@@ -1,0 +1,231 @@
+"""Near-duplicate sentence clustering: MinHash + LSH banding.
+
+v1 matched recurring phrases by exact normalized-sentence equality, so
+"I'm so tired of this" and "so tired of everything" never linked. People
+do not repeat themselves verbatim; recurring thoughts show up as
+near-duplicates. This module clusters sentences whose estimated Jaccard
+similarity over word shingles clears a threshold, in (near-)linear time
+via locality-sensitive hashing.
+
+Determinism is a hard requirement (same corpus → same clusters, on every
+platform, forever): hash parameters come from a fixed splitmix64 stream
+and shingle hashing uses blake2b — no Python ``hash()``, no seeded
+``random`` module, no wall clock.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from datetime import date
+
+NUM_PERM = 64
+BANDS = 16
+ROWS = 4  # BANDS * ROWS == NUM_PERM
+MERSENNE = (1 << 61) - 1
+DEFAULT_JACCARD = 0.5
+DEFAULT_MIN_SIZE = 3
+DEFAULT_MIN_SPAN_DAYS = 7
+DEFAULT_MIN_DISTINCT_DAYS = 3
+# Cost ceilings: a "sentence" longer than this is a paragraph (not a
+# recurring *phrase*), and a single band bucket holding more distinct
+# signatures than this is a hash collision pile, not a cluster — the
+# pairwise confirmation loop is O(bucket^2) and without these caps a few
+# hundred KB of crafted near-identical text costs minutes of CPU.
+MAX_SENTENCE_TOKENS = 120
+MAX_BUCKET_SIGNATURES = 256
+
+
+@dataclass(frozen=True)
+class SentenceRef:
+    """One normalized sentence occurrence, pinned to its entry date."""
+
+    text: str
+    day: date
+
+
+@dataclass(frozen=True)
+class PhraseCluster:
+    """A group of near-duplicate sentences (one recurring thought)."""
+
+    members: list[SentenceRef]
+    representative: str
+    span_days: int
+    distinct_days: int
+
+
+def _splitmix64(seed: int):
+    """Deterministic 64-bit pseudo-random stream (no stdlib RNG involved)."""
+    state = seed & 0xFFFFFFFFFFFFFFFF
+    while True:
+        state = (state + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+        z = state
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+        yield z ^ (z >> 31)
+
+
+_HASH_PARAMS: list[tuple[int, int]] = []
+_gen = _splitmix64(0x4D696E64506174)  # "MindPat"
+for _ in range(NUM_PERM):
+    a = (next(_gen) | 1) % MERSENNE  # odd, non-degenerate multipliers
+    b = next(_gen) % MERSENNE
+    _HASH_PARAMS.append((a, b))
+del _gen
+
+
+def shingles(tokens: list[str]) -> set[str]:
+    """Unigrams + bigrams: the shingle set for one sentence.
+
+    Word-order-preserving k-shingles (k=3) punish insertions hard —
+    "i am so tired of everything" vs "i am just so tired of everything
+    today" share almost no 3-grams. Unigrams tolerate insertions,
+    bigrams keep enough order sensitivity to separate unrelated
+    thoughts (measured margin on journal-like pairs: related ≥0.6,
+    unrelated ≤0.1 estimated Jaccard).
+    """
+    out: set[str] = set(tokens)
+    for i in range(len(tokens) - 1):
+        out.add(f"{tokens[i]} {tokens[i + 1]}")
+    return out
+
+
+def _shingle_hash(shingle: str) -> int:
+    digest = hashlib.blake2b(shingle.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
+
+
+def signature(tokens: list[str]) -> list[int]:
+    """NUM_PERM-component MinHash signature of a token list."""
+    hashes = [_shingle_hash(s) for s in sorted(shingles(tokens))]
+    if not hashes:
+        return [0] * NUM_PERM
+    return [
+        min(((a * h + b) % MERSENNE) for h in hashes) for a, b in _HASH_PARAMS
+    ]
+
+
+def estimated_jaccard(sig1: list[int], sig2: list[int]) -> float:
+    """Jaccard similarity estimated from two equal-length signatures."""
+    if len(sig1) != len(sig2) or not sig1:
+        return 0.0
+    equal = sum(1 for x, y in zip(sig1, sig2) if x == y)
+    return equal / len(sig1)
+
+
+def _band_keys(sig: list[int]) -> list[tuple[int, str]]:
+    """LSH band bucket keys: one per band, over consecutive row slices."""
+    keys: list[tuple[int, str]] = []
+    for band in range(BANDS):
+        row = sig[band * ROWS : (band + 1) * ROWS]
+        digest = hashlib.blake2b(
+            ",".join(str(v) for v in row).encode("ascii"), digest_size=8
+        ).hexdigest()
+        keys.append((band, digest))
+    return keys
+
+
+def near_duplicate_clusters(
+    sentences: list[SentenceRef],
+    jaccard: float = DEFAULT_JACCARD,
+    min_size: int = DEFAULT_MIN_SIZE,
+    min_span_days: int = DEFAULT_MIN_SPAN_DAYS,
+    min_distinct_days: int = DEFAULT_MIN_DISTINCT_DAYS,
+) -> list[PhraseCluster]:
+    """Cluster near-duplicate sentences that recur across separated days.
+
+    LSH banding proposes candidate pairs (sentences sharing at least one
+    band bucket); exact signature comparison confirms them; union-find
+    merges them; filters demand enough members spread across enough
+    distinct days — a sentence repeated five times in one afternoon is
+    a writing tic, not a pattern.
+    """
+    n = len(sentences)
+    if n < min_size:
+        return []
+    # Overlong "sentences" are excluded before signing: MinHash cost scales
+    # with shingle count, and a punctuation-free megabyte entry would
+    # otherwise arrive as one ~100k-token sentence.
+    sentences = [s for s in sentences if len(s.text.split()) <= MAX_SENTENCE_TOKENS]
+    n = len(sentences)
+    if n < min_size:
+        return []
+    signatures = [signature(s.text.split()) for s in sentences]
+
+    buckets: dict[tuple[int, str], list[int]] = {}
+    for idx, sig in enumerate(signatures):
+        for key in _band_keys(sig):
+            buckets.setdefault(key, []).append(idx)
+
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[max(rx, ry)] = min(rx, ry)
+
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        # Exact duplicates union in O(n) per bucket (identical signatures
+        # share every key); only DISTINCT signatures need pairwise
+        # comparison. Comparing just members[0] against the rest would
+        # silently miss links between later members — the qualifying pair
+        # does not have to involve the first index that landed in the
+        # bucket.
+        by_sig: dict[tuple[int, ...], int] = {}
+        for idx in members:
+            sig_key = tuple(signatures[idx])
+            anchor = by_sig.get(sig_key)
+            if anchor is None:
+                by_sig[sig_key] = idx
+            else:
+                union(anchor, idx)
+        distinct = list(by_sig.values())
+        if len(distinct) > MAX_BUCKET_SIGNATURES:
+            # A bucket this crowded is adversarial noise (every near-variant
+            # of one sentence): confirming pairs inside it is quadratic. The
+            # identical-signature unions above already ran; skip the rest.
+            continue
+        for i in range(len(distinct)):
+            for j in range(i + 1, len(distinct)):
+                if estimated_jaccard(signatures[distinct[i]], signatures[distinct[j]]) >= jaccard:
+                    union(distinct[i], distinct[j])
+
+    groups: dict[int, list[int]] = {}
+    for idx in range(n):
+        groups.setdefault(find(idx), []).append(idx)
+
+    clusters: list[PhraseCluster] = []
+    for indices in groups.values():
+        if len(indices) < min_size:
+            continue
+        refs = [sentences[i] for i in indices]
+        days = sorted({r.day for r in refs})
+        span = (days[-1] - days[0]).days
+        if len(days) < min_distinct_days or span < min_span_days:
+            continue
+        clusters.append(
+            PhraseCluster(
+                members=refs,
+                representative=_representative(refs),
+                span_days=span,
+                distinct_days=len(days),
+            )
+        )
+    clusters.sort(key=lambda c: (-len(c.members), c.representative))
+    return clusters
+
+
+def _representative(refs: list[SentenceRef]) -> str:
+    """Most frequent variant; ties break lexicographically (determinism)."""
+    counts: dict[str, int] = {}
+    for ref in refs:
+        counts[ref.text] = counts.get(ref.text, 0) + 1
+    return max(sorted(counts), key=lambda t: counts[t])

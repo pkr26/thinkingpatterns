@@ -1,0 +1,36 @@
+{
+  "name": "mindpattern-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:vectors": "node tools/verify_vectors.mjs",
+    "decrypt:export": "node tools/decrypt_export.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.1.0",
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "react": "19.1.0",
+    "react-native": "0.81.0",
+    "react-native-quick-crypto": "^0.7.0",
+    "react-native-safe-area-context": "^5.0.0",
+    "react-native-screens": "^4.0.0"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "^10.0.0",
+    "@stryker-mutator/vitest-runner": "^10.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-test-renderer": "^18.3.1",
+    "@vitest/coverage-v8": "^3.2.7",
+    "react-test-renderer": "^19.1.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.7"
+  }
+}

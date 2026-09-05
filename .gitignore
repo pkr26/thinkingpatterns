@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.mutmut-cache
+mutants/
+htmlcov/
+.coverage
+
+# Node / React Native
+node_modules/
+mobile/build/
+mobile/ios/Pods/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/.verify-build/
+mobile/.decrypt-build/
+*.log
+
+# Local state
+*.db
+*.sqlite3
+.env
+
+# dev artifacts — never commit real databases
+backend/mindpattern.db
+backend/demo.db
+*.db

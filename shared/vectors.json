@@ -1,0 +1,52 @@
+{
+  "vectors": [
+    {
+      "password": "correct horse battery staple",
+      "salt": "AAECAwQFBgcICQoLDA0ODw==",
+      "iterations": 600000,
+      "master_key": "7xdxRO7JQgy8EJPSqLNEqSvFBtDU7JwCjdGfgyTYweY=",
+      "auth_key": "/nZai1rpo2JhJA7muC392WguD3neGYG3cnRlZLQqaVA=",
+      "data_key": "qHOz93IjzXKZIPmmA0SIYsCheK83px5tF6gHhVayXyQ=",
+      "plaintext": "U3VuZGF5IG5pZ2h0IGFnYWluLiBUaGUgZGVhZGxpbmUgZHJlYWQgaXMgYmFjay4=",
+      "aad": "WyJlbnRyeSIsInVzZXItMTIzNCIsImVudHJ5LTIwMjYtMDktMDEtYSJd",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoLDQd5ZjDOegtntkk+81yTzw/BWYMn7edIcz+Ip7RkintmryhY0ysAARJJyTOf9gqbidosqFe264EfoxHAf4MU"
+    },
+    {
+      "password": "p@ssw0rd-\u00ef\u00f1-unicode",
+      "salt": "EBESExQVFhcYGRobHB0eHw==",
+      "iterations": 600000,
+      "master_key": "dPgObU+iZR37N7aWEO0Cl9/bCE0ZWpwPhA4f0TKAINU=",
+      "auth_key": "PlZomALNjbGyB/X/Oa3Mnwc6sNG4O1svBu1v6rUaMjE=",
+      "data_key": "zv2efX1eHgddIH5UCAEF6wIcssqGTt0V+PQnGKateUE=",
+      "plaintext": "eyJ2IjoxLCJ0ZXh0IjoiZ29vZCBtb3JuaW5nIiwic2VudGltZW50IjowLjUsImNyZWF0ZWRfYXQiOiIyMDI2LTA5LTAyIn0=",
+      "aad": "WyJpbnNpZ2h0cyIsInVzZXItYWJjZCIsInBhdHRlcm5zIl0=",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoLuxoN1wEqq6sLQc4tuJPVtQuu++pP8y9hT5jOpCfU/cbir+xI499db0H6nInW38IMpFOD6FRCChlY5CEaBXJbtpN68MnqcCVUTkCsySjkPPNMo2sE0tRB"
+    },
+    {
+      "password": "unicode-aad-case",
+      "salt": "ICEiIyQlJicoKSorLC0uLw==",
+      "iterations": 600000,
+      "master_key": "Cc6fQH7CI0xFb4t8f3jW4zjcIj4R82JP8vqyD5AhMD0=",
+      "auth_key": "JkFKx5BsiL/p38UDxSGyxBZ+1CkkJRaGd8eXH2fvw00=",
+      "data_key": "f+66e9x8jmcFZp5VVE4p4cuZAqSOP/hT1e1rjf/Nm8A=",
+      "plaintext": "bm9uLWFzY2lpIEFBRCBiaW5kaW5nIGNoZWNr",
+      "aad": "WyJlbnRyeSIsIlx1MDBmY25cdTAwZWZjb2RlLXVzZXIiLCJlbnRyXHUwMGU5ZS1cdWQ4M2VcdWRkZTAtMSJd",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoL8AfyB6q9w0mcQ5zaPerq3+tUGQx5YTSNpFsobGuQynuow/gB+u+Rv+Epdg=="
+    },
+    {
+      "password": "astral-aad-case",
+      "salt": "MDEyMzQ1Njc4OTo7PD0+Pw==",
+      "iterations": 600000,
+      "master_key": "d9B6w+add5oSOG9PuUpAkspW0RTG7xAHQOjsDKvQN34=",
+      "auth_key": "iBp6M3R8yUKgzn6LpP0S+pjV0M7yO0HopKOeSi60cM0=",
+      "data_key": "psdh1yQKrneDY0ILdKwxk/5FYjCgKylSBa8MBnVc9UU=",
+      "plaintext": "YXN0cmFsIEFBRCBiaW5kaW5nIGNoZWNr",
+      "aad": "WyJpbnNpZ2h0cyIsInVzZXItXHVkODNlXHVkZGUwLWJyYWluIiwicGF0dGVybnMiXQ==",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoLkQNMk7ME4Yx+LRz2ONlXXJZzovE6xsVkSImNnmn3bYX8k7Nbh1omyg=="
+    }
+  ]
+}
