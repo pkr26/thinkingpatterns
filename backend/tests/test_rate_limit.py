@@ -42,6 +42,29 @@ async def test_register_rate_limited(client, settings):
     assert statuses[-1] == 429
 
 
+async def test_register_probes_do_not_lock_out_a_legitimate_registrant(client, settings):
+    # Per-username bucket semantics: only ACTUAL conflicts (409s) consume the
+    # bucket. An attacker spraying malformed probes at a name they do not own
+    # must not be able to 429 the legitimate first registrant of that name.
+    settings.trust_proxy_headers = True  # isolate the per-username bucket from the per-IP one
+    settings.auth_rate_limit = 3
+    for i in range(8):
+        probe = await client.post("/api/auth/register", json={
+            "username": "wanted-name",
+            "salt": "!!!not-b64!!!",
+            "verifier": base64.b64encode(b"v" * 32).decode(),
+        }, headers={"X-Forwarded-For": f"10.7.{i}.1"})
+        assert probe.status_code == 422  # rejected, and never counted
+
+    emu = ClientEmulator("wanted-name", "legit-password")
+    legit = await client.post("/api/auth/register", json={
+        "username": emu.username,
+        "salt": emu.salt_b64,
+        "verifier": emu.auth_key_b64,
+    }, headers={"X-Forwarded-For": "10.7.99.1"})
+    assert legit.status_code == 201
+
+
 async def test_processing_sessions_rate_limited(client, settings):
     settings.auth_rate_limit = 100  # keep auth flowing
     emu = ClientEmulator("proc", "p")

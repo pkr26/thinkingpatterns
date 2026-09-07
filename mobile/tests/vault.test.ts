@@ -31,7 +31,7 @@ describe("vault", () => {
     // L5: get() returns a fresh object each call — callers cannot mutate the
     // vault's own reference — while sharing the underlying buffers so
     // zeroize-on-lock still reaches every copy.
-    expect(vault.get()).toStrictEqual(keys);
+    expect(vault.get()).toStrictEqual({ authKey: keys.authKey, dataKey: keys.dataKey });
     expect(listener).toHaveBeenCalledTimes(1);
 
     // The master key is zeroized on hand-off: only auth/data remain useful.
@@ -39,6 +39,17 @@ describe("vault", () => {
     expect(keys.authKey.equals(Buffer.alloc(32, 2))).toBe(true);
 
     unsubscribe();
+  });
+
+  it("get() never hands out the master key — it is not retained after unlock", () => {
+    const keys = keysOf(5);
+    vault.unlock(keys);
+    const session = vault.get();
+    // The zeroized master key must not ride along as dead bytes a future
+    // caller could silently use: the field is gone from the session object.
+    expect("masterKey" in session).toBe(false);
+    expect(session.authKey.equals(Buffer.alloc(32, 6))).toBe(true);
+    expect(session.dataKey.equals(Buffer.alloc(32, 7))).toBe(true);
   });
 
   it("re-unlocking zeroizes the previous session's keys first", () => {

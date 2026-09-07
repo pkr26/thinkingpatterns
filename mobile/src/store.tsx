@@ -4,7 +4,7 @@
  * disk in plaintext). All heavy state lives encrypted on the server and is
  * decrypted on demand.
  */
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { api } from "./api/client";
 import { vault } from "./vault";
@@ -16,8 +16,10 @@ import { clearRecomputeStamp } from "./brainSync";
 export type AuthStatus = "loading" | "loggedOut" | "loggedIn";
 
 /** Foreground inactivity limit: an unlocked phone on a table must not keep
- *  the derived keys hot indefinitely (auto-lock previously fired only on
- *  background/inactive transitions). */
+ *  the derived keys hot indefinitely. This is a true INACTIVITY timeout —
+ *  user interaction (touchActivity) restarts the countdown, so someone
+ *  actively writing is never locked out mid-sentence. Backgrounding still
+ *  locks immediately, regardless of the countdown. */
 const IDLE_LOCK_MS = 5 * 60_000;
 
 /** Server-reported unlock_days is attacker-controllable text from the
@@ -36,6 +38,9 @@ interface SessionState {
   unlockDays: number;
   markLoggedIn: () => void;
   setUnlockDays: (days: number) => void;
+  /** Restarts the foreground inactivity countdown; call from real user
+   *  interaction (typing, tapping) while the vault is unlocked. */
+  touchActivity: () => void;
   refreshActiveDays: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -47,6 +52,7 @@ const SessionContext = createContext<SessionState>({
   unlockDays: 30,
   markLoggedIn: () => {},
   setUnlockDays: () => {},
+  touchActivity: () => {},
   refreshActiveDays: async () => {},
   signOut: async () => {},
 });
@@ -56,6 +62,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(vault.isUnlocked());
   const [activeDays, setActiveDays] = useState(0);
   const [unlockDays, setUnlockDays] = useState(30);
+
+  /** (Re)arm the inactivity lock: drop any pending timer and start a fresh
+   *  countdown, but only while the vault is actually unlocked. */
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchActivity = useCallback((): void => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    if (vault.isUnlocked()) {
+      idleTimer.current = setTimeout(() => vault.lock(), IDLE_LOCK_MS);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,32 +87,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {}); // offline / old server: keep the 30-day default
     // Cold restart: the bearer token survives on disk but the key vault
     // does not — navigation shows the unlock gate until it reopens.
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const armIdleLock = (): void => {
-      if (idleTimer) clearTimeout(idleTimer);
-      if (vault.isUnlocked()) {
-        idleTimer = setTimeout(() => vault.lock(), IDLE_LOCK_MS);
-      }
-    };
     const unsubscribe = vault.subscribe(() => {
       setUnlocked(vault.isUnlocked());
-      armIdleLock(); // a fresh unlock restarts the idle countdown
+      touchActivity(); // a fresh unlock starts the inactivity countdown
     });
     const appStateSub = AppState.addEventListener("change", (state) => {
       if (state === "background" || state === "inactive") {
-        if (idleTimer) clearTimeout(idleTimer);
+        if (idleTimer.current) clearTimeout(idleTimer.current);
         vault.lock();
       } else if (state === "active") {
-        armIdleLock();
+        touchActivity();
       }
     });
     return () => {
       cancelled = true;
-      if (idleTimer) clearTimeout(idleTimer);
+      if (idleTimer.current) clearTimeout(idleTimer.current);
       unsubscribe();
       appStateSub.remove();
     };
-  }, []);
+  }, [touchActivity]);
 
   const refreshActiveDays = async () => {
     try {
@@ -147,6 +156,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         unlockDays,
         markLoggedIn: () => setAuthStatus("loggedIn"),
         setUnlockDays,
+        touchActivity,
         refreshActiveDays,
         signOut,
       }}

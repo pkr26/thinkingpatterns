@@ -48,5 +48,35 @@
       "nonce": "AAECAwQFBgcICQoL",
       "blob": "AAECAwQFBgcICQoLkQNMk7ME4Yx+LRz2ONlXXJZzovE6xsVkSImNnmn3bYX8k7Nbh1omyg=="
     }
+  ],
+  "encrypt_vectors": [
+    {
+      "password": "encrypt-pin-ascii",
+      "salt": "QEFCQ0RFRkdISUpLTE1OTw==",
+      "iterations": 600000,
+      "data_key": "QCQKfp5j4hwR1xLN4U+hFOFGNweruQLRlYzQDA9tkkA=",
+      "plaintext": "RmVlbGluZyBjYWxtZXIgYWZ0ZXIgdGhlIG1vcm5pbmcgd2Fsay4=",
+      "aad_parts": [
+        "entry",
+        "user-777",
+        "entry-2026-09-07-morning"
+      ],
+      "nonce": "DA0ODxAREhMUFRYX",
+      "blob": "DA0ODxAREhMUFRYXkjGM+7g5WgyDdEEw/qBtOUYg+jAG5rcAfFOZlXZ5K8jP1gUe5KAvkpV6lU2S//ob3YXdXrSP"
+    },
+    {
+      "password": "encrypt-pin-\u00fcn\u00efcode",
+      "salt": "UFFSU1RVVldYWVpbXF1eXw==",
+      "iterations": 600000,
+      "data_key": "xqhR7Q8WrDbi2A91yFrJILHLbhZkBp3Hd1RFwsPV+nU=",
+      "plaintext": "Zml4ZWQtbm9uY2UgZW5jcnlwdCBwaW4gd2l0aCBhc3RyYWwgQUFEIGJpbmRpbmc=",
+      "aad_parts": [
+        "entry",
+        "\u00fcs\u00e9r-\ud83e\udde0",
+        "entr\u00e9e-\ud83c\udf19-42"
+      ],
+      "nonce": "FxYVFBMSERAPDg0M",
+      "blob": "FxYVFBMSERAPDg0M13mEJ0sbunsiV2eJDbZDxA8cH8qNMyEAGUBTyYiCDko1bpov44wV2v4Y6jrHXPETanHIBB8wYHYMxO453vhz"
+    }
   ]
 }

@@ -44,6 +44,18 @@ describe("unlockProof", () => {
     expect(await verifyUnlockProof(dataKey, "u1")).toBe("wrong");
   });
 
+  it("a well-formed seal with the WRONG plaintext reads as wrong, not ok", async () => {
+    // Valid AEAD under the right key and AAD — but the plaintext is not the
+    // marker (e.g. a future schema version). Authenticity alone is not proof.
+    const impostor = encrypt(
+      dataKey,
+      Buffer.from("mindpattern-unlock-proof/v2"),
+      buildAad("unlockproof", "u1"),
+    ).toString("base64");
+    await storage.setItem("@mindpattern/unlockproof_u1", impostor);
+    expect(await verifyUnlockProof(dataKey, "u1")).toBe("wrong");
+  });
+
   it("corrupt base64 reads as wrong, not a crash", async () => {
     await storage.setItem("@mindpattern/unlockproof_u1", "!!!not base64!!!");
     expect(await verifyUnlockProof(dataKey, "u1")).toBe("wrong");

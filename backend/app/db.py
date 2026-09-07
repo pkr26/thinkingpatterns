@@ -1,4 +1,20 @@
-"""Async engine / session wiring (SQLite for tests+dev, PostgreSQL for prod)."""
+"""Async engine / session wiring (SQLite for tests+dev, PostgreSQL for prod).
+
+Schema lifecycle: Alembic migrations (backend/alembic/, configured by
+backend/alembic.ini) are the source of truth for schema change. The initial
+revision reproduces exactly what ``init_models`` creates, so:
+
+- fresh dev/test databases: ``init_models`` (create_all) builds the schema
+  directly — no alembic round-trip in the 250+-test hot loop;
+- production upgrade path: ``alembic upgrade head`` (see
+  backend/alembic/README.md);
+- databases created before migrations existed: adopt with
+  ``alembic stamp head`` once, then ``alembic upgrade head`` thereafter.
+
+After any change to app/models.py, generate the next revision with
+``alembic revision --autogenerate`` and review it before committing —
+create_all will NOT apply changes to existing databases.
+"""
 
 from __future__ import annotations
 

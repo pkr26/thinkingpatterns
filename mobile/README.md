@@ -6,6 +6,7 @@ The client half of the zero-knowledge contract:
 - **Entries are encrypted before they leave the phone** (`src/crypto/envelope.ts`): AES-256-GCM, `nonce(12) ‖ ct ‖ tag(16)`, with AAD binding `(context, userId, itemId)` so the server cannot relocate blobs undetected.
 - **The vault** (`src/vault.ts`) keeps the unlocked data key in memory only; it is zeroized on sign-out.
 - **Offline-first**: entries that fail to sync are queued locally (still encrypted) and flushed on next launch (`EntryScreen.flushQueue`).
+- **Crisis-language detection is on-device** (`src/crisisDetect.ts`): entries are encrypted before anything leaves the phone, so the server cannot notice a crisis — a conservative pre-encryption matcher runs in memory over what the user just typed (nothing sent, stored, or logged) and surfaces the offline crisis-resources screen.
 
 ## Setup
 
@@ -36,9 +37,11 @@ loudly on any disagreement. Run it whenever you touch `src/crypto/**`.
 | Screen | Purpose |
 |---|---|
 | `LoginScreen` | Register / login; password never persisted, master key zeroized after derivation. |
+| `UnlockScreen` | After restart the session token persists but the key vault is locked; re-derives keys from the password (offline-capable via cached salt). |
 | `EntryScreen` | Daily entry with 30-day progress ring, on-device sentiment, offline queue. |
 | `InsightsScreen` | Decrypts the insight blob; pattern cards (timing / mood link / repeated phrase). No advice, no diagnosis. |
 | `QuestionScreen` | One reflective question per day; opens a processing session to recompute when needed. |
+| `CrisisScreen` | Offline crisis resources (988, Crisis Text Line, 911 guidance); one tap from every screen, no network dependency. |
 | `SettingsScreen` | Server URL, encrypted export, hard delete, sign out. |
 
 Voice-to-text: v1 accepts the text through the system keyboard's dictation

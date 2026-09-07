@@ -25,7 +25,7 @@ export function deriveKeys(password: string, salt: Buffer): Keys {
 }
 
 export function encryptEntry(
-  keys: Keys,
+  keys: Pick<Keys, "dataKey">,
   userId: string,
   clientEntryId: string,
   text: string,
@@ -41,17 +41,37 @@ const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
   return { blobB64: blob.toString("base64") };
 }
 
-export function decryptEntry(keys: Keys, userId: string, clientEntryId: string, blobB64: string): EntryPayload {
+export function decryptEntry(
+  keys: Pick<Keys, "dataKey">,
+  userId: string,
+  clientEntryId: string,
+  blobB64: string,
+): EntryPayload {
   const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("entry", userId, clientEntryId));
   return JSON.parse(plaintext.toString("utf8")) as EntryPayload;
 }
 
-export function decryptInsights(keys: Keys, userId: string, blobB64: string) {
-  const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("insights", userId, "patterns"));
-  return JSON.parse(plaintext.toString("utf8"));
+/** The only insights payload schema this client understands (the backend
+ *  emits "v": 2). An unknown version must fail LOUDLY here — silently
+ *  parsing a future schema as if it were v2 is how a schema roll corrupts
+ *  the UI with misread fields. Mirrors the InsightsScreen phase guard. */
+export const INSIGHTS_PAYLOAD_VERSION = 2;
+
+export interface InsightsPayload {
+  v: number;
+  stats?: { patterns?: unknown };
 }
 
-export function decryptQuestion(keys: Keys, userId: string, forDate: string, blobB64: string) {
+export function decryptInsights(keys: Pick<Keys, "dataKey">, userId: string, blobB64: string): InsightsPayload {
+  const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("insights", userId, "patterns"));
+  const payload = JSON.parse(plaintext.toString("utf8")) as { v?: unknown };
+  if (payload.v !== INSIGHTS_PAYLOAD_VERSION) {
+    throw new Error(`unsupported insights payload version: ${String(payload.v)}`);
+  }
+  return payload as unknown as InsightsPayload;
+}
+
+export function decryptQuestion(keys: Pick<Keys, "dataKey">, userId: string, forDate: string, blobB64: string) {
   const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("question", userId, forDate));
   return JSON.parse(plaintext.toString("utf8")) as { for_date: string; question: string };
 }

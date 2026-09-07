@@ -192,6 +192,14 @@ describe("QuestionScreen", () => {
     expect(Alert.alert).toHaveBeenCalled();
   });
 
+  it("the crisis link is one tap away and navigates to Crisis", async () => {
+    const nav = { navigate: vi.fn() };
+    const root = await render(<QuestionScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Need help now? Crisis resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+  });
+
   it("disables the button and shows the spinner while busy", async () => {
     let resolveInsights!: (v: unknown) => void;
     vi.mocked(api.insights).mockImplementation(() => new Promise((resolve) => (resolveInsights = resolve)));

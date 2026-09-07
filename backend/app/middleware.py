@@ -3,10 +3,10 @@
 Responsibilities, in order:
  1. Reject oversized request bodies (413) *before* the JSON is read — the
     schema-level caps only bound what is stored, not what is buffered.
- 2. Stamp the security headers (nosniff / DENY / no-referrer / no-store) on
-    EVERY response — including 500s and the 413/400s this middleware itself
-    produces. (A BaseHTTPMiddleware or exception-handler approach cannot
-    cover unhandled exceptions; sitting as raw ASGI can.)
+ 2. Stamp the security headers (nosniff / DENY / no-referrer / no-store /
+    HSTS) on EVERY response — including 500s and the 413/400s this middleware
+    itself produces. (A BaseHTTPMiddleware or exception-handler approach
+    cannot cover unhandled exceptions; sitting as raw ASGI can.)
  3. Convert unhandled exceptions into a logged, header-stamped 500 with no
     internals leaked; deeply-nested JSON (RecursionError) becomes a 400.
 """
@@ -23,6 +23,9 @@ SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"x-frame-options", b"DENY"),
     (b"referrer-policy", b"no-referrer"),
     (b"cache-control", b"no-store"),
+    # HSTS: once the API is ever reached over TLS, browsers must keep it that
+    # way (no-op over plain HTTP, which is exactly when it cannot help).
+    (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
 )
 
 _OVERSIZE_BODY = json.dumps({"detail": "request body too large"}).encode("utf-8")

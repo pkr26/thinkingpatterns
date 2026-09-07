@@ -6,9 +6,12 @@ secure processing context entries AND the previous brain state are
 decrypted, the stateful brain folds the corpus into its persistent
 pattern store (lifecycle, decayed evidence, statistically gated
 detectors), and the updated state plus the surfaced patterns are
-re-encrypted under the same key. Buffers the enclave owns are zeroized.
-Sessions are single-use: the key is destroyed the moment a recompute
-consumes it.
+re-encrypted under the same key. Buffers the enclave owns are zeroized,
+and the API-layer copy of the data key is scrubbed in a ``finally`` on
+every recompute exit (success or error); immutable str copies the parser
+and analyzer produce still linger until GC — see the enclave module for
+the honest scope. Sessions are single-use: the key is destroyed the
+moment a recompute consumes it.
 
 Two encrypted insight rows come out of a recompute:
   * kind="brain"    — the mini-brain's persistent state (carried forward),
@@ -27,6 +30,7 @@ import base64
 import binascii
 import json
 import math
+from dataclasses import replace
 from datetime import date as date_type
 
 import anyio.to_thread
@@ -46,12 +50,20 @@ from ..schemas import (
 )
 from ..security import crypto
 from ..security.crypto import TamperError
-from ..security.enclave import KeyNotFound, SecureProcessingContext
+from ..security.enclave import KeyNotFound, SecureProcessingContext, zeroize
 from ..services import brain, llm, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
+from .entries import _UserLocks
 
 router = APIRouter(tags=["insights"])
+
+# Two concurrent recomputes for one account would interleave their
+# delete-then-insert on the same insight rows (last writer wins, and the
+# carried-forward brain state each decrypted may already be stale). The
+# deployment is single-process, so an in-process per-user lock serializes
+# them; distinct users still recompute in parallel.
+_recompute_locks = _UserLocks()
 
 
 def _decode_b64(value: str, what: str) -> bytes:
@@ -137,13 +149,14 @@ def _parse_entries(
             )
         )
     # Total-corpus budget: keep the most recent text (entries arrive in
-    # date order) and truncate the oldest beyond the budget.
+    # date order) and truncate the oldest beyond the budget. JournalEntry
+    # is frozen, so truncation swaps in a copy rather than mutating.
     total = sum(len(e.text) for e in entries)
-    for entry in entries:
+    for i, entry in enumerate(entries):
         if total <= MAX_ANALYSIS_TOTAL_CHARS:
             break
         total -= len(entry.text)
-        entry.text = ""
+        entries[i] = replace(entry, text="")
     return entries
 
 
@@ -239,121 +252,130 @@ async def recompute(
     except KeyNotFound:
         raise HTTPException(status_code=403, detail="processing session missing or expired") from None
 
-    rows = await _load_rows(session, user.id)
-    # Corpus cap: analyze the most recent N entries (patterns are about
-    # recency); the threshold above still counted every entry's date.
-    analysis_rows = rows[-settings.recompute_entry_limit :]
-    # The SERVER-validated outer dates drive the brain's calendar; the
-    # client-controlled created_at inside each blob is only sanity-checked.
-    analysis_dates = [row.entry_date for row in analysis_rows]
-    # The brain's memory from the previous recompute travels INTO the secure
-    # context as one more encrypted item and comes back out updated.
-    prior = await _latest_insight(session, user.id, "brain")
-    entry_items = [
-        (crypto.build_aad("entry", row.user_id, row.client_entry_id), bytes(row.blob))
-        for row in analysis_rows
-    ]
-    state_item = (
-        (crypto.build_aad("insights", user.id, "brain"), bytes(prior.blob)) if prior else None
-    )
-    analyzer = llm.get_analyzer(settings, llm_consent=user.llm_consent)
-
-    def make_analyze_fn(with_state: bool):
-        # A factory, not a plain closure: the tamper-retry below passes the
-        # entry items WITHOUT the state blob, and a closure over a truthy
-        # state_item would strip the newest ENTRY as "state" on that path.
-        def analyze_fn(plains: list[bytearray]):
-            state_plain, entry_plains = (
-                (bytes(plains[-1]), plains[:-1]) if with_state else (None, plains)
-            )
-            entries = _parse_entries(entry_plains, analysis_dates)
-            result = brain.update(brain.load_state(state_plain), entries, today)
-            merged = list(result.surfaced)
-            if isinstance(analyzer, llm.LLMAnalyzer):
-                seen = {(p.kind, p.label) for p in merged}
-                for extra in analyzer.extract_patterns(entries):
-                    if (extra.kind, extra.label) not in seen:
-                        merged.append(extra)
-                merged = merged[: brain.MAX_SURFACED]
-            return result, merged
-
-        return analyze_fn
-
-    encrypted = entry_items + ([state_item] if state_item else [])
-    # Analysis runs on a DEDICATED capacity limiter, not the shared anyio
-    # thread pool: recomputes are attacker-sized multi-second CPU work and
-    # must never queue in front of login scrypt (or any other request's
-    # worker) in the same FIFO pool.
-    analyze_limiter = getattr(request.app.state, "analyze_limiter", None)
+    # The popped key is a bytearray the keystore no longer references; it
+    # is scrubbed in the finally below on EVERY exit from the recompute —
+    # success, 400, or an unexpected 500 alike. (str copies the parser and
+    # analyzer make are immutable and still linger until GC — see the
+    # enclave module docstring for what zeroization honestly covers.)
     try:
-        # Decryption + analysis is synchronous, potentially slow CPU (or an
-        # LLM round-trip); run it in a worker thread so the event loop that
-        # serves every other request never stalls behind a recompute.
-        result, merged = await anyio.to_thread.run_sync(
-            SecureProcessingContext(data_key).run, encrypted, make_analyze_fn(state_item is not None),
-            limiter=analyze_limiter,
-        )
-    except TamperError:
-        if state_item is None:
-            raise HTTPException(status_code=400, detail="entry blob failed authentication") from None
-        # A tampered/corrupt brain state must not brick the account forever:
-        # retry once with amnesia (fresh state, FULL corpus) — if an ENTRY
-        # blob is the culprit the retry fails the same way and surfaces the
-        # real error.
-        try:
-            result, merged = await anyio.to_thread.run_sync(
-                SecureProcessingContext(data_key).run, entry_items, make_analyze_fn(False),
-                limiter=analyze_limiter,
+        async with _recompute_locks.hold(f"insights:{user.id}"):
+            rows = await _load_rows(session, user.id)
+            # Corpus cap: analyze the most recent N entries (patterns are about
+            # recency); the threshold above still counted every entry's date.
+            analysis_rows = rows[-settings.recompute_entry_limit :]
+            # The SERVER-validated outer dates drive the brain's calendar; the
+            # client-controlled created_at inside each blob is only sanity-checked.
+            analysis_dates = [row.entry_date for row in analysis_rows]
+            # The brain's memory from the previous recompute travels INTO the secure
+            # context as one more encrypted item and comes back out updated.
+            prior = await _latest_insight(session, user.id, "brain")
+            entry_items = [
+                (crypto.build_aad("entry", row.user_id, row.client_entry_id), bytes(row.blob))
+                for row in analysis_rows
+            ]
+            state_item = (
+                (crypto.build_aad("insights", user.id, "brain"), bytes(prior.blob)) if prior else None
             )
-        except TamperError:
-            raise HTTPException(status_code=400, detail="entry blob failed authentication") from None
-    except (json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError, TypeError, OverflowError):
-        # No exception-text echo: parser internals can quote payload content.
-        # OverflowError is a backstop behind the date validation above.
-        raise HTTPException(status_code=400, detail="entry payload malformed") from None
+            analyzer = llm.get_analyzer(settings, llm_consent=user.llm_consent)
 
-    insights_payload = {
-        "v": 2,
-        "phase": state.phase.value,
-        "stats": {**result.stats, "patterns": [p.to_dict() for p in merged]},
-    }
-    blob = crypto.encrypt(
-        data_key,
-        json.dumps(insights_payload).encode("utf-8"),
-        crypto.build_aad("insights", user.id, "patterns"),
-    )
-    await _replace_insight(session, user.id, "patterns", None, blob)
-    state_blob = crypto.encrypt(
-        data_key,
-        brain.dump_state(result.new_state),
-        crypto.build_aad("insights", user.id, "brain"),
-    )
-    await _replace_insight(session, user.id, "brain", None, state_blob)
+            def make_analyze_fn(with_state: bool):
+                # A factory, not a plain closure: the tamper-retry below passes the
+                # entry items WITHOUT the state blob, and a closure over a truthy
+                # state_item would strip the newest ENTRY as "state" on that path.
+                def analyze_fn(plains: list[bytearray]):
+                    state_plain, entry_plains = (
+                        (bytes(plains[-1]), plains[:-1]) if with_state else (None, plains)
+                    )
+                    entries = _parse_entries(entry_plains, analysis_dates)
+                    result = brain.update(brain.load_state(state_plain), entries, today)
+                    merged = list(result.surfaced)
+                    if isinstance(analyzer, llm.LLMAnalyzer):
+                        seen = {(p.kind, p.label) for p in merged}
+                        for extra in analyzer.extract_patterns(entries):
+                            if (extra.kind, extra.label) not in seen:
+                                merged.append(extra)
+                        merged = merged[: brain.MAX_SURFACED]
+                    return result, merged
 
-    question_stored = False
-    if merged:
-        question = questions.question_for_today(user.id, merged, today)
-        question_payload = {"for_date": today.isoformat(), "question": question}
-        question_blob = crypto.encrypt(
-            data_key,
-            json.dumps(question_payload).encode("utf-8"),
-            crypto.build_aad("question", user.id, today.isoformat()),
-        )
-        await _replace_insight(session, user.id, "question", today, question_blob)
-        question_stored = True
+                return analyze_fn
 
-    await session.commit()
-    return RecomputeResponse(
-        phase=state.phase.value,
-        active_days=state.active_days,
-        streak=state.streak,
-        days_remaining=state.days_remaining,
-        patterns_stored=len(merged),
-        question_stored=question_stored,
-        analyzer="llm" if isinstance(analyzer, llm.LLMAnalyzer) else "brain",
-        patterns_new=result.patterns_new,
-        patterns_fading=result.patterns_fading,
-    )
+            encrypted = entry_items + ([state_item] if state_item else [])
+            # Analysis runs on a DEDICATED capacity limiter, not the shared anyio
+            # thread pool: recomputes are attacker-sized multi-second CPU work and
+            # must never queue in front of login scrypt (or any other request's
+            # worker) in the same FIFO pool.
+            analyze_limiter = getattr(request.app.state, "analyze_limiter", None)
+            try:
+                # Decryption + analysis is synchronous, potentially slow CPU (or an
+                # LLM round-trip); run it in a worker thread so the event loop that
+                # serves every other request never stalls behind a recompute.
+                result, merged = await anyio.to_thread.run_sync(
+                    SecureProcessingContext(data_key).run, encrypted, make_analyze_fn(state_item is not None),
+                    limiter=analyze_limiter,
+                )
+            except TamperError:
+                if state_item is None:
+                    raise HTTPException(status_code=400, detail="entry blob failed authentication") from None
+                # A tampered/corrupt brain state must not brick the account forever:
+                # retry once with amnesia (fresh state, the same capped entry
+                # corpus) — if an ENTRY blob is the culprit the retry fails the
+                # same way and surfaces the real error.
+                try:
+                    result, merged = await anyio.to_thread.run_sync(
+                        SecureProcessingContext(data_key).run, entry_items, make_analyze_fn(False),
+                        limiter=analyze_limiter,
+                    )
+                except TamperError:
+                    raise HTTPException(status_code=400, detail="entry blob failed authentication") from None
+            except (json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError, TypeError, OverflowError):
+                # No exception-text echo: parser internals can quote payload content.
+                # OverflowError is a backstop behind the date validation above.
+                raise HTTPException(status_code=400, detail="entry payload malformed") from None
+
+            insights_payload = {
+                "v": 2,
+                "phase": state.phase.value,
+                "stats": {**result.stats, "patterns": [p.to_dict() for p in merged]},
+            }
+            blob = crypto.encrypt(
+                data_key,
+                json.dumps(insights_payload).encode("utf-8"),
+                crypto.build_aad("insights", user.id, "patterns"),
+            )
+            await _replace_insight(session, user.id, "patterns", None, blob)
+            state_blob = crypto.encrypt(
+                data_key,
+                brain.dump_state(result.new_state),
+                crypto.build_aad("insights", user.id, "brain"),
+            )
+            await _replace_insight(session, user.id, "brain", None, state_blob)
+
+            question_stored = False
+            if merged:
+                question = questions.question_for_today(user.id, merged, today)
+                question_payload = {"for_date": today.isoformat(), "question": question}
+                question_blob = crypto.encrypt(
+                    data_key,
+                    json.dumps(question_payload).encode("utf-8"),
+                    crypto.build_aad("question", user.id, today.isoformat()),
+                )
+                await _replace_insight(session, user.id, "question", today, question_blob)
+                question_stored = True
+
+            await session.commit()
+            return RecomputeResponse(
+                phase=state.phase.value,
+                active_days=state.active_days,
+                streak=state.streak,
+                days_remaining=state.days_remaining,
+                patterns_stored=len(merged),
+                question_stored=question_stored,
+                analyzer="llm" if isinstance(analyzer, llm.LLMAnalyzer) else "brain",
+                patterns_new=result.patterns_new,
+                patterns_fading=result.patterns_fading,
+            )
+    finally:
+        zeroize(data_key)
 
 
 @router.get(

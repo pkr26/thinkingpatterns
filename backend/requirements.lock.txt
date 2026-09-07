@@ -1,9 +1,10 @@
-# Pinned runtime dependencies — exact versions the 258-test suite ran
+# Pinned runtime dependencies — exact versions the 560-test suite ran
 # against. The Docker image installs with --no-deps so this file is the
 # complete supply chain: nothing resolves at build time.
 # Regenerate after dependency changes with the versions from the tested
 # environment (importlib.metadata) and re-run the full test suite.
 aiosqlite==0.22.1
+alembic==1.19.2
 annotated-types==0.8.0
 anyio==4.15.0
 asyncpg==0.30.0
@@ -17,6 +18,8 @@ httpcore==1.0.9
 httptools==0.8.0
 httpx==0.28.1
 idna==3.19
+mako==1.4.1
+markupsafe==3.0.3
 pydantic==2.13.5
 pydantic-core==2.46.5
 python-dotenv==1.2.3

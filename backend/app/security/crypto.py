@@ -39,11 +39,24 @@ def generate_key() -> bytes:
     return os.urandom(KEY_SIZE)
 
 
-def encrypt(key: bytes, plaintext: bytes, aad: bytes | None = None) -> bytes:
-    """Encrypt and authenticate *plaintext* under *key*, returning the envelope."""
+def encrypt(
+    key: bytes,
+    plaintext: bytes,
+    aad: bytes | None = None,
+    nonce: bytes | None = None,
+) -> bytes:
+    """Encrypt and authenticate *plaintext* under *key*, returning the envelope.
+
+    *nonce* is a test seam: when omitted (every production call) a fresh
+    random nonce is generated; when given it must be exactly NONCE_SIZE bytes
+    and is used verbatim (shared/vectors.json pins fixed-nonce output).
+    """
     if len(key) != KEY_SIZE:
         raise CryptoError(f"key must be {KEY_SIZE} bytes, got {len(key)}")
-    nonce = os.urandom(NONCE_SIZE)
+    if nonce is None:
+        nonce = os.urandom(NONCE_SIZE)
+    elif len(nonce) != NONCE_SIZE:
+        raise CryptoError(f"nonce must be {NONCE_SIZE} bytes, got {len(nonce)}")
     ciphertext = AESGCM(key).encrypt(nonce, plaintext, aad)
     return nonce + ciphertext
 

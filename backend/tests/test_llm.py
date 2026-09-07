@@ -33,7 +33,7 @@ def entry(n: int, text: str = "a calm day at work", sentiment: float | None = 0.
 
 
 def test_get_analyzer_requires_both_url_and_consent():
-    settings = Settings()
+    settings = Settings(environment="development")
     settings.llm_url = ""
     assert isinstance(get_analyzer(settings, llm_consent=True), RuleBasedAnalyzer)
 

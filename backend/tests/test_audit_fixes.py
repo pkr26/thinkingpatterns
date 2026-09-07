@@ -11,12 +11,12 @@ import base64
 import json
 import random
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from app.config import Settings
-from app.security import crypto
+from app.security import crypto, enclave
 from app.services import brain, phrases, questions, statsig
 from app.services.patterns import JournalEntry, Pattern
 from tests.helpers import ClientEmulator, daterange
@@ -116,13 +116,16 @@ async def test_concurrent_entry_creates_respect_quota(client, app):
     emu = ClientEmulator("quorarace", "pw-quota-race")
     await emu.register(client)
     app.state.settings.max_entries_per_user = 5
+    # Entry dates must not precede account creation, so this API-touching
+    # test uses the real current date rather than the fixed T0 pin.
+    today = date.today()
 
     async def create(i: int):
         return await client.post(
             "/api/entries", headers=emu.headers,
             json={"client_entry_id": f"e-race-{i}",
-                  "blob": emu.encrypt_entry("x", T0, f"e-race-{i}"),
-                  "entry_date": T0.isoformat()},
+                  "blob": emu.encrypt_entry("x", today, f"e-race-{i}"),
+                  "entry_date": today.isoformat()},
         )
 
     responses = await asyncio.gather(*(create(i) for i in range(20)))
@@ -388,3 +391,319 @@ def test_keystore_pop_is_atomic_single_use():
     except KeyNotFound:
         raised = True
     assert raised
+
+
+# --- finding: total-corpus budget crashed on the frozen JournalEntry ---------------------
+
+
+def test_parse_entries_total_budget_truncates_oldest():
+    # Entries sized EXACTLY at the per-entry cap: the per-entry truncation
+    # cannot shrink them, so the total-corpus budget loop is the branch
+    # under test (the earlier 450KB fixture never reached it). Pre-fix the
+    # loop assigned to a frozen dataclass field -> FrozenInstanceError.
+    from app.api.insights import (
+        MAX_ANALYSIS_TEXT_CHARS,
+        MAX_ANALYSIS_TOTAL_CHARS,
+        _parse_entries,
+    )
+    n = MAX_ANALYSIS_TOTAL_CHARS // MAX_ANALYSIS_TEXT_CHARS + 1  # 101
+    plains, dates = [], []
+    for _ in range(n):
+        plains.append(bytearray(json.dumps(
+            {"v": 1, "text": "x" * MAX_ANALYSIS_TEXT_CHARS,
+             "sentiment": None, "created_at": "2026-09-01"}).encode()))
+        dates.append(date(2026, 9, 1))
+    entries = _parse_entries(plains, dates)
+    assert sum(len(e.text) for e in entries) <= MAX_ANALYSIS_TOTAL_CHARS
+    assert entries[0].text == ""  # oldest truncated first
+    assert len(entries[-1].text) == MAX_ANALYSIS_TEXT_CHARS  # newest kept
+
+
+async def test_recompute_over_total_corpus_budget_returns_200(client):
+    # End-to-end: >100 entries of 20k chars each exceed the 2M total budget
+    # after the per-entry cap, so the recompute must truncate, not 500.
+    from app.api.insights import MAX_ANALYSIS_TEXT_CHARS, MAX_ANALYSIS_TOTAL_CHARS
+    emu = ClientEmulator("bigcorpus", "pw-big-corpus")
+    await emu.register(client)
+    await emu.backdate_account(client, days=120)
+    n = MAX_ANALYSIS_TOTAL_CHARS // MAX_ANALYSIS_TEXT_CHARS + 1
+    days = daterange(40, date.today())  # 40 active days >= the 30-day threshold
+    for i in range(n):
+        await emu.create_entry(
+            client, "x" * MAX_ANALYSIS_TEXT_CHARS, days[i % len(days)],
+            client_entry_id=f"e-big-{i}",
+        )
+    result = await emu.recompute(client)
+    assert result["phase"] == "insight"
+
+
+# --- finding: API-layer data key was never zeroized --------------------------------------
+
+
+async def test_recompute_zeroizes_api_layer_data_key_on_success(client, monkeypatch):
+    from app.api import insights
+    from app.security import enclave
+
+    captured = []
+    real_zeroize = enclave.zeroize
+
+    def spy(buf):
+        captured.append(buf)
+        real_zeroize(buf)
+
+    monkeypatch.setattr(insights, "zeroize", spy)
+
+    emu = ClientEmulator("zeroizeok", "pw-zeroize-ok")
+    await emu.register(client)
+    await emu.backdate_account(client, days=40)
+    for d in daterange(31, date.today()):
+        await emu.create_entry(client, "an ordinary day with work and sleep", d)
+    result = await emu.recompute(client)
+    assert result["phase"] == "insight"
+    assert captured, "API-layer data key was never zeroized"
+    assert all(all(byte == 0 for byte in buf) for buf in captured)
+
+
+async def test_recompute_zeroizes_api_layer_data_key_on_error(client, monkeypatch):
+    from app.api import insights
+    from app.security import enclave
+
+    captured = []
+    real_zeroize = enclave.zeroize
+
+    def spy(buf):
+        captured.append(buf)
+        real_zeroize(buf)
+
+    monkeypatch.setattr(insights, "zeroize", spy)
+
+    emu = ClientEmulator("zeroizeerr", "pw-zeroize-err")
+    await emu.register(client)
+    await emu.backdate_account(client, days=40)
+    days = daterange(31, date.today())
+    for i, d in enumerate(days):
+        if i == 30:
+            # Encrypted under the WRONG key: decryption fails authentication,
+            # driving the 400 path that must still scrub the data key.
+            blob = base64.b64encode(crypto.encrypt(
+                bytes(32),
+                json.dumps({"v": 1, "text": "broken", "sentiment": None,
+                            "created_at": d.isoformat()}).encode(),
+                crypto.build_aad("entry", emu.user_id, "e-tampered"),
+            )).decode()
+            response = await client.post("/api/entries", headers=emu.headers, json={
+                "client_entry_id": "e-tampered", "blob": blob, "entry_date": d.isoformat(),
+            })
+            assert response.status_code == 201, response.text
+        else:
+            await emu.create_entry(client, "an ordinary day with work and sleep", d)
+    token = await emu.open_processing_session(client)
+    response = await client.post("/api/insights/recompute",
+                                 headers={**emu.headers, "X-Processing-Token": token})
+    assert response.status_code == 400
+    assert captured, "API-layer data key was never zeroized on the error path"
+    assert all(all(byte == 0 for byte in buf) for buf in captured)
+
+
+def test_keystore_pop_transfers_owned_bytearray():
+    from app.security.enclave import InMemoryKeyStore, zeroize
+
+    store = InMemoryKeyStore()
+    token = store.create(b"k" * 32, ttl_seconds=300, owner="u1")
+    key = store.pop(token, owner="u1")
+    # No immutable copy is minted: the caller gets the store's own mutable
+    # buffer and is responsible for scrubbing it.
+    assert isinstance(key, bytearray)
+    assert bytes(key) == b"k" * 32
+    zeroize(key)
+    assert bytes(key) == bytes(32)
+
+
+# --- finding: phrase detection dropped the newest entries when capped ---------------------
+
+
+def test_phrase_detection_keeps_recent_entries_when_capped(monkeypatch):
+    # With the sentence budget exceeded, the OLDEST sentences are dropped —
+    # pre-fix the cap kept the oldest ~window and a phrase that only recurs
+    # in recent entries was invisible. A small patched budget keeps the
+    # MinHash work tiny while exercising the same branch.
+    monkeypatch.setattr(brain, "MAX_WINDOW_SENTENCES", 50)
+    window = [
+        JournalEntry(text=f"old entry number {i} had nothing repeat.",
+                     entry_date=T0 - timedelta(days=120 - i), sentiment=None)
+        for i in range(60)
+    ]
+    phrase = "i keep replaying that conversation in my head"
+    for offset in (14, 10, 5, 0):  # 4 distinct days, 14-day span: qualifies
+        window.append(JournalEntry(text=phrase + ".",
+                                   entry_date=T0 - timedelta(days=offset), sentiment=None))
+    signals = brain._detect_phrases(window)
+    assert any("replaying that conversation" in s.label for s in signals)
+
+
+# --- finding: revived archived patterns skipped the confirmation clock --------------------
+
+
+@pytest.mark.parametrize("stale_state", ["fading", "archived"])
+def test_revived_pattern_restarts_confirmation_clock(stale_state):
+    today = T0
+    old_first = (today - timedelta(days=100)).isoformat()
+    last = (today - timedelta(days=10)).isoformat()
+
+    store = brain.fresh_state()
+    store["patterns"]["p-revive"] = brain.StoredPattern(
+        pid="p-revive", kind="temporal", label="sunday dread",
+        first_seen=old_first, last_seen=last,
+        first_qualified=old_first, last_qualified=last,
+        occurrences=4, state=stale_state,
+        qualification_days=[old_first], evidence_dates=[old_first],
+        feedback={}, detail={},
+    )
+
+    def qualify(day: date) -> None:
+        brain._merge_lifecycle(store, [brain._Signal(
+            pid="p-revive", kind="temporal", label="sunday dread",
+            occurrences=4, pvalue=None, detail={},
+            evidence_days=[day - timedelta(days=1), day],
+        )], day)
+
+    qualify(today)
+    record = store["patterns"]["p-revive"]
+    assert record.state == "emerging"
+    assert record.first_qualified == today.isoformat()
+    # Re-qualifying the next day must NOT promote to confirmed: the pattern
+    # has to re-prove itself through the normal CONFIRM_AGE_DAYS window.
+    # Pre-fix the stale first_qualified (100 days old) confirmed it here.
+    qualify(today + timedelta(days=1))
+    assert store["patterns"]["p-revive"].state == "emerging"
+
+
+# --- finding: recomputes for one user were not serialized ---------------------------------
+
+
+async def test_concurrent_recomputes_for_one_user_serialize(client, monkeypatch):
+    import threading
+
+    emu = ClientEmulator("recserial", "pw-recompute-serial")
+    await emu.register(client)
+    await emu.backdate_account(client, days=40)
+    for d in daterange(31, date.today()):
+        await emu.create_entry(client, "an ordinary day with work and sleep", d)
+
+    guard = threading.Lock()
+    active = 0
+    overlapped = False
+    real_run = enclave.SecureProcessingContext.run
+
+    def run_spy(self, encrypted, analyze):
+        # Runs on a worker thread; the sleep widens the would-be overlap so
+        # an unserialized pair is observed with (near-)certainty.
+        nonlocal active, overlapped
+        with guard:
+            overlapped = overlapped or active > 0
+            active += 1
+        try:
+            time.sleep(0.05)
+            return real_run(self, encrypted, analyze)
+        finally:
+            with guard:
+                active -= 1
+
+    monkeypatch.setattr(enclave.SecureProcessingContext, "run", run_spy)
+
+    token1 = await emu.open_processing_session(client)
+    token2 = await emu.open_processing_session(client)
+    r1, r2 = await asyncio.gather(
+        client.post("/api/insights/recompute",
+                    headers={**emu.headers, "X-Processing-Token": token1}),
+        client.post("/api/insights/recompute",
+                    headers={**emu.headers, "X-Processing-Token": token2}),
+    )
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+    assert not overlapped
+
+
+# --- finding: _UserLocks eviction could orphan a parked waiter ----------------------------
+
+
+async def test_user_locks_never_evict_a_lock_with_waiters():
+    from app.api.entries import _UserLocks
+
+    locks = _UserLocks(max_keys=1)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    acquired: list[asyncio.Lock] = []
+
+    async def first():
+        async with locks.hold("k"):
+            entered.set()
+            await release.wait()
+
+    async def waiter():
+        await entered.wait()
+        async with locks.hold("k") as lock:
+            acquired.append(lock)
+
+    t1 = asyncio.create_task(first())
+    t2 = asyncio.create_task(waiter())
+    await entered.wait()
+    for _ in range(1000):
+        if locks._locks["k"][1] == 2:  # holder + parked waiter
+            break
+        await asyncio.sleep(0.001)
+    assert locks._locks["k"][1] == 2
+    original = locks._locks["k"][0]
+    # Capacity pressure while the waiter is parked: the waited-on lock must
+    # survive (evicting it would orphan the waiter and let the next hold("k")
+    # mint a second lock for the same key).
+    async with locks.hold("other"):
+        pass
+    assert locks._locks["k"][0] is original
+    release.set()
+    await asyncio.gather(t1, t2)
+    assert acquired == [original]
+
+
+async def test_user_locks_still_recycle_idle_entries():
+    from app.api.entries import _UserLocks
+
+    locks = _UserLocks(max_keys=2)
+    for key in ("a", "b"):
+        async with locks.hold(key):
+            pass
+    async with locks.hold("c"):
+        pass
+    assert set(locks._locks) == {"b", "c"}
+
+
+# --- finding: list_entries pagination had no tiebreaker -----------------------------------
+
+
+async def test_list_entries_pagination_has_stable_total_order(client, app):
+    from sqlalchemy import update as sql_update
+
+    from app.models import Entry
+
+    emu = ClientEmulator("paginate", "pw-paginate")
+    await emu.register(client)
+    day = date.today()
+    for i in range(5):
+        await emu.create_entry(client, f"page order entry {i}", day,
+                               client_entry_id=f"e-page-{i}")
+    # Identical (entry_date, received_at): only the id tiebreaker orders these.
+    async with app.state.sessionmaker() as s:
+        await s.execute(sql_update(Entry).values(
+            received_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+        await s.commit()
+
+    async def fetch(offset: int, limit: int) -> list[str]:
+        response = await client.get("/api/entries", headers=emu.headers,
+                                    params={"offset": offset, "limit": limit})
+        assert response.status_code == 200, response.text
+        return [row["id"] for row in response.json()]
+
+    full = await fetch(0, 100)
+    paged = await fetch(0, 2) + await fetch(2, 2) + await fetch(4, 2)
+    assert len(full) == 5
+    assert paged == full  # no duplicates, no reordering across page boundaries

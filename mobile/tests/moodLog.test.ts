@@ -94,6 +94,36 @@ describe("moodLog", () => {
     expect((await recentMoods(keyA, "u1", 30)).map((m) => m.value)).toEqual([0.3]);
   });
 
+  it("a corrupt LEGACY blob degrades to empty instead of crashing the read", async () => {
+    // Starts with "[" so the legacy path is taken, but the JSON is broken:
+    // the parse failure must degrade to empty (and flag legacy for rewrite).
+    await storage.setItem("mindpattern.moodlog.u1", "[{broken json");
+    expect(await recentMoods(keyA, "u1", 30)).toEqual([]);
+    expect(await localStreak(keyA, "u1", day(0))).toBe(0);
+  });
+
+  it("a decrypted payload that is not an array sanitizes to empty", async () => {
+    // Valid AEAD, valid JSON — but the wrong SHAPE. Never render garbage.
+    const notArray = encrypt(keyA, Buffer.from(JSON.stringify({ days: "lots" })), buildAad("moodlog", "u1"));
+    await storage.setItem("mindpattern.moodlog.u1", notArray.toString("base64"));
+    expect(await recentMoods(keyA, "u1", 30)).toEqual([]);
+  });
+
+  it("sanitize drops junk items from a legacy payload, keeping only valid days", async () => {
+    await storage.setItem(
+      "mindpattern.moodlog.u1",
+      JSON.stringify([
+        "junk",
+        null,
+        { date: "not-a-date", value: 0.1 },
+        { date: "2026-09-01", value: "high" },
+        { value: 0.4 },
+        { date: "2026-09-02", value: 0.5 },
+      ]),
+    );
+    expect(await recentMoods(keyA, "u1", 30)).toEqual([{ date: "2026-09-02", value: 0.5 }]);
+  });
+
   it("upserts by date — one value per day", async () => {
     await recordMood(keyA, "u1", day(0), -0.5);
     await recordMood(keyA, "u1", day(0), 0.4);

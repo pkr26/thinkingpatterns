@@ -16,8 +16,10 @@ Enumeration posture, stated honestly:
 
 Login/logout: logout bumps the account's token epoch, instantly revoking
 every bearer token issued so far (stateless tokens, server-side kill
-switch). scrypt runs in a worker thread — a ~35ms KDF on the event loop
-would let a single IP stall every concurrent request.
+switch). scrypt runs in a worker thread behind a dedicated CapacityLimiter
+(app.state.auth_limiter) — a ~35ms/64-MiB KDF on the event loop, or
+unbounded concurrent KDFs on the shared pool, would let a single IP stall
+every concurrent request.
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import (
-    check_keyed_limit,
     check_keyed_limit_without_count,
     make_rate_limiter,
     record_keyed_failure,
@@ -43,6 +44,7 @@ from ..cache import (
 from ..deps import get_session, require_user
 from ..models import User
 from ..schemas import LoginRequest, RegisterRequest, SaltLookupRequest, SaltResponse, TokenResponse
+from ..security.kdf import hkdf_sha256
 from ..security.tokens import issue_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -66,13 +68,30 @@ def hash_verifier(auth_key: bytes, salt: bytes) -> bytes:
     )
 
 
-async def hash_verifier_off_loop(auth_key: bytes, salt: bytes) -> bytes:
-    """scrypt is ~35ms of CPU: never run it on the event loop thread."""
-    return await anyio.to_thread.run_sync(hash_verifier, auth_key, salt)
+async def hash_verifier_off_loop(auth_key: bytes, salt: bytes, limiter=None) -> bytes:
+    """scrypt is ~35ms of CPU and 64 MiB of RAM: never run it on the event
+    loop thread, and cap concurrency through the app's dedicated auth
+    limiter so a login flood cannot queue unbounded scrypt allocations on
+    the shared anyio pool."""
+    return await anyio.to_thread.run_sync(hash_verifier, auth_key, salt, limiter=limiter)
+
+
+def _auth_limiter(request: Request):
+    # Same pattern as the recompute path: a dedicated CapacityLimiter wired
+    # in main.py; getattr keeps direct-router unit tests without app state
+    # working (anyio falls back to the default pool limiter on None).
+    return getattr(request.app.state, "auth_limiter", None)
+
+
+DECOY_SALT_INFO = b"mindpattern/decoy-salt/v1"
 
 
 def decoy_salt(username: str, secret: str) -> str:
-    digest = hmac.new(secret.encode("utf-8"), b"decoy:" + username.encode("utf-8"), hashlib.sha256).digest()
+    # Key separation: the decoy HMAC runs under an HKDF subkey derived from
+    # the token secret, not the raw secret itself — token signing and decoy
+    # salts must never be two uses of one HMAC key.
+    decoy_key = hkdf_sha256(secret.encode("utf-8"), None, DECOY_SALT_INFO)
+    digest = hmac.new(decoy_key, b"decoy:" + username.encode("utf-8"), hashlib.sha256).digest()
     return base64.b64encode(digest[:SALT_BYTES]).decode("ascii")
 
 
@@ -97,9 +116,14 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
     settings = request.app.state.settings
     # Per-username bucket: rotating source IPs must not allow unbounded
     # probing of one name (the 409 availability answer is the one oracle a
-    # name-based system cannot fully close).
-    check_keyed_limit(request, f"register-name:{body.username}",
-                      settings.auth_rate_limit, settings.auth_rate_window)
+    # name-based system cannot fully close). Like the login path, the probe
+    # itself does NOT consume the bucket — only ACTUAL conflicts (409s) are
+    # counted, so spraying garbage or taken-name probes cannot 429 the
+    # legitimate first registrant of a free name.
+    username_key = f"register-name:{body.username}"
+    check_keyed_limit_without_count(
+        request, username_key, settings.auth_rate_limit, settings.auth_rate_window
+    )
     try:
         salt_bytes = base64.b64decode(body.salt, validate=True)
         verifier_bytes = base64.b64decode(body.verifier, validate=True)
@@ -113,10 +137,13 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
     # Hash FIRST, before the existence check, so the taken/free paths are
     # computationally identical (no timing oracle on top of the status code).
     scrypt_server_salt = os.urandom(16)
-    verifier_hash = await hash_verifier_off_loop(verifier_bytes, scrypt_server_salt)
+    verifier_hash = await hash_verifier_off_loop(
+        verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
+    )
 
     existing = await session.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none() is not None:
+        record_keyed_failure(request, username_key, settings.auth_rate_window)
         raise HTTPException(status_code=409, detail="username already taken")
 
     user = User(
@@ -137,6 +164,7 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
         # Two concurrent registrations of the same username: the unique
         # index is the authority, the pre-check above is just fast-path UX.
         await session.rollback()
+        record_keyed_failure(request, username_key, settings.auth_rate_window)
         raise HTTPException(status_code=409, detail="username already taken") from exc
     return response
 
@@ -182,9 +210,13 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
         verifier_bytes = b""
     if user is None or not user.is_active:
         # Burn equivalent CPU so response timing does not reveal existence.
-        await hash_verifier_off_loop(b"\x00" * AUTH_KEY_SIZE, b"\x00" * 16)
+        await hash_verifier_off_loop(
+            b"\x00" * AUTH_KEY_SIZE, b"\x00" * 16, limiter=_auth_limiter(request)
+        )
         raise HTTPException(status_code=401, detail="invalid credentials")
-    candidate = await hash_verifier_off_loop(verifier_bytes, user.scrypt_salt)
+    candidate = await hash_verifier_off_loop(
+        verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
+    )
     if not hmac.compare_digest(candidate, bytes(user.verifier)):
         record_keyed_failure(request, username_key, settings.auth_rate_window)
         raise HTTPException(status_code=401, detail="invalid credentials")

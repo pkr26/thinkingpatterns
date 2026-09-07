@@ -47,21 +47,44 @@ CASES = [
      "aad": ["insights", "user-🧠-brain", "patterns"]},
 ]
 
+# Fixed-nonce encrypt vectors pin the OTHER direction: the decrypt-only
+# vectors above prove both platforms can read Python's output, but nothing
+# pinned what the mobile encrypt() emits (it uses a random nonce, so its
+# output cannot be pinned transitively). Here the nonce is fixed and the
+# exact blob bytes are stored, so each platform's encrypt() is checked
+# byte-for-byte against output the other platform independently decrypts.
+# AAD is stored as PARTS (context, userId, itemId) — never the pre-built
+# bytes — so consumers are forced through their own AAD builder.
+ENCRYPT_CASES = [
+    {"password": "encrypt-pin-ascii", "salt": bytes(range(64, 80)),
+     "plaintext": b"Feeling calmer after the morning walk.",
+     "aad_parts": ["entry", "user-777", "entry-2026-09-07-morning"],
+     "nonce": bytes(range(12, 24))},
+    # Non-ASCII/astral user and entry ids: the blob only matches if the AAD
+    # builder reproduces Python's ensure_ascii escaping byte-for-byte.
+    {"password": "encrypt-pin-ünïcode", "salt": bytes(range(80, 96)),
+     "plaintext": b"fixed-nonce encrypt pin with astral AAD binding",
+     "aad_parts": ["entry", "üsér-🧠", "entrée-🌙-42"],
+     "nonce": bytes(range(23, 11, -1))},
+]
+
+
+def derive_keys(password: str, salt: bytes) -> tuple[bytes, bytes, bytes]:
+    """PBKDF2 master key, cross-checked between two implementations."""
+    via_hashlib = kdf.derive_master_key(password, salt, kdf.KDF_ITERATIONS)
+    via_cryptography = PBKDF2HMAC(
+        algorithm=hashes.SHA256(), length=32, salt=salt, iterations=kdf.KDF_ITERATIONS
+    ).derive(password.encode("utf-8"))
+    assert via_hashlib == via_cryptography, "PBKDF2 implementations disagree!"
+    master = via_hashlib
+    return master, kdf.derive_auth_key(master), kdf.derive_data_key(master)
+
 
 def main() -> None:
     vectors = []
     for case in CASES:
         salt = case["salt"]
-        # Cross-check the two PBKDF2 implementations against each other.
-        via_hashlib = kdf.derive_master_key(case["password"], salt, kdf.KDF_ITERATIONS)
-        via_cryptography = PBKDF2HMAC(
-            algorithm=hashes.SHA256(), length=32, salt=salt, iterations=kdf.KDF_ITERATIONS
-        ).derive(case["password"].encode("utf-8"))
-        assert via_hashlib == via_cryptography, "PBKDF2 implementations disagree!"
-
-        master = via_hashlib
-        auth_key = kdf.derive_auth_key(master)
-        data_key = kdf.derive_data_key(master)
+        master, auth_key, data_key = derive_keys(case["password"], salt)
         aad = crypto.build_aad(*case["aad"])
         nonce = bytes(range(12))  # deterministic nonce for vector stability
         ciphertext = AESGCM(data_key).encrypt(nonce, case["plaintext"], aad)
@@ -79,10 +102,33 @@ def main() -> None:
             "blob": base64.b64encode(nonce + ciphertext).decode(),
         })
 
+    encrypt_vectors = []
+    for case in ENCRYPT_CASES:
+        salt = case["salt"]
+        _, _, data_key = derive_keys(case["password"], salt)
+        aad = crypto.build_aad(*case["aad_parts"])
+        nonce = case["nonce"]
+        assert len(nonce) == crypto.NONCE_SIZE
+        # AESGCM directly (not crypto.encrypt) keeps generation independent
+        # of the function the backend test pins against these bytes.
+        ciphertext = AESGCM(data_key).encrypt(nonce, case["plaintext"], aad)
+
+        encrypt_vectors.append({
+            "password": case["password"],
+            "salt": base64.b64encode(salt).decode(),
+            "iterations": kdf.KDF_ITERATIONS,
+            "data_key": base64.b64encode(data_key).decode(),
+            "plaintext": base64.b64encode(case["plaintext"]).decode(),
+            "aad_parts": case["aad_parts"],
+            "nonce": base64.b64encode(nonce).decode(),
+            "blob": base64.b64encode(nonce + ciphertext).decode(),
+        })
+
     out = REPO_ROOT / "shared" / "vectors.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"vectors": vectors}, indent=2) + "\n")
-    print(f"wrote {len(vectors)} vectors -> {out}")
+    payload = {"vectors": vectors, "encrypt_vectors": encrypt_vectors}
+    out.write_text(json.dumps(payload, indent=2) + "\n")
+    print(f"wrote {len(vectors)} vectors + {len(encrypt_vectors)} encrypt vectors -> {out}")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
  * H3: session material is encrypted at rest. A device backup must not
  * contain a greppable bearer token or username.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { secureStore } from "../src/secureStore";
 
@@ -40,5 +40,82 @@ describe("secureStore", () => {
     await secureStore.setItem("a", "same");
     await secureStore.setItem("b", "same");
     expect(await storage.getItem("a")).not.toBe(await storage.getItem("b"));
+  });
+
+  // First-use race: two concurrent first calls used to both see null and
+  // generate DIFFERENT device keys — the module cache then disagreed with
+  // storage and half the ciphertext was undecryptable after a restart.
+  it("concurrent first calls share a single device-key generation", async () => {
+    // A fresh module graph (fresh key cache) backed by a fresh storage
+    // instance: resetModules re-instantiates the aliased AsyncStorage mock,
+    // so grab THAT instance to drive and inspect the race.
+    vi.resetModules();
+    const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+    const fresh = (await import("../src/secureStore")).secureStore;
+
+    // Park the first device-key read so both callers enter initialization
+    // before either finishes.
+    const originalGetItem = freshStorage.getItem.bind(freshStorage);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let parked = true;
+    freshStorage.getItem = async (key: string) => {
+      if (parked && key === "@mindpattern/device_k") {
+        parked = false;
+        await gate;
+      }
+      return originalGetItem(key);
+    };
+    const setItemSpy = vi.spyOn(freshStorage, "setItem");
+
+    const first = fresh.setItem("k1", "v1");
+    const second = fresh.setItem("k2", "v2");
+    release();
+    await Promise.all([first, second]);
+
+    // Exactly ONE key was generated and persisted...
+    const keyWrites = setItemSpy.mock.calls.filter(([key]) => key === "@mindpattern/device_k");
+    expect(keyWrites).toHaveLength(1);
+    // ...and both values decrypt through the same module cache.
+    expect(await fresh.getItem("k1")).toBe("v1");
+    expect(await fresh.getItem("k2")).toBe("v2");
+  });
+
+  it("loads an existing device key from storage instead of regenerating (restart path)", async () => {
+    vi.resetModules();
+    const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+    const fresh = (await import("../src/secureStore")).secureStore;
+    // Pre-seed a device key: the app restarted, the key is already on disk.
+    const existing = Buffer.alloc(32, 9).toString("base64");
+    await freshStorage.setItem("@mindpattern/device_k", existing);
+    const setItemSpy = vi.spyOn(freshStorage, "setItem");
+
+    await fresh.setItem("k", "v");
+
+    expect(await fresh.getItem("k")).toBe("v");
+    // No new key was generated or written over the existing one.
+    expect(setItemSpy.mock.calls.filter(([key]) => key === "@mindpattern/device_k")).toHaveLength(0);
+    expect(await freshStorage.getItem("@mindpattern/device_k")).toBe(existing);
+  });
+
+  it("a failed key initialization does not poison later callers", async () => {
+    vi.resetModules();
+    const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+    const fresh = (await import("../src/secureStore")).secureStore;
+    const originalGetItem = freshStorage.getItem.bind(freshStorage);
+    let broken = true;
+    freshStorage.getItem = async (key: string) => {
+      if (broken && key === "@mindpattern/device_k") throw new Error("storage read failed");
+      return originalGetItem(key);
+    };
+
+    await expect(fresh.setItem("k", "v")).rejects.toThrow("storage read failed");
+
+    // The failed promise was dropped: the next call initializes fresh.
+    broken = false;
+    await fresh.setItem("k", "v");
+    expect(await fresh.getItem("k")).toBe("v");
   });
 });

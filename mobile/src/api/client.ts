@@ -32,9 +32,12 @@ const MAX_ERROR_MESSAGE_CHARS = 200;
  *  forever (memory exhaustion, battery drain). 100 pages = 50k entries —
  *  far beyond any real journal; past that the server is hostile/broken. */
 const MAX_LIST_PAGES = 100;
-/** Entry ids this client generates are [A-Za-z0-9-]; anything else in this
- *  position is at-rest tampering and must never reach the URL path. */
-const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+/** Entry ids this client generates are [A-Za-z0-9_-]; anything else in this
+ *  position is at-rest tampering and must never reach the URL path. The
+ *  1-64 length band matches the backend exactly (backend/app/schemas.py
+ *  CLIENT_ID_PATTERN) — a longer id would be built, queued and retried
+ *  forever only to be 422'd at upload. */
+const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function parseServerUrl(candidate: string): { url: string; insecure: boolean } | null {
   const trimmed = candidate.trim();
@@ -241,6 +244,16 @@ export class ApiError extends Error {
   }
 }
 
+/** One entry row as the backend serializes it (EntryOut). The server is
+ *  untrusted — this types the shape for callers, it is not a guarantee. */
+export interface ListedEntry {
+  id: string;
+  client_entry_id: string;
+  blob: string;
+  entry_date: string;
+  received_at: string;
+}
+
 export const api = {
   setSession: async (token: string, userId: string, username?: string) => {
     // All three values are session material and live encrypted at rest
@@ -294,13 +307,13 @@ export const api = {
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string) =>
     request("POST", "/api/entries", { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
   /** Paginates through every page (server caps pages at 500 entries). */
-  listEntries: async (since?: string): Promise<any[]> => {
-    const all: any[] = [];
+  listEntries: async (since?: string): Promise<ListedEntry[]> => {
+    const all: ListedEntry[] = [];
     const pageSize = 500;
     for (let page = 0; page < MAX_LIST_PAGES; page++) {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(page * pageSize) });
       if (since) params.set("since", since);
-      const result = await request("GET", `/api/entries?${params.toString()}`);
+      const result = (await request("GET", `/api/entries?${params.toString()}`)) as ListedEntry[];
       all.push(...result);
       if (result.length < pageSize) return all;
     }

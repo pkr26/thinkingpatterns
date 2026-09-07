@@ -17,6 +17,7 @@ mobile/android/.gradle/
 mobile/android/app/build/
 mobile/.verify-build/
 mobile/.decrypt-build/
+coverage/
 *.log
 
 # Local state

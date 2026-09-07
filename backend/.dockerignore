@@ -1,0 +1,15 @@
+# Local-only artifacts — the image installs runtime deps from
+# requirements.lock.txt and copies only app/, alembic/, alembic.ini.
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mutmut-cache/
+.coverage
+coverage/
+htmlcov/
+*.db
+tests/
+scripts/
+probe_brain.py

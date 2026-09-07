@@ -24,18 +24,20 @@ from ..cache import make_rate_limiter
 from ..deps import get_session, require_user
 from ..models import Entry, Insight, User
 from ..schemas import AccountDeleteRequest, EntryOut, InsightOut, LlmConsentRequest, LlmConsentResponse
-from .auth import hash_verifier_off_loop
+from .auth import _auth_limiter, hash_verifier_off_loop
 
 router = APIRouter(prefix="/account", tags=["account"])
 
 
-async def _require_verifier(user: User, body_verifier: str) -> None:
+async def _require_verifier(user: User, body_verifier: str, request: Request) -> None:
     """Password-equivalent proof: scrypt(verifier) must match the stored hash."""
     try:
         verifier_bytes = base64.b64decode(body_verifier, validate=True)
     except (binascii.Error, ValueError):
         raise HTTPException(status_code=401, detail="invalid credentials") from None
-    candidate = await hash_verifier_off_loop(verifier_bytes, user.scrypt_salt)
+    candidate = await hash_verifier_off_loop(
+        verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
+    )
     if not hmac.compare_digest(candidate, bytes(user.verifier)):
         raise HTTPException(status_code=401, detail="invalid credentials")
 
@@ -126,6 +128,7 @@ async def get_llm_consent(
 )
 async def set_llm_consent(
     body: LlmConsentRequest,
+    request: Request,
     user: User = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -134,7 +137,7 @@ async def set_llm_consent(
     When the operator has configured MINDPATTERN_LLM_URL, journal text is
     only sent to that third-party endpoint for accounts with consent=True.
     """
-    await _require_verifier(user, body.verifier)
+    await _require_verifier(user, body.verifier, request)
     user.llm_consent = body.enabled
     session.add(user)
     await session.commit()
@@ -158,7 +161,7 @@ async def delete_account(
     be able to permanently destroy a journal. In-memory processing-session
     keys for this account are wiped alongside the rows.
     """
-    await _require_verifier(user, body.verifier)
+    await _require_verifier(user, body.verifier, request)
     if not user.is_active:
         raise HTTPException(status_code=404, detail="account not found")
     request.app.state.key_store.destroy_all_for_owner(user.id)

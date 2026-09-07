@@ -1,5 +1,13 @@
 # MindPattern — Deep Mutation Testing Report (full-stack run)
 
+> **Historical snapshot — read this first.** This report describes the
+> mutation-testing exercise as of its commit (~2026-09-04). Test counts and
+> coverage figures below are from that run and differ from HEAD (the suites
+> have grown since; see README.md for current numbers). In particular, the
+> mobile 100% Stryker score depended on Stryker suppression comments that
+> were later removed, so that score does **not** reproduce at HEAD. The
+> methodology, triage, and equivalent-mutant analysis remain valid context.
+
 **Scope:** the ENTIRE application, both sides —
 `backend/app/**` (security core, services, every API router, middleware,
 cache, config, deps, db, main, schemas; `models.py` excluded, see below) and

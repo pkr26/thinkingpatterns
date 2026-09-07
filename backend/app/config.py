@@ -1,20 +1,26 @@
 """Application settings.
 
 The Settings dataclass is plain values; ``Settings.from_env()`` is the only
-place environment variables are read (at call time, not import time), so
-configuration is explicit, testable, and never captured accidentally early.
+place environment variables are read. That read happens ONCE, at module
+import, producing the module-level ``settings`` the app entrypoint
+(``main.app``) uses — a misconfigured process therefore refuses to boot at
+import time rather than halfway through serving. Tests never touch that
+global: they build their own Settings and inject it via
+``create_app(settings)``.
 
-The insecure development token secret is only accepted when the environment
-is *exactly* ``development`` — any other value (staging, prod, a typo) fails
-closed at startup instead of silently signing tokens with a public constant.
-Setting MINDPATTERN_ENV=production additionally rejects SQLite and weak
-secrets.
+The environment defaults to ``production`` (fail closed): development mode,
+with its committed dev token secret, SQLite and open /docs, exists only when
+MINDPATTERN_ENV=development is set *exactly* — any other value (staging,
+prod, a typo, or an unset variable) takes the production gates instead of
+silently signing tokens with a public constant. Production additionally
+rejects SQLite and weak secrets.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 DEFAULT_INSECURE_SECRET = "dev-insecure-secret-change-me"
 
@@ -42,14 +48,20 @@ def _bool_env(name: str, default: bool = False) -> bool:
 
 
 def _cors_origins() -> list[str]:
-    """Comma-separated allowed origins; the literal * keeps mobile clients working."""
-    raw = os.getenv("MINDPATTERN_CORS_ORIGINS", "*").strip()
+    """Comma-separated allowed origins; empty default = NO cross-origin access.
+
+    The mobile app is a native client and never sends Origin headers, so CORS
+    is not needed for it; a browser frontend must be explicitly allowlisted.
+    """
+    raw = os.getenv("MINDPATTERN_CORS_ORIGINS", "").strip()
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 @dataclass
 class Settings:
-    environment: str = "development"
+    # Fail closed: production is the DEFAULT. Development (dev secret,
+    # SQLite, /docs) requires an explicit MINDPATTERN_ENV=development opt-in.
+    environment: str = "production"
     database_url: str = "sqlite+aiosqlite:///./mindpattern.db"
 
     token_secret: str = DEFAULT_INSECURE_SECRET
@@ -82,7 +94,7 @@ class Settings:
     llm_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
 
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = field(default_factory=list)
     trust_proxy_headers: bool = False
 
     def __post_init__(self) -> None:
@@ -143,11 +155,29 @@ class Settings:
                     "MINDPATTERN_DB_URL must point at PostgreSQL (or another shared "
                     "database) in production; SQLite is dev/test only"
                 )
+        if self.llm_url.strip():
+            # Decrypted journal plaintext is POSTed to this endpoint, so the
+            # transport must be TLS. Plain http:// is accepted only for a
+            # loopback dev server (exact host match — "localhost.evil.com"
+            # must not slip through a prefix check) in development mode.
+            parsed = urlparse(self.llm_url.strip())
+            dev_loopback = (
+                self.environment == "development"
+                and parsed.scheme == "http"
+                and parsed.hostname in ("localhost", "127.0.0.1")
+            )
+            if parsed.scheme != "https" and not dev_loopback:
+                raise RuntimeError(
+                    "MINDPATTERN_LLM_URL must use https:// — decrypted journal "
+                    "plaintext is POSTed to it. Plain http:// is only accepted "
+                    "for http://localhost / http://127.0.0.1 with "
+                    "MINDPATTERN_ENV=development exactly."
+                )
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            environment=os.getenv("MINDPATTERN_ENV", "development"),
+            environment=os.getenv("MINDPATTERN_ENV", "production"),
             database_url=os.getenv("MINDPATTERN_DB_URL", "sqlite+aiosqlite:///./mindpattern.db"),
             token_secret=os.getenv("MINDPATTERN_TOKEN_SECRET", DEFAULT_INSECURE_SECRET),
             token_ttl_seconds=_int_env("MINDPATTERN_TOKEN_TTL", 86_400),

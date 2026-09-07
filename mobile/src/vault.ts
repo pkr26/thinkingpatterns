@@ -21,7 +21,12 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-let current: Keys | null = null;
+/** What an unlocked session actually holds. The master key is NOT retained:
+ *  unlock() zeroizes it immediately, and keeping the (zeroed) field on the
+ *  stored state only invited a future caller to read dead bytes silently. */
+export type SessionKeys = Pick<Keys, "authKey" | "dataKey">;
+
+let current: SessionKeys | null = null;
 let ownerUserId: string | null = null;
 
 export const vault = {
@@ -30,16 +35,16 @@ export const vault = {
   unlock(keys: Keys, userId?: string): void {
     if (current) zeroize(current.authKey, current.dataKey);
     zeroize(keys.masterKey); // only auth/data keys are useful from here on
-    current = keys;
+    current = { authKey: keys.authKey, dataKey: keys.dataKey };
     ownerUserId = userId ?? null;
     notify();
   },
-  get(): Keys {
+  get(): SessionKeys {
     if (!current) throw new Error("vault is locked");
     // A fresh object per call: callers cannot mutate the vault's own
     // reference or swap its keys. The buffers are shared on purpose —
     // zeroize-on-lock must still reach every copy.
-    return { masterKey: current.masterKey, authKey: current.authKey, dataKey: current.dataKey };
+    return { authKey: current.authKey, dataKey: current.dataKey };
   },
   isUnlocked(): boolean {
     return current !== null;

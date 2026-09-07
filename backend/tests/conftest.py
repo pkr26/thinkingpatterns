@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import os
+
+# The app fails closed: environment defaults to production, so importing
+# app.config (module-level Settings.from_env()) without MINDPATTERN_ENV set
+# refuses to boot. The test suite IS a development context — opt in
+# explicitly, before any app module is imported.
+os.environ.setdefault("MINDPATTERN_ENV", "development")
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -12,7 +20,7 @@ from app.main import create_app
 
 @pytest.fixture
 def settings() -> Settings:
-    s = Settings()
+    s = Settings(environment="development")
     s.database_url = "sqlite+aiosqlite://"
     s.token_secret = "test-secret-not-for-production"
     s.processing_session_ttl = 300

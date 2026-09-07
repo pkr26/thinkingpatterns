@@ -18,9 +18,14 @@ import { engine } from "./crypto/engine";
 
 const DEVICE_KEY_STORAGE = "@mindpattern/device_k";
 let cachedKey: Buffer | null = null;
+/** Single-flight initialization: concurrent first callers share ONE
+ *  in-flight promise. Without it, two first calls both read null, generate
+ *  DIFFERENT keys and both write — the module cache then holds one key
+ *  while storage holds the other, and half the stored ciphertext is
+ *  undecryptable after a restart. */
+let keyPromise: Promise<Buffer> | null = null;
 
-async function deviceKey(): Promise<Buffer> {
-  if (cachedKey) return cachedKey;
+async function loadDeviceKey(): Promise<Buffer> {
   const raw = await AsyncStorage.getItem(DEVICE_KEY_STORAGE);
   if (raw) {
     cachedKey = Buffer.from(raw, "base64");
@@ -29,6 +34,17 @@ async function deviceKey(): Promise<Buffer> {
     await AsyncStorage.setItem(DEVICE_KEY_STORAGE, cachedKey.toString("base64"));
   }
   return cachedKey;
+}
+
+function deviceKey(): Promise<Buffer> {
+  if (cachedKey) return Promise.resolve(cachedKey);
+  // A failed initialization must not poison later callers: drop the promise
+  // so the next call retries fresh.
+  keyPromise ??= loadDeviceKey().catch((err: unknown) => {
+    keyPromise = null;
+    throw err;
+  });
+  return keyPromise;
 }
 
 export const secureStore = {

@@ -5,6 +5,15 @@
  * same interface) and prove byte-for-byte agreement with the backend
  * reference values in shared/vectors.json, including the non-ASCII and
  * astral AAD vectors that pin the ensure_ascii canonicalization contract.
+ *
+ * DEVICE-ENGINE GAP: everything here runs on the `node:crypto` engine
+ * fallback (see src/crypto/engine.ts) — the shipping on-device engine,
+ * react-native-quick-crypto, is never exercised by any automated test. Its
+ * AES-GCM/PBKDF2/HKDF paths are assumed to match node:crypto byte-for-byte.
+ * To pin these vectors on-device in the future, run this same suite inside
+ * the RN app (e.g. an in-app dev screen or e2e harness that loads
+ * shared/vectors.json and executes the same assertions through the real
+ * engine); do not reimplement the vectors in native code.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -12,11 +21,11 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deriveMasterKey, deriveAuthKey, deriveDataKey } from "../src/crypto/kdf";
-import { buildAad, decrypt } from "../src/crypto/envelope";
+import { buildAad, decrypt, encrypt } from "../src/crypto/envelope";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
-const { vectors } = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const { vectors, encrypt_vectors: encryptVectors } = JSON.parse(readFileSync(vectorsPath, "utf8"));
 
 describe("shared/vectors.json against the real TS crypto stack", () => {
   it("has vectors to check", () => {
@@ -48,6 +57,44 @@ describe("shared/vectors.json against the real TS crypto stack", () => {
       expect(() => decrypt(dataKey, blob, buildAad("entry", "other-user", "x"))).toThrow();
     });
   }
+});
+
+describe("fixed-nonce encrypt vectors (mobile -> backend direction)", () => {
+  // The decrypt-only vectors above pin Python's output; this family pins what
+  // THIS client emits, byte-for-byte, so the backend test can independently
+  // decrypt it. AAD is rebuilt from the vector's PARTS — never the stored
+  // bytes — which also exercises buildAad against every vector part set.
+  it("has encrypt vectors to check", () => {
+    expect(encryptVectors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  for (const [i, v] of encryptVectors.entries()) {
+    it(`encrypt vector ${i}: fixed-nonce encrypt reproduces the blob byte-for-byte`, () => {
+      const salt = Buffer.from(v.salt, "base64");
+      const dataKey = deriveDataKey(deriveMasterKey(v.password, salt, v.iterations));
+      const aad = buildAad(...v.aad_parts);
+      const nonce = Buffer.from(v.nonce, "base64");
+      const blob = encrypt(dataKey, Buffer.from(v.plaintext, "base64"), aad, nonce);
+      expect(blob.toString("base64")).toBe(v.blob);
+    });
+
+    it(`encrypt vector ${i}: mobile decrypts the pinned blob (backend's encrypt output)`, () => {
+      const salt = Buffer.from(v.salt, "base64");
+      const dataKey = deriveDataKey(deriveMasterKey(v.password, salt, v.iterations));
+      const plaintext = decrypt(
+        dataKey, Buffer.from(v.blob, "base64"), buildAad(...v.aad_parts),
+      );
+      expect(plaintext.toString("base64")).toBe(v.plaintext);
+    });
+  }
+
+  it("nonce seam: wrong-size nonce fails loudly, omission stays random", () => {
+    const key = Buffer.alloc(32, 7);
+    expect(() => encrypt(key, Buffer.from("data"), undefined, Buffer.alloc(8))).toThrow();
+    const a = encrypt(key, Buffer.from("data"));
+    const b = encrypt(key, Buffer.from("data"));
+    expect(a.equals(b)).toBe(false);
+  });
 });
 
 describe("AAD canonicalization (ensure_ascii contract)", () => {

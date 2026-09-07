@@ -208,7 +208,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--username", default="demo")
-    parser.add_argument("--password", default="demo-patterns-2026")
+    # No default password: a predictable credential on a seeded account is
+    # one forgotten teardown away from a stranger reading the demo journal.
+    parser.add_argument("--password", required=True)
     parser.add_argument("--days", type=int, default=84)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--db-url", default=None,

@@ -66,6 +66,12 @@ def verify_token(token: str, secret: str, now: float | None = None) -> dict:
         raise TokenError("malformed payload") from exc
     if not isinstance(payload, dict) or "uid" not in payload or "exp" not in payload:
         raise TokenError("malformed payload")
-    if payload["exp"] <= (now if now is not None else time.time()):
+    exp = payload["exp"]
+    # A non-numeric exp ("tomorrow", null, ...) would raise TypeError on the
+    # comparison below and surface as a 500; bool is rejected explicitly even
+    # though it IS an int — JSON true is not a timestamp.
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        raise TokenError("malformed payload")
+    if exp <= (now if now is not None else time.time()):
         raise TokenError("token expired")
     return payload

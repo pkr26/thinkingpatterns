@@ -276,11 +276,154 @@ describe("SessionProvider", () => {
     // Every default is callable and does nothing.
     session.markLoggedIn();
     session.setUnlockDays(3);
+    session.touchActivity();
     await act(async () => {
       await session.refreshActiveDays();
       await session.signOut();
     });
     expect(textOf(root)).toBe("loading|false|0|30");
+  });
+
+  // The inactivity countdown must be a REAL reset: interaction restarts the
+  // full 5-minute window rather than merely delaying the original deadline.
+  // (flush() needs real timers, and earlier tests in this file leave mounted
+  // providers subscribed to the vault — so the unlock happens while real
+  // timers are still active; fake timers go on right after, and the fake
+  // countdown is then armed by touchActivity / the AppState listener.)
+  it("locks after 5 idle minutes, and touchActivity restarts the countdown", async () => {
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    await act(async () => {
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    });
+    vi.useFakeTimers();
+    try {
+      expect(vault.isUnlocked()).toBe(true);
+
+      // Activity arms the (fake) countdown; 4:59 idle — still unlocked.
+      act(() => {
+        session.touchActivity();
+      });
+      act(() => {
+        vi.advanceTimersByTime(4 * 60_000 + 59_000);
+      });
+      expect(vault.isUnlocked()).toBe(true);
+
+      // Interaction one second before the deadline restarts the countdown,
+      // so the original deadline passes without a lock.
+      act(() => {
+        session.touchActivity();
+      });
+      act(() => {
+        vi.advanceTimersByTime(4 * 60_000 + 59_000);
+      });
+      expect(vault.isUnlocked()).toBe(true);
+
+      // One more idle second crosses the NEW deadline: locked, and the
+      // published session state follows the vault.
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(vault.isUnlocked()).toBe(false);
+      expect(textOf(root)).toBe("loggedOut|false|0|30");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("arms no countdown while the vault is locked", async () => {
+    await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    vi.useFakeTimers();
+    try {
+      expect(vault.isUnlocked()).toBe(false);
+      act(() => {
+        session.touchActivity(); // locked vault: no timer is armed
+      });
+      act(() => {
+        vi.advanceTimersByTime(10 * 60_000);
+      });
+      expect(vault.isUnlocked()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returning to the foreground restarts the inactivity countdown", async () => {
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    await act(async () => {
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    });
+    vi.useFakeTimers();
+    try {
+      // Foreground return = activity: it arms the countdown.
+      act(() => {
+        listener("active");
+      });
+      act(() => {
+        vi.advanceTimersByTime(4 * 60_000 + 59_000);
+      });
+      expect(vault.isUnlocked()).toBe(true);
+
+      // Another foreground return restarts it.
+      act(() => {
+        listener("active");
+      });
+      act(() => {
+        vi.advanceTimersByTime(4 * 60_000 + 59_000);
+      });
+      expect(vault.isUnlocked()).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(vault.isUnlocked()).toBe(false);
+      expect(textOf(root)).toBe("loggedOut|false|0|30");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("unmounting the provider disarms the inactivity countdown", async () => {
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    await act(async () => {
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    });
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        session.touchActivity(); // arm the countdown
+      });
+      act(() => {
+        root.unmount(); // provider cleanup must clear the pending timer
+      });
+      act(() => {
+        vi.advanceTimersByTime(10 * 60_000);
+      });
+      // No ghost timer fires after unmount: the vault is still unlocked.
+      expect(vault.isUnlocked()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

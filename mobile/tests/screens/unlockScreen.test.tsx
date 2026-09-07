@@ -295,6 +295,43 @@ describe("UnlockScreen", () => {
     expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Wrong password.");
   });
 
+  it("offline path with no saved account id: honest error, locked vault", async () => {
+    vi.mocked(api.saltFor).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.getCachedSalt).mockResolvedValue(SALT_B64);
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "pw");
+    await pressLabel(root, "Unlock");
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Unlock failed",
+      "no saved account on this device — please sign in",
+    );
+  });
+
+  it("a successful online unlock tolerates a missing stored user id", async () => {
+    // The vault's account binding is best-effort metadata: a null id must
+    // not block an unlock the server already verified.
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("a non-Error failure in the outer flow reports 'unknown error'", async () => {
+    vi.mocked(api.getUsername).mockRejectedValue("boom" as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "pw");
+    await pressLabel(root, "Unlock");
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "unknown error");
+  });
+
   it("ignores a second unlock press while one is in flight", async () => {
     let resolveLogin!: (v: unknown) => void;
     vi.mocked(api.login).mockImplementation(() => new Promise((resolve) => (resolveLogin = resolve)));

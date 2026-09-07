@@ -202,6 +202,20 @@ describe("login", () => {
     expect(markLoggedIn).toHaveBeenCalledTimes(1);
   });
 
+  it("tolerates an empty user_id in the login response (vault binding is best-effort)", async () => {
+    // A server that verifies the password but returns a blank id must not
+    // block the unlock — the vault simply records no account binding.
+    vi.mocked(api.login).mockResolvedValue({ token: "tok", user_id: "" } as never);
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Sign in");
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    expect(markLoggedIn).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
   it("unlocks via the keyboard submit action too", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");

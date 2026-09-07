@@ -188,8 +188,8 @@ describe("MindPatternCrypto payload helpers", () => {
 
   it("round-trips insight and question payloads with their AAD contracts", () => {
     const k = keys();
-    const insightsBlob = encrypt(k.dataKey, Buffer.from(JSON.stringify({ stats: { patterns: [] } })), buildAad("insights", "user-9", "patterns"));
-    expect(decryptInsights(k, "user-9", insightsBlob.toString("base64"))).toEqual({ stats: { patterns: [] } });
+    const insightsBlob = encrypt(k.dataKey, Buffer.from(JSON.stringify({ v: 2, stats: { patterns: [] } })), buildAad("insights", "user-9", "patterns"));
+    expect(decryptInsights(k, "user-9", insightsBlob.toString("base64"))).toEqual({ v: 2, stats: { patterns: [] } });
     expect(() => decryptInsights(k, "user-OTHER", insightsBlob.toString("base64"))).toThrow(TamperError);
 
     const qBlob = encrypt(k.dataKey, Buffer.from(JSON.stringify({ for_date: "2026-09-03", question: "What changed?" })), buildAad("question", "user-9", "2026-09-03"));
@@ -199,5 +199,24 @@ describe("MindPatternCrypto payload helpers", () => {
     });
     // AAD uses the server-reported date, not the local clock.
     expect(() => decryptQuestion(k, "user-9", "2026-09-02", qBlob.toString("base64"))).toThrow(TamperError);
+  });
+
+  it("rejects insights payloads whose version this client does not understand", () => {
+    const k = keys();
+    const blobOf = (payload: unknown) =>
+      encrypt(k.dataKey, Buffer.from(JSON.stringify(payload)), buildAad("insights", "user-9", "patterns")).toString("base64");
+    // A future schema roll must fail LOUDLY, not be misread as v2.
+    expect(() => decryptInsights(k, "user-9", blobOf({ v: 3, stats: { patterns: [] } }))).toThrow(
+      /unsupported insights payload version: 3/,
+    );
+    // A pre-versioning (or hostile) payload without v is unknown too.
+    expect(() => decryptInsights(k, "user-9", blobOf({ stats: { patterns: [] } }))).toThrow(
+      /unsupported insights payload version: undefined/,
+    );
+    // The accepted version round-trips.
+    expect(decryptInsights(k, "user-9", blobOf({ v: 2, stats: { patterns: [] } }))).toEqual({
+      v: 2,
+      stats: { patterns: [] },
+    });
   });
 });

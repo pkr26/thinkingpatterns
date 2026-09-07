@@ -8,6 +8,7 @@ shared counter before scaling out).
 
 from __future__ import annotations
 
+import heapq
 import ipaddress
 import threading
 import time
@@ -21,6 +22,12 @@ from fastapi import HTTPException, Request
 # which beats unbounded growth.
 MAX_TRACKED_KEYS = 10_000
 
+# Eviction runs when the cap is crossed and clears down to the cap minus
+# this batch: the O(n) stale-scan under the lock is paid once per batch of
+# over-cap hits instead of on every single hit (the counter is touched on
+# the event loop's request path, so per-hit full scans add latency).
+EVICTION_BATCH = MAX_TRACKED_KEYS // 10
+
 
 @dataclass(frozen=True)
 class HitResult:
@@ -31,9 +38,12 @@ class HitResult:
 class FixedWindowCounter:
     """Per-key fixed windows keyed on wall-clock time.
 
-    Each key carries its own window length, so buckets with different
-    window sizes coexist correctly; a slot's count is valid only while
-    ``now - window_start < window_seconds``.
+    The window length is supplied by the CALLER on every hit()/check(); the
+    window_seconds stored per key is bookkeeping the eviction path uses to
+    judge staleness, and hit() rewrites it on every call. A slot's count is
+    therefore judged against the window passed with the current call — in
+    practice each bucket prefix uses one window from settings, so callers
+    never observe a mismatch.
     """
 
     def __init__(self) -> None:
@@ -74,20 +84,26 @@ class FixedWindowCounter:
             return HitResult(count=count, retry_after=retry_after)
 
     def _evict_oldest_locked(self, now: float) -> None:
-        # Drop stale windows first; if still over the cap, evict among active
-        # keys by smallest count then oldest start. An attacker rotating
-        # identities mints thousands of single-hit buckets; a real user's
-        # multi-hit bucket must be the LAST active key evicted (evicting by
-        # window start alone let 10k fresh garbage keys reset a victim's
-        # count mid-window). Deterministic; O(n) only when the cap is crossed.
-        # Uses the same clock the hit was recorded under — a synthetic now
-        # from hit(now=...) must not be judged against wall-clock time.
+        # Drop stale windows first; if still near the cap, evict among active
+        # keys by smallest count then oldest start, in one batch down to
+        # MAX_TRACKED_KEYS - EVICTION_BATCH so the next batch of over-cap
+        # hits does not each pay a full scan. An attacker rotating identities
+        # mints thousands of single-hit buckets; a real user's multi-hit
+        # bucket must be the LAST active key evicted (evicting by window
+        # start alone let 10k fresh garbage keys reset a victim's count
+        # mid-window). Uses the same clock the hit was recorded under — a
+        # synthetic now from hit(now=...) must not be judged against
+        # wall-clock time.
         stale = [k for k, (_, s, w) in self._hits.items() if now - s >= w]
         for k in stale:
             del self._hits[k]
-        while len(self._hits) > MAX_TRACKED_KEYS:
-            victim = min(self._hits, key=lambda k: (self._hits[k][0], self._hits[k][1]))
-            del self._hits[victim]
+        overflow = len(self._hits) - (MAX_TRACKED_KEYS - EVICTION_BATCH)
+        if overflow > 0:
+            victims = heapq.nsmallest(
+                overflow, self._hits, key=lambda k: (self._hits[k][0], self._hits[k][1])
+            )
+            for k in victims:
+                del self._hits[k]
 
 
 def _aggregate_host(host: str) -> str:

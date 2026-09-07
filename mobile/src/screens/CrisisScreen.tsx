@@ -9,7 +9,23 @@
  * or alerts anyone — it just puts real humans one tap away.
  */
 import React from "react";
-import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+
+/** Texting a crisis line uses a different query separator per platform:
+ *  Android's "?body=" is silently dropped by iOS (which wants "&body="),
+ *  and "HOME" pre-filled is the whole point of the shortcut. */
+function crisisTextUrl(): string {
+  return `sms:741741${Platform.select({ ios: "&body=HOME", default: "?body=HOME" })}`;
+}
+
+/** Every external open can reject (no dialer, no browser, a simulator) —
+ *  and a dead tap on THIS screen is the worst possible failure. Fall back
+ *  to telling the user the number/address itself. */
+function openExternal(url: string, fallback: string): void {
+  Linking.openURL(url).catch(() => {
+    Alert.alert("Couldn't open it from here", fallback);
+  });
+}
 
 function ActionButton({ label, detail, onPress }: { label: string; detail: string; onPress: () => void }) {
   return (
@@ -35,23 +51,23 @@ export function CrisisScreen(): React.JSX.Element {
       <ActionButton
         label="Call or text 988"
         detail="988 Suicide & Crisis Lifeline — call 988 or text it, any time"
-        onPress={() => Linking.openURL("tel:988")}
+        onPress={() => openExternal("tel:988", "You can still dial or text 988 from your phone — it is free and answers 24/7.")}
       />
       <ActionButton
         label="Text HOME to 741741"
         detail="Crisis Text Line — text conversation with a trained counselor"
-        onPress={() => Linking.openURL("sms:741741?body=HOME")}
+        onPress={() => openExternal(crisisTextUrl(), "You can still text HOME to 741741 from your messages app.")}
       />
       <ActionButton
         label="Call 911"
         detail="If you are in immediate danger or have already hurt yourself"
-        onPress={() => Linking.openURL("tel:911")}
+        onPress={() => openExternal("tel:911", "You can still dial 911 from your phone.")}
       />
 
       <Text style={styles.body}>Outside the US? Find your local line at findahelpline.com.</Text>
       <TouchableOpacity
         style={styles.link}
-        onPress={() => Linking.openURL("https://findahelpline.com")}
+        onPress={() => openExternal("https://findahelpline.com", "You can still visit findahelpline.com in a browser.")}
       >
         <Text style={styles.linkText}>Open findahelpline.com</Text>
       </TouchableOpacity>

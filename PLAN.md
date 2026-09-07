@@ -12,7 +12,7 @@ reflective question per day. No advice, no diagnosis.
 ┌───────────────────────────────┐         ┌──────────────────────────────────────┐
 │  React Native app (iOS/Andr.) │  TLS    │  FastAPI backend                     │
 │                               │ ──────► │                                      │
-│  Entry screen (text|voice→stt)│         │  /api/auth      register, login,     │
+│  Entry screen (text; voice→stt  │         │  /api/auth      register, login,     │
 │  crypto service (PBKDF2+      │         │                 salt lookup          │
 │    HKDF + AES-256-GCM)        │         │  /api/entries   blob CRUD (opaque)   │
 │  local cache (offline-first)  │         │  /api/processing/sessions            │
@@ -28,6 +28,9 @@ reflective question per day. No advice, no diagnosis.
                                           │  zeroize (plaintext is ephemeral)    │
                                           └──────────────────────────────────────┘
 ```
+
+`voice→stt` is a future increment — no audio capture code exists yet; v1
+takes voice input through the OS keyboard's dictation (see mobile/README.md).
 
 ## 2. Security model (what v1 actually implements — post-remediation)
 
@@ -130,7 +133,7 @@ docker-compose.yml  postgres + api for local dev (no redis: the counter is in-pr
 
 1. **Unit**: crypto (roundtrip, tamper, AAD binding, zeroization), KDF (determinism, separation, pinned vectors at real 600k iterations), tokens, threshold boundaries, pattern engine (corpus fixtures, determinism, no-false-positive), question engine.
 2. **Integration/API**: full client-emulated flows over httpx ASGI transport with in-memory SQLite — auth, entry isolation between users, ciphertext-only storage assertions, 30-day gate (locked at 29, unlocked at 30), export/delete cascade, rate limiting.
-3. **Mutation testing (deep)**: `mutmut` over `app/security/` and `app/services/` — every surviving mutant is triaged; security-module survivors are killed with additional tests; second run to confirm the improved kill rate. Report in `reports/mutation_report.md`.
+3. **Mutation testing (deep)**: `mutmut` over the whole backend app (`app/security/`, `app/services/`, `app/api/`, plus middleware, cache, config, deps, db, main, schemas — only declarative `models.py` is excluded) — every surviving mutant is triaged; security-module survivors are killed with additional tests; second run to confirm the improved kill rate. Report in `reports/mutation_report.md`.
 
 ## 8. v1 trade-offs (explicit)
 

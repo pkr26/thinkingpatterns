@@ -19,7 +19,9 @@
  *   1. Every queued entry records the userId it was encrypted for; a flush
  *      under a different account skips those items.
  *   2. clearQueue() bumps a generation counter; any in-flight flush detects
- *      the bump and abandons its final write-back.
+ *      the bump and abandons its final write-back, and an enqueue whose read
+ *      straddled the wipe abandons its commit instead of resurrecting an
+ *      item inside the just-wiped queue.
  *   3. The queue is capacity-bounded with a LOUD failure (QueueFullError).
  *   4. A server 422 does NOT silently destroy the entry: the ciphertext is
  *      moved to a rejected-store for recovery — a hostile server must not
@@ -109,18 +111,22 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
   return serialized(async () => {
     const generation = queueGeneration;
     const queue = await readQueue();
-    let next = queue;
-    if (queueGeneration !== generation) {
-      // clearQueue ran between our read and now (it stays outside the
-      // mutex on purpose): our snapshot is stale — re-read so a wiped
-      // queue is never resurrected by our write-back.
-      next = await readQueue();
-    }
-    if (next.length >= MAX_QUEUE_LENGTH) {
+    // clearQueue stays outside the mutex on purpose (see its comment), so a
+    // wipe can land inside our read-to-write window. If the generation
+    // moved, the wipe BEGAN before our commit and this entry must not
+    // survive it: re-reading the wiped queue and writing anyway would
+    // resurrect an item in a queue the user just wiped (sign-out / account
+    // deletion). Abandon the commit — the entry text is still on the Entry
+    // screen, and the account context it belonged to is gone.
+    if (queueGeneration !== generation) return;
+    if (queue.length >= MAX_QUEUE_LENGTH) {
       throw new QueueFullError();
     }
-    next.push(item);
-    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(next));
+    queue.push(item);
+    // There is deliberately no await between the generation check above and
+    // this write: a wipe can only begin at an await point, so any clearQueue
+    // starting from here on runs AFTER the write and removes the item itself.
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
   });
 }
 

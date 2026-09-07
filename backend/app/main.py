@@ -48,10 +48,17 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # limiter keeps it from occupying every worker thread that auth scrypt
     # and ordinary requests also need.
     app.state.analyze_limiter = anyio.CapacityLimiter(4)
+    # Auth scrypt (N=2^16, ~64 MiB per hash) likewise gets its own small
+    # limiter: a login flood must not be able to queue unbounded 64-MiB
+    # allocations on the shared anyio thread pool.
+    app.state.auth_limiter = anyio.CapacityLimiter(4)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,  # "*" default (mobile clients); set MINDPATTERN_CORS_ORIGINS for web
+        # Empty by default — the mobile app is a native client and needs no
+        # CORS; browser frontends set an explicit MINDPATTERN_CORS_ORIGINS
+        # allowlist. Credentials stay off.
+        allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Processing-Token"],
     )

@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.cache import FixedWindowCounter, MAX_TRACKED_KEYS, client_key
+from app.cache import EVICTION_BATCH, FixedWindowCounter, MAX_TRACKED_KEYS, client_key
 from app.config import _bool_env
 from app.security import crypto
 from app.security.tokens import TokenError, _b64url_encode, verify_token
@@ -231,8 +231,11 @@ def test_counter_evicts_oldest_when_nothing_is_stale():
         counter.hit(f"k{i}", window_seconds=10_000, now=1_000.0)
     result = counter.hit("newcomer", window_seconds=10_000, now=1_001.0)
     assert result.count == 1
-    assert len(counter._hits) == MAX_TRACKED_KEYS
-    assert "k0" not in counter._hits  # oldest window start evicted
+    # Nothing is stale, so eviction clears a whole BATCH of active keys by
+    # (count, window_start) down to MAX - EVICTION_BATCH. Every pre-existing
+    # key ties on both, so WHICH ones go is unspecified — but the newcomer's
+    # later window start ranks it after all of them, so it always survives.
+    assert len(counter._hits) == MAX_TRACKED_KEYS - EVICTION_BATCH
     assert "newcomer" in counter._hits
 
 

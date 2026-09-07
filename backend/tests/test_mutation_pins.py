@@ -86,7 +86,17 @@ def clean_env(monkeypatch):
 
 def test_settings_defaults_are_pinned(clean_env):
     """Every default is a documented contract: rate budgets, TTLs, caps."""
-    defaults = asdict(Settings())
+    # Fail closed: a bare Settings() is production + the dev secret and
+    # refuses to boot — that RuntimeError pins the environment default.
+    with pytest.raises(RuntimeError) as excinfo:
+        Settings()
+    assert str(excinfo.value) == (
+        "MINDPATTERN_TOKEN_SECRET is unset/insecure: refuse to start. "
+        "Set a strong random value (e.g. openssl rand -hex 32). "
+        "(The built-in dev secret is only allowed with "
+        "MINDPATTERN_ENV=development exactly.)"
+    )
+    defaults = asdict(Settings(environment="development"))
     assert defaults == {
         "environment": "development",
         "database_url": "sqlite+aiosqlite:///./mindpattern.db",
@@ -109,14 +119,19 @@ def test_settings_defaults_are_pinned(clean_env):
         "llm_url": "",
         "llm_api_key": "",
         "llm_model": "gpt-4o-mini",
-        "cors_origins": ["*"],
+        "cors_origins": [],
         "trust_proxy_headers": False,
     }
 
 
-def test_from_env_defaults_are_pinned(clean_env):
+def test_from_env_defaults_are_pinned(clean_env, monkeypatch):
     """The inline fallbacks in from_env() equal the dataclass defaults."""
-    assert asdict(Settings.from_env()) == asdict(Settings())
+    # Bare from_env() fails closed: environment defaults to production, which
+    # rejects the dev secret/SQLite defaults — development must be opted in.
+    with pytest.raises(RuntimeError, match=r"MINDPATTERN_TOKEN_SECRET is unset/insecure"):
+        Settings.from_env()
+    monkeypatch.setenv("MINDPATTERN_ENV", "development")
+    assert asdict(Settings.from_env()) == asdict(Settings(environment="development"))
 
 
 def test_insecure_default_secret_value_is_pinned():
@@ -124,6 +139,7 @@ def test_insecure_default_secret_value_is_pinned():
 
 
 def test_from_env_wires_every_variable(clean_env, monkeypatch):
+    monkeypatch.setenv("MINDPATTERN_ENV", "development")
     monkeypatch.setenv("MINDPATTERN_DB_URL", "sqlite+aiosqlite://")
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "x" * 45)
     monkeypatch.setenv("MINDPATTERN_TOKEN_TTL", "1234")
@@ -148,6 +164,7 @@ def test_from_env_wires_every_variable(clean_env, monkeypatch):
     monkeypatch.setenv("MINDPATTERN_CORS_ORIGINS", "https://a.example, https://b.example")
 
     settings = Settings.from_env()
+    assert settings.environment == "development"
     assert settings.database_url == "sqlite+aiosqlite://"
     assert settings.token_secret == "x" * 45
     assert settings.token_ttl_seconds == 1234
@@ -192,7 +209,7 @@ def test_bool_env_accepts_every_spelling(monkeypatch):
 
 def test_cors_origins_parsing(clean_env, monkeypatch):
     monkeypatch.delenv("MINDPATTERN_CORS_ORIGINS", raising=False)
-    assert _cors_origins() == ["*"]  # literal * keeps mobile clients working
+    assert _cors_origins() == []  # empty default = NO cross-origin access
     monkeypatch.setenv("MINDPATTERN_CORS_ORIGINS", " https://a.example , https://b.example , , ")
     assert _cors_origins() == ["https://a.example", "https://b.example"]
 
@@ -337,6 +354,7 @@ def test_crypto_and_auth_constants_are_pinned():
         (b"x-frame-options", b"DENY"),
         (b"referrer-policy", b"no-referrer"),
         (b"cache-control", b"no-store"),
+        (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
     )
 
 
@@ -369,14 +387,19 @@ def test_counter_window_boundary_semantics():
 
 def test_counter_evicts_at_the_exact_cap_and_by_window_start():
     counter = FixedWindowCounter()
-    # Fill exactly MAX keys with DIFFERENT window sizes: the oldest window
-    # START is evicted, not the smallest window size.
+    # Fill exactly MAX keys with DIFFERENT window sizes: eviction ranks
+    # active victims by (count, window_start), not by window size.
     for i in range(MAX_TRACKED_KEYS):
         counter.hit(f"k{i}", window_seconds=10_000 + i, now=1_000.0 + i)
     assert len(counter._hits) == MAX_TRACKED_KEYS
     counter.hit("newcomer", window_seconds=1, now=2_000.0)
-    assert len(counter._hits) == MAX_TRACKED_KEYS
-    assert "k0" not in counter._hits  # oldest start
+    # Eviction is batched: one pass clears down to MAX - EVICTION_BATCH so
+    # the next over-cap hits do not each pay a full scan.
+    assert len(counter._hits) == MAX_TRACKED_KEYS - cache_module.EVICTION_BATCH
+    # Every key ties on count=1, so the oldest window STARTS go first; k0's
+    # start is strictly the oldest so its eviction is certain, while the
+    # exact identity of the remaining tied victims is unspecified.
+    assert "k0" not in counter._hits
     assert "newcomer" in counter._hits
 
 
@@ -488,7 +511,7 @@ async def test_cors_middleware_contract(settings):
     cors = next(m for m in application.user_middleware if m.cls.__name__ == "CORSMiddleware")
     assert cors.kwargs["allow_methods"] == ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     assert cors.kwargs["allow_headers"] == ["Authorization", "Content-Type", "X-Processing-Token"]
-    assert cors.kwargs["allow_origins"] == ["*"]
+    assert cors.kwargs["allow_origins"] == []
 
 
 async def test_validation_errors_expose_only_loc_and_msg(app, client):
@@ -868,14 +891,18 @@ async def test_register_stores_a_16_byte_server_scrypt_salt(client, app):
 
 
 async def test_decoy_salt_is_deterministic_and_domain_separated(settings):
-    from app.api.auth import decoy_salt
+    from app.api.auth import DECOY_SALT_INFO, decoy_salt
+    from app.security.kdf import hkdf_sha256
 
     secret = settings.token_secret
     assert decoy_salt("alice", secret) == decoy_salt("alice", secret)  # stable
     assert decoy_salt("alice", secret) != decoy_salt("bob", secret)  # per-name
     assert decoy_salt("alice", secret) != decoy_salt("alice", "other-secret")
-    # Domain separation: base64(HMAC(secret, b"decoy:<name>")[:16]) exactly.
-    digest = hmac.new(secret.encode("utf-8"), b"decoy:alice", hashlib.sha256).digest()
+    # Domain separation: the decoy HMAC runs under an HKDF subkey derived
+    # from the token secret — base64(HMAC(HKDF(secret, None, info),
+    # b"decoy:<name>")[:16]) exactly, never HMAC(raw_secret, ...).
+    decoy_key = hkdf_sha256(secret.encode("utf-8"), None, DECOY_SALT_INFO)
+    digest = hmac.new(decoy_key, b"decoy:alice", hashlib.sha256).digest()
     assert decoy_salt("alice", secret) == base64.b64encode(digest[:16]).decode("ascii")
 
 
@@ -1163,7 +1190,7 @@ def test_llm_analyzer_defaults_and_url_normalization():
 
 
 def test_get_analyzer_requires_explicit_consent_argument():
-    settings = Settings()
+    settings = Settings(environment="development")
     settings.llm_url = "https://llm.example.com/v1"
     # Default parameter: no consent argument -> rule-based, never the LLM.
     assert isinstance(get_analyzer(settings), RuleBasedAnalyzer)
@@ -1577,16 +1604,22 @@ def test_insights_response_default_blob_is_none():
 
 async def test_keyed_limit_buckets_use_the_username_namespaced_keys(client, app):
     emu = ClientEmulator("keyednames", "pw-keyed-names")
-    await client.post(
+    response = await client.post(
         "/api/auth/register",
         json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
     )
+    assert response.status_code == 201
+    counter: FixedWindowCounter = app.state.rate_counter
+    # A SUCCESSFUL register does NOT consume the per-username bucket — only
+    # 409 conflicts count, so probing a free name cannot 429 its legitimate
+    # first registrant.
+    keys = set(counter._hits)
+    assert not any(k.startswith(f"register-name:{emu.username}") for k in keys), keys
+
     # A SUCCESSFUL login no longer consumes the per-username bucket (only
     # failed verifications count — garbage probes must not lock a victim out).
     await client.post("/api/auth/login", json={"username": emu.username, "verifier": emu.auth_key_b64})
-    counter: FixedWindowCounter = app.state.rate_counter
     keys = set(counter._hits)
-    assert any(k.startswith(f"register-name:{emu.username}") for k in keys), keys
     assert not any(k.startswith(f"login-name:{emu.username}") for k in keys), keys
 
     # A FAILED verification does consume it.
@@ -1594,6 +1627,15 @@ async def test_keyed_limit_buckets_use_the_username_namespaced_keys(client, app)
     await client.post("/api/auth/login", json={"username": emu.username, "verifier": wrong})
     keys = set(counter._hits)
     assert any(k.startswith(f"login-name:{emu.username}") for k in keys), keys
+
+    # And a 409 register conflict does consume the register-name bucket.
+    response = await client.post(
+        "/api/auth/register",
+        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+    )
+    assert response.status_code == 409
+    keys = set(counter._hits)
+    assert any(k.startswith(f"register-name:{emu.username}") for k in keys), keys
 
 
 def test_retry_after_header_floors_at_exactly_one_second():

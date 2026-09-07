@@ -22,12 +22,17 @@ const { api } = await import("../../src/api/client");
 const { InsightsScreen } = await import("../../src/screens/InsightsScreen");
 const { vault } = await import("../../src/vault");
 const { buildAad, encrypt } = await import("../../src/crypto/envelope");
+const { INSIGHTS_PAYLOAD_VERSION } = await import("../../src/crypto/MindPatternCrypto");
 const { render, flush, textOf, allText, act } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 
 const dataKey = Buffer.alloc(32, 9);
 const insightsBlob = (payload: unknown): string =>
-  encrypt(dataKey, Buffer.from(JSON.stringify(payload)), buildAad("insights", "user-1", "patterns")).toString("base64");
+  encrypt(
+    dataKey,
+    Buffer.from(JSON.stringify({ v: INSIGHTS_PAYLOAD_VERSION, ...(payload as Record<string, unknown>) })),
+    buildAad("insights", "user-1", "patterns"),
+  ).toString("base64");
 
 const pattern = (over: Record<string, unknown>) => ({
   kind: "temporal",
@@ -372,7 +377,7 @@ describe("InsightsScreen phases", () => {
     // Blob is bound to "" as userId then — build it that way.
     const blobForEmptyUser = encrypt(
       dataKey,
-      Buffer.from(JSON.stringify({ stats: { patterns: [pattern({ label: "work" })] } })),
+      Buffer.from(JSON.stringify({ v: INSIGHTS_PAYLOAD_VERSION, stats: { patterns: [pattern({ label: "work" })] } })),
       buildAad("insights", "", "patterns"),
     ).toString("base64");
     vi.mocked(api.insights).mockResolvedValue({
@@ -547,9 +552,216 @@ describe("InsightsScreen evidence view", () => {
     expect(text).toContain("THEME");
     expect(text).toContain("'guitar' has been taking up more space in your writing lately (19% of entries).");
   });
+
+  it("baseline: shows the writing streak and the on-device mood sparkline", async () => {
+    // The baseline-phase value is DEVICE-LOCAL: the streak and trend come
+    // from the encrypted mood log, not the server.
+    const { recordMood, localDateISO } = await import("../../src/moodLog");
+    const dayAt = (back: number) => localDateISO(new Date(Date.now() - back * 86_400_000));
+    await recordMood(dataKey, "user-1", dayAt(2), 0.4);
+    await recordMood(dataKey, "user-1", dayAt(1), -0.6);
+    await recordMood(dataKey, "user-1", dayAt(0), 0.2);
+
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "baseline",
+      active_days: 12,
+      days_remaining: 18,
+    } as never);
+    const { expectStyle } = await import("../helpers/rtr");
+    const root = await render(<InsightsScreen />);
+    await flush();
+
+    const text = textOf(root);
+    expect(text).toContain("Keep writing — 18 days to your patterns");
+    expect(text).toContain("Writing streak: 3 days");
+    expect(text).toContain("Your mood, this month (stays on this device):");
+    // The sparkline renders both an up bar (positive day) and a down bar.
+    expectStyle(root, { backgroundColor: "#59c98a", borderRadius: 1 });
+    expectStyle(root, { backgroundColor: "#e06c75", borderRadius: 1 });
+  });
+
+  it("the evidence panel renders every supported stat row for a pattern", async () => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 60,
+      days_remaining: 0,
+      blob: insightsBlob({
+        stats: {
+          patterns: [
+            pattern({
+              kind: "mood_correlation",
+              label: "deadline",
+              occurrences: 8,
+              detail: {
+                first_seen: "2026-07-01",
+                last_seen: "2026-09-01",
+                sample_days: 60,
+                mood_delta: -0.4,
+                direction: "lower",
+                cohens_d: 0.8,
+                lag_days: 1,
+                n_after: 5,
+                n_other: 40,
+                carryover_recent: 0.5,
+                carryover_earlier: 0.2,
+                spread_recent: 0.9,
+                spread_earlier: 0.4,
+                share: 0.2,
+                entries: 12,
+                share_earlier: 0.1,
+                share_recent: 0.3,
+                trend: "rising",
+                p_value: 0.001,
+                span_days: 45,
+                distinct_days: 12,
+                negativity: 0.7,
+                absolutist_per_100: 3.2,
+                shift: -0.2,
+                baseline: 0.1,
+                pattern_state: "confirmed",
+              },
+            }),
+          ],
+        },
+      }),
+    } as never);
+    const { pressLabel } = await import("../helpers/rtr");
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).toContain(
+      "Your entries read lower on days when 'deadline' comes up (mood shift of 0.4).",
+    );
+
+    await pressLabel(root, "Why am I seeing this?");
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("Mood difference");
+    expect(text).toContain("lower by 0.40 vs your own norm");
+    expect(text).toContain("Effect size");
+    expect(text).toContain("Cohen's d = 0.80");
+    expect(text).toContain("Day-to-day carryover");
+    expect(text).toContain("recent 0.50 vs earlier 0.20");
+    expect(text).toContain("Mood spread");
+    expect(text).toContain("recent 0.90 vs earlier 0.40");
+    expect(text).toContain("Tone");
+    expect(text).toContain("reads negative (0.70); absolutist words 3.2/100");
+    expect(text).toContain("Recurring over");
+    expect(text).toContain("45 days (12 distinct days)");
+    expect(text).toContain("Significance");
+    expect(text).toContain("p = 1.0e-3 (FDR-corrected)");
+    expect(text).toContain("Lag");
+    expect(text).toContain("~1 day later (5 such days vs 40 others)");
+    expect(text).toContain("Share of entries");
+    expect(text).toContain("20% (12 entries, 8 mentions)");
+    expect(text).toContain("Earlier → recent");
+    expect(text).toContain("10% → 30%");
+    expect(text).toContain("Shift");
+    expect(text).toContain("−0.20 vs baseline 0.10");
+    // The lifecycle badge reads as an established finding.
+    expect(text).toContain("established");
+
+    // The toggle collapses the panel again.
+    await pressLabel(root, "Hide the evidence");
+    await flush();
+    expect(textOf(root)).not.toContain("Evidence window");
+  });
+
+  it("renders direction fallbacks, missing-field defaults and bare cards", async () => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 60,
+      days_remaining: 0,
+      blob: insightsBlob({
+        stats: {
+          patterns: [
+            pattern({ kind: "mood_shift", label: "overall mood", occurrences: 30, detail: { direction: "higher", shift: 0.3, baseline: 0.2 } }),
+            pattern({ kind: "mood_shift", label: "baseline drift", occurrences: 12, detail: { direction: "lower" } }),
+            pattern({ kind: "link", label: "caffeine", occurrences: 6, detail: { direction: "higher", lag_days: 1 } }),
+            // A bare card: no occurrences, no confidence, no detail — every
+            // sanitizer and evidence-row fallback engages.
+            { kind: "inertia", label: "day-to-day mood" },
+            pattern({ kind: "temporal", label: "work", occurrences: 9, detail: { day: "Sunday", day_fraction: 0.5 } }),
+            pattern({ kind: "mood_correlation", label: "rain", occurrences: 4, detail: { mood_delta: 0.3, direction: "higher", share: 0.2, span_days: 30 } }),
+          ],
+        },
+      }),
+    } as never);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("MOOD TREND");
+    expect(text).toContain("Your entries have read higher than your usual baseline lately (a shift of 0.3).");
+    expect(text).toContain("Your entries have read lower than your usual baseline lately (a shift of 0.0).");
+    expect(text).toContain("The day after 'caffeine' comes up, your entries read higher than usual for you.");
+    expect(text).toContain("0 mentions · strength 0%");
+
+    const { TouchableOpacity } = await import("react-native");
+    const expand = async (i: number) => {
+      const toggle = root.root.findAllByType(TouchableOpacity)[i];
+      await act(async () => {
+        (toggle.props as { onPress: () => void }).onPress();
+      });
+      await flush();
+    };
+    expect(root.root.findAllByType(TouchableOpacity)).toHaveLength(6); // one "Why am I seeing this?" per card
+
+    // The mood_shift card trending up renders the "+" direction.
+    await expand(0);
+    expect(textOf(root)).toContain("+0.30 vs baseline 0.20");
+
+    // The link card without sample counts shows "?" placeholders.
+    await expand(2);
+    expect(textOf(root)).toContain("~1 day later (? such days vs ? others)");
+
+    // Expanding the bare card shows the "?" fallbacks for missing fields.
+    await expand(3);
+    expect(textOf(root)).toContain("Evidence window");
+    expect(textOf(root)).toContain("? → ?");
+
+    // The temporal card without a base_rate reports a 0% baseline.
+    await expand(4);
+    expect(textOf(root)).toContain("50% on Sundays (your baseline: 0%)");
+
+    // The rain card: mood difference in the "higher" direction, and the
+    // share/span rows without their optional counts.
+    await expand(5);
+    const rainText = textOf(root);
+    expect(rainText).toContain("higher by 0.30 vs your own norm");
+    expect(rainText).toContain("20% (? entries, 4 mentions)");
+    expect(rainText).toContain("30 days (? distinct days)");
+  });
+
+  it("baseline singular: one remaining day and a one-day streak read naturally", async () => {
+    const { recordMood, clearMoodLog, localDateISO } = await import("../../src/moodLog");
+    await clearMoodLog("user-1"); // earlier tests in this file seeded the log
+    await recordMood(dataKey, "user-1", localDateISO(), 0.4);
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "baseline",
+      active_days: 29,
+      days_remaining: 1,
+    } as never);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("Keep writing — 1 day to your patterns");
+    expect(text).toContain("Writing streak: 1 day");
+    // One mood day is not a trend: no sparkline yet.
+    expect(text).not.toContain("Your mood, this month");
+  });
 });
 
 describe("M9: server-controlled values are sanitized before render", () => {
+  it("renders a malformed days_remaining as 0 instead of trusting it", async () => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "baseline",
+      active_days: 3,
+      days_remaining: "soon",
+    } as never);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).toContain("Keep writing — 0 days to your patterns");
+  });
+
   it("rejects an unknown phase instead of trusting it", async () => {
     vi.mocked(api.insights).mockImplementation(async () =>
       ({ phase: "super-insight", days_remaining: 0, active_days: 99 }) as never,

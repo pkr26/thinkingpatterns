@@ -120,6 +120,23 @@ describe("stored base URL policy", () => {
     expect(await setBaseUrl("https://same.example.com")).toBeNull();
     expect(await api.isLoggedIn()).toBe(true);
   });
+
+  it("still switches origin when key enumeration is unavailable", async () => {
+    await setBaseUrl("https://old.example.com");
+    await api.setSession("tok-secret", "user-1", "alice");
+    const originalGetAllKeys = storage.getAllKeys.bind(storage);
+    (storage as { getAllKeys: typeof storage.getAllKeys }).getAllKeys = async () => {
+      throw new Error("getAllKeys unsupported on this platform");
+    };
+    try {
+      expect(await setBaseUrl("https://new.example.com")).toBeNull();
+    } finally {
+      (storage as { getAllKeys: typeof storage.getAllKeys }).getAllKeys = originalGetAllKeys;
+    }
+    // The critical part — the session wipe — happened despite the failure.
+    expect(await getBaseUrl()).toBe("https://new.example.com");
+    expect(await api.isLoggedIn()).toBe(false);
+  });
 });
 
 describe("request plumbing", () => {
@@ -514,6 +531,21 @@ describe("sensitive-request redirect hardening", () => {
       message: expect.stringContaining("redirected"),
     });
   });
+
+  it("treats an unparseable final URL as a redirect refusal", async () => {
+    const response = jsonResponse({ ok: true }, 200, "::::not-a-url");
+    vi.mocked(fetch).mockResolvedValue(response as never);
+    await expect(api.meta()).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("redirected"),
+    });
+  });
+
+  it("accepts a response whose url is missing entirely (non-sensitive)", async () => {
+    const response = jsonResponse({ ok: true }, 200, null as unknown as string);
+    vi.mocked(fetch).mockResolvedValue(response as never);
+    await expect(api.meta()).resolves.toEqual({ ok: true });
+  });
 });
 
 describe("listEntries hostile-server cap", () => {
@@ -547,6 +579,18 @@ describe("deleteEntry path validation", () => {
     await api.deleteEntry("e-2026-09-04-abc_def");
     const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${DEFAULT_BASE_URL}/api/entries/e-2026-09-04-abc_def`);
+  });
+
+  it("matches the backend's 1-64 length band exactly", async () => {
+    // Boundary: 64 chars is the backend ceiling (schemas.py CLIENT_ID_PATTERN)
+    // — a locally-built id longer than that could never upload anyway.
+    await api.deleteEntry("x".repeat(64));
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    await expect(api.deleteEntry("x".repeat(65))).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("invalid entry id"),
+    });
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1); // the 65-char id never left the device
   });
 });
 

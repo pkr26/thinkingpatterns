@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date as date_type, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -45,24 +47,38 @@ class _UserLocks:
     each observe quota-N free and all commit, overshooting both the entry
     count and the byte total. The deployment is single-process per instance
     (documented in the README), so an in-process lock is the authority; the
-    registry is bounded and only unlocked entries are recycled.
+    registry is bounded and only idle entries are recycled.
+
+    "Idle" is tracked by a refcount, not by lock.locked(): between a
+    release() and a waiter's re-acquire a lock reports locked() == False,
+    so evicting on locked() alone could drop a lock a waiter is parked on
+    — orphaning that waiter while the next get() mints a second lock for
+    the same key. The refcount is incremented synchronously (no await)
+    before the caller blocks on acquire, closing that window.
     """
 
     def __init__(self, max_keys: int = 10_000) -> None:
-        self._locks: dict[str, asyncio.Lock] = {}
+        # key -> [lock, live holders+waiters]
+        self._locks: dict[str, list] = {}
         self._max_keys = max_keys
 
-    def get(self, key: str) -> asyncio.Lock:
-        lock = self._locks.get(key)
-        if lock is None:
+    @asynccontextmanager
+    async def hold(self, key: str) -> AsyncIterator[asyncio.Lock]:
+        entry = self._locks.get(key)
+        if entry is None:
             if len(self._locks) >= self._max_keys:
                 for stale in [
-                    k for k, v in self._locks.items() if not v.locked()
+                    k for k, v in self._locks.items() if v[1] == 0
                 ][: len(self._locks) - self._max_keys + 1]:
                     del self._locks[stale]
-            lock = asyncio.Lock()
-            self._locks[key] = lock
-        return lock
+            entry = [asyncio.Lock(), 0]
+            self._locks[key] = entry
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                yield entry[0]
+        finally:
+            entry[1] -= 1
 
 
 _user_locks = _UserLocks()
@@ -143,7 +159,7 @@ async def create_entry(
 
     # Serialize quota-check + insert per user: without the lock, N concurrent
     # creates each see the quota as un-consumed and all commit.
-    async with _user_locks.get(f"entries:{user.id}"):
+    async with _user_locks.hold(f"entries:{user.id}"):
         await _assert_within_quota(session, user, len(blob), request.app.state.settings)
 
         existing = await session.execute(
@@ -189,7 +205,9 @@ async def list_entries(
     if since is not None:
         query = query.where(Entry.entry_date >= since)
     query = (
-        query.order_by(Entry.entry_date.asc(), Entry.received_at.asc())
+        # id breaks (entry_date, received_at) ties so paginated clients see
+        # one stable order across pages.
+        query.order_by(Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc())
         .offset(offset)
         .limit(limit)
     )

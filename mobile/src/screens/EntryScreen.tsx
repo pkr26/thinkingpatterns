@@ -20,12 +20,19 @@ import { vault } from "../vault";
 import { useSession } from "../store";
 import { enqueue, flushQueue, QueueFullError } from "../offlineQueue";
 import { localDateISO, recordMood } from "../moodLog";
+import { detectCrisisLanguage } from "../crisisDetect";
 
 /** Keeps the encrypted payload comfortably under the server's ~1 MiB cap. */
 const MAX_ENTRY_CHARS = 100_000;
 
+/** A 401 save locks the vault, and the lock swaps the whole screen stack —
+ *  this screen unmounts and its state dies with it. The draft waits here
+ *  (memory-only, account-bound) so re-unlocking restores it for another
+ *  save attempt. A different account on the same device never sees it. */
+let stashedDraft: { userId: string; text: string } | null = null;
+
 export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Element {
-  const { activeDays, unlockDays } = useSession();
+  const { activeDays, unlockDays, touchActivity } = useSession();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +40,11 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     const userId: Promise<string | null> = api.getUserId();
     userId.then((id) => {
       if (id) flushQueue(id).catch(() => {});
+      // Restore the draft a 401-forced lock stashed before the unmount —
+      // only for the same account it was written under.
+      const stash = stashedDraft;
+      stashedDraft = null;
+      if (stash && id === stash.userId) setText(stash.text);
     });
     // NOTE (privacy hardening): this screen no longer triggers the daily
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
@@ -68,13 +80,22 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // device-only metadata, encrypted under the data key, and never
       // leaves the phone.
       void recordMood(keys.dataKey, userId, today, localSentiment(trimmed)).catch(() => {});
+      // Crisis detection is ON-DEVICE and pre-encryption by necessity: the
+      // server only ever sees ciphertext, so it cannot notice a crisis.
+      // The result is never stored or transmitted — it only decides whether
+      // to point at support resources after the entry is safely saved.
+      const crisisLanguage = detectCrisisLanguage(trimmed);
       try {
         await api.createEntry(clientEntryId, blobB64, today);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
-          // Session expired: keep the text on screen — after re-unlocking,
-          // pressing save again syncs this exact entry.
-          Alert.alert("Session expired", "Please unlock again — your entry is still on screen.");
+          // Session expired: lock the vault so navigation gates back to
+          // the Unlock screen on its own (re-saving would just re-fail
+          // with the same dead session). The draft is stashed for the
+          // re-unlock remount — it is NOT lost.
+          stashedDraft = { userId, text: trimmed };
+          vault.lock();
+          Alert.alert("Session expired", "Please unlock again — your entry will still be here.");
           return;
         }
         if (err instanceof ApiError && err.status === 422) {
@@ -100,6 +121,19 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         }
       }
       setText("");
+      // Never before or instead of saving: the entry is already safe
+      // (synced or queued) before this dialog appears. Safe-messaging
+      // tone — acknowledge, point at humans, no diagnosis.
+      if (crisisLanguage) {
+        Alert.alert(
+          "Support is available",
+          "Some of what you wrote sounds like a really heavy moment. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
+          [
+            { text: "View support resources", onPress: () => navigation.navigate("Crisis") },
+            { text: "Not now", style: "cancel" },
+          ],
+        );
+      }
     } catch (err) {
       Alert.alert("Could not save", err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -127,7 +161,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         placeholder="What's going on today?"
         placeholderTextColor="#5c6370"
         value={text}
-        onChangeText={setText}
+        onChangeText={(next) => {
+          touchActivity(); // typing resets the inactivity auto-lock
+          setText(next);
+        }}
       />
       <TouchableOpacity style={styles.button} onPress={save} disabled={busy || !text.trim()}>
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save entry</Text>}

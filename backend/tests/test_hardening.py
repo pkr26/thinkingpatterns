@@ -241,11 +241,113 @@ def test_garbage_int_env_is_loud(monkeypatch):
         Settings.from_env()
 
 
-def test_development_defaults_still_boot(monkeypatch):
+def test_missing_env_fails_closed(monkeypatch):
+    # No MINDPATTERN_ENV at all: the default is production, so the committed
+    # dev secret must refuse to boot rather than silently sign tokens with a
+    # public constant.
     for var in ("MINDPATTERN_ENV", "MINDPATTERN_TOKEN_SECRET"):
         monkeypatch.delenv(var, raising=False)
+    with pytest.raises(RuntimeError, match="TOKEN_SECRET"):
+        Settings.from_env()
+
+
+def test_development_boots_only_when_explicit(monkeypatch):
+    monkeypatch.setenv("MINDPATTERN_ENV", "development")
+    monkeypatch.delenv("MINDPATTERN_TOKEN_SECRET", raising=False)
     s = Settings.from_env()
     assert s.environment == "development"
+
+
+def test_settings_default_environment_is_production():
+    # The dataclass default itself fails closed: Settings() with no explicit
+    # environment is production, so the committed dev secret is rejected.
+    with pytest.raises(RuntimeError, match="TOKEN_SECRET"):
+        Settings()
+
+
+# --- config: LLM endpoint must be TLS ------------------------------------------
+
+
+def test_llm_url_http_rejected_in_production():
+    with pytest.raises(RuntimeError, match="LLM_URL"):
+        Settings(
+            environment="production",
+            database_url="postgresql+asyncpg://u:p@h/db",
+            token_secret="x" * 48,
+            llm_url="http://llm.internal/v1",
+        )
+
+
+def test_llm_url_http_rejected_in_staging():
+    # Not just production: ANY non-development environment sends journal
+    # plaintext over TLS or not at all.
+    with pytest.raises(RuntimeError, match="LLM_URL"):
+        Settings(environment="staging", token_secret="x" * 45, llm_url="http://llm.internal/v1")
+
+
+def test_llm_url_https_accepted():
+    s = Settings(
+        environment="production",
+        database_url="postgresql+asyncpg://u:p@h/db",
+        token_secret="x" * 48,
+        llm_url="https://llm.example.com/v1",
+    )
+    assert s.llm_url == "https://llm.example.com/v1"
+
+
+def test_llm_url_loopback_http_allowed_only_in_development():
+    for url in ("http://localhost:11434/v1", "http://127.0.0.1:8080/v1"):
+        s = Settings(environment="development", llm_url=url)
+        assert s.llm_url == url
+    # Exact-host match: a lookalike host or a LAN address is not loopback.
+    for url in ("http://localhost.evil.com/v1", "http://192.168.1.10/v1"):
+        with pytest.raises(RuntimeError, match="LLM_URL"):
+            Settings(environment="development", llm_url=url)
+    # Loopback http does NOT leak into other environments.
+    with pytest.raises(RuntimeError, match="LLM_URL"):
+        Settings(environment="staging", token_secret="x" * 45, llm_url="http://localhost:11434/v1")
+
+
+# --- config: CORS defaults to no origins ---------------------------------------
+
+
+def test_cors_origins_default_to_empty():
+    assert Settings(environment="development").cors_origins == []
+
+
+async def test_no_cors_headers_by_default(client):
+    # A cross-origin browser request must get no allow header when no
+    # allowlist is configured (the mobile app never sends Origin anyway).
+    response = await client.get("/healthz", headers={"Origin": "https://attacker.example"})
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+async def test_configured_cors_origin_is_echoed(settings):
+    settings.cors_origins = ["https://web.example"]
+    from httpx import ASGITransport, AsyncClient
+    from app.main import create_app
+
+    transport = ASGITransport(app=create_app(settings))
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        allowed = await c.get("/healthz", headers={"Origin": "https://web.example"})
+        denied = await c.get("/healthz", headers={"Origin": "https://attacker.example"})
+    assert allowed.headers.get("access-control-allow-origin") == "https://web.example"
+    assert "access-control-allow-origin" not in denied.headers
+
+
+# --- cache: eviction is batched, semantics unchanged ----------------------------
+
+
+def test_counter_eviction_is_batched_under_cap_pressure():
+    from app.cache import EVICTION_BATCH, MAX_TRACKED_KEYS
+
+    counter = FixedWindowCounter()
+    for i in range(MAX_TRACKED_KEYS + 1):
+        counter.hit(f"attacker-{i}", 60)
+    # One eviction event clears a whole batch below the cap instead of
+    # trimming a single key per over-cap hit.
+    assert len(counter._hits) <= MAX_TRACKED_KEYS - EVICTION_BATCH + 1  # noqa: SLF001
 
 
 # --- offline-queue duplicate race: second sync is a 409, not a 500 ------------

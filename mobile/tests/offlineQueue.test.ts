@@ -255,6 +255,14 @@ describe("corrupted storage recovery", () => {
     expect(await storage.getItem("@mindpattern/queue_rejected")).toBeNull();
   });
 
+  it("treats a corrupt rejected-store as empty instead of throwing", async () => {
+    await storage.setItem("@mindpattern/queue_rejected", "{not json");
+    expect(await rejectedEntries()).toEqual([]);
+    // Valid JSON that is not an array degrades the same way.
+    await storage.setItem("@mindpattern/queue_rejected", "42");
+    expect(await rejectedEntries()).toEqual([]);
+  });
+
   it("treats non-array queue data as empty (and keeps it for repair)", async () => {
     await storage.setItem("@mindpattern/queue", "42");
     expect(await queueLength()).toBe(0);
@@ -269,10 +277,10 @@ describe("corrupted storage recovery", () => {
     expect(remaining).toHaveLength(0);
   });
 
-  it("a wipe racing enqueue never resurrects the old entries (M4)", async () => {
+  it("a wipe racing enqueue wins: the item never lands in the wiped queue (M4)", async () => {
     await enqueue(aliceEntry(1)); // will be wiped mid-enqueue below
     // Interleave: the queue is cleared between enqueue's read and its
-    // write-back (sign-out timing, reproduced deterministically).
+    // commit (sign-out timing, reproduced deterministically).
     const originalGetItem = storage.getItem.bind(storage);
     let armed = true;
     (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
@@ -289,9 +297,20 @@ describe("corrupted storage recovery", () => {
     } finally {
       (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
     }
-    // The wiped entry must NOT reappear; only the newly enqueued item is stored.
-    const stored = JSON.parse((await storage.getItem("@mindpattern/queue")) ?? "[]");
-    expect(stored.map((s: any) => s.clientEntryId)).toEqual(["a-2"]);
+    // The wipe BEGAN before the enqueue committed, so the enqueue must NOT
+    // survive it: no resurrection of the old entries AND no write of the
+    // racing item into the just-wiped queue — the key stays gone entirely.
+    expect(await storage.getItem("@mindpattern/queue")).toBeNull();
+    expect(await queueLength()).toBe(0);
+  });
+
+  it("an enqueue that STARTS after the wipe still lands (the queue is reusable)", async () => {
+    await enqueue(aliceEntry(1));
+    await clearQueue();
+    await enqueue(aliceEntry(2));
+    expect(await queueLength()).toBe(1);
+    expect(await storage.getItem("@mindpattern/queue")).toContain("a-2");
+    expect(await storage.getItem("@mindpattern/queue")).not.toContain("a-1");
   });
 
   it("treats non-array queue data as empty (and keeps it for repair)", async () => {

@@ -17,7 +17,7 @@ observation shows you its evidence.**
 |---|---|
 | `RESEARCH.md` | The industry/clinical-research audit behind the engine: every detector mapped to its citation |
 | `backend/` | FastAPI service (Python 3.12+): entry sync, secure processing session, stateful deterministic "mini-brain" v3 (see below), 30-day threshold, daily questions |
-| `backend/tests/` | 495-test suite: unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions |
+| `backend/tests/` | 560-test suite: unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
 | `mobile/` | React Native (iOS/Android) client: encrypted journal, evidence-view pattern cards, crisis resources, baseline-phase mood trend |
@@ -54,7 +54,7 @@ Sentiment is a **graded lexicon engine** (VADER-style: graded valences,
 intensifiers, damped negation, "but" re-weighting — Hutto & Gilbert 2014),
 deterministic and self-contained.
 
-**Honesty guarantees, enforced by 491 backend tests:** base-rate correction
+**Honesty guarantees, enforced by 560 backend tests:** base-rate correction
 (a Sunday-heavy journaler gets no fake "everything happens on Sundays"),
 FDR-corrected multiple testing across every statistical claim, effect-size
 gates, within-person detrending (a mood *trend* cannot manufacture
@@ -119,7 +119,7 @@ The mobile client keeps derived keys memory-only: after an app restart the sessi
 # Backend (dev) — Python 3.12+
 cd backend
 python3 -m venv .venv && source .venv/bin/activate   # or: uv venv
-pip install fastapi "uvicorn[standard]" "sqlalchemy>=2.0,<2.1" aiosqlite cryptography httpx greenlet
+pip install -r requirements.lock.txt                  # pinned set the suite ran against
 uvicorn app.main:app --reload                           # http://localhost:8000/docs
 
 # Full stack (postgres + api)
@@ -132,7 +132,7 @@ docker compose up --build
 # Mobile (source; native projects are generated with the RN toolchain)
 cd mobile && npm install && npm run ios   # or android; point Settings at your API
 
-# Mobile tests: 244 tests — real crypto modules against shared vectors + queue/client/log regressions
+# Mobile tests: 425 tests — real crypto modules against shared vectors + queue/client/log regressions
 cd mobile && npm test
 
 # Cross-platform crypto check over the REAL compiled modules
@@ -144,6 +144,15 @@ cd backend && ../.venv/bin/python probe_brain.py
 # Decrypt your ciphertext export locally (password never leaves the machine)
 node mobile/tools/decrypt_export.mjs --bundle export.json
 ```
+
+## Database migrations
+
+Schema changes ship as Alembic revisions (`backend/alembic/`); apply them at
+deploy time with `alembic upgrade head` before starting the new app version.
+The image and `docker-compose.yml` include the migration files, and
+`MINDPATTERN_DB_URL` is the single configuration path. Operator workflow,
+adopting a pre-migrations database, and autogenerate instructions:
+`backend/alembic/README.md`.
 
 ## Testing
 
@@ -334,6 +343,5 @@ A second multi-pass adversarial audit found and this pass fixed:
   redirects are refused.
 * `probe_brain.py` now exits non-zero on any FAIL (it can gate CI).
 
-Test status after this pass: backend **527 passed** (incl. 26 new
-regression tests pinning every fix above), probe 9/9, mobile **283
-passed** (34 new), cross-platform crypto vectors 4/4.
+Test status at HEAD: backend **560 passed**, probe 9/9, mobile **425
+passed**, cross-platform crypto vectors green.

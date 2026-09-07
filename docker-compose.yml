@@ -15,6 +15,13 @@ services:
       # a network. Change to "8000:8000" only for trusted local device testing.
       - "127.0.0.1:8000:8000"
     restart: unless-stopped
+    healthcheck:
+      # Same probe as the Dockerfile HEALTHCHECK.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     depends_on:
       db:
         condition: service_healthy

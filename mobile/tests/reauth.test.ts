@@ -70,6 +70,25 @@ describe("verifyPasswordForVault", () => {
     expect(await verifyPasswordForVault(PASSWORD)).toEqual({ ok: false, reason: "offline" });
   });
 
+  it("refuses an empty password before touching the vault or the network", async () => {
+    expect(await verifyPasswordForVault("")).toEqual({ ok: false, reason: "wrong-password" });
+    expect(api.getUsername).not.toHaveBeenCalled();
+  });
+
+  it("reports offline when the fetched salt comes back empty", async () => {
+    vi.mocked(api.getCachedSalt).mockResolvedValue(null);
+    vi.mocked(api.saltFor).mockResolvedValue({ salt: "" } as never);
+    expect(await verifyPasswordForVault(PASSWORD)).toEqual({ ok: false, reason: "offline" });
+  });
+
+  it("a vault holding a malformed (wrong-length) key never matches", async () => {
+    // keysEqual's length guard: a truncated/corrupt key in the vault must
+    // fail closed, not crash the comparison.
+    vault.lock();
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(16, 9), dataKey: Buffer.alloc(32) });
+    expect(await verifyPasswordForVault(PASSWORD)).toEqual({ ok: false, reason: "wrong-password" });
+  });
+
   it("a similar-but-different salt derivation never matches the vault key", async () => {
     // Same password, DIFFERENT salt (the cross-origin poisoning case).
     vi.mocked(api.getCachedSalt).mockResolvedValue(Buffer.alloc(16, 9).toString("base64"));

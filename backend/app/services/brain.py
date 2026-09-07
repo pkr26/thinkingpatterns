@@ -976,13 +976,19 @@ def _detect_phrases(window: list[JournalEntry]) -> list[_Signal]:
     "recurring_phrase".
     """
     sentences: list[phrase_miner.SentenceRef] = []
-    for entry in window:
+    # Fill the sentence budget NEWEST-first: when the cap bites, the
+    # sentences dropped are the oldest in the window — the same recency
+    # bias the window itself applies to entries. The final reverse keeps
+    # clustering input in chronological order, so results stay
+    # deterministic (and identical to before whenever the cap never hits).
+    for entry in reversed(window):
         for sentence in sentences_of(entry.text):
             sentences.append(phrase_miner.SentenceRef(text=sentence, day=entry.entry_date))
             if len(sentences) >= MAX_WINDOW_SENTENCES:
                 break
         if len(sentences) >= MAX_WINDOW_SENTENCES:
             break
+    sentences.reverse()
     signals: list[_Signal] = []
     for cluster in phrase_miner.near_duplicate_clusters(
         sentences,
@@ -1297,7 +1303,12 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
             if (today - date.fromisoformat(record.first_qualified)).days >= CONFIRM_AGE_DAYS:
                 record.state = "confirmed"
         elif record.state in ("fading", "archived"):
-            record.state = "emerging"  # re-qualified: back in play
+            # Re-qualified: back in play, but as a fresh qualification —
+            # the confirmation clock restarts here, or the next run's age
+            # check would read the stale first_qualified and promote the
+            # pattern straight to "confirmed" without re-proving itself.
+            record.state = "emerging"
+            record.first_qualified = today_iso
 
     # Aging: patterns that stopped qualifying fade, archive, then are dropped.
     for pid in sorted(patterns):

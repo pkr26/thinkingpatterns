@@ -67,3 +67,24 @@ def test_payload_must_have_uid_and_exp():
     sig = b64(hmac_mod.new(SECRET.encode(), payload.encode(), hashlib.sha256).digest())
     with pytest.raises(tokens.TokenError):
         tokens.verify_token(f"{payload}.{sig}", SECRET)
+
+
+def test_non_numeric_exp_rejected_not_500():
+    """A well-signed token whose exp is not a number must raise TokenError,
+    never the TypeError an unchecked ``exp <= now`` comparison throws."""
+    import base64
+    import hashlib
+    import hmac as hmac_mod
+    import json
+
+    def b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def signed(payload_dict: dict) -> str:
+        body = b64(json.dumps(payload_dict).encode())
+        sig = b64(hmac_mod.new(SECRET.encode(), body.encode(), hashlib.sha256).digest())
+        return f"{body}.{sig}"
+
+    for bad_exp in ("tomorrow", "9999999999", None, [1], {"t": 1}, True):
+        with pytest.raises(tokens.TokenError):
+            tokens.verify_token(signed({"uid": "u", "exp": bad_exp}), SECRET)

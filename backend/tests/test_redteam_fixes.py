@@ -7,9 +7,12 @@ starts failing, a security fix regressed — treat it as a release blocker.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 from datetime import date
 
+import anyio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -23,12 +26,58 @@ from tests.helpers import ClientEmulator
 TODAY = date.today()
 
 
-# --- H-2/H-1: scrypt cost + off-loop ------------------------------------------
+# --- H-2/H-1: scrypt cost + off-loop + bounded concurrency ----------------------
 
 
 def test_scrypt_params_meet_hardened_floor():
     # N=2^16 (64 MiB) with the input already PBKDF2-600k stretched client-side.
     assert SCRYPT_N == 2 ** 16
+
+
+def test_auth_scrypt_has_a_dedicated_capacity_limiter(settings):
+    # Login/register scrypt (64 MiB per hash) must not queue unboundedly on
+    # the shared anyio thread pool: the app wires a small dedicated limiter.
+    app = create_app(settings)
+    limiter = app.state.auth_limiter
+    assert isinstance(limiter, anyio.CapacityLimiter)
+    assert limiter.total_tokens == 4
+
+
+async def test_login_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatch):
+    emu = ClientEmulator("capped", "p")
+    await emu.register(client)
+    seen_limiters = []
+    real_run_sync = anyio.to_thread.run_sync
+
+    async def spy(func, *args, limiter=None, **kwargs):
+        seen_limiters.append(limiter)
+        return await real_run_sync(func, *args, limiter=limiter, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", spy)
+    await emu.login(client)
+    assert app.state.auth_limiter in seen_limiters
+
+
+async def test_llm_consent_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatch):
+    # The account verifier re-check runs the same 64-MiB scrypt; it must sit
+    # behind the dedicated auth limiter too, not the shared anyio pool.
+    emu = ClientEmulator("cappedconsent", "p")
+    await emu.register(client)
+    seen_limiters = []
+    real_run_sync = anyio.to_thread.run_sync
+
+    async def spy(func, *args, limiter=None, **kwargs):
+        seen_limiters.append(limiter)
+        return await real_run_sync(func, *args, limiter=limiter, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", spy)
+    response = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert response.status_code == 200
+    assert app.state.auth_limiter in seen_limiters
 
 
 # --- M-4: whole-request body cap ------------------------------------------------
@@ -93,6 +142,10 @@ async def test_security_headers_on_unhandled_500(settings):
     assert response.status_code == 500
     assert response.headers.get("x-content-type-options") == "nosniff"
     assert response.headers.get("cache-control") == "no-store"
+    assert (
+        response.headers.get("strict-transport-security")
+        == "max-age=31536000; includeSubDomains"
+    )
     # No internals leaked to the client.
     assert "boom" not in response.text
 
@@ -116,13 +169,14 @@ async def test_entry_quota_is_enforced(client, settings):
 
 
 # --- H-1: per-username register limiter defeats IP rotation -----------------------
+# ...but only ACTUAL conflicts consume it: the probe itself is free.
 
 
 async def test_register_name_bucket_survives_ip_rotation(client, settings):
     settings.trust_proxy_headers = True  # accept per-request client identity
     settings.auth_rate_limit = 3
     statuses = []
-    for i in range(5):
+    for i in range(7):
         statuses.append((
             await client.post("/api/auth/register", json={
                 "username": "target-name",
@@ -131,9 +185,10 @@ async def test_register_name_bucket_survives_ip_rotation(client, settings):
             }, headers={"X-Forwarded-For": f"10.9.{i}.{i}"})  # fresh IP each time
         ).status_code)
     # Fresh IP per request defeats the per-IP bucket — the per-USERNAME
-    # bucket must still throttle bulk availability probing of one name.
-    assert statuses[:3] == [201, 409, 409]
-    assert statuses[3:] == [429, 429]
+    # bucket must still throttle bulk availability probing of one name. Only
+    # real 409s count: the 201 creates no charge, then conflicts accumulate
+    # (1..4) and the 429 starts once the count passes the limit of 3.
+    assert statuses == [201, 409, 409, 409, 409, 429, 429]
 
 
 # --- C-2/H-5: LLM path — consent, threshold, and output sanitization --------------
@@ -327,3 +382,19 @@ async def test_decoy_salt_uses_token_secret_and_16_bytes(client, app):
     unknown = await client.post("/api/auth/salt", json={"username": "ghost"})
     assert unknown.json()["salt"] == decoy_salt("ghost", app.state.settings.token_secret)
     assert len(base64.b64decode(unknown.json()["salt"])) == 16
+
+
+def test_decoy_salt_uses_an_hkdf_subkey_not_the_raw_secret():
+    # Key separation pin: the decoy is HMAC under HKDF(token_secret,
+    # "mindpattern/decoy-salt/v1") — it must NOT equal the legacy raw
+    # HMAC(token_secret, ...) value, so token signing and decoy salts never
+    # share one HMAC key.
+    from app.api.auth import DECOY_SALT_INFO
+    from app.security.kdf import hkdf_sha256
+
+    secret = "unit-test-secret"
+    decoy_key = hkdf_sha256(secret.encode("utf-8"), None, DECOY_SALT_INFO)
+    expected = hmac.new(decoy_key, b"decoy:ghost", hashlib.sha256).digest()
+    assert decoy_salt("ghost", secret) == base64.b64encode(expected[:16]).decode("ascii")
+    legacy = hmac.new(secret.encode("utf-8"), b"decoy:ghost", hashlib.sha256).digest()
+    assert decoy_salt("ghost", secret) != base64.b64encode(legacy[:16]).decode("ascii")

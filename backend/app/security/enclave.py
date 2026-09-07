@@ -86,7 +86,7 @@ class InMemoryKeyStore:
             self._purge_expired_locked(current)
             raise KeyNotFound("unknown processing session")
 
-    def pop(self, token: str, now: float | None = None, owner: str | None = None) -> bytes:
+    def pop(self, token: str, now: float | None = None, owner: str | None = None) -> bytearray:
         """Atomically fetch AND consume the key for *token* (single-use).
 
         get()-then-destroy() enforced single use only by scheduling accident
@@ -94,6 +94,12 @@ class InMemoryKeyStore:
         future `await` inserted there (or a keystore shared across workers)
         would let N concurrent requests reuse one uploaded key. pop() makes
         the mechanism real: under the store lock, exactly one caller wins.
+
+        On success the store's OWN bytearray is handed over (ownership
+        transfers; no immutable bytes copy is minted to linger until GC).
+        The store keeps no reference, and the caller is responsible for
+        zeroizing it on every exit path — the recompute endpoint does so in
+        a finally around the whole processing run.
         """
         current = now if now is not None else time.time()
         with self._lock:
@@ -108,7 +114,7 @@ class InMemoryKeyStore:
             if owner is not None and bound_owner is not None and owner != bound_owner:
                 zeroize(key)
                 raise KeyNotFound("processing session belongs to another user")
-            return bytes(key)
+            return key
 
     def destroy(self, token: str) -> bool:
         with self._lock:

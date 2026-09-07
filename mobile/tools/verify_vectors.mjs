@@ -25,7 +25,7 @@ const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
 const tscBin = join(here, "..", "node_modules", ".bin", "tsc");
 const buildDir = join(here, "..", ".verify-build");
 
-const { vectors } = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const { vectors, encrypt_vectors: encryptVectors = [] } = JSON.parse(readFileSync(vectorsPath, "utf8"));
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -67,11 +67,18 @@ async function loadReferenceFallback() {
       deriveDataKey: async (master) => hkdf(master, "mindpattern/data/v1"),
     },
     envelope: {
+      buildAad: async (...parts) => referenceBuildAad(...parts),
       decrypt: async (key, blob, aad) => {
         const nonce = blob.subarray(0, 12);
         const ck = await subtle.importKey("raw", key, "AES-GCM", false, ["decrypt"]);
         return Buffer.from(await subtle.decrypt(
           { name: "AES-GCM", iv: nonce, additionalData: aad, tagLength: 128 }, ck, blob.subarray(12)));
+      },
+      encrypt: async (key, plaintext, aad, nonce) => {
+        const ck = await subtle.importKey("raw", key, "AES-GCM", false, ["encrypt"]);
+        const ct = Buffer.from(await subtle.encrypt(
+          { name: "AES-GCM", iv: nonce, additionalData: aad, tagLength: 128 }, ck, plaintext));
+        return Buffer.concat([nonce, ct]);
       },
     },
   };
@@ -82,6 +89,18 @@ async function hkdf(ikm, info) {
   const key = await subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
   return Buffer.from(await subtle.deriveBits(
     { name: "HKDF", hash: "SHA-256", salt: Buffer.alloc(32), info: Buffer.from(info, "utf8") }, key, 256));
+}
+
+// Reference copy of the ensure_ascii AAD canonicalization for the webcrypto
+// fallback ONLY — in REAL MODULES mode the shipping envelope.buildAad is used.
+function referenceBuildAad(...parts) {
+  const json = JSON.stringify(parts);
+  let out = "";
+  for (let i = 0; i < json.length; i++) {
+    const code = json.charCodeAt(i);
+    out += code >= 0x7f ? "\\u" + code.toString(16).padStart(4, "0") : json[i];
+  }
+  return Buffer.from(out, "utf8");
 }
 
 const impl = (await loadRealModules()) ?? (await loadReferenceFallback());
@@ -119,10 +138,39 @@ for (const [i, v] of vectors.entries()) {
   }
 }
 
+for (const [i, v] of encryptVectors.entries()) {
+  const salt = Buffer.from(v.salt, "base64");
+  const master = await impl.kdf.deriveMasterKey(v.password, salt, v.iterations);
+  const dataKey = await impl.kdf.deriveDataKey(master);
+  if (b64(dataKey) !== v.data_key) {
+    console.error(`encrypt vector ${i}: data_key MISMATCH`);
+    failures += 1;
+    continue;
+  }
+  const aad = await impl.envelope.buildAad(...v.aad_parts);
+  const nonce = Buffer.from(v.nonce, "base64");
+  const plaintext = Buffer.from(v.plaintext, "base64");
+  try {
+    const blob = await impl.envelope.encrypt(dataKey, plaintext, aad, nonce);
+    if (b64(blob) !== v.blob) {
+      console.error(`encrypt vector ${i}: fixed-nonce encrypt blob MISMATCH`);
+      failures += 1;
+    }
+    const back = await impl.envelope.decrypt(dataKey, Buffer.from(v.blob, "base64"), aad);
+    if (b64(back) !== v.plaintext) {
+      console.error(`encrypt vector ${i}: pinned blob decrypt MISMATCH`);
+      failures += 1;
+    }
+  } catch (err) {
+    console.error(`encrypt vector ${i}: AES-GCM failed: ${err.message}`);
+    failures += 1;
+  }
+}
+
 if (impl.mode.startsWith("REAL")) rmSync(buildDir, { recursive: true, force: true });
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);
   process.exit(1);
 }
-console.log(`all ${vectors.length} vectors verified`);
+console.log(`all ${vectors.length} vectors + ${encryptVectors.length} encrypt vectors verified`);

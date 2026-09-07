@@ -56,7 +56,7 @@ const storage = (await import("../helpers/storageMock")).default;
 
 const authKey = Buffer.alloc(32, 2);
 const keys = { masterKey: Buffer.alloc(32), authKey, dataKey: Buffer.alloc(32, 3) };
-const nav = { popToTop: vi.fn() };
+const nav = { popToTop: vi.fn(), navigate: vi.fn() };
 
 beforeEach(() => {
   resetApi(api as never);
@@ -71,6 +71,7 @@ beforeEach(() => {
   vi.mocked(flushQueue).mockClear();
   signOut.mockClear();
   nav.popToTop.mockClear();
+  nav.navigate.mockClear();
   Alert.alert.mockClear();
   vi.mocked(Share.share).mockReset();
   vi.mocked(Share.share).mockImplementation(async () => ({}));
@@ -272,6 +273,17 @@ describe("server URL policy", () => {
     await pressLabel(root, "Save server URL");
     await pressAlertButton("Allow insecure HTTP");
     expect(Alert.alert).toHaveBeenCalledWith("Could not save server", expect.stringContaining("full URL"));
+  });
+
+  it("reports save errors from the direct save of a secure URL", async () => {
+    vi.mocked(setBaseUrl).mockImplementation(async () => "connection refused");
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "https://your-server:8000", "https://sync.example.com");
+    await pressLabel(root, "Save server URL");
+    await flush();
+    expect(setBaseUrl).toHaveBeenCalledWith("https://sync.example.com", { allowInsecure: false });
+    expect(Alert.alert).toHaveBeenCalledWith("Could not save server", "connection refused");
   });
 
   it("saves secure URLs without any warning", async () => {
@@ -500,6 +512,50 @@ describe("destructive delete", () => {
     expect(api.deleteAccount).toHaveBeenCalledWith(authKey.toString("base64"));
     expect(vault.isUnlocked()).toBe(false);
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("the crisis-help button navigates to Crisis without any confirmation", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Need help now? Crisis resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+  });
+
+  it("Confirm with no typed password is a no-op even if the disabled press leaks through", async () => {
+    // The native button suppresses this press; the guard inside
+    // confirmWithPassword is the second line of defense.
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Delete my account and data");
+    await pressAlertButton("Continue");
+    await pressAlertButton("Continue to password");
+    await flush();
+    expect(textOf(root)).toContain("Enter your password to delete everything");
+    // Password field left empty: the Confirm press must not even attempt re-auth.
+    await pressLabel(root, "Confirm with password");
+    await flush();
+    expect(verifyPasswordForVault).not.toHaveBeenCalled();
+    expect(api.deleteAccount).not.toHaveBeenCalled();
+    // The card is still up — nothing was cancelled by accident.
+    expect(textOf(root)).toContain("Enter your password to delete everything");
+  });
+
+  it("Cancel on the password card abandons the pending action", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Delete my account and data");
+    await pressAlertButton("Continue");
+    await pressAlertButton("Continue to password");
+    await flush();
+    expect(textOf(root)).toContain("Enter your password to delete everything");
+    await typeInto(root, "password", "half-typed");
+    await pressLabel(root, "Cancel");
+    await flush();
+    // The pending action and the half-typed password are both discarded.
+    expect(textOf(root)).not.toContain("Enter your password to delete everything");
+    expect(() => inputByPlaceholder(root, "password")).toThrow();
+    expect(verifyPasswordForVault).not.toHaveBeenCalled();
+    expect(api.deleteAccount).not.toHaveBeenCalled();
   });
 
   // M11: deletion is the destructive path — everything this account left on

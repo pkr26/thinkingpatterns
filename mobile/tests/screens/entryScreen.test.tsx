@@ -29,9 +29,8 @@ vi.mock("../../src/moodLog", async (importOriginal) => {
 });
 
 // C2: saving/syncing an entry must NEVER auto-ship the data key — the
-// mini-brain refresh is an explicit, user-initiated act only.
-const maybeDailyRecompute = vi.fn(async () => {});
-vi.mock("../../src/brainSync", () => ({ maybeDailyRecompute, clearRecomputeStamp: vi.fn(async () => {}) }));
+// mini-brain refresh is an explicit, user-initiated act only. EntryScreen no
+// longer imports brainSync at all, so nothing here can trigger a recompute.
 
 vi.mock("../../src/offlineQueue", () => ({
   QueueFullError,
@@ -53,11 +52,12 @@ const { encryptEntry } = await import("../../src/crypto/MindPatternCrypto");
 const { enqueue, flushQueue, QueueFullError: QFErr } = await import("../../src/offlineQueue");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, pressLabel, typeInto, touchableByLabel, allText, act } = await import("../helpers/rtr");
+const { render, flush, textOf, pressLabel, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 
 const keys = { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) };
 const nav = { navigate: vi.fn() };
+const touchActivity = vi.fn();
 
 beforeEach(() => {
   resetApi(api as never);
@@ -69,9 +69,10 @@ beforeEach(() => {
   vi.mocked(encryptEntry).mockImplementation(() => ({ blobB64: "QkxPQg==" }));
   Alert.alert.mockClear();
   nav.navigate.mockClear();
+  touchActivity.mockClear();
   vault.lock();
   vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
-  sessionState = { activeDays: 0, unlockDays: 30 };
+  sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
 });
 
 async function writeEntry(root: Awaited<ReturnType<typeof render>>, text: string): Promise<void> {
@@ -153,17 +154,8 @@ describe("EntryScreen progress display", () => {
     await render(<EntryScreen navigation={nav} />);
     await flush();
     expect(flushQueue).toHaveBeenCalledWith("user-1");
-    // C2: the flush must not trigger an automatic data-key upload.
-    expect(maybeDailyRecompute).not.toHaveBeenCalled();
-  });
-
-  it("never auto-uploads the data key after a save (explicit-only recompute)", async () => {
-    const root = await render(<EntryScreen navigation={nav} />);
-    await writeEntry(root, "a fresh thought");
-    await pressLabel(root, "Save entry");
-    await flush();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
-    expect(maybeDailyRecompute).not.toHaveBeenCalled();
+    // C2: the flush cannot trigger an automatic data-key upload — the screen
+    // holds no reference to brainSync.
   });
 
   it("skips the mount flush when no user id is stored", async () => {
@@ -248,14 +240,50 @@ describe("EntryScreen save pipeline", () => {
     expect(api.createEntry).not.toHaveBeenCalled();
   });
 
-  it("keeps the entry on screen on 401 (session expired)", async () => {
+  it("401 locks the vault (navigation gates to Unlock) and keeps the draft", async () => {
     vi.mocked(api.createEntry).mockRejectedValue(new ApiError(401, "invalid token"));
     const root = await render(<EntryScreen navigation={nav} />);
     await writeEntry(root, "keep me");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Session expired", expect.stringContaining("still on screen"));
+    expect(Alert.alert).toHaveBeenCalledWith("Session expired", expect.stringContaining("unlock again"));
+    // The vault is locked — navigation's gate swaps to the Unlock screen —
+    // and the dead session was NOT queued for a guaranteed re-failure.
+    expect(vault.isUnlocked()).toBe(false);
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("restores the stashed draft after a 401-forced lock, for the same account only", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(401, "invalid token"));
+    const first = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(first, "keep me through the relock");
+    await pressLabel(first, "Save entry");
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    first.unmount();
+
+    // Same account re-unlocks: the draft is back in the editor.
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    const second = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(
+      (inputByPlaceholder(second, "What's going on today?").props as { value: string }).value,
+    ).toBe("keep me through the relock");
+
+    // A DIFFERENT account on the same device must never see the stash.
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(401, "invalid token"));
+    const third = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(third, "alice's unsent entry");
+    await pressLabel(third, "Save entry");
+    await flush();
+    third.unmount();
+    vi.mocked(api.getUserId).mockResolvedValue("user-2");
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    const fourth = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(
+      (inputByPlaceholder(fourth, "What's going on today?").props as { value: string }).value,
+    ).toBe("");
   });
 
   it("never queues a blob the server permanently rejects (422)", async () => {
@@ -333,14 +361,15 @@ describe("EntryScreen save pipeline", () => {
 });
 
 describe("EntryScreen navigation", () => {
-  it("offers Patterns, Question and Settings shortcuts", async () => {
+  it("offers Patterns, Question, Settings and crisis-help shortcuts", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect(allText(root).join(" ")).toContain("Patterns");
     await pressLabel(root, "Patterns");
     await pressLabel(root, "Question");
     await pressLabel(root, "Settings");
-    expect(nav.navigate.mock.calls).toEqual([["Insights"], ["Question"], ["Settings"]]);
+    await pressLabel(root, "Get help");
+    expect(nav.navigate.mock.calls).toEqual([["Insights"], ["Question"], ["Settings"], ["Crisis"]]);
   });
 
   it("renders the busy spinner instead of the button label while saving", async () => {
@@ -366,5 +395,84 @@ describe("EntryScreen navigation", () => {
     await flush();
     expect(api.createEntry).toHaveBeenCalledTimes(1);
     expect(allText(root)).toContain("Save entry");
+  });
+});
+
+
+describe("EntryScreen crisis detection (on-device, pre-encryption)", () => {
+  it("shows the gentle support alert AFTER a successful save", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I have been thinking about how to end it all");
+    await pressLabel(root, "Save entry");
+    await flush();
+    // The save ran first — detection never blocks or replaces it.
+    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Support is available",
+      expect.stringContaining("one tap away"),
+      expect.arrayContaining([
+        expect.objectContaining({ text: "View support resources" }),
+        expect.objectContaining({ text: "Not now" }),
+      ]),
+    );
+  });
+
+  it("'View support resources' navigates to Crisis; 'Not now' does nothing", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I want to die tonight");
+    await pressLabel(root, "Save entry");
+    await flush();
+    await pressAlertButton("View support resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+
+    nav.navigate.mockClear();
+    Alert.alert.mockClear();
+    const second = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(second, "no reason to live anymore");
+    await pressLabel(second, "Save entry");
+    await flush();
+    await pressAlertButton("Not now");
+    expect(nav.navigate).not.toHaveBeenCalled();
+  });
+
+  it("stays silent on ordinary entries", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "good day, calm evening with the dog");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("also points to support when the entry was queued offline (it is still saved)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "thinking about suicide");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const alerts = Alert.alert.mock.calls.map((c) => c[0]);
+    expect(alerts).toContain("Saved offline");
+    expect(alerts).toContain("Support is available");
+  });
+
+  it("does NOT point to support when the save failed (401 keeps the draft, no celebration dialog)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(401, "invalid token"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on");
+    await pressLabel(root, "Save entry");
+    await flush();
+    const alerts = Alert.alert.mock.calls.map((c) => c[0]);
+    expect(alerts).toEqual(["Session expired"]);
+  });
+});
+
+describe("EntryScreen inactivity auto-lock wiring", () => {
+  it("resets the idle countdown on every keystroke", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await typeInto(root, "What's going on today?", "t");
+    await typeInto(root, "What's going on today?", "to");
+    await typeInto(root, "What's going on today?", "tod");
+    expect(touchActivity).toHaveBeenCalledTimes(3);
   });
 });
