@@ -235,7 +235,7 @@ def test_production_refuses_dev_secret_and_sqlite(clean_env, monkeypatch):
         Settings.from_env()
     assert str(excinfo.value) == (
         "MINDPATTERN_DB_URL must point at PostgreSQL (or another shared "
-        "database) in production; SQLite is dev/test only"
+        "database) outside development; SQLite is dev/test only"
     )
 
     monkeypatch.setenv("MINDPATTERN_DB_URL", "postgresql+asyncpg://u:p@h/db")

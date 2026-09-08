@@ -227,6 +227,19 @@ def test_production_refuses_sqlite(monkeypatch):
         Settings.from_env()
 
 
+@pytest.mark.parametrize("env", ["staging", "prod", "PRODUCTION", "Production ", "eu-west"])
+def test_any_non_development_env_refuses_sqlite(env):
+    # Fail closed on the URL too: a typo'd MINDPATTERN_ENV must not boot
+    # against a throwaway local file database.
+    with pytest.raises(RuntimeError, match="DB_URL"):
+        Settings(environment=env, token_secret="x" * 48)
+
+
+def test_development_allows_sqlite():
+    s = Settings(environment="development", database_url="sqlite+aiosqlite:///./dev.db")
+    assert s.database_url.startswith("sqlite")
+
+
 def test_production_accepts_real_config(monkeypatch):
     monkeypatch.setenv("MINDPATTERN_ENV", "production")
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "x" * 48)
@@ -282,7 +295,8 @@ def test_llm_url_http_rejected_in_staging():
     # Not just production: ANY non-development environment sends journal
     # plaintext over TLS or not at all.
     with pytest.raises(RuntimeError, match="LLM_URL"):
-        Settings(environment="staging", token_secret="x" * 45, llm_url="http://llm.internal/v1")
+        Settings(environment="staging", token_secret="x" * 45,
+                 database_url="postgresql+asyncpg://u:p@h/db", llm_url="http://llm.internal/v1")
 
 
 def test_llm_url_https_accepted():
@@ -305,7 +319,8 @@ def test_llm_url_loopback_http_allowed_only_in_development():
             Settings(environment="development", llm_url=url)
     # Loopback http does NOT leak into other environments.
     with pytest.raises(RuntimeError, match="LLM_URL"):
-        Settings(environment="staging", token_secret="x" * 45, llm_url="http://localhost:11434/v1")
+        Settings(environment="staging", token_secret="x" * 45,
+                 database_url="postgresql+asyncpg://u:p@h/db", llm_url="http://localhost:11434/v1")
 
 
 # --- config: CORS defaults to no origins ---------------------------------------
@@ -334,6 +349,64 @@ async def test_configured_cors_origin_is_echoed(settings):
         denied = await c.get("/healthz", headers={"Origin": "https://attacker.example"})
     assert allowed.headers.get("access-control-allow-origin") == "https://web.example"
     assert "access-control-allow-origin" not in denied.headers
+
+
+# --- app factory: create_all is a development-only convenience -----------------
+
+
+async def test_create_all_only_runs_in_development(monkeypatch):
+    # Outside development the schema comes from `alembic upgrade head` (image
+    # entrypoint); startup must NOT create_all an unstamped schema.
+    import app.main as main_mod
+
+    class _Engine:
+        async def dispose(self):
+            pass
+
+    inited: list = []
+
+    async def _init(engine):
+        inited.append(engine)
+
+    monkeypatch.setattr(main_mod, "build_engine", lambda url: _Engine())
+    monkeypatch.setattr(main_mod, "init_models", _init)
+
+    prod = main_mod.create_app(Settings(
+        environment="staging",
+        database_url="postgresql+asyncpg://u:p@h/db",
+        token_secret="x" * 48,
+    ))
+    async with prod.router.lifespan_context(prod):
+        pass
+    assert inited == []
+
+    dev = main_mod.create_app(Settings(environment="development", database_url="sqlite+aiosqlite://"))
+    async with dev.router.lifespan_context(dev):
+        pass
+    assert len(inited) == 1
+
+
+# --- app factory: docs/schema hidden outside development ----------------------
+
+
+@pytest.mark.parametrize("env", ["production", "staging", "prod"])
+async def test_docs_hidden_in_any_non_development_env(monkeypatch, env):
+    # The docs gate must match the config gates: any MINDPATTERN_ENV value
+    # other than the exact "development" serves no API map.
+    import httpx
+    from app.main import create_app
+
+    monkeypatch.setattr("app.main.build_engine", lambda url: None)
+    settings = Settings(
+        environment=env,
+        database_url="postgresql+asyncpg://u:p@h/db",
+        token_secret="x" * 48,
+    )
+    app = create_app(settings)
+    async with httpx.ASGITransport(app=app) as transport:
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            assert (await c.get("/docs")).status_code == 404
+            assert (await c.get("/openapi.json")).status_code == 404
 
 
 # --- cache: eviction is batched, semantics unchanged ----------------------------

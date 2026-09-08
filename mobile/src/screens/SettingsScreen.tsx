@@ -22,7 +22,7 @@ const MAX_EXPORT_CHARS = 4_000_000;
 type PendingAction = { kind: "llm"; enabled: boolean } | { kind: "delete" } | null;
 
 export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.Element {
-  const { signOut } = useSession();
+  const { signOut, touchActivity } = useSession();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [consentedUrl, setConsentedUrl] = useState<string | null>(null);
@@ -208,7 +208,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onTouchStart={touchActivity}>
       {/* Crisis help: one tap from here, works offline (see CrisisScreen). */}
       <TouchableOpacity style={[styles.button, styles.helpButton]} onPress={() => navigation.navigate("Crisis")}>
         <Text style={[styles.buttonText, styles.helpText]}>Need help now? Crisis resources</Text>

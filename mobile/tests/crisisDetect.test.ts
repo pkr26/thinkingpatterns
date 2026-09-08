@@ -42,8 +42,44 @@ describe("detectCrisisLanguage — true positives", () => {
     "I don't want to be here",
     "i dont want to live",
     "I do not want to exist",
+    // M2 additions: purpose-in-life, be-alive, death-wish gerunds/infinitives,
+    // and the cut-myself self-harm family.
+    "there is nothing to live for",
+    "i have nothing to live for anymore",
+    "I don't want to be alive",
+    "i do not want to be alive",
+    "wanting to die more days than not",
+    "i keep wanting to die",
+    "i feel like dying",
+    "lately everything feels like dying inside",
+    "wish i could die",
+    "I wish I could die in my sleep",
+    "i cut myself again",
+    "i have been cutting myself",
   ])("fires on %j", (text) => {
     expect(detectCrisisLanguage(text)).toBe(true);
+  });
+
+  // iOS Smart Punctuation substitutes U+2019 for ASCII ' by default — every
+  // apostrophe-tolerant family must fire on BOTH spellings or iPhone typing
+  // silently misses detection.
+  const CURLY = "\u2019";
+  it.each([
+    `I can${CURLY}t go on`,
+    `i don${CURLY}t want to live`,
+    `I don${CURLY}t want to be here`,
+    `don${CURLY}t want to be alive`,
+    `i don${CURLY}t want to exist`,
+  ])("fires on the curly-apostrophe (U+2019) variant %j", (text) => {
+    expect(detectCrisisLanguage(text)).toBe(true);
+  });
+
+  it("still fires on the ASCII and dropped-apostrophe variants", () => {
+    expect(detectCrisisLanguage("I can't go on")).toBe(true);
+    expect(detectCrisisLanguage("i cant go on")).toBe(true);
+    expect(detectCrisisLanguage("I cannot go on")).toBe(true);
+    expect(detectCrisisLanguage("i dont want to live")).toBe(true);
+    expect(detectCrisisLanguage("I do not want to live")).toBe(true);
   });
 
   it("is case-insensitive, including ALL CAPS and mixed case", () => {
@@ -80,6 +116,15 @@ describe("detectCrisisLanguage — true negatives", () => {
     "Feeling anxious about the move but also excited.",
     "I want to diet again starting Monday.",
     "The exam ends, it all comes down to Friday.",
+    // Near-misses for the M2 additions.
+    "I have nothing to lose.",
+    "the new hire has nothing to live up to",
+    "i do want to be alive",
+    "i want to be alive for my kids",
+    "I wish I could fly",
+    "feels like a dying art form",
+    "i need to cut my hair this weekend",
+    "his cutting remarks stung all day",
   ])("does NOT fire on %j", (text) => {
     expect(detectCrisisLanguage(text)).toBe(false);
   });
@@ -88,6 +133,15 @@ describe("detectCrisisLanguage — true negatives", () => {
     // "suicide" is high-signal enough that the matcher fires on any use of
     // the word — the cost is one gentle dialog, the benefit is no misses.
     expect(detectCrisisLanguage("We discussed suicide prevention policy in class today.")).toBe(true);
+  });
+
+  it("accepts the documented false positives: benign 'cut myself' / 'feel like dying' contexts", () => {
+    // A clean context distinction ("shaving", "chopping onions", gym
+    // hyperbole) would be an incomplete blocklist pretending to be
+    // precision — see the crisisDetect header. The conservative contract
+    // pays one gentle dialog instead of risking a miss.
+    expect(detectCrisisLanguage("I cut myself shaving this morning")).toBe(true);
+    expect(detectCrisisLanguage("I feel like dying after that workout")).toBe(true);
   });
 
   it("does not fire on empty or whitespace-only input", () => {

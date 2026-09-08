@@ -88,3 +88,25 @@ def test_non_numeric_exp_rejected_not_500():
     for bad_exp in ("tomorrow", "9999999999", None, [1], {"t": 1}, True):
         with pytest.raises(tokens.TokenError):
             tokens.verify_token(signed({"uid": "u", "exp": bad_exp}), SECRET)
+
+
+def test_non_finite_exp_rejected():
+    """Python's json.loads accepts NaN/Infinity literals, and ``nan <= now``
+    is False — a well-signed NaN-exp token would never expire without an
+    explicit finiteness check."""
+    import base64
+    import hashlib
+    import hmac as hmac_mod
+    import json
+
+    def b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def signed(payload_dict: dict) -> str:
+        body = b64(json.dumps(payload_dict).encode())
+        sig = b64(hmac_mod.new(SECRET.encode(), body.encode(), hashlib.sha256).digest())
+        return f"{body}.{sig}"
+
+    for bad_exp in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(tokens.TokenError):
+            tokens.verify_token(signed({"uid": "u", "exp": bad_exp}), SECRET)

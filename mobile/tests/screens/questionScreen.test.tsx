@@ -12,6 +12,12 @@ vi.mock("../../src/api/client", async () => {
   return { ApiError, api: makeApiMock() };
 });
 
+const touchActivity = vi.fn();
+vi.mock("../../src/store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/store")>();
+  return { ...actual, useSession: () => ({ touchActivity }) };
+});
+
 const { api, ApiError } = await import("../../src/api/client");
 const { QuestionScreen } = await import("../../src/screens/QuestionScreen");
 const { vault } = await import("../../src/vault");
@@ -32,6 +38,7 @@ const questionBlob = (question: string, forDate = FOR_DATE): string =>
 beforeEach(() => {
   resetApi(api as never);
   Alert.alert.mockClear();
+  touchActivity.mockClear();
   vault.lock();
   vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey }, "user-1");
 });
@@ -161,6 +168,23 @@ describe("QuestionScreen", () => {
     await flush();
     expect(textOf(root)).toContain("Session expired — unlock again.");
     expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  // M2: interaction on this screen (not just Entry typing) restarts the
+  // inactivity countdown — a reader is not idle.
+  it("any touch on the screen resets the inactivity countdown", async () => {
+    const { View } = await import("react-native");
+    const root = await render(<QuestionScreen />);
+    await flush();
+    const container = root.root.findAllByType(View)[0];
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      (container.props as { onTouchStart?: () => void }).onTouchStart?.();
+    });
+    await act(async () => {
+      (container.props as { onTouchStart?: () => void }).onTouchStart?.();
+    });
+    expect(touchActivity).toHaveBeenCalledTimes(2);
   });
 
   it("local crypto failures get a dialog", async () => {

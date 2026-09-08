@@ -22,6 +22,12 @@ class QueueFullError extends Error {
     this.name = "QueueFullError";
   }
 }
+class QueueAbandonedError extends Error {
+  constructor() {
+    super("the queue was wiped while saving — the entry was NOT queued");
+    this.name = "QueueAbandonedError";
+  }
+}
 const recordMood = vi.fn(async () => {});
 vi.mock("../../src/moodLog", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/moodLog")>();
@@ -34,6 +40,7 @@ vi.mock("../../src/moodLog", async (importOriginal) => {
 
 vi.mock("../../src/offlineQueue", () => ({
   QueueFullError,
+  QueueAbandonedError,
   enqueue: vi.fn(async () => {}),
   flushQueue: vi.fn(async () => 0),
 }));
@@ -49,7 +56,8 @@ vi.mock("../../src/store", async (importOriginal) => {
 
 const { api, ApiError } = await import("../../src/api/client");
 const { encryptEntry } = await import("../../src/crypto/MindPatternCrypto");
-const { enqueue, flushQueue, QueueFullError: QFErr } = await import("../../src/offlineQueue");
+const { enqueue, flushQueue, QueueFullError: QFErr, QueueAbandonedError: QAErr } = await import("../../src/offlineQueue");
+const { takeStashedDraft } = await import("../../src/store");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
 const { render, flush, textOf, pressLabel, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
@@ -73,6 +81,10 @@ beforeEach(() => {
   vault.lock();
   vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
+  // The draft stash is module state (in store.tsx): consume any leftover
+  // so one test's stashed draft cannot leak into the next.
+  takeStashedDraft("user-1");
+  takeStashedDraft("user-2");
 });
 
 async function writeEntry(root: Awaited<ReturnType<typeof render>>, text: string): Promise<void> {
@@ -316,7 +328,28 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "offline thought");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Offline storage full", expect.stringContaining("still on screen"));
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Offline storage full",
+      expect.stringContaining("still on screen"),
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
+  });
+
+  it("an abandoned enqueue (queue wiped mid-save) is LOUD: no 'Saved offline', draft kept", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new QAErr());
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "offline thought");
+    await pressLabel(root, "Save entry");
+    await flush();
+    const alerts = Alert.alert.mock.calls.map((c) => c[0]);
+    expect(alerts).toEqual(["Not saved"]);
+    expect(alerts).not.toContain("Saved offline");
+    expect(Alert.alert).toHaveBeenCalledWith("Not saved", expect.stringContaining("still on screen"));
+    // The draft stays in the editor for another attempt.
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("offline thought");
   });
 
   it("surfaces unexpected save errors with their message", async () => {
@@ -464,6 +497,123 @@ describe("EntryScreen crisis detection (on-device, pre-encryption)", () => {
     await flush();
     const alerts = Alert.alert.mock.calls.map((c) => c[0]);
     expect(alerts).toEqual(["Session expired"]);
+  });
+
+  it("STILL points to support when a crisis-flagged entry hits a full queue (the text is on screen)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new QFErr());
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on like this");
+    await pressLabel(root, "Save entry");
+    await flush();
+    // The queue-full alert comes first; acknowledging it opens the support
+    // pointer — the failed save must not suppress it.
+    const alerts = Alert.alert.mock.calls.map((c) => c[0]);
+    expect(alerts).toEqual(["Offline storage full"]);
+    await pressAlertButton("OK");
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Offline storage full", "Support is available"]);
+    await pressAlertButton("View support resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+    // The draft was never cleared.
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("I can't go on like this");
+  });
+
+  it("queue-full on an ORDINARY entry does not open the support dialog", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new QFErr());
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "a perfectly ordinary day");
+    await pressLabel(root, "Save entry");
+    await flush();
+    await pressAlertButton("OK");
+    const alerts = Alert.alert.mock.calls.map((c) => c[0]);
+    expect(alerts).toEqual(["Offline storage full"]);
+  });
+});
+
+describe("EntryScreen draft-stash hygiene", () => {
+  const stashVia401 = async (text: string): Promise<void> => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(401, "invalid token"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, text);
+    await pressLabel(root, "Save entry");
+    await flush();
+    root.unmount();
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+  };
+
+  it("a late getUserId() resolution does not clobber in-progress typing", async () => {
+    await stashVia401("the stashed draft");
+    // Now the remount: getUserId is SLOW, and the user starts typing before
+    // it resolves.
+    let resolveUserId!: (v: string | null) => void;
+    vi.mocked(api.getUserId).mockImplementation(
+      () => new Promise<string | null>((resolve) => (resolveUserId = resolve)),
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "fresh typing already here");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      resolveUserId("user-1");
+    });
+    await flush();
+    // The stash is consumed but NOT applied over non-empty text...
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("fresh typing already here");
+    // ...and it is consumed (one-shot): a later remount must not resurrect it.
+    expect(takeStashedDraft("user-1")).toBeNull();
+  });
+
+  it("still applies the stash when the field is empty at resolution time", async () => {
+    await stashVia401("restore me");
+    let resolveUserId!: (v: string | null) => void;
+    vi.mocked(api.getUserId).mockImplementation(
+      () => new Promise<string | null>((resolve) => (resolveUserId = resolve)),
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      resolveUserId("user-1");
+    });
+    await flush();
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("restore me");
+  });
+
+  it("a failed getUserId() keeps the stash for the next mount instead of dropping the draft", async () => {
+    await stashVia401("do not lose me");
+    vi.mocked(api.getUserId).mockRejectedValue(new Error("storage exploded"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    // No crash, empty editor, and the stash survived the rejection.
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("");
+    expect(takeStashedDraft("user-1")).toBe("do not lose me");
+  });
+
+  it("a mismatched account never consumes the stash — the owning account still restores it", async () => {
+    await stashVia401("alice's draft");
+    // A DIFFERENT account mounts: no restore, no consume.
+    vi.mocked(api.getUserId).mockResolvedValue("user-2");
+    const other = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(
+      (inputByPlaceholder(other, "What's going on today?").props as { value: string }).value,
+    ).toBe("");
+    other.unmount();
+    // The stash survived the mismatched mount: the owning account's next
+    // mount restores it (a consumed stash would render an empty editor).
+    vi.mocked(api.getUserId).mockResolvedValue("user-1");
+    const mine = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(
+      (inputByPlaceholder(mine, "What's going on today?").props as { value: string }).value,
+    ).toBe("alice's draft");
   });
 });
 

@@ -176,19 +176,6 @@ def make_rate_limiter(bucket: str, limit_attr: str, window_attr: str):
     return check
 
 
-def check_keyed_limit(request: Request, key: str, limit: int, window: int) -> None:
-    """Rate-limit an arbitrary key (e.g. a username) inside a route handler.
-
-    Used for per-username buckets on register/login: rotating source IPs
-    must not enable unbounded probing of one account name (or unbounded
-    name-availability enumeration via register).
-    """
-    counter: FixedWindowCounter = request.app.state.rate_counter
-    result = counter.hit(key, window)
-    if result.count > limit:
-        raise _limit_response(result.retry_after)
-
-
 def check_keyed_limit_without_count(request: Request, key: str, limit: int, window: int) -> None:
     """429 if the key is already over the limit, but do NOT count this request.
 

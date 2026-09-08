@@ -1,5 +1,10 @@
 services:
   api:
+    # The image CMD (docker-entrypoint.sh) runs `alembic upgrade head`
+    # against MINDPATTERN_DB_URL before starting uvicorn, so this service is
+    # migrated on every deploy without a separate step. A database created by
+    # a pre-migrations (create_all-era) deploy must be adopted once with
+    # `alembic stamp head` — see backend/alembic/README.md.
     build: ./backend
     environment:
       MINDPATTERN_ENV: production

@@ -22,6 +22,12 @@ VECTORS_PATH = Path(__file__).resolve().parents[2] / "shared" / "vectors.json"
 
 
 def _encrypt_vectors() -> list[dict]:
+    # Hard failure, never a silent skip: vectors.json is committed, so a
+    # missing file means a broken checkout, not "not generated yet".
+    assert VECTORS_PATH.exists(), (
+        f"shared/vectors.json not found at {VECTORS_PATH} — it is committed; "
+        "restore it (or regenerate with scripts/generate_vectors.py)"
+    )
     data = json.loads(VECTORS_PATH.read_text())
     return data["encrypt_vectors"]
 
@@ -33,12 +39,11 @@ def _data_key(vector: dict) -> bytes:
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not VECTORS_PATH.exists(), reason="vectors not generated yet")
 def test_fixed_nonce_encrypt_reproduces_blob_byte_for_byte():
     vectors = _encrypt_vectors()
     assert len(vectors) >= 2, "expected at least one ASCII and one non-ASCII case"
     for vector in vectors:
-        aad = crypto.build_aad(*vector["aad_parts"])
+        aad = crypto.build_aad(*vector["aad_parts"]) if vector["aad_parts"] else None
         blob = crypto.encrypt(
             _data_key(vector),
             base64.b64decode(vector["plaintext"]),
@@ -49,11 +54,10 @@ def test_fixed_nonce_encrypt_reproduces_blob_byte_for_byte():
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not VECTORS_PATH.exists(), reason="vectors not generated yet")
 def test_backend_decrypts_fixed_nonce_blob():
     """The same pinned blob bytes the mobile test reproduces must decrypt here."""
     for vector in _encrypt_vectors():
-        aad = crypto.build_aad(*vector["aad_parts"])
+        aad = crypto.build_aad(*vector["aad_parts"]) if vector["aad_parts"] else None
         plaintext = crypto.decrypt(
             _data_key(vector), base64.b64decode(vector["blob"]), aad
         )

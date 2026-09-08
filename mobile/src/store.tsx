@@ -6,10 +6,34 @@
  */
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { api } from "./api/client";
+import { api, setUnauthorizedHandler } from "./api/client";
 import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
+
+/** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
+ *  waits here (memory-only, account-bound) so re-unlocking restores it for
+ *  another save attempt. A different account on the same device never sees
+ *  it, and signOut wipes it — a signed-out session must not retain the
+ *  previous user's plaintext draft in the JS heap. */
+let stashedDraft: { userId: string; text: string } | null = null;
+
+/** Stash an in-progress draft before a 401-forced lock unmounts the editor. */
+export function stashDraft(userId: string, text: string): void {
+  stashedDraft = { userId, text };
+}
+
+/** Consumes the stash ONLY for the account it was written under — the
+ *  account check succeeds BEFORE the stash is nulled, so a mismatched (or
+ *  failed) restore attempt does not silently drop the draft. */
+export function takeStashedDraft(userId: string): string | null {
+  if (stashedDraft && stashedDraft.userId === userId) {
+    const { text } = stashedDraft;
+    stashedDraft = null;
+    return text;
+  }
+  return null;
+}
 
 /** "loading" prevents the login-flash race: a saved session must never be
  *  overwritten by an alternate sign-in before AsyncStorage resolves. */
@@ -75,6 +99,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Any authenticated 401 (entry save, insights fetch, question fetch,
+    // queue flush — not just the Entry screen) locks the vault app-wide;
+    // the client invokes this hook before the ApiError reaches the caller.
+    setUnauthorizedHandler(() => vault.lock());
     api.isLoggedIn().then((logged) => {
       if (!cancelled) setAuthStatus(logged ? "loggedIn" : "loggedOut");
     });
@@ -101,6 +129,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     });
     return () => {
       cancelled = true;
+      setUnauthorizedHandler(null);
       if (idleTimer.current) clearTimeout(idleTimer.current);
       unsubscribe();
       appStateSub.remove();
@@ -127,6 +156,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // offline: the token also dies at natural expiry
     }
     vault.lock();
+    // The stashed draft is plaintext in the JS heap: it must not outlive
+    // the session it belongs to (shared-device confidentiality).
+    stashedDraft = null;
     // Local account hygiene (shared-device confidentiality): the cached
     // KDF salt, the offline-unlock proof and the recompute stamp are what
     // let a LATER user of this device interact with the previous account's

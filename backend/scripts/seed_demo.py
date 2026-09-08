@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import getpass
 import json
 import os
 import random
@@ -210,12 +211,20 @@ def main() -> int:
     parser.add_argument("--username", default="demo")
     # No default password: a predictable credential on a seeded account is
     # one forgotten teardown away from a stranger reading the demo journal.
-    parser.add_argument("--password", required=True)
+    # The flag exists for CI/automation; interactively the password is
+    # prompted for instead, so it never travels on argv (visible in `ps`
+    # and shell history).
+    parser.add_argument("--password", default=None,
+                        help="demo account password (omit to be prompted)")
     parser.add_argument("--days", type=int, default=84)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--db-url", default=None,
                         help="SQLAlchemy URL of the API database — needed once to backdate the demo account's created_at (see below)")
     args = parser.parse_args()
+    if args.password is None:
+        args.password = getpass.getpass(f"password for demo account {args.username!r}: ")
+    if not args.password:
+        parser.error("password must not be empty")
 
     client = httpx.Client(base_url=args.base_url, timeout=30)
 
@@ -329,7 +338,7 @@ def main() -> int:
     for p in payload["stats"]["patterns"]:
         state = p["detail"].get("pattern_state", "?")
         print(f"  [{state:9}] {p['kind']:18} {p['label'][:60]}")
-    print(f"\nSign into the app →  username: {args.username}   password: {args.password}")
+    print(f"\nSign into the app →  username: {args.username}   password: the one you provided")
     return 0
 
 

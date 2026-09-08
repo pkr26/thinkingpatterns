@@ -9,12 +9,12 @@ import { AppState, Text } from "react-native";
 
 vi.mock("../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("./helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  return { ApiError, api: makeApiMock(), setUnauthorizedHandler: vi.fn() };
 });
 
-const { api } = await import("../src/api/client");
+const { api, setUnauthorizedHandler } = await import("../src/api/client");
 const { resetApi } = await import("./helpers/apiMock");
-const { SessionProvider, useSession } = await import("../src/store");
+const { SessionProvider, useSession, stashDraft, takeStashedDraft } = await import("../src/store");
 const { vault } = await import("../src/vault");
 const { render, flush, textOf, act } = await import("./helpers/rtr");
 
@@ -31,6 +31,7 @@ function Probe() {
 beforeEach(() => {
   // Fresh default implementations per test so per-test overrides cannot leak.
   resetApi(api as never);
+  vi.mocked(setUnauthorizedHandler).mockClear();
   vi.mocked(AppState.addEventListener).mockClear();
   vault.lock();
 });
@@ -424,6 +425,71 @@ describe("SessionProvider", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // M2: a 401 from ANY api call must lock the vault app-wide — the store
+  // registers the client's unauthorized hook, and the lock flips the
+  // published `unlocked` flag (what navigation gates on).
+  it("registers the 401 hook: any unauthorized response locks the vault and flips the gate", async () => {
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    expect(setUnauthorizedHandler).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    });
+    expect(textOf(root)).toBe("loggedOut|true|0|30");
+
+    // The client invokes the registered handler before throwing its 401.
+    const handler = vi.mocked(setUnauthorizedHandler).mock.calls[0]?.[0] as (() => void) | null;
+    expect(handler).toBeTypeOf("function");
+    await act(async () => {
+      handler?.();
+    });
+    expect(vault.isUnlocked()).toBe(false);
+    expect(textOf(root)).toBe("loggedOut|false|0|30");
+  });
+
+  it("unregisters the 401 hook when the provider unmounts", async () => {
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    await act(async () => {
+      root.unmount();
+    });
+    expect(vi.mocked(setUnauthorizedHandler).mock.calls.at(-1)?.[0]).toBeNull();
+  });
+
+  // M2 draft-stash hygiene: the plaintext draft must not outlive the
+  // session in the JS heap.
+  it("signOut wipes the stashed draft", async () => {
+    stashDraft("user-1", "the previous user's plaintext draft");
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    await act(async () => {
+      await session.signOut();
+    });
+    expect(takeStashedDraft("user-1")).toBeNull();
+  });
+
+  it("takeStashedDraft is account-bound: a mismatch neither returns nor consumes the stash", async () => {
+    stashDraft("user-1", "alice's draft");
+    // A different account never sees it — and the stash SURVIVES the
+    // mismatched probe (the account check precedes the consume).
+    expect(takeStashedDraft("user-2")).toBeNull();
+    // The owning account still gets it back, exactly once.
+    expect(takeStashedDraft("user-1")).toBe("alice's draft");
+    expect(takeStashedDraft("user-1")).toBeNull();
   });
 });
 

@@ -64,15 +64,21 @@ describe("fixed-nonce encrypt vectors (mobile -> backend direction)", () => {
   // THIS client emits, byte-for-byte, so the backend test can independently
   // decrypt it. AAD is rebuilt from the vector's PARTS — never the stored
   // bytes — which also exercises buildAad against every vector part set.
-  it("has encrypt vectors to check", () => {
+  it("has encrypt vectors to check, including a no-AAD case", () => {
     expect(encryptVectors.length).toBeGreaterThanOrEqual(2);
+    // Pins the families beyond 3-part 'entry': 2-part moodlog/unlockproof
+    // AADs, an empty plaintext, and the AAD-less secureStore path.
+    expect(encryptVectors.some((v) => v.aad_parts === null)).toBe(true);
+    expect(encryptVectors.some((v) => v.plaintext === "")).toBe(true);
+    expect(encryptVectors.some((v) => v.aad_parts?.[0] === "moodlog")).toBe(true);
+    expect(encryptVectors.some((v) => v.aad_parts?.[0] === "unlockproof")).toBe(true);
   });
 
   for (const [i, v] of encryptVectors.entries()) {
     it(`encrypt vector ${i}: fixed-nonce encrypt reproduces the blob byte-for-byte`, () => {
       const salt = Buffer.from(v.salt, "base64");
       const dataKey = deriveDataKey(deriveMasterKey(v.password, salt, v.iterations));
-      const aad = buildAad(...v.aad_parts);
+      const aad = v.aad_parts ? buildAad(...v.aad_parts) : undefined;
       const nonce = Buffer.from(v.nonce, "base64");
       const blob = encrypt(dataKey, Buffer.from(v.plaintext, "base64"), aad, nonce);
       expect(blob.toString("base64")).toBe(v.blob);
@@ -81,9 +87,8 @@ describe("fixed-nonce encrypt vectors (mobile -> backend direction)", () => {
     it(`encrypt vector ${i}: mobile decrypts the pinned blob (backend's encrypt output)`, () => {
       const salt = Buffer.from(v.salt, "base64");
       const dataKey = deriveDataKey(deriveMasterKey(v.password, salt, v.iterations));
-      const plaintext = decrypt(
-        dataKey, Buffer.from(v.blob, "base64"), buildAad(...v.aad_parts),
-      );
+      const aad = v.aad_parts ? buildAad(...v.aad_parts) : undefined;
+      const plaintext = decrypt(dataKey, Buffer.from(v.blob, "base64"), aad);
       expect(plaintext.toString("base64")).toBe(v.plaintext);
     });
   }

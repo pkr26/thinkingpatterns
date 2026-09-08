@@ -168,6 +168,17 @@ export function detailToMessage(detail: unknown, status: number): string {
   return `request failed (${status})`;
 }
 
+/** Session-death hook: invoked on ANY authenticated 401 BEFORE the
+ *  ApiError is thrown, so every call site (entry save, insights fetch,
+ *  question fetch, queue flush) reacts identically instead of each
+ *  growing its own handler. Set once by the session store, where the
+ *  vault lives; a failed login/register 401 carries no token and does
+ *  NOT trip it (that 401 means "bad credentials", not "session died"). */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 interface RequestOptions {
   /** The request ships a credential that must never survive a redirect
    *  (verifier, data key). For these, an unverifiable final URL — some
@@ -232,6 +243,16 @@ async function request(
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401 && token !== null) {
+      // The bearer token we sent was rejected: the session is dead. Lock
+      // the vault app-wide BEFORE the caller sees the error — a hook
+      // failure must never mask the 401 itself.
+      try {
+        onUnauthorized?.();
+      } catch {
+        // a hook must never mask the ApiError below
+      }
+    }
     throw new ApiError(response.status, detailToMessage((data as { detail?: unknown }).detail, response.status));
   }
   return data;

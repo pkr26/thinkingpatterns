@@ -707,3 +707,33 @@ async def test_list_entries_pagination_has_stable_total_order(client, app):
     paged = await fetch(0, 2) + await fetch(2, 2) + await fetch(4, 2)
     assert len(full) == 5
     assert paged == full  # no duplicates, no reordering across page boundaries
+
+
+# --- finding: insights corpus load had no tiebreaker --------------------------------------
+
+
+async def test_load_rows_has_stable_total_order(client, app):
+    from sqlalchemy import update as sql_update
+
+    from app.api.insights import _load_rows
+    from app.models import Entry
+
+    emu = ClientEmulator("corpusorder", "pw-corpus-order")
+    await emu.register(client)
+    day = date.today()
+    for i in range(5):
+        await emu.create_entry(client, f"corpus order entry {i}", day,
+                               client_entry_id=f"e-corpus-{i}")
+    # Identical (entry_date, received_at): only the id tiebreaker orders these.
+    # Without it, which entry the 2M-char corpus budget truncates is
+    # DB-arbitrary and can flip between recomputes.
+    async with app.state.sessionmaker() as s:
+        await s.execute(sql_update(Entry).values(
+            received_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+        await s.commit()
+        rows = await _load_rows(s, emu.user_id)
+    # Entry ids are random uuid hex, so ascending id order can only come from
+    # an explicit ORDER BY ... id — never from insertion/rowid order.
+    ids = [row.id for row in rows]
+    assert len(ids) == 5
+    assert ids == sorted(ids)

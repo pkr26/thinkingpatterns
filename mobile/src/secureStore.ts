@@ -27,11 +27,20 @@ let keyPromise: Promise<Buffer> | null = null;
 
 async function loadDeviceKey(): Promise<Buffer> {
   const raw = await AsyncStorage.getItem(DEVICE_KEY_STORAGE);
-  if (raw) {
-    cachedKey = Buffer.from(raw, "base64");
+  const stored = raw ? Buffer.from(raw, "base64") : null;
+  // A stored key must be exactly 32 bytes; anything else is corrupt, so
+  // treat it as absent and re-derive — otherwise every setItem throws and
+  // every getItem silently reads null forever.
+  if (stored && stored.length === 32) {
+    cachedKey = stored;
   } else {
-    cachedKey = Buffer.from(engine.randomBytes(32));
-    await AsyncStorage.setItem(DEVICE_KEY_STORAGE, cachedKey.toString("base64"));
+    const key = Buffer.from(engine.randomBytes(32));
+    await AsyncStorage.setItem(DEVICE_KEY_STORAGE, key.toString("base64"));
+    // Cache only AFTER the key is durably persisted: caching before the
+    // write would leave a never-stored key behind on failure (e.g. disk
+    // full), and that session's ciphertext would be undecryptable after a
+    // restart — silent data loss.
+    cachedKey = key;
   }
   return cachedKey;
 }

@@ -74,7 +74,7 @@ five-minute demo — so seed an account whose history already exists:
 ```bash
 cd backend
 # terminal 1: the API (dev sqlite)
-MINDPATTERN_DB_URL="sqlite+aiosqlite:///./demo.db" ../.venv/bin/uvicorn app.main:app --port 8000
+MINDPATTERN_ENV=development MINDPATTERN_DB_URL="sqlite+aiosqlite:///./demo.db" ../.venv/bin/uvicorn app.main:app --port 8000
 # terminal 2: 84 days of realistic, structure-planted journal
 ../.venv/bin/python scripts/seed_demo.py \
   --db-url "sqlite+aiosqlite:///./demo.db" --username demo --password 'demo-patterns-2026'
@@ -83,8 +83,9 @@ MINDPATTERN_DB_URL="sqlite+aiosqlite:///./demo.db" ../.venv/bin/uvicorn app.main
 The script uses the real client-side crypto (the app's own KDF + AES-GCM
 path, pinned by `shared/vectors.json`) and the real API — the server only
 ever sees opaque blobs and one single-use key. It prints the patterns the
-brain surfaced; sign into the app with the printed credentials to see the
-same cards. `probe_brain.py` runs the ground-truth check offline (9/9).
+brain surfaced; sign into the app as `demo` with the password you provided
+to see the same cards. `probe_brain.py` runs the ground-truth check offline
+(9/9).
 
 ## Safety
 
@@ -109,7 +110,7 @@ same cards. `probe_brain.py` runs the ground-truth check offline (9/9).
 6. **Destructive actions re-authenticate.** `DELETE /api/account` and enabling LLM analysis require the password-derived verifier — a stolen bearer token cannot erase a journal. `POST /api/auth/logout` bumps a token epoch that revokes every token for the account.
 7. **Metadata the server does hold** (be aware of it): usernames, per-entry calendar dates and received timestamps, entry ciphertext sizes, insight dates. A DB leak reveals *when* and *how much* you wrote — never *what*.
 8. **Optional LLM analysis is opt-in per user.** If the operator configures `MINDPATTERN_LLM_URL`, journal text is only sent to that third-party endpoint for accounts that explicitly consented (re-authenticated toggle in Settings, with the disclosure that named-provider retention applies), only post-threshold, with model output sanitized (labels length-capped, "recurring phrases" verified against your actual text, numerics clamped). Off by default for every account.
-9. **Transport & ops hardening.** Production boots with OpenAPI/docs disabled and refuses the dev token secret in every non-development environment (fail-closed). Every response — including 500s and 413s — carries `nosniff`/`DENY`/`no-referrer`/`no-store`. Request bodies are capped at 2 MiB **before** parsing; validation errors never echo input. Rate limiting covers auth, entries, processing, reads, deletes; behind a proxy it uses the rightmost `X-Forwarded-For` across **all** header lines; the counter's memory is bounded. Access logs are disabled in the image. Export is streamed. Per-account quotas bound storage and recompute cost.
+9. **Transport & ops hardening.** Non-development boots with OpenAPI/docs disabled and refuses the dev token secret and SQLite in every non-development environment (fail-closed). Every response — including 500s and 413s — carries `nosniff`/`DENY`/`no-referrer`/`no-store` plus HSTS (`strict-transport-security: max-age=31536000; includeSubDomains`). Request bodies are capped at 2 MiB **before** parsing; validation errors never echo input. Rate limiting covers auth, entries, processing, reads, deletes; behind a proxy it uses the rightmost `X-Forwarded-For` across **all** header lines; the counter's memory is bounded. Access logs are disabled in the image. Export is streamed. Per-account quotas bound storage and recompute cost.
 
 The mobile client keeps derived keys memory-only: after an app restart the session token is still valid but the key vault is locked behind an unlock screen, and navigation is tri-state (no login-flash race). The offline sync queue is account-bound by mechanism; server error text is sanitized before reaching dialogs, and the app switcher sees only a blank shield.
 
@@ -117,10 +118,12 @@ The mobile client keeps derived keys memory-only: after an app restart the sessi
 
 ```bash
 # Backend (dev) — Python 3.12+
+# NOTE: the app fails closed (MINDPATTERN_ENV defaults to production), so
+# every local non-Docker command below opts into development explicitly.
 cd backend
 python3 -m venv .venv && source .venv/bin/activate   # or: uv venv
 pip install -r requirements.lock.txt                  # pinned set the suite ran against
-uvicorn app.main:app --reload                           # http://localhost:8000/docs
+MINDPATTERN_ENV=development uvicorn app.main:app --reload   # http://localhost:8000/docs
 
 # Full stack (postgres + api)
 cat > .env <<EOF
@@ -147,12 +150,16 @@ node mobile/tools/decrypt_export.mjs --bundle export.json
 
 ## Database migrations
 
-Schema changes ship as Alembic revisions (`backend/alembic/`); apply them at
-deploy time with `alembic upgrade head` before starting the new app version.
-The image and `docker-compose.yml` include the migration files, and
-`MINDPATTERN_DB_URL` is the single configuration path. Operator workflow,
-adopting a pre-migrations database, and autogenerate instructions:
-`backend/alembic/README.md`.
+Schema changes ship as Alembic revisions (`backend/alembic/`). The container
+entrypoint runs `alembic upgrade head` against `MINDPATTERN_DB_URL` **before
+starting uvicorn**, so `docker compose up --build` is always migrated; the
+app's startup `create_all` runs only with `MINDPATTERN_ENV=development`
+(dev/test), never in a deployed container. A database created by a
+pre-migrations (create_all-era) deploy must be adopted once with
+`alembic stamp head` so future revisions don't collide with existing tables.
+Migration tooling reads `MINDPATTERN_DB_URL` directly — it does not import
+the app config and needs no token secret. Operator workflow, adoption, and
+autogenerate instructions: `backend/alembic/README.md`.
 
 ## Testing
 
@@ -173,7 +180,7 @@ PATH="$PWD/../.venv/bin:$PATH" ../.venv/bin/mutmut run
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MINDPATTERN_ENV` | `development` | Only the literal `development` may use the dev secret; anything else fail-closes. `production` additionally rejects SQLite |
+| `MINDPATTERN_ENV` | `production` | Fails closed: only the literal `development` may use the dev secret, SQLite, or /docs; every other value (including unset) takes the production gates |
 | `MINDPATTERN_DB_URL` | local SQLite | SQLAlchemy async URL (use `postgresql+asyncpg://…` in prod) |
 | `MINDPATTERN_TOKEN_SECRET` | dev default | HMAC secret for session tokens — must be set outside development (≥ 32 chars, or the app refuses to boot) |
 | `MINDPATTERN_UNLOCK_DAYS` | `30` | Pattern-revelation threshold |
@@ -187,7 +194,7 @@ PATH="$PWD/../.venv/bin:$PATH" ../.venv/bin/mutmut run
 | `MINDPATTERN_MAX_ENTRIES_PER_USER` | `10000` | Per-account entry quota (413 when exceeded) |
 | `MINDPATTERN_MAX_USER_BLOB_BYTES` | `268435456` | Per-account total ciphertext quota |
 | `MINDPATTERN_RECOMPUTE_ENTRY_LIMIT` | `2000` | Most-recent entries analyzed per recompute (threshold still counts all days) |
-| `MINDPATTERN_CORS_ORIGINS` | `*` | Comma-separated allowed origins for browser clients |
+| `MINDPATTERN_CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins for browser clients; empty = no CORS headers (fail-closed) |
 | `MINDPATTERN_TRUST_PROXY_HEADERS` | `0` | `1` = rate-limit by rightmost `X-Forwarded-For` across all header lines (only behind a trusted reverse proxy; run uvicorn with `--proxy-headers`) |
 
 Invalid numeric values abort startup instead of silently falling back.

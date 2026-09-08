@@ -149,11 +149,15 @@ class Settings:
         for name in ("max_body_bytes", "max_user_blob_bytes"):
             if getattr(self, name) < 1024:
                 raise RuntimeError(f"{name} must be >= 1024")
-        if self.environment == "production":
+        if self.environment != "development":
+            # SQLite is dev/test only — rejected for ANY non-development
+            # value ("prod", "staging", a typo), not just the exact string
+            # "production": a typo must not boot against a throwaway local
+            # file database.
             if self.database_url.startswith("sqlite"):
                 raise RuntimeError(
                     "MINDPATTERN_DB_URL must point at PostgreSQL (or another shared "
-                    "database) in production; SQLite is dev/test only"
+                    "database) outside development; SQLite is dev/test only"
                 )
         if self.llm_url.strip():
             # Decrypted journal plaintext is POSTed to this endpoint, so the

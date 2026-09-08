@@ -23,7 +23,9 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov
       - name: Backend tests with coverage
         working-directory: backend
-        run: python -m pytest tests/ --cov=app --cov-report=term
+        # --cov-fail-under pins the floor at the suite's measured total
+        # (97% at the time this gate was added); lower it only deliberately.
+        run: python -m pytest tests/ --cov=app --cov-report=term --cov-fail-under=97
 
   mobile:
     runs-on: ubuntu-latest

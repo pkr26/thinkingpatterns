@@ -21,11 +21,21 @@
  *   2. clearQueue() bumps a generation counter; any in-flight flush detects
  *      the bump and abandons its final write-back, and an enqueue whose read
  *      straddled the wipe abandons its commit instead of resurrecting an
- *      item inside the just-wiped queue.
+ *      item inside the just-wiped queue — LOUDLY (QueueAbandonedError), so
+ *      the UI never reports "Saved offline" for an entry that was not saved.
+ *      The same generation check guards the recovery stores: an
+ *      appendRejected / quarantine write that straddled the wipe must not
+ *      re-create REJECTED_KEY / QUARANTINE_KEY after account deletion.
  *   3. The queue is capacity-bounded with a LOUD failure (QueueFullError).
  *   4. A server 422 does NOT silently destroy the entry: the ciphertext is
  *      moved to a rejected-store for recovery — a hostile server must not
  *      be able to erase a user's only copy with an error code.
+ *   5. A server 401 means the session is dead: every remaining upload for
+ *      this account is doomed, and re-queueing it would loop
+ *      unlock → flush → 401 → lock forever. The unsent ciphertext moves to
+ *      the rejected store (preserved for recovery, never destroyed) and the
+ *      flush fails LOUDLY with SessionExpiredError; the client layer has
+ *      already locked the vault by then (see setUnauthorizedHandler).
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, ApiError } from "./api/client";
@@ -65,7 +75,34 @@ export class QueueFullError extends Error {
   }
 }
 
-async function readQueue(): Promise<QueuedEntry[]> {
+/** The queue was wiped (sign-out / account deletion) between the enqueue's
+ *  read and its commit, so the entry was NOT saved. Throwing — instead of
+ *  returning normally — keeps the UI honest: no "Saved offline", the draft
+ *  stays on screen. */
+export class QueueAbandonedError extends Error {
+  constructor() {
+    super("the queue was wiped while saving — the entry was NOT queued");
+    this.name = "QueueAbandonedError";
+  }
+}
+
+/** The session died mid-flush (401): the doomed ciphertext was moved to the
+ *  rejected store for recovery and the flush stopped instead of re-queueing
+ *  it against the dead session forever. */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("session expired mid-flush — unsent entries were preserved in the rejected store");
+    this.name = "SessionExpiredError";
+  }
+}
+
+/** A wipe that began after `generation` was captured wins: the read's
+ *  follow-up writes (and the caller's commit) must be abandoned. */
+function wipedSince(generation: number | undefined): boolean {
+  return generation !== undefined && queueGeneration !== generation;
+}
+
+async function readQueue(generation?: number): Promise<QueuedEntry[]> {
   // "" and "[]" both yield an empty queue (the empty string falls into the
   // corrupted-storage recovery below, which returns [] as well).
   const raw = (await AsyncStorage.getItem(QUEUE_KEY)) ?? "[]";
@@ -78,6 +115,9 @@ async function readQueue(): Promise<QueuedEntry[]> {
     // so a SECOND corruption never overwrites the first recovery copy),
     // then start a fresh queue.
     const previous = await AsyncStorage.getItem(QUARANTINE_KEY);
+    // A wipe (account deletion) racing this read wins: re-creating the
+    // quarantine key now would resurrect ciphertext after the wipe.
+    if (wipedSince(generation)) return [];
     const record = previous === null ? raw : `${previous}\n---corruption---\n${raw}`;
     await AsyncStorage.setItem(QUARANTINE_KEY, record);
     await AsyncStorage.removeItem(QUEUE_KEY);
@@ -101,8 +141,11 @@ export async function rejectedEntries(): Promise<QueuedEntry[]> {
   }
 }
 
-async function appendRejected(item: QueuedEntry): Promise<void> {
+async function appendRejected(item: QueuedEntry, generation?: number): Promise<void> {
   const list = await rejectedEntries();
+  // A wipe (sign-out / account deletion) racing this read-modify-write wins:
+  // re-writing REJECTED_KEY now would resurrect ciphertext after the wipe.
+  if (wipedSince(generation)) return;
   list.push(item);
   await AsyncStorage.setItem(REJECTED_KEY, JSON.stringify(list));
 }
@@ -110,15 +153,15 @@ async function appendRejected(item: QueuedEntry): Promise<void> {
 export async function enqueue(item: QueuedEntry): Promise<void> {
   return serialized(async () => {
     const generation = queueGeneration;
-    const queue = await readQueue();
+    const queue = await readQueue(generation);
     // clearQueue stays outside the mutex on purpose (see its comment), so a
     // wipe can land inside our read-to-write window. If the generation
     // moved, the wipe BEGAN before our commit and this entry must not
     // survive it: re-reading the wiped queue and writing anyway would
     // resurrect an item in a queue the user just wiped (sign-out / account
-    // deletion). Abandon the commit — the entry text is still on the Entry
-    // screen, and the account context it belonged to is gone.
-    if (queueGeneration !== generation) return;
+    // deletion). Abandon the commit LOUDLY — the entry text is still on the
+    // Entry screen, and the account context it belonged to is gone.
+    if (queueGeneration !== generation) throw new QueueAbandonedError();
     if (queue.length >= MAX_QUEUE_LENGTH) {
       throw new QueueFullError();
     }
@@ -133,7 +176,7 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
 export async function flushQueue(currentUserId: string): Promise<number> {
   return serialized(async () => {
     const generation = queueGeneration;
-    const queue = await readQueue();
+    const queue = await readQueue(generation);
     let sent = 0;
     const remaining: QueuedEntry[] = [];
     for (let i = 0; i < queue.length; i++) {
@@ -165,14 +208,28 @@ export async function flushQueue(currentUserId: string): Promise<number> {
           // succeed and would poison the queue. But the ciphertext is
           // possibly the user's ONLY copy: quarantine it for recovery
           // instead of destroying it on the server's word.
-          await appendRejected(item);
+          await appendRejected(item, generation);
           continue;
         }
         if (status === 401) {
-          // The session is dead — every remaining item would fail too.
-          // Keep them (they are valid ciphertext) for after re-unlock.
-          remaining.push(...queue.slice(i));
-          break;
+          // The session is dead — every remaining upload for THIS account
+          // would fail the same way, and re-queueing the items would loop
+          // unlock → flush → 401 → lock forever. Preserve the ciphertext in
+          // the rejected store (recovery surface — never destroyed), keep
+          // other accounts' items queued, then fail LOUDLY. (The client
+          // layer has already locked the vault via setUnauthorizedHandler.)
+          for (const doomed of queue.slice(i)) {
+            if (!doomed) continue;
+            if (doomed.userId === currentUserId) {
+              await appendRejected(doomed, generation);
+            } else {
+              remaining.push(doomed);
+            }
+          }
+          if (!wipedSince(generation)) {
+            await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+          }
+          throw new SessionExpiredError();
         }
         remaining.push(item); // network / 5xx / 429 — retry on next launch
       }
@@ -198,5 +255,5 @@ export async function clearQueue(): Promise<void> {
 }
 
 export async function queueLength(): Promise<number> {
-  return serialized(async () => (await readQueue()).length);
+  return serialized(async () => (await readQueue(queueGeneration)).length);
 }

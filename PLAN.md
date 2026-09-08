@@ -12,7 +12,7 @@ reflective question per day. No advice, no diagnosis.
 ┌───────────────────────────────┐         ┌──────────────────────────────────────┐
 │  React Native app (iOS/Andr.) │  TLS    │  FastAPI backend                     │
 │                               │ ──────► │                                      │
-│  Entry screen (text; voice→stt  │         │  /api/auth      register, login,     │
+│  Entry screen (text; voice→stt│         │  /api/auth      register, login,     │
 │  crypto service (PBKDF2+      │         │                 salt lookup          │
 │    HKDF + AES-256-GCM)        │         │  /api/entries   blob CRUD (opaque)   │
 │  local cache (offline-first)  │         │  /api/processing/sessions            │
@@ -21,7 +21,7 @@ reflective question per day. No advice, no diagnosis.
 │                               │         │  /api/account   export, hard delete  │
 │  MASTER KEY NEVER LEAVES      │         │                                      │
 │  DEVICE (except wrapped,      │         │  PostgreSQL (SQLAlchemy async)       │
-│  per-session, for processing) │         │  (rate limit + keystore in-process) │
+│  per-session, for processing) │         │  (rate limit + keystore in-process)  │
 └───────────────────────────────┘         │                                      │
                                           │  Secure processing enclave:          │
                                           │  decrypt → analyze → re-encrypt →    │

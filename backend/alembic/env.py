@@ -15,21 +15,25 @@ Workflow (run from the backend/ directory):
     # re-running DDL, then future revisions apply normally:
     MINDPATTERN_DB_URL=... ../.venv/bin/alembic stamp head
 
-The URL comes from app.config.Settings.from_env() — the same source the app
-itself reads — so there is exactly one configuration path. Both dialects are
-handled: SQLite migrations run with render_as_batch=True (SQLite cannot
-ALTER most things; batch mode rebuilds the table), PostgreSQL runs plain DDL.
+The URL is read straight from MINDPATTERN_DB_URL (falling back to the same
+local SQLite default the app uses in development). app.config is deliberately
+NOT imported: its import-time fail-closed gate (token secret, non-SQLite URL
+outside development) would crash every migration command on an operator
+machine, and migration tooling has no business needing a token secret. Both
+dialects are handled: SQLite migrations run with render_as_batch=True (SQLite
+cannot ALTER most things; batch mode rebuilds the table), PostgreSQL runs
+plain DDL.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 
 from alembic import context
 from sqlalchemy import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.config import Settings
 from app.models import Base
 
 config = context.config
@@ -38,7 +42,9 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    return Settings.from_env().database_url
+    # Same default as app.config.Settings.database_url, without importing the
+    # fail-closed app config (see module docstring).
+    return os.getenv("MINDPATTERN_DB_URL", "sqlite+aiosqlite:///./mindpattern.db")
 
 
 def _is_sqlite(url: str) -> bool:

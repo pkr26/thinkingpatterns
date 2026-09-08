@@ -1,5 +1,6 @@
 # Local-only artifacts — the image installs runtime deps from
-# requirements.lock.txt and copies only app/, alembic/, alembic.ini.
+# requirements.lock.txt and copies only app/, alembic/, alembic.ini,
+# docker-entrypoint.sh.
 __pycache__/
 **/__pycache__/
 *.pyc

@@ -54,7 +54,8 @@ CASES = [
 # exact blob bytes are stored, so each platform's encrypt() is checked
 # byte-for-byte against output the other platform independently decrypts.
 # AAD is stored as PARTS (context, userId, itemId) — never the pre-built
-# bytes — so consumers are forced through their own AAD builder.
+# bytes — so consumers are forced through their own AAD builder. A null
+# aad_parts pins the AAD-less path used by secureStore.ts's device-key store.
 ENCRYPT_CASES = [
     {"password": "encrypt-pin-ascii", "salt": bytes(range(64, 80)),
      "plaintext": b"Feeling calmer after the morning walk.",
@@ -66,6 +67,28 @@ ENCRYPT_CASES = [
      "plaintext": b"fixed-nonce encrypt pin with astral AAD binding",
      "aad_parts": ["entry", "üsér-🧠", "entrée-🌙-42"],
      "nonce": bytes(range(23, 11, -1))},
+    # 2-part moodlog AAD, exactly as mobile/src/moodLog.ts builds it.
+    {"password": "encrypt-pin-moodlog", "salt": bytes(range(96, 112)),
+     "plaintext": b'[{"date":"2026-09-07","value":0.75}]',
+     "aad_parts": ["moodlog", "user-555"],
+     "nonce": bytes(range(24, 36))},
+    # 2-part unlockproof AAD with the production proof plaintext
+    # (mobile/src/unlockProof.ts PROOF_PLAINTEXT).
+    {"password": "encrypt-pin-unlockproof", "salt": bytes(range(112, 128)),
+     "plaintext": b"mindpattern-unlock-proof/v1",
+     "aad_parts": ["unlockproof", "user-888"],
+     "nonce": bytes(range(35, 23, -1))},
+    # Empty plaintext: pins the nonce||tag-only blob shape both ways.
+    {"password": "encrypt-pin-empty", "salt": bytes(range(128, 144)),
+     "plaintext": b"",
+     "aad_parts": ["entry", "user-000", "entry-empty"],
+     "nonce": bytes(range(36, 48))},
+    # No AAD at all: the path mobile/src/secureStore.ts's device-key store
+    # encrypts through. aad_parts null forces consumers to omit AAD.
+    {"password": "encrypt-pin-no-aad", "salt": bytes(range(144, 160)),
+     "plaintext": b"device-local secret without aad binding",
+     "aad_parts": None,
+     "nonce": bytes(range(47, 35, -1))},
 ]
 
 
@@ -106,7 +129,7 @@ def main() -> None:
     for case in ENCRYPT_CASES:
         salt = case["salt"]
         _, _, data_key = derive_keys(case["password"], salt)
-        aad = crypto.build_aad(*case["aad_parts"])
+        aad = crypto.build_aad(*case["aad_parts"]) if case["aad_parts"] else None
         nonce = case["nonce"]
         assert len(nonce) == crypto.NONCE_SIZE
         # AESGCM directly (not crypto.encrypt) keeps generation independent

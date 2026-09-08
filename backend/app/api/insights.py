@@ -166,7 +166,7 @@ async def _load_rows(session: AsyncSession, user_id: str) -> list[Entry]:
             await session.execute(
                 select(Entry)
                 .where(Entry.user_id == user_id)
-                .order_by(Entry.entry_date.asc(), Entry.received_at.asc())
+                .order_by(Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc())
             )
         )
         .scalars()

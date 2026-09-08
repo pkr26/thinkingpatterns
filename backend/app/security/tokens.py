@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import time
 
 
@@ -69,8 +70,10 @@ def verify_token(token: str, secret: str, now: float | None = None) -> dict:
     exp = payload["exp"]
     # A non-numeric exp ("tomorrow", null, ...) would raise TypeError on the
     # comparison below and surface as a 500; bool is rejected explicitly even
-    # though it IS an int — JSON true is not a timestamp.
-    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+    # though it IS an int — JSON true is not a timestamp. Non-finite floats
+    # parse fine in Python's json (NaN/Infinity literals) and break the
+    # expiry check: ``nan <= now`` is False, so a NaN exp would never expire.
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp):
         raise TokenError("malformed payload")
     if exp <= (now if now is not None else time.time()):
         raise TokenError("token expired")

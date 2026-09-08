@@ -12,7 +12,9 @@ import asyncio
 from pathlib import Path
 
 from alembic import command
+from alembic.autogenerate import compare_metadata
 from alembic.config import Config
+from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.engine import Engine
 
@@ -76,6 +78,25 @@ def test_migrations_reproduce_create_all_schema(tmp_path, monkeypatch):
     assert rows == [("73031d06d71b",)]
     mig_engine.dispose()
     ref_engine.dispose()
+
+
+def test_autogenerate_against_migrated_head_is_empty(tmp_path, monkeypatch):
+    """Model/migration parity: autogenerating against a database migrated to
+    head must produce an EMPTY diff. If this fails, someone changed
+    app/models.py without shipping a revision (or a revision's DDL does not
+    match the models) — `alembic revision --autogenerate` would silently
+    produce a spurious next migration.
+    """
+    migrated = tmp_path / "parity.db"
+    _upgrade_head(f"sqlite+aiosqlite:///{migrated}", monkeypatch)
+
+    engine = create_engine(f"sqlite:///{migrated}")
+    with engine.connect() as conn:
+        # render_as_batch matches alembic/env.py's SQLite configuration.
+        ctx = MigrationContext.configure(conn, opts={"render_as_batch": True})
+        diff = compare_metadata(ctx, Base.metadata)
+    engine.dispose()
+    assert diff == []
 
 
 def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):

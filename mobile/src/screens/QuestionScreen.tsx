@@ -13,8 +13,10 @@ import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } fr
 import { api, ApiError } from "../api/client";
 import { decryptQuestion } from "../crypto/MindPatternCrypto";
 import { vault } from "../vault";
+import { useSession } from "../store";
 
 export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.Element {
+  const { touchActivity } = useSession();
   const [question, setQuestion] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +83,9 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   };
 
   return (
-    <View style={styles.container}>
+    // Any touch on this screen is real interaction: restart the inactivity
+    // countdown so the auto-lock only fires on a genuinely idle session.
+    <View style={styles.container} onTouchStart={touchActivity}>
       {busy && <ActivityIndicator color="#4f7cff" size="large" />}
       {error && <Text style={styles.error}>{error}</Text>}
       {question && (

@@ -15,6 +15,7 @@ import {
   getBaseUrl,
   isInsecureHttpAllowed,
   setBaseUrl,
+  setUnauthorizedHandler,
 } from "../src/api/client";
 
 // The real client validates the FINAL url of every response (redirect
@@ -258,6 +259,50 @@ describe("request plumbing", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("ApiError");
     expect(err.status).toBe(418);
+  });
+});
+
+describe("401 session-death hook", () => {
+  afterEach(() => {
+    setUnauthorizedHandler(null);
+  });
+
+  it("invokes the handler on an authenticated 401 BEFORE throwing, for every endpoint", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    const calls: string[] = [];
+    // The handler observes the vault state at invocation time; here we just
+    // record the call order relative to the thrown ApiError.
+    setUnauthorizedHandler(() => calls.push("locked"));
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "invalid token" }, 401));
+
+    // Insights fetch and question fetch — the audit's inconsistent pair.
+    await expect(api.insights()).rejects.toMatchObject({ status: 401 });
+    await expect(api.questionToday()).rejects.toMatchObject({ status: 401 });
+    expect(calls).toEqual(["locked", "locked"]);
+  });
+
+  it("does NOT trip on a 401 that carried no token (failed login = bad credentials, not session death)", async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "bad verifier" }, 401));
+    await expect(api.login("alice", "dg==")).rejects.toMatchObject({ status: 401 });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("a throwing handler never masks the 401 ApiError", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    setUnauthorizedHandler(() => {
+      throw new Error("hook exploded");
+    });
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "invalid token" }, 401));
+    await expect(api.insights()).rejects.toMatchObject({ status: 401, message: "invalid token" });
+  });
+
+  it("works with no handler registered (hook is optional)", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    setUnauthorizedHandler(null);
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "invalid token" }, 401));
+    await expect(api.insights()).rejects.toMatchObject({ status: 401 });
   });
 });
 

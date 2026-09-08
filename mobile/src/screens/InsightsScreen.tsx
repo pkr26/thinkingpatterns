@@ -246,7 +246,7 @@ function sanitizePatterns(raw: unknown): PatternCard[] {
 }
 
 export function InsightsScreen(): React.JSX.Element {
-  const { refreshActiveDays, unlockDays } = useSession();
+  const { refreshActiveDays, unlockDays, touchActivity } = useSession();
   const [phase, setPhase] = useState<string>("loading");
   const [remaining, setRemaining] = useState(0);
   const [patterns, setPatterns] = useState<PatternCard[]>([]);
@@ -301,9 +301,12 @@ export function InsightsScreen(): React.JSX.Element {
   }, [load]);
 
   return (
+    // Any touch on this screen is real interaction: restart the inactivity
+    // countdown so the auto-lock only fires on a genuinely idle session.
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ padding: 20, gap: 14 }}
+      onTouchStart={touchActivity}
       refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor="#4f7cff" />}
     >
       {error && <Text style={styles.error}>{error}</Text>}

@@ -118,4 +118,50 @@ describe("secureStore", () => {
     await fresh.setItem("k", "v");
     expect(await fresh.getItem("k")).toBe("v");
   });
+
+  // Disk-full path: if persisting the derived key fails, the unpersisted key
+  // must NOT stay in the module cache — otherwise the retry short-circuits,
+  // nothing is ever written, and the session's ciphertext is undecryptable
+  // after a restart.
+  it("a failed device-key persist does not cache the unpersisted key", async () => {
+    vi.resetModules();
+    const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+    const fresh = (await import("../src/secureStore")).secureStore;
+    const originalSetItem = freshStorage.setItem.bind(freshStorage);
+    let rejectedKey: string | null = null;
+    let broken = true;
+    freshStorage.setItem = async (key: string, value: string) => {
+      if (broken && key === "@mindpattern/device_k") {
+        rejectedKey = value;
+        throw new Error("disk full");
+      }
+      return originalSetItem(key, value);
+    };
+
+    await expect(fresh.setItem("k", "v")).rejects.toThrow("disk full");
+    expect(await freshStorage.getItem("@mindpattern/device_k")).toBeNull();
+
+    // The failed init poisoned nothing: the next call retries the full
+    // derive+persist instead of reusing the never-stored key.
+    broken = false;
+    await fresh.setItem("k", "v");
+    const persisted = await freshStorage.getItem("@mindpattern/device_k");
+    expect(persisted).not.toBeNull();
+    expect(persisted).not.toBe(rejectedKey);
+    expect(await fresh.getItem("k")).toBe("v");
+  });
+
+  it("a stored device key with the wrong length is treated as absent and replaced", async () => {
+    vi.resetModules();
+    const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+    const fresh = (await import("../src/secureStore")).secureStore;
+    await freshStorage.setItem("@mindpattern/device_k", Buffer.from("short").toString("base64"));
+
+    await fresh.setItem("k", "v");
+
+    const persisted = await freshStorage.getItem("@mindpattern/device_k");
+    expect(persisted).not.toBeNull();
+    expect(Buffer.from(persisted as string, "base64")).toHaveLength(32);
+    expect(await fresh.getItem("k")).toBe("v");
+  });
 });

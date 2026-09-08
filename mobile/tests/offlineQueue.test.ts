@@ -27,7 +27,7 @@ vi.mock("../src/api/client", () => {
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { api, ApiError } = await import("../src/api/client") as any;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { enqueue, flushQueue, clearQueue, queueLength, quarantinedQueueExists, rejectedEntries, MAX_QUEUE_LENGTH, QueueFullError } =
+const { enqueue, flushQueue, clearQueue, queueLength, quarantinedQueueExists, rejectedEntries, MAX_QUEUE_LENGTH, QueueFullError, QueueAbandonedError, SessionExpiredError } =
   await import("../src/offlineQueue");
 
 const aliceEntry = (n: number) => ({
@@ -143,22 +143,30 @@ describe("failure handling", () => {
     expect((await rejectedEntries()).map((r) => r.clientEntryId)).toEqual(["a-1"]);
   });
 
-  it("stops uploading on 401 and keeps the rest for after re-unlock", async () => {
+  it("on 401 does NOT re-queue the doomed entries: they move to the rejected store and the flush is loud", async () => {
     await enqueue(aliceEntry(1));
     await enqueue(aliceEntry(2));
     vi.mocked(api.createEntry).mockImplementation(async () => {
       throw new ApiError(401, "invalid token");
     });
 
-    await flushQueue("alice");
-    const remaining = JSON.parse((await storage.getItem("@mindpattern/queue")) ?? "[]");
-    expect(remaining).toHaveLength(2);
+    // Session death surfaces as a dedicated error, not a silent re-queue.
+    await expect(flushQueue("alice")).rejects.toBeInstanceOf(SessionExpiredError);
+    // The doomed ciphertext is preserved for recovery — never destroyed,
+    // never re-queued against the dead session...
+    expect((await rejectedEntries()).map((r) => r.clientEntryId)).toEqual(["a-1", "a-2"]);
+    expect(await queueLength()).toBe(0);
+    // ...so a second flush does NOT retry them (no silent re-queue forever).
+    vi.mocked(api.createEntry).mockClear();
+    expect(await flushQueue("alice")).toBe(0);
+    expect(api.createEntry).not.toHaveBeenCalled();
   });
 
-  it("on 401 mid-queue keeps every unsent item and stops retrying", async () => {
+  it("on 401 mid-queue preserves every doomed item and keeps foreign accounts queued", async () => {
     await enqueue(aliceEntry(1)); // succeeds
     await enqueue(aliceEntry(2)); // 401
     await enqueue(aliceEntry(3)); // never attempted
+    await enqueue({ ...aliceEntry(4), userId: "bob" }); // foreign: not doomed
     let calls = 0;
     vi.mocked(api.createEntry).mockImplementation(async (id: string) => {
       calls += 1;
@@ -166,11 +174,13 @@ describe("failure handling", () => {
       return {};
     });
 
-    const sent = await flushQueue("alice");
-    expect(sent).toBe(1);
+    await expect(flushQueue("alice")).rejects.toBeInstanceOf(SessionExpiredError);
     expect(calls).toBe(2); // item 3 was never attempted
+    // Alice's doomed ciphertext is in the rejected store; Bob's item was
+    // never attempted against this session and stays queued for Bob.
+    expect((await rejectedEntries()).map((r) => r.clientEntryId)).toEqual(["a-2", "a-3"]);
     const remaining = JSON.parse((await storage.getItem("@mindpattern/queue")) ?? "[]");
-    expect(remaining.map((r: any) => r.clientEntryId)).toEqual(["a-2", "a-3"]);
+    expect(remaining.map((r: any) => r.clientEntryId)).toEqual(["a-4"]);
   });
 
   it("fails LOUDLY at capacity instead of silently discarding old entries", async () => {
@@ -277,7 +287,7 @@ describe("corrupted storage recovery", () => {
     expect(remaining).toHaveLength(0);
   });
 
-  it("a wipe racing enqueue wins: the item never lands in the wiped queue (M4)", async () => {
+  it("a wipe racing enqueue wins: the item never lands in the wiped queue, and the enqueue is LOUD (M4)", async () => {
     await enqueue(aliceEntry(1)); // will be wiped mid-enqueue below
     // Interleave: the queue is cleared between enqueue's read and its
     // commit (sign-out timing, reproduced deterministically).
@@ -293,7 +303,11 @@ describe("corrupted storage recovery", () => {
       return originalGetItem(k);
     };
     try {
-      await enqueue(aliceEntry(2));
+      // The abandoned commit no longer returns normally: the caller must
+      // not show "Saved offline" for an entry that was never queued.
+      const rejection = await enqueue(aliceEntry(2)).catch((e: unknown) => e);
+      expect(rejection).toBeInstanceOf(QueueAbandonedError);
+      expect((rejection as Error).message).toContain("NOT queued");
     } finally {
       (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
     }
@@ -302,6 +316,9 @@ describe("corrupted storage recovery", () => {
     // racing item into the just-wiped queue — the key stays gone entirely.
     expect(await storage.getItem("@mindpattern/queue")).toBeNull();
     expect(await queueLength()).toBe(0);
+    const err = new QueueAbandonedError();
+    expect(err.name).toBe("QueueAbandonedError");
+    expect(new SessionExpiredError().name).toBe("SessionExpiredError");
   });
 
   it("an enqueue that STARTS after the wipe still lands (the queue is reusable)", async () => {
@@ -311,6 +328,64 @@ describe("corrupted storage recovery", () => {
     expect(await queueLength()).toBe(1);
     expect(await storage.getItem("@mindpattern/queue")).toContain("a-2");
     expect(await storage.getItem("@mindpattern/queue")).not.toContain("a-1");
+  });
+
+  it("a wipe racing a 422-flush wins: appendRejected cannot rewrite REJECTED_KEY after the wipe (M2-a)", async () => {
+    await enqueue(aliceEntry(1)); // will 422 mid-flush
+    vi.mocked(api.createEntry).mockImplementation(async () => {
+      throw new ApiError(422, "bad blob");
+    });
+    // Interleave: account deletion lands between appendRejected's read of
+    // the rejected store and its write-back.
+    const originalGetItem = storage.getItem.bind(storage);
+    let armed = true;
+    (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
+      if (armed && k === "@mindpattern/queue_rejected") {
+        armed = false;
+        const stale = await originalGetItem(k);
+        await clearQueue(); // the wipe lands inside the read-to-write window
+        return stale;
+      }
+      return originalGetItem(k);
+    };
+    let flushError: unknown = null;
+    try {
+      await flushQueue("alice").catch((e: unknown) => {
+        flushError = e;
+      });
+    } finally {
+      (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
+    }
+    // The flush abandoned its write-back (wiped mid-flush) — and crucially
+    // the rejected store was NOT rewritten after the wipe.
+    expect(flushError).toBeNull();
+    expect(await storage.getItem("@mindpattern/queue")).toBeNull();
+    expect(await storage.getItem("@mindpattern/queue_rejected")).toBeNull();
+    expect(await rejectedEntries()).toEqual([]);
+  });
+
+  it("a wipe racing a corrupt-queue quarantine write wins: QUARANTINE_KEY stays wiped (M2-a)", async () => {
+    await storage.setItem("@mindpattern/queue", "{not json");
+    // Interleave: the wipe lands between the quarantine read and its write.
+    const originalGetItem = storage.getItem.bind(storage);
+    let armed = true;
+    (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
+      if (armed && k === "@mindpattern/queue_quarantine") {
+        armed = false;
+        const stale = await originalGetItem(k);
+        await clearQueue();
+        return stale;
+      }
+      return originalGetItem(k);
+    };
+    try {
+      expect(await queueLength()).toBe(0);
+    } finally {
+      (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
+    }
+    // The corrupt payload was NOT re-quarantined after the wipe.
+    expect(await storage.getItem("@mindpattern/queue_quarantine")).toBeNull();
+    expect(await storage.getItem("@mindpattern/queue")).toBeNull();
   });
 
   it("treats non-array queue data as empty (and keeps it for repair)", async () => {

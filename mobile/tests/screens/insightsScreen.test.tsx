@@ -13,9 +13,10 @@ vi.mock("../../src/api/client", async () => {
 });
 
 const refreshActiveDays = vi.fn(async () => {});
+const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ refreshActiveDays, unlockDays: 30 }) };
+  return { ...actual, useSession: () => ({ refreshActiveDays, unlockDays: 30, touchActivity }) };
 });
 
 const { api } = await import("../../src/api/client");
@@ -46,6 +47,7 @@ const pattern = (over: Record<string, unknown>) => ({
 beforeEach(() => {
   resetApi(api as never);
   refreshActiveDays.mockClear();
+  touchActivity.mockClear();
   AlertlessReset();
   vault.lock();
   vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey });
@@ -340,6 +342,27 @@ describe("InsightsScreen phases", () => {
     const root = await render(<InsightsScreen />);
     await flush();
     expect(textOf(root)).toContain("server unreachable");
+  });
+
+  // M2: a 401 from the insights fetch is surfaced honestly (the vault lock
+  // itself is the client hook's job — covered in client.request/store tests)
+  // and interaction on this screen restarts the inactivity countdown.
+  it("surfaces a 401 from the insights fetch instead of swallowing it", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vi.mocked(api.insights).mockRejectedValue(new ApiError(401, "invalid token"));
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).toContain("invalid token");
+  });
+
+  it("any touch on the screen resets the inactivity countdown", async () => {
+    const root = await render(<InsightsScreen />);
+    await flush();
+    const scroll = root.root.findByType(ScrollView);
+    await act(async () => {
+      (scroll.props as { onTouchStart?: () => void }).onTouchStart?.();
+    });
+    expect(touchActivity).toHaveBeenCalledTimes(1);
   });
 
   it("renders the decrypted-patterns error path (tampered blob)", async () => {

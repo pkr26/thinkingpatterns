@@ -17,19 +17,13 @@ import {
 import { api, ApiError } from "../api/client";
 import { encryptEntry } from "../crypto/MindPatternCrypto";
 import { vault } from "../vault";
-import { useSession } from "../store";
-import { enqueue, flushQueue, QueueFullError } from "../offlineQueue";
+import { useSession, stashDraft, takeStashedDraft } from "../store";
+import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
 import { localDateISO, recordMood } from "../moodLog";
 import { detectCrisisLanguage } from "../crisisDetect";
 
 /** Keeps the encrypted payload comfortably under the server's ~1 MiB cap. */
 const MAX_ENTRY_CHARS = 100_000;
-
-/** A 401 save locks the vault, and the lock swaps the whole screen stack —
- *  this screen unmounts and its state dies with it. The draft waits here
- *  (memory-only, account-bound) so re-unlocking restores it for another
- *  save attempt. A different account on the same device never sees it. */
-let stashedDraft: { userId: string; text: string } | null = null;
 
 export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const { activeDays, unlockDays, touchActivity } = useSession();
@@ -37,15 +31,30 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const userId: Promise<string | null> = api.getUserId();
-    userId.then((id) => {
-      if (id) flushQueue(id).catch(() => {});
-      // Restore the draft a 401-forced lock stashed before the unmount —
-      // only for the same account it was written under.
-      const stash = stashedDraft;
-      stashedDraft = null;
-      if (stash && id === stash.userId) setText(stash.text);
-    });
+    let cancelled = false;
+    api
+      .getUserId()
+      .then((id) => {
+        if (cancelled) return;
+        if (id) flushQueue(id).catch(() => {});
+        // Restore the draft a 401-forced lock stashed before the unmount —
+        // only for the same account it was written under (takeStashedDraft
+        // enforces that), and only if the user has not already started
+        // typing: a late getUserId() resolution must not clobber fresh text.
+        if (id) {
+          const restored = takeStashedDraft(id);
+          if (restored !== null) {
+            setText((current) => (current === "" ? restored : current));
+          }
+        }
+      })
+      .catch(() => {
+        // The storage read failed: leaving the stash in place (instead of
+        // dropping it) keeps the draft recoverable on the next mount.
+      });
+    return () => {
+      cancelled = true;
+    };
     // NOTE (privacy hardening): this screen no longer triggers the daily
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
     // — after the red-team audit it is only ever sent as an explicit act
@@ -85,15 +94,28 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // The result is never stored or transmitted — it only decides whether
       // to point at support resources after the entry is safely saved.
       const crisisLanguage = detectCrisisLanguage(trimmed);
+      // Never before or instead of saving: the entry is already safe
+      // (synced or queued) before this dialog appears. Safe-messaging
+      // tone — acknowledge, point at humans, no diagnosis.
+      const showCrisisAlert = () =>
+        Alert.alert(
+          "Support is available",
+          "Some of what you wrote sounds like a really heavy moment. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
+          [
+            { text: "View support resources", onPress: () => navigation.navigate("Crisis") },
+            { text: "Not now", style: "cancel" },
+          ],
+        );
       try {
         await api.createEntry(clientEntryId, blobB64, today);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
-          // Session expired: lock the vault so navigation gates back to
-          // the Unlock screen on its own (re-saving would just re-fail
-          // with the same dead session). The draft is stashed for the
-          // re-unlock remount — it is NOT lost.
-          stashedDraft = { userId, text: trimmed };
+          // Session expired: the client's unauthorized hook has already
+          // locked the vault app-wide (vault.lock() here is belt-and-braces
+          // for callers bypassing the hook — the lock swaps the whole
+          // screen stack, and this screen unmounts with it). The draft is
+          // stashed for the re-unlock remount — it is NOT lost.
+          stashDraft(userId, trimmed);
           vault.lock();
           Alert.alert("Session expired", "Please unlock again — your entry will still be here.");
           return;
@@ -111,9 +133,22 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           Alert.alert("Saved offline", "This entry will sync when you're back online.");
         } catch (queueErr) {
           if (queueErr instanceof QueueFullError) {
+            // The entry text is still on screen — a crisis-flagged entry
+            // that could not be queued must STILL point at support.
             Alert.alert(
               "Offline storage full",
               "Your oldest unsynced entries are protected — connect and sync before writing more. This entry is still on screen.",
+              [{ text: "OK", onPress: () => { if (crisisLanguage) showCrisisAlert(); } }],
+            );
+            return;
+          }
+          if (queueErr instanceof QueueAbandonedError) {
+            // The queue was wiped (sign-out / account deletion) mid-save:
+            // the entry is NOT saved. Be loud — no "Saved offline", and the
+            // draft stays on screen.
+            Alert.alert(
+              "Not saved",
+              "The offline queue was cleared while saving (were you signed out?). Your entry is still on screen.",
             );
             return;
           }
@@ -121,19 +156,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         }
       }
       setText("");
-      // Never before or instead of saving: the entry is already safe
-      // (synced or queued) before this dialog appears. Safe-messaging
-      // tone — acknowledge, point at humans, no diagnosis.
-      if (crisisLanguage) {
-        Alert.alert(
-          "Support is available",
-          "Some of what you wrote sounds like a really heavy moment. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
-          [
-            { text: "View support resources", onPress: () => navigation.navigate("Crisis") },
-            { text: "Not now", style: "cancel" },
-          ],
-        );
-      }
+      if (crisisLanguage) showCrisisAlert();
     } catch (err) {
       Alert.alert("Could not save", err instanceof Error ? err.message : "unknown error");
     } finally {

@@ -25,7 +25,16 @@ const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
 const tscBin = join(here, "..", "node_modules", ".bin", "tsc");
 const buildDir = join(here, "..", ".verify-build");
 
-const { vectors, encrypt_vectors: encryptVectors = [] } = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const { vectors, encrypt_vectors: encryptVectors } = JSON.parse(readFileSync(vectorsPath, "utf8"));
+// Fail CLOSED: a renamed/dropped key must not read as "0 vectors verified".
+if (!Array.isArray(vectors) || vectors.length < 4) {
+  console.error(`vectors.json: "vectors" key missing or has ${vectors?.length ?? "no"} entries (expected >= 4)`);
+  process.exit(1);
+}
+if (!Array.isArray(encryptVectors) || encryptVectors.length < 2) {
+  console.error(`vectors.json: "encrypt_vectors" key missing or has ${encryptVectors?.length ?? "no"} entries (expected >= 2)`);
+  process.exit(1);
+}
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -71,13 +80,14 @@ async function loadReferenceFallback() {
       decrypt: async (key, blob, aad) => {
         const nonce = blob.subarray(0, 12);
         const ck = await subtle.importKey("raw", key, "AES-GCM", false, ["decrypt"]);
+        // GCM with empty AAD is byte-identical to GCM with no AAD.
         return Buffer.from(await subtle.decrypt(
-          { name: "AES-GCM", iv: nonce, additionalData: aad, tagLength: 128 }, ck, blob.subarray(12)));
+          { name: "AES-GCM", iv: nonce, additionalData: aad ?? Buffer.alloc(0), tagLength: 128 }, ck, blob.subarray(12)));
       },
       encrypt: async (key, plaintext, aad, nonce) => {
         const ck = await subtle.importKey("raw", key, "AES-GCM", false, ["encrypt"]);
         const ct = Buffer.from(await subtle.encrypt(
-          { name: "AES-GCM", iv: nonce, additionalData: aad, tagLength: 128 }, ck, plaintext));
+          { name: "AES-GCM", iv: nonce, additionalData: aad ?? Buffer.alloc(0), tagLength: 128 }, ck, plaintext));
         return Buffer.concat([nonce, ct]);
       },
     },
@@ -147,7 +157,7 @@ for (const [i, v] of encryptVectors.entries()) {
     failures += 1;
     continue;
   }
-  const aad = await impl.envelope.buildAad(...v.aad_parts);
+  const aad = v.aad_parts ? await impl.envelope.buildAad(...v.aad_parts) : undefined;
   const nonce = Buffer.from(v.nonce, "base64");
   const plaintext = Buffer.from(v.plaintext, "base64");
   try {
