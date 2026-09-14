@@ -11,10 +11,10 @@
 # hash-checking with a proper lock generator (uv pip compile
 # --generate-hashes) rather than by hand.
 aiosqlite==0.22.1
-alembic==1.19.2
+alembic==1.20.0
 annotated-types==0.8.0
-anyio==4.15.0
-asyncpg==0.30.0
+anyio==4.15.1
+asyncpg==0.31.0
 certifi==2026.7.22
 click==8.5.0
 cryptography==50.0.1
@@ -28,7 +28,7 @@ idna==3.19
 mako==1.4.1
 markupsafe==3.0.3
 pydantic==2.13.5
-pydantic-core==2.46.5
+pydantic-core==2.49.0
 python-dotenv==1.2.3
 sqlalchemy==2.0.52
 starlette==1.6.0
