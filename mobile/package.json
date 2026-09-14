@@ -21,8 +21,8 @@
     "@react-native-async-storage/async-storage": "^2.1.0",
     "@react-navigation/native": "^7.3.18",
     "@react-navigation/native-stack": "^7.18.10",
-    "react": "19.1.0",
-    "react-native": "0.81.0",
+    "react": "19.3.0",
+    "react-native": "0.87.1",
     "react-native-quick-crypto": "^0.7.0",
     "react-native-safe-area-context": "^5.0.0",
     "react-native-screens": "^4.0.0"
@@ -31,10 +31,10 @@
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-test-renderer": "^19.1.0",
+    "@types/react": "^19.3.0",
+    "@types/react-test-renderer": "^19.3.0",
     "@vitest/coverage-v8": "^3.2.7",
-    "react-test-renderer": "^19.1.0",
+    "react-test-renderer": "^19.3.0",
     "typescript": "^5.6.0",
     "vitest": "^3.2.7"
   }
