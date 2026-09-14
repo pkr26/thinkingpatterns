@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 import anyio
@@ -9,18 +10,30 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import config
-from .api import api_router
+from . import __version__, config
+from .api import api_router, api_v1_router
 from .cache import FixedWindowCounter
 from .db import build_engine, build_sessionmaker, init_models
+from .deps import DEFAULT_ERROR_CODES
 from .middleware import HardeningMiddleware
 from .security.enclave import InMemoryKeyStore
 
-# Single source for the app version inside the code (pyproject.toml carries
-# the same value for packaging; importlib.metadata is unusable because the
-# package is never installed — the image and dev venv run from source).
-APP_VERSION = "1.0.0"
+logger = logging.getLogger("mindpattern")
+
+# Kept as an alias: older code/tests reference APP_VERSION on this module.
+APP_VERSION = __version__
+
+
+def _error_envelope(status_code: int, detail, code: str | None = None) -> dict:
+    # detail is ALWAYS a human string — never the FastAPI default list of
+    # {loc, msg, input} dicts (mobile parses it as a string, and input echo
+    # is an amplification/leak vector).
+    if not isinstance(detail, str) or not detail:
+        detail = "request failed"
+    return {"detail": detail, "code": code or DEFAULT_ERROR_CODES.get(status_code, "error")}
 
 
 def create_app(settings: config.Settings | None = None) -> FastAPI:
@@ -53,7 +66,12 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json" if is_development else None,
     )
     app.state.settings = settings
-    app.state.engine = build_engine(settings.database_url)
+    app.state.engine = build_engine(
+        settings.database_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+    )
     app.state.sessionmaker = build_sessionmaker(app.state.engine)
     app.state.key_store = InMemoryKeyStore()
     app.state.rate_counter = FixedWindowCounter()
@@ -73,27 +91,71 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # allowlist. Credentials stay off.
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Processing-Token"],
+        # X-Processing-Token drives recomputes; X-Account-Verifier is the
+        # preferred DELETE /account re-auth transport — a browser client
+        # could not send either in a cross-origin request without this.
+        allow_headers=["Authorization", "Content-Type", "X-Processing-Token", "X-Account-Verifier"],
     )
     # Outermost: body-size cap + security headers on EVERY response (413s,
     # 500s included) + last-ditch exception handling.
-    app.add_middleware(HardeningMiddleware, max_body_bytes=settings.max_body_bytes)
+    app.add_middleware(
+        HardeningMiddleware,
+        max_body_bytes=settings.max_body_bytes,
+        trust_proxy_headers=settings.trust_proxy_headers,
+    )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error_envelope(request: Request, exc: StarletteHTTPException):
+        # Covers both fastapi.HTTPException (a subclass) and framework-raised
+        # Starlette errors (unknown route 404s, 405s). ApiError instances
+        # carry their own code; everything else gets the per-status default.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_envelope(exc.status_code, exc.detail, getattr(exc, "code", None)),
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_no_echo(request: Request, exc: RequestValidationError):
         # FastAPI's default 422 echoes the offending `input` — for an
         # oversized blob field that is a 2x-bandwidth amplification vector.
-        # Keep locations + messages, drop the input payload.
+        # Report only WHICH fields failed and why (locations + pydantic's
+        # messages carry no user input), as one human string.
+        parts = []
+        for e in exc.errors():
+            loc = ".".join(str(part) for part in e.get("loc", ()) if part != "body")
+            msg = e.get("msg", "invalid value")
+            parts.append(f"{loc}: {msg}" if loc else msg)
+        detail = "; ".join(parts)[:500] or "request validation failed"
         return JSONResponse(
             status_code=422,
-            content={"detail": [{"loc": e.get("loc"), "msg": e.get("msg")} for e in exc.errors()]},
+            content=_error_envelope(422, detail),
         )
 
+    # Canonical mount is /api/v1; the legacy /api mount serves the same
+    # routers unversioned for existing clients (deprecated — /api/meta
+    # reports api_version so clients can discover the canonical base).
+    app.include_router(api_v1_router)
     app.include_router(api_router)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict:
+        # Liveness only: no DB touch, so a wedged pool still reports the
+        # process as alive (that's what /readyz is for).
         return {"status": "ok", "version": APP_VERSION}
+
+    @app.get("/readyz", tags=["ops"])
+    async def readyz(request: Request):
+        try:
+            async with request.app.state.sessionmaker() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception:
+            logger.exception("readiness check failed: database unreachable")
+            return JSONResponse(
+                status_code=503,
+                content=_error_envelope(503, "database unavailable"),
+            )
+        return {"status": "ready", "version": APP_VERSION}
 
     return app
 

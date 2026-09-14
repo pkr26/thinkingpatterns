@@ -6,7 +6,7 @@ The client half of the zero-knowledge contract:
 - **Entries are encrypted before they leave the phone** (`src/crypto/envelope.ts`): AES-256-GCM, `nonce(12) ‖ ct ‖ tag(16)`, with AAD binding `(context, userId, itemId)` so the server cannot relocate blobs undetected.
 - **The vault** (`src/vault.ts`) keeps the unlocked data key in memory only; it is zeroized on sign-out.
 - **Offline-first**: entries that fail to sync are queued locally (still encrypted) and flushed on next launch (`EntryScreen.flushQueue`).
-- **Crisis-language detection is on-device** (`src/crisisDetect.ts`): entries are encrypted before anything leaves the phone, so the server cannot notice a crisis — a conservative pre-encryption matcher runs in memory over what the user just typed (nothing sent, stored, or logged) and surfaces the offline crisis-resources screen.
+- **Crisis-language detection is on-device** (`src/crisisDetect.ts`): entries are encrypted before anything leaves the phone, so the server cannot notice a crisis — a conservative pre-encryption matcher runs in memory over what the user just typed (nothing sent, stored, or logged) and surfaces the offline crisis-resources screen. The phrase lists are the `dialog` and suppress (`dialog` + `suppress_extra`) tiers of `shared/crisis_phrases.json`, the cross-platform contract, embedded in `src/crisisPhrases.ts` with parity pinned by tests.
 
 ## Setup
 
@@ -15,9 +15,12 @@ npm install
 cd ios && pod install && cd ..        # iOS
 npm run ios                           # or: npm run android
 npm run typecheck                     # strict TS check
+npm test                              # 759 tests across 33 files (98% per-file coverage thresholds)
 ```
 
-The API base URL defaults to `http://localhost:8000` and is configurable in Settings.
+The API base URL defaults to `http://localhost:8000` and is configurable in
+Settings. The client prepends `/api/v1` to every endpoint (`src/api/client.ts`);
+the server still answers the deprecated unversioned `/api` alias.
 
 ## Cross-platform crypto verification
 
@@ -37,14 +40,56 @@ loudly on any disagreement. Run it whenever you touch `src/crypto/**`.
 | Screen | Purpose |
 |---|---|
 | `LoginScreen` | Register / login; password never persisted, master key zeroized after derivation. |
+| `OnboardingScreen` | Three calm first-run panels, shown once after registration: the daily habit + 30-day threshold, encryption (with the one honest processing-session exception), and the no-recovery warning with the 13+ line. |
 | `UnlockScreen` | After restart the session token persists but the key vault is locked; re-derives keys from the password (offline-capable via cached salt). |
-| `EntryScreen` | Daily entry with 30-day progress ring, on-device sentiment, offline queue. |
-| `InsightsScreen` | Decrypts the insight blob; pattern cards (timing / mood link / repeated phrase). No advice, no diagnosis. |
-| `QuestionScreen` | One reflective question per day; opens a processing session to recompute when needed. |
+| `EntryScreen` | Daily entry with 30-day progress ring, explicit one-tap mood check-in (a deliberate tap always wins over inferred sentiment), on-device sentiment, offline queue, honest inline save/sync feedback. |
+| `HistoryScreen` | Past entries pulled from the server and decrypted on-device only; read / edit / delete. Entries are immutable server-side, so edit = delete + re-upload under a fresh id; needs connectivity and says so when there is none. |
+| `InsightsScreen` | Decrypts the insight blob; pattern cards (timing / mood link / repeated phrase). No advice, no diagnosis. Crisis-adjacent patterns (`detail.sensitive=true`, or a suppress-list label match) render as a non-quoting card — "A difficult thought has been returning…" + a support link — never the text itself. |
+| `QuestionScreen` | One reflective question per day (pre-threshold: a day-1 generic question answered fully on-device from the pool pinned to `shared/generic_questions.json`); opens a processing session to recompute when needed. "Write about this" bridges question → journal. |
 | `CrisisScreen` | Offline crisis resources (988, Crisis Text Line, 911 guidance); one tap from every screen, no network dependency. |
-| `SettingsScreen` | Server URL, encrypted export, hard delete, sign out. |
+| `PrivacyScreen` | The privacy policy, in plain language, offline — static content, no network, no account. |
+| `SettingsScreen` | Server URL, LLM consent, encrypted export, hard delete, sign out — plus the recovered-entries surface: server-rejected or quarantined uploads are preserved (never destroyed) and can be recovered here. |
 
 Voice-to-text: v1 accepts the text through the system keyboard's dictation
 (long-press the globe/spacebar on iOS, microphone key on Gboard); a native
 `react-native-voice` integration is the next increment and slots into
 `EntryScreen`'s text state without touching the crypto path.
+
+## Session storage — the honest version
+
+`src/secureStore.ts` stores the session token AES-256-GCM-encrypted under a
+random per-install device key, so a backup no longer contains the token
+verbatim. Stated plainly: **the device key currently lives in AsyncStorage
+too** (a documented fallback pending react-native-keychain), so a device
+backup includes both the key and the ciphertext it protects — a
+fully-controlled device attacker recovers the session. Keychain/Keystore
+custody of that key is the fix; see the checklist below.
+
+## Sync model
+
+Push-only is deliberate v1 scope: a **single-device-writer** design.
+Entries push up; `HistoryScreen` pulls this account's entries back
+(same-device restore after reinstall, or a new device). There is no
+multi-device conflict model — two devices writing concurrently is out of
+scope, not handled.
+
+## Native hardening checklist
+
+This repo ships JS/TS source only; the `ios/`/`android/` projects are
+generated with the React Native toolchain. Apply these when generating
+them:
+
+- **react-native-keychain with `ThisDeviceOnly`** for the `secureStore`
+  seam — replaces the AsyncStorage device-key fallback so backups stop
+  containing the key. The seam (`SecureStoreBackend`) means only the
+  backend module changes; callers keep using `secureStore` unchanged.
+- **`android:allowBackup="false"`**, and `NSURLIsExcludedFromBackupKey` on
+  the AsyncStorage directory on iOS — queue/mood-log ciphertext and the
+  secureStore envelope don't belong in platform backups at all.
+- **`FLAG_SECURE`** on Android — the native form of the app-switcher blank
+  shield (currently best-effort JS).
+- **TLS/SPKI pinning** for the API origin, with a documented bypass for
+  self-hosters (pinning must not lock an operator's own client out of their
+  own server).
+- **Biometric unlock** via keychain access-control flags — the planned
+  follow-up to password-every-cold-start.

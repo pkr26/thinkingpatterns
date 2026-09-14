@@ -1,8 +1,15 @@
-# Pinned runtime dependencies — exact versions the 560-test suite ran
+# Pinned runtime dependencies — exact versions the 573-test suite ran
 # against. The Docker image installs with --no-deps so this file is the
 # complete supply chain: nothing resolves at build time.
 # Regenerate after dependency changes with the versions from the tested
 # environment (importlib.metadata) and re-run the full test suite.
+#
+# Supply-chain status: `pip-audit -r requirements.lock.txt` is a CI gate
+# (clean as of 2026-09-07). Hashes are deliberately NOT embedded: a correct
+# --require-hashes set needs every platform wheel hashed (linux for CI/
+# Docker, macOS for dev), and a partial set would break installs. Adopt
+# hash-checking with a proper lock generator (uv pip compile
+# --generate-hashes) rather than by hand.
 aiosqlite==0.22.1
 alembic==1.19.2
 annotated-types==0.8.0

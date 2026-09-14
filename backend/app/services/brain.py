@@ -18,11 +18,12 @@ RESEARCH.md for the full bibliography. The changes that matter:
     lexicon with intensifier boosters, downtoners, damped negation
     (x-0.74 scalar) and "but" re-weighting replaces the binary word
     lists. Still pure and deterministic.
-  * **Lagged day-after links** (Bourke et al. 2026 meta-analysis of 118
-    daily-diary studies; Bolger et al. 1989 spillover): "the day after
-    'sleep' comes up, your entries read lower" — the literal pattern
-    *linking* the product is named for. Welch's t + Cohen's d on
-    residuals, gated like every statistical claim.
+  * **Lagged day-after links** (Konjarski et al. 2018, *Sleep Medicine
+    Reviews* meta-analysis of daily-diary sleep→affect studies; Bolger et
+    al. 1989 spillover): "the day after 'sleep' comes up, your entries
+    read lower" — the literal pattern *linking* the product is named for.
+    Welch's t + Cohen's d on residuals, gated like every statistical
+    claim.
   * **Mood dynamics**: inertia (lag-1 autocorrelation; Kuppens, Allen &
     Sheeber 2010; Houben et al. 2015 meta-analysis) and instability
     (rolling spread) are meta-analytically tied to lower wellbeing and
@@ -37,11 +38,25 @@ RESEARCH.md for the full bibliography. The changes that matter:
     startup, grief, guitar — is found by deterministic n-gram mining of
     recurring content phrases, surfaced when RISING against the user's own
     earlier-window base rate (exact binomial, BH-corrected) or a persistent
-    presence. The audit's "topic blindness" finding, closed.
-  * **Honest multiple testing**: the weekday-concentration test now
-    tests every candidate weekday (not the argmax alone) and puts all
-    of them into the Benjamini-Hochberg family — selecting the best of
-    7 days and testing it once understated p-values ~7x.
+    presence. Presence claims clear two anti-boilerplate bars (distinct
+    followers, and NOT covered by the run's own recurring-phrase clusters
+    — a repeated sentence is a phrase card, not a topic). The audit's
+    "topic blindness" finding, closed.
+  * **Honest multiple testing**: every significance test that runs —
+    weekday concentrations (every candidate weekday, not the argmax
+    alone), mood ties, links, dynamics, shifts, rising topics — enters
+    one Benjamini-Hochberg family for the run, computed BEFORE any
+    effect-size gate is applied; the gates then filter the corrected
+    survivors. Selecting on extremeness first and correcting only the
+    survivors is selection-then-test and voids FDR control (measured:
+    ~half of pure-noise corpora surfaced a false statistical card).
+  * **Replication before surfacing**: statistical claims must re-qualify
+    on >= 2 distinct recompute days before they earn a card, and the
+    second qualification must bring INDEPENDENT evidence — consecutive
+    recomputes share ~179 of 180 window days, so "qualified twice" on
+    consecutive days is the same data scored twice (see
+    STATISTICAL_KINDS). Direct measurements (a literally repeated
+    sentence, a persistent topic presence) may surface at once.
   * **EWMA tuning** (Smit, Schat & Ceulemans 2023 methods paper):
     lambda 0.18 inside their validated 0.05-0.25 band, baseline over
     the first quarter of the window (min 10 days).
@@ -66,6 +81,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
+from . import crisis
 from . import phrases as phrase_miner
 from . import statsig
 from .patterns import DAY_NAMES, SENTENCE_RE, WORD_RE, JournalEntry, Pattern
@@ -83,6 +99,38 @@ MIN_SENTENCE_TOKENS = 4
 HALF_LIFE_DAYS = 45.0  # recent mentions outweigh old ones; the brain forgets
 EVIDENCE_FULL = 8.0    # decayed mentions that saturate strength
 STRONG_EVIDENCE = 10   # occurrences that may surface on first qualification
+
+# Statistical claim kinds vs direct-measurement kinds. A statistical claim
+# ("work days read lower", "mood carries over more than usual") can fluke
+# through the gates on pure noise — measured: ~half of pure-noise corpora
+# surfaced at least one such card when a single strong qualification was
+# enough. These kinds therefore surface only after re-qualifying on >= 2
+# DISTINCT recompute days (the replication gate, enforced in
+# _merge_lifecycle). Direct-measurement kinds (recurring_phrase, rumination,
+# topic presence) REPORT what is literally in the text — a repeated sentence
+# is there or it isn't, no null hypothesis to fluke past — so they keep
+# first-qualification surfacing at STRONG_EVIDENCE. The asymmetry is
+# deliberate: replication discipline applies to inference, not to counting.
+STATISTICAL_KINDS = frozenset({
+    "temporal", "mood_correlation", "link", "inertia", "instability",
+    "mood_shift",
+})
+
+# The two flavors of statistical claim, replicated differently (the "2
+# distinct recompute days" bar alone was measured at ~17% false-card rate
+# on daily-cadence pure noise: consecutive recomputes share ~179/180 window
+# days, so day N+1 is not an independent replication of day N).
+#   * EVIDENCE_DATE_KINDS anchor on concrete days (theme days, outcome
+#     days): the second qualification must add at least one NEW evidence
+#     day the record did not already hold — the claim re-derived on data
+#     that did not produce the first one.
+#   * WINDOW_STAT_KINDS are computed on the sliding window itself (an
+#     ~11-day EWMA memory re-qualifies one fluke for days running): the
+#     two qualification days must be >= REPLICATION_MIN_SPREAD_DAYS apart,
+#     so the window has genuinely moved between observations.
+EVIDENCE_DATE_KINDS = frozenset({"temporal", "mood_correlation", "link"})
+WINDOW_STAT_KINDS = frozenset({"inertia", "instability", "mood_shift"})
+REPLICATION_MIN_SPREAD_DAYS = 2
 
 # --- statistical gates -------------------------------------------------------
 ALPHA = 0.05
@@ -191,7 +239,15 @@ THEME_WORDS: dict[str, str] = {
 # --- graded sentiment lexicon (VADER-inspired; Hutto & Gilbert 2014) ------------
 # Valences in [-4, 4]; magnitudes follow the VADER convention (a "terrible"
 # outweighs a "bad"). Curated for journal register; superset of the v2 word
-# lists so historical corpora score consistently.
+# lists so historical corpora score consistently ("relaxed" kept from v2).
+# Curation rule: a word whose DOMINANT journal sense is not sentiment is
+# dropped, whatever its dictionary valence — a false valence costs trust.
+# Removed on that rule: "kind" (+1.9 — the hedge "kind of <adj>" is far more
+# common than the compliment and flipped hedged negatives positive), "fed"
+# (-1.5 — "fed up" is rare next to "i fed the cat"), "present" (0.8 — gift /
+# attendance / "presented" via -ed stemming outnumber the mindful sense).
+# "miss" stays: in first-person journal text the longing sense dominates and
+# the collision senses ("missed the bus") read mildly negative anyway.
 SENTIMENT_LEXICON: dict[str, float] = {
     # positive — mild
     "okay": 0.9, "ok": 0.9, "alright": 0.9, "fine": 0.8, "decent": 1.1,
@@ -200,7 +256,7 @@ SENTIMENT_LEXICON: dict[str, float] = {
     "comfortable": 1.6, "content": 1.9, "peaceful": 2.2, "relieved": 1.9,
     "rested": 1.8, "refreshed": 2.0, "grounded": 1.6, "balanced": 1.3,
     "accepted": 1.2, "safe": 1.6, "secure": 1.5, "warm": 1.4, "cozy": 1.8,
-    "soft": 0.7, "lighter": 1.4, "bright": 1.5, "clear": 0.9, "present": 0.8,
+    "soft": 0.7, "lighter": 1.4, "bright": 1.5, "clear": 0.9,
     # positive — moderate
     "good": 1.9, "nice": 1.5, "better": 1.7, "improved": 1.6, "happy": 3.0,
     "glad": 2.2, "joy": 2.8, "joyful": 2.9, "cheerful": 2.4, "smiled": 2.3,
@@ -213,7 +269,7 @@ SENTIMENT_LEXICON: dict[str, float] = {
     "active": 1.3, "alive": 1.9, "grateful": 2.8, "thankful": 2.8,
     "appreciate": 2.2, "blessed": 2.5, "lucky": 1.8, "amused": 1.8,
     "connected": 1.8, "supported": 2.0, "understood": 1.8, "heard": 1.4,
-    "kind": 1.9, "helpful": 1.6, "generous": 1.8, "creative": 1.7,
+    "relaxed": 1.9, "helpful": 1.6, "generous": 1.8, "creative": 1.7,
     "progress": 1.5, "win": 1.9, "won": 1.9,
     # positive — strong
     "great": 3.1, "wonderful": 3.2, "amazing": 3.3, "awesome": 3.3,
@@ -241,7 +297,7 @@ SENTIMENT_LEXICON: dict[str, float] = {
     "nervous": -2.0, "worry": -2.1, "worried": -2.3, "stress": -2.0,
     "stressed": -2.4, "pressured": -2.1, "overloaded": -2.3,
     "overwhelmed": -2.9, "swamped": -2.1, "angry": -2.7, "anger": -2.6,
-    "mad": -2.2, "upset": -2.3, "fed": -1.5, "bitter": -2.1,
+    "mad": -2.2, "upset": -2.3, "bitter": -2.1,
     "resentment": -2.3, "resentful": -2.2, "hate": -2.8, "dislike": -1.7,
     "afraid": -2.5, "scared": -2.5, "fear": -2.5, "fearful": -2.4,
     "dread": -2.6, "panic": -3.0, "panicky": -2.9, "hopeless": -3.3,
@@ -264,14 +320,17 @@ SENTIMENT_LEXICON: dict[str, float] = {
 }
 
 # Intensifiers/downtoners (VADER booster conventions, multiplicative).
+# "hardly"/"barely" are NOT downtoners: VADER treats them as negations
+# ("hardly good" ≈ "not good"). Listing them here AND in NEGATORS applied
+# both rules at once (0.7x booster times the -0.74 flip) — negation-only.
 INTENSIFIERS: dict[str, float] = {
     "very": 1.4, "so": 1.2, "really": 1.25, "extremely": 1.6,
     "incredibly": 1.6, "absolutely": 1.6, "completely": 1.55,
     "totally": 1.5, "utterly": 1.6, "deeply": 1.45, "truly": 1.3,
     "quite": 1.15, "pretty": 1.15, "super": 1.4, "highly": 1.4,
     "insanely": 1.5, "unbelievably": 1.55,
-    "slightly": 0.75, "somewhat": 0.8, "mildly": 0.75, "barely": 0.7,
-    "hardly": 0.7, "almost": 0.85, "little": 0.9,
+    "slightly": 0.75, "somewhat": 0.8, "mildly": 0.75,
+    "almost": 0.85, "little": 0.9,
 }
 NEGATION_SCALAR = -0.74  # VADER's damped flip: "not good" < "bad"
 BUT_WORDS = frozenset({"but", "however", "although", "though", "yet"})
@@ -312,6 +371,18 @@ TOPIC_MIN_PER_HALF = 10         # entries per half before a trend is claimable
 TOPIC_PRESENCE_MIN_ENTRIES = 20
 TOPIC_PRESENCE_MIN_SHARE = 0.30
 TOPIC_PRESENCE_MIN_DAYS = 10
+# A presence claim must recur in varied context: the token FOLLOWING each
+# occurrence differs across occurrences. Templated boilerplate ("another
+# ordinary journal scribble…") has one follower per slot and is filtered;
+# a real topic ("guitar") attaches to whatever the day contained.
+TOPIC_PRESENCE_MIN_CONTEXTS = 4
+# Second anti-boilerplate bar (small-vocab corpora defeat the follower bar:
+# a 40-word vocabulary hands every content word enough distinct followers).
+# When the run's OWN recurring-phrase clusters already cover this share of
+# a candidate's evidence days, the occurrences are a repeated SENTENCE —
+# the phrase detector surfaces that sentence as recurring_phrase, and a
+# presence card on top would be the same measurement wearing a second hat.
+TOPIC_PRESENCE_CLUSTER_COVER = 0.8
 TOPIC_MAX_CANDIDATES = 12       # tested per run (by document frequency)
 TOPIC_MAX_SIGNALS = 6           # surfaced per run, rising first
 
@@ -357,6 +428,9 @@ TOPIC_STOPWORDS = frozenset({
     "mood", "mind", "head", "heart", "soul", "life", "living", "live",
     "love", "hate", "okay", "ok", "fine", "good", "bad", "better", "worse",
     "best", "worst", "great", "nice", "hard", "easy", "weird", "strange",
+    # dropped from the sentiment lexicon for context-dependence; still never
+    # a life topic ("stayed present", "a present for mom")
+    "present",
     # high-frequency journal verbs/nouns that are never life topics
     "people", "person", "told", "ask", "asked", "asking", "call", "called",
     "calling", "talk", "talked", "talking", "spend", "spent", "spending",
@@ -561,11 +635,21 @@ def _lag1_autocorr(values: list[float]) -> float | None:
     return _pearson(values[:-1], values[1:])
 
 
-def _sd(values: list[float]) -> float:
-    if len(values) < 2:
-        return 0.0
-    m = sum(values) / len(values)
-    return math.sqrt(sum((v - m) ** 2 for v in values) / (len(values) - 1))
+def _daily_lag1_autocorr(day_values: dict[date, float]) -> float | None:
+    """Lag-1 autocorrelation over CONSECUTIVE calendar days only.
+
+    The deflation heuristic behind the link/mood tests' effective sample
+    size. Unlike _lag1_autocorr (positional, EWMA-tuned), only true
+    next-day pairs count — a 5-day gap is not lag-1 dependence. An
+    approximation either way: one shared nuisance estimate for every
+    theme's test, computed once per run.
+    """
+    days = sorted(day_values)
+    pairs = [(day_values[d1], day_values[d2])
+             for d1, d2 in zip(days, days[1:]) if (d2 - d1).days == 1]
+    if len(pairs) < 8:
+        return None
+    return _pearson([a for a, _ in pairs], [b for _, b in pairs])
 
 
 # --- pattern store ----------------------------------------------------------------
@@ -698,6 +782,17 @@ def dump_state(state: dict) -> bytes:
 
 @dataclass
 class _Signal:
+    """One detector's claim this run.
+
+    ``pvalue`` is set whenever a significance test RAN — including for
+    candidates whose effect-size gates fail. Selection-then-test (running
+    BH only over gate survivors) invalidates FDR control: the gates select
+    FOR extremeness, so the family must count every test, and the gates
+    apply to the corrected survivors (``gate_ok``). ``fallback`` carries
+    the direct-measurement variant of a topic signal (a persistent
+    presence) for when its tested rising claim does not survive.
+    """
+
     pid: str
     kind: str
     label: str
@@ -705,6 +800,8 @@ class _Signal:
     pvalue: float | None  # None = qualifies on its own (non-statistical family)
     detail: dict
     evidence_days: list[date]
+    gate_ok: bool = True
+    fallback: _Signal | None = None
 
 
 def _decay_strength(evidence: list[date], today: date) -> float:
@@ -723,6 +820,7 @@ def _detect_themes(
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
     weekday_total: dict[int, int],
     total_entries: int,
+    lag1: float | None = None,
 ) -> list[_Signal]:
     """Base-rate-corrected weekday concentration + within-person mood ties.
 
@@ -730,15 +828,21 @@ def _detect_themes(
 
       * the weekday test asked only about the argmax day — selecting the
         best of 7 and testing it once understated the p-value ~7x. Every
-        weekday that clears the fraction/sample floors is now tested and
-        ALL of the tests enter the Benjamini-Hochberg family; the best
-        surviving day becomes the pattern.
+        weekday with a testable base rate is now tested and ALL of the
+        tests enter the Benjamini-Hochberg family — including the ones
+        whose effect gates fail (selecting on the statistic before
+        correcting is selection-then-test and voids FDR control; the
+        gates filter the corrected survivors instead).
       * mood correlations ran on raw sentiment, so any slow mood trend
         manufactured spurious ties (probe_brain.py: five false claims at
         p <= 1e-6). They now run on residuals against the user's own
         rolling baseline (Bolger & Laurenceau 2013, within-person
         centering) — a theme only ties to mood if its days read
         different from the user's norm AT THAT MOMENT.
+
+    ``lag1``: autocorrelation of the daily residual series, used to
+    deflate per-group n in the mood Welch test — day residuals are not
+    independent observations when mood carries over day to day.
     """
     signals: list[_Signal] = []
     themes = sorted({theme for _, _, themes, _ in per_entry for theme in themes})
@@ -754,21 +858,21 @@ def _detect_themes(
         weekday_counts: dict[int, int] = {}
         for e, _ in with_theme:
             weekday_counts[e.entry_date.weekday()] = weekday_counts.get(e.entry_date.weekday(), 0) + 1
-        candidates: list[tuple[int, int, float, float]] = []  # (weekday, k, fraction, pvalue)
+        candidates: list[tuple[int, int, float, float, bool]] = []  # (weekday, k, fraction, pvalue, gate_ok)
         for weekday in sorted(weekday_counts):
-            k = weekday_counts[weekday]
-            fraction = k / count
-            if k < TEMPORAL_MIN_DAY_K or fraction < TEMPORAL_MIN_FRACTION:
-                continue
             base_rate = weekday_total.get(weekday, 0) / total_entries
             if not 0.0 < base_rate < 1.0:
-                continue
-            candidates.append((weekday, k, fraction, statsig.binomial_sf(k, count, base_rate)))
-        # EVERY candidate weekday enters the significance family (selecting
-        # the argmax first and testing it alone understated p-values by up
-        # to the number of weekdays). update() keeps, per theme, only the
-        # best SURVIVOR after correction.
-        for weekday, k, fraction, pvalue in candidates:
+                continue  # the test itself is undefined here
+            k = weekday_counts[weekday]
+            fraction = k / count
+            pvalue = statsig.binomial_sf(k, count, base_rate)
+            gate_ok = k >= TEMPORAL_MIN_DAY_K and fraction >= TEMPORAL_MIN_FRACTION
+            candidates.append((weekday, k, fraction, pvalue, gate_ok))
+        # EVERY tested weekday enters the significance family, gate-passing
+        # or not (selecting the argmax first and testing it alone understated
+        # p-values by up to the number of weekdays). update() keeps, per
+        # theme, only the best SURVIVOR after correction.
+        for weekday, k, fraction, pvalue, gate_ok in candidates:
             signals.append(_Signal(
                 pid=f"temporal:{theme}",
                 kind="temporal",
@@ -784,6 +888,7 @@ def _detect_themes(
                     "days_tested": len(candidates),
                 },
                 evidence_days=days,
+                gate_ok=gate_ok,
             ))
 
         if len(without_theme) >= MOOD_MIN_PER_SIDE:
@@ -791,22 +896,23 @@ def _detect_themes(
             moods_without = [s for _, s in without_theme]
             delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
             effect = statsig.cohens_d(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
-            if abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT:
-                _, pvalue = statsig.welch_test(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
-                signals.append(_Signal(
-                    pid=f"mood_correlation:{theme}",
-                    kind="mood_correlation",
-                    label=theme,
-                    occurrences=count,
-                    pvalue=pvalue,
-                    detail={
-                        "mood_delta": round(delta, 3),
-                        "direction": "lower" if delta > 0 else "higher",
-                        "cohens_d": round(effect, 3),
-                        "p_value": round(pvalue, 6),
-                    },
-                    evidence_days=days,
-                ))
+            _, pvalue = statsig.welch_test(moods_with, moods_without,
+                                           variance_floor=MOOD_SD_FLOOR, lag1=lag1)
+            signals.append(_Signal(
+                pid=f"mood_correlation:{theme}",
+                kind="mood_correlation",
+                label=theme,
+                occurrences=count,
+                pvalue=pvalue,
+                detail={
+                    "mood_delta": round(delta, 3),
+                    "direction": "lower" if delta > 0 else "higher",
+                    "cohens_d": round(effect, 3),
+                    "p_value": round(pvalue, 6),
+                },
+                evidence_days=days,
+                gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,
+            ))
     return signals
 
 
@@ -814,16 +920,35 @@ def _detect_links(
     day_themes: dict[date, set[str]],
     day_residuals: dict[date, float],
     today: date,
+    lag1: float | None = None,
 ) -> list[_Signal]:
     """Lagged day-after links: theme today → mood deviation tomorrow.
 
     The best-validated lagged association in the daily-diary literature
-    is sleep → next-day affect (Bourke et al. 2026, meta-analysis of 118
-    studies); stress spillover (Bolger et al. 1989) has the same shape.
-    We test every theme's next-day residual mood against the user's own
-    baseline — the literal "pattern linking" the product promises.
-    Only lag-1 is tested: it is the interpretable, best-replicated lag,
-    and each extra lag doubles the multiple-testing burden.
+    is sleep → next-day affect (Konjarski et al. 2018, *Sleep Medicine
+    Reviews* meta-analysis); stress spillover (Bolger et al. 1989) has the
+    same shape. We test every theme's next-day residual mood against the
+    user's own baseline — the literal "pattern linking" the product
+    promises. Only lag-1/lag-2 are tested: they are the interpretable,
+    best-replicated lags, and each extra lag doubles the multiple-testing
+    burden.
+
+    Two honesty details:
+
+      * GAP LABELING: a one-day journaling skip must not erase the link
+        (a skip-day pair still measures "the day after the theme came
+        up" for the WRITER — they just didn't write that day), so
+        transitions with gap <= LINK_MAX_GAP_DAYS are admitted. The
+        label then reports the MODAL exposed gap (detail.lag_days, with
+        per-gap counts): "the day after" is said only when the data
+        actually says it. Restricting to gap == 1 was tried and
+        rejected: for anyone who skips a weekday the exposed group
+        collapses below the sample floor and true links vanish.
+      * EFFECTIVE SAMPLE SIZE: consecutive-day residuals are
+        autocorrelated (that carryover is the inertia detector's whole
+        subject), so the per-side n is deflated by the series' lag-1
+        autocorrelation before the Welch test — treating them as
+        independent made every link p-value anti-conservative.
     """
     days = sorted(day_themes)
     transitions: list[tuple[date, date]] = []
@@ -837,16 +962,18 @@ def _detect_links(
     signals: list[_Signal] = []
     themes = sorted({t for theme_set in day_themes.values() for t in theme_set})
     for theme in themes:
-        exposed = [day_residuals[cur] for prev, cur in transitions if theme in day_themes[prev]]
+        exposed_pairs = [(prev, cur) for prev, cur in transitions if theme in day_themes[prev]]
+        exposed = [day_residuals[cur] for _, cur in exposed_pairs]
         unexposed = [day_residuals[cur] for prev, cur in transitions if theme not in day_themes[prev]]
         if len(exposed) < LINK_MIN_PER_SIDE or len(unexposed) < LINK_MIN_PER_SIDE:
             continue
         delta = sum(unexposed) / len(unexposed) - sum(exposed) / len(exposed)
         effect = statsig.cohens_d(exposed, unexposed, variance_floor=MOOD_SD_FLOOR)
-        if abs(delta) < MOOD_MIN_DELTA or abs(effect) < MOOD_MIN_EFFECT:
-            continue
-        _, pvalue = statsig.welch_test(exposed, unexposed, variance_floor=MOOD_SD_FLOOR)
-        outcome_days = [cur for prev, cur in transitions if theme in day_themes[prev]]
+        _, pvalue = statsig.welch_test(exposed, unexposed,
+                                       variance_floor=MOOD_SD_FLOOR, lag1=lag1)
+        gap1 = sum(1 for prev, cur in exposed_pairs if (cur - prev).days == 1)
+        gap2 = len(exposed_pairs) - gap1
+        outcome_days = [cur for _, cur in exposed_pairs]
         signals.append(_Signal(
             pid=f"link:{theme}",
             kind="link",
@@ -854,7 +981,11 @@ def _detect_links(
             occurrences=len(exposed),
             pvalue=pvalue,
             detail={
-                "lag_days": 1,
+                # The MODAL exposed gap (ties break to 1, the stricter
+                # reading): the card copy keys off this.
+                "lag_days": 1 if gap1 >= gap2 else 2,
+                "gap1_days": gap1,
+                "gap2_days": gap2,
                 "mood_delta": round(delta, 3),
                 "direction": "lower" if delta > 0 else "higher",
                 "cohens_d": round(effect, 3),
@@ -863,6 +994,7 @@ def _detect_links(
                 "n_other": len(unexposed),
             },
             evidence_days=outcome_days,
+            gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,
         ))
     return signals
 
@@ -894,13 +1026,16 @@ def _detect_mood_dynamics(
     if len(recent) >= INERTIA_MIN_PAIRS and len(earlier) >= INERTIA_MIN_PAIRS:
         r_recent = _pearson([a for a, _ in recent], [b for _, b in recent])
         r_earlier = _pearson([a for a, _ in earlier], [b for _, b in earlier])
-        if (r_recent is not None and r_earlier is not None
-                and r_recent >= INERTIA_RECENT_MIN
-                and r_recent - r_earlier >= INERTIA_DELTA):
-            # An autocorrelation IS a statistical claim: r = 0.46 on 10
-            # pairs is p ~ 0.18 noise. The p-value enters the same
-            # Benjamini-Hochberg family as every other claim this run.
-            pvalue = statsig.correlation_p(r_recent, len(recent))
+        if r_recent is not None and r_earlier is not None:
+            # The claim is COMPARATIVE ("carrying over more than usual"),
+            # so its p-value must test the difference of the two windows'
+            # correlations (Fisher z), not the weaker null r_recent = 0 —
+            # a user whose carryover was always high has "inertia" under
+            # the old test even with no change at all. The p enters the
+            # same Benjamini-Hochberg family as every other claim this
+            # run, whether or not the effect gates pass.
+            pvalue = statsig.fisher_z_difference_p(
+                r_recent, len(recent), r_earlier, len(earlier))
             signals.append(_Signal(
                 pid="inertia:mood",
                 kind="inertia",
@@ -914,6 +1049,8 @@ def _detect_mood_dynamics(
                     "p_value": round(pvalue, 6),
                 },
                 evidence_days=[d for d, _, _ in consecutive if d > recent_cutoff],
+                gate_ok=(r_recent >= INERTIA_RECENT_MIN
+                         and r_recent - r_earlier >= INERTIA_DELTA),
             ))
 
     # --- instability: spread of within-person residuals, recent vs earlier.
@@ -921,33 +1058,38 @@ def _detect_mood_dynamics(
     recent_vals = [day_residuals[d] for d in residual_days if d > recent_cutoff]
     earlier_vals = [day_residuals[d] for d in residual_days if d <= recent_cutoff]
     if len(recent_vals) >= INSTABILITY_MIN_DAYS and len(earlier_vals) >= INSTABILITY_MIN_DAYS:
-        sd_recent = _sd(recent_vals)
-        sd_earlier = _sd(earlier_vals)
-        if sd_recent >= INSTABILITY_SD_FLOOR and sd_recent >= INSTABILITY_RATIO * max(sd_earlier, 0.0):
-            # Variance-ratio claim → F-test p-value, in the BH family.
-            v_r, v_e = sd_recent**2, max(sd_earlier, 1e-12) ** 2
-            f_stat = v_r / v_e
-            pvalue = min(
-                1.0,
-                2.0 * min(
-                    statsig.f_sf(f_stat, len(recent_vals) - 1, len(earlier_vals) - 1),
-                    statsig.f_sf(1.0 / f_stat, len(earlier_vals) - 1, len(recent_vals) - 1),
-                ),
-            )
-            signals.append(_Signal(
-                pid="instability:mood",
-                kind="instability",
-                label="daily mood",
-                occurrences=len(recent_vals),
-                pvalue=pvalue,
-                detail={
-                    "spread_recent": round(sd_recent, 3),
-                    "spread_earlier": round(sd_earlier, 3),
-                    "window_days": INSTABILITY_RECENT_DAYS,
-                    "p_value": round(pvalue, 6),
-                },
-                evidence_days=[d for d in residual_days if d > recent_cutoff],
-            ))
+        sd_recent = statsig.sample_sd(recent_vals)
+        sd_earlier = statsig.sample_sd(earlier_vals)
+        # Variance-ratio claim → F-test p-value, in the BH family whether
+        # or not the effect gates (spread floor, ratio) pass. The p is now
+        # computed pre-gate, so the degenerate zero-spread case the gate
+        # used to hide needs its own guard: a frozen series is the
+        # OPPOSITE of an instability claim — "no evidence", not a crash.
+        v_r, v_e = sd_recent**2, max(sd_earlier, 1e-12) ** 2
+        f_stat = v_r / v_e
+        pvalue = 1.0 if f_stat <= 0.0 else min(
+            1.0,
+            2.0 * min(
+                statsig.f_sf(f_stat, len(recent_vals) - 1, len(earlier_vals) - 1),
+                statsig.f_sf(1.0 / f_stat, len(earlier_vals) - 1, len(recent_vals) - 1),
+            ),
+        )
+        signals.append(_Signal(
+            pid="instability:mood",
+            kind="instability",
+            label="daily mood",
+            occurrences=len(recent_vals),
+            pvalue=pvalue,
+            detail={
+                "spread_recent": round(sd_recent, 3),
+                "spread_earlier": round(sd_earlier, 3),
+                "window_days": INSTABILITY_RECENT_DAYS,
+                "p_value": round(pvalue, 6),
+            },
+            evidence_days=[d for d in residual_days if d > recent_cutoff],
+            gate_ok=(sd_recent >= INSTABILITY_SD_FLOOR
+                     and sd_recent >= INSTABILITY_RATIO * max(sd_earlier, 0.0)),
+        ))
     return signals
 
 
@@ -964,7 +1106,43 @@ def _phrase_pid(kind: str, cluster_members: list[phrase_miner.SentenceRef]) -> s
     return f"{kind}:{digest}"
 
 
-def _detect_phrases(window: list[JournalEntry]) -> list[_Signal]:
+def _window_sentences(window: list[JournalEntry]) -> list[phrase_miner.SentenceRef]:
+    """The window's clusterable sentences, budgeted newest-first.
+
+    Fill the sentence budget NEWEST-first: when the cap bites, the
+    sentences dropped are the oldest in the window — the same recency
+    bias the window itself applies to entries. The final reverse keeps
+    clustering input in chronological order, so results stay
+    deterministic (and identical to before whenever the cap never hits).
+    """
+    sentences: list[phrase_miner.SentenceRef] = []
+    for entry in reversed(window):
+        for sentence in sentences_of(entry.text):
+            sentences.append(phrase_miner.SentenceRef(text=sentence, day=entry.entry_date))
+            if len(sentences) >= MAX_WINDOW_SENTENCES:
+                break
+        if len(sentences) >= MAX_WINDOW_SENTENCES:
+            break
+    sentences.reverse()
+    return sentences
+
+
+def _phrase_clusters(window: list[JournalEntry]) -> list[phrase_miner.PhraseCluster]:
+    """The run's recurring-phrase clusters, computed ONCE per update.
+
+    Both the phrase detector and the topic presence gate consume the same
+    clustering — a word whose occurrences are all inside one repeated
+    sentence is that sentence's story, not a topic (see _detect_topics).
+    """
+    return phrase_miner.near_duplicate_clusters(
+        _window_sentences(window),
+        min_size=PHRASE_MIN_OCCURRENCES,
+        min_span_days=PHRASE_MIN_SPAN_DAYS,
+        min_distinct_days=PHRASE_MIN_DISTINCT_DAYS,
+    )
+
+
+def _detect_phrases(clusters: list[phrase_miner.PhraseCluster]) -> list[_Signal]:
     """Near-duplicate clusters; negative ones surface as rumination.
 
     A recurring near-duplicate cluster is surfaced as a repeated *worry*
@@ -975,27 +1153,8 @@ def _detect_phrases(window: list[JournalEntry]) -> list[_Signal]:
     along in the detail. Non-negative repeats stay the neutral
     "recurring_phrase".
     """
-    sentences: list[phrase_miner.SentenceRef] = []
-    # Fill the sentence budget NEWEST-first: when the cap bites, the
-    # sentences dropped are the oldest in the window — the same recency
-    # bias the window itself applies to entries. The final reverse keeps
-    # clustering input in chronological order, so results stay
-    # deterministic (and identical to before whenever the cap never hits).
-    for entry in reversed(window):
-        for sentence in sentences_of(entry.text):
-            sentences.append(phrase_miner.SentenceRef(text=sentence, day=entry.entry_date))
-            if len(sentences) >= MAX_WINDOW_SENTENCES:
-                break
-        if len(sentences) >= MAX_WINDOW_SENTENCES:
-            break
-    sentences.reverse()
     signals: list[_Signal] = []
-    for cluster in phrase_miner.near_duplicate_clusters(
-        sentences,
-        min_size=PHRASE_MIN_OCCURRENCES,
-        min_span_days=PHRASE_MIN_SPAN_DAYS,
-        min_distinct_days=PHRASE_MIN_DISTINCT_DAYS,
-    ):
+    for cluster in clusters:
         days = sorted({ref.day for ref in cluster.members})
         variants = sorted({ref.text for ref in cluster.members})
         member_sentiments = [sentiment_score(ref.text.split()) for ref in cluster.members]
@@ -1039,7 +1198,7 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     exponentially weighted moving average (lambda 0.18, inside the
     0.05-0.25 band validated by Smit, Schat & Ceulemans 2023); a run of
     points beyond +/-2.7 sigma_ewma in the recent tail reports a
-    trajectory shift (Snippe et al. 2023 used this exact family of
+    trajectory shift (Snippe et al. 2024 used this exact family of
     charts on EMA mood series).
     """
     n = len(day_sentiments)
@@ -1048,8 +1207,7 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     baseline = day_sentiments[: max(MOOD_SHIFT_BASELINE_MIN, n // 4)]
     values = [s for _, s in baseline]
     mu = sum(values) / len(values)
-    sigma = statsig._variance(values) if len(values) > 1 else 0.0  # noqa: SLF001
-    sigma = math.sqrt(max(sigma, MOOD_SHIFT_SIGMA_FLOOR**2))
+    sigma = max(statsig.sample_sd(values), MOOD_SHIFT_SIGMA_FLOOR)
     sigma_ewma = sigma * math.sqrt(MOOD_SHIFT_LAMBDA / (2 - MOOD_SHIFT_LAMBDA))
     # The textbook EWMA variance assumes iid observations. Daily mood is
     # precisely the autocorrelated series this engine's own inertia
@@ -1085,12 +1243,12 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     if len(beyond) < MOOD_SHIFT_RUN:
         return []
     shift = last_ewma - mu
-    if abs(shift) < MOOD_SHIFT_MIN_SHIFT:
-        return []
     direction = "lower" if last_sign < 0 else "higher"
     # The excursion IS a statistical claim (a control chart is a repeated
     # test): attach its p-value so it enters the BH family with everything
-    # else instead of bypassing multiple-testing correction.
+    # else instead of bypassing multiple-testing correction. The minimum
+    # meaningful shift is an effect gate and filters the SURVIVORS — the
+    # test ran, so the family counts it.
     z_last = (last_ewma - mu) / sigma_ewma if sigma_ewma > 0 else 0.0
     pvalue = statsig.normal_two_sided_sf(z_last)
     return [_Signal(
@@ -1108,13 +1266,36 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
             "p_value": round(pvalue, 6),
         },
         evidence_days=beyond,
+        gate_ok=abs(shift) >= MOOD_SHIFT_MIN_SHIFT,
     )]
 
 
 # --- emergent topic discovery -------------------------------------------------------
 
+def _cluster_covered_days(
+    clusters: list[phrase_miner.PhraseCluster], label: str
+) -> set[date]:
+    """Days on which a recurring-phrase cluster member contains *label*.
+
+    Unigrams match on tokens; bigrams on ADJACENT token pairs (the label
+    was mined from adjacent tokens, so the same adjacency is required here
+    — a substring test would credit "xa b" with the bigram "a b").
+    """
+    covered: set[date] = set()
+    for cluster in clusters:
+        for ref in cluster.members:
+            toks = ref.text.split()
+            if " " in label:
+                if any(f"{a} {b}" == label for a, b in zip(toks, toks[1:])):
+                    covered.add(ref.day)
+            elif label in toks:
+                covered.add(ref.day)
+    return covered
+
+
 def _detect_topics(
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
+    phrase_clusters: list[phrase_miner.PhraseCluster],
 ) -> list[_Signal]:
     """Discover recurring content n-grams the fixed lexicon does not cover.
 
@@ -1125,9 +1306,35 @@ def _detect_topics(
     absolutist markers are all excluded — those layers own them), recurring
     across enough entries and distinct days. A candidate surfaces either as
     RISING (recent-half share vs the user's own earlier-half base rate,
-    exact binomial, into the Benjamini-Hochberg family — "X is taking up
-    more space in your writing") or as a PERSISTENT presence (a direct
-    measurement of share, ≥30% of entries — no null hypothesis applies).
+    exact binomial, into the run-wide Benjamini-Hochberg family — "X is
+    taking up more space in your writing") or as a PERSISTENT presence (a
+    direct measurement of share, ≥30% of entries — no null hypothesis
+    applies).
+
+    Three honesty rules worth calling out:
+
+      * Every TESTABLE candidate's p-value is emitted pre-gate (the local
+        Bonferroni this detector used to apply is subsumed by the
+        run-wide family); the rising effect gates filter the corrected
+        survivors downstream. A failing rising claim with a persistent
+        presence still surfaces — as the presence variant (``fallback``).
+      * Presence claims must clear a distinct-context bar: the same word
+        followed by the same word every time ("another ordinary journal
+        scribble…") is boilerplate, not a topic — measured: presence
+        topics flooded pure-noise corpora (~5 cards/run) before the bar.
+        Presence cards carry ``presence: true`` so the client can
+        down-rank a measurement against tested claims.
+      * …and a cluster-coverage bar on top of it (the follower bar is
+        beatable: small-vocab noise hands every frequent word enough
+        distinct followers — measured: 40/40 such runs surfaced 3–6
+        presence cards, "'blanket' is a steady presence"). A candidate
+        whose evidence days are ≥ TOPIC_PRESENCE_CLUSTER_COVER covered by
+        the run's own recurring-phrase clusters has its occurrences
+        explained by a repeated SENTENCE; the phrase detector already
+        surfaces that sentence, so the presence claim is suppressed as
+        the same measurement in a second hat. Rising (tested) claims are
+        unaffected — a word can genuinely rise inside varied phrasing
+        while a boilerplate sentence also repeats.
     """
     n = len(per_entry)
     if n < TOPIC_MIN_PER_HALF * 2:
@@ -1157,15 +1364,19 @@ def _detect_topics(
 
     df_docs: dict[str, set[int]] = {}
     df_days: dict[str, set[date]] = {}
+    followers: dict[str, set[str]] = {}
     for i, (day, tokens) in enumerate(doc_tokens):
         prev = None
-        for tok in tokens:
+        for j, tok in enumerate(tokens):
             if not eligible(tok):
                 prev = None
                 continue
+            following = tokens[j + 1] if j + 1 < len(tokens) else None
             for cand in (tok, f"{prev} {tok}") if prev else (tok,):
                 df_docs.setdefault(cand, set()).add(i)
                 df_days.setdefault(cand, set()).add(day)
+                if following is not None:
+                    followers.setdefault(cand, set()).add(following)
             prev = tok
 
     candidates: list[tuple[str, int, int, int]] = []  # label, total, days, recent_df
@@ -1177,80 +1388,144 @@ def _detect_topics(
         recent_df = sum(1 for i in docs_hit if i in recent_idx)
         candidates.append((label, total, days_n, recent_df))
     # Highest-document-frequency first: when "guitar" and "guitar practice"
-    # both qualify, the broader one wins and nested labels are dropped.
+    # both qualify downstream, the broader one wins and nested labels are
+    # dropped (the dedupe itself happens post-correction in update()).
     candidates.sort(key=lambda c: (-c[1], c[0]))
     candidates = candidates[:TOPIC_MAX_CANDIDATES]
 
     recent_n = len(recent_idx)
-    kept_tokens: set[str] = set()
-    ranked: list[tuple[int, _Signal]] = []
+    signals: list[_Signal] = []
     for label, total, days_n, recent_df in candidates:
-        toks = label.split()
-        if any(t in kept_tokens for t in toks):
-            continue
         share = total / n
-        pvalue: float | None = None
-        trend = "steady"
         share_recent = recent_df / recent_n if recent_n else 0.0
         share_earlier = (total - recent_df) / earlier_n if earlier_n else 0.0
+        pvalue: float | None = None
+        gate_ok = False
         if recent_n >= TOPIC_MIN_PER_HALF and earlier_n >= TOPIC_MIN_PER_HALF:
             base = ((total - recent_df) + 0.5) / (earlier_n + 1)
-            if (recent_df >= TOPIC_RISING_MIN_RECENT
-                    and share_recent >= TOPIC_RISING_MIN_SHARE
-                    and share_recent >= base + TOPIC_RISING_MIN_GAIN
-                    # AND a substantial RELATIVE gain: the binomial p-value
-                    # conditions on a base estimated from the same window's
-                    # earlier half, so a chance-low earlier half makes an
-                    # ordinary recent half look "rising". Demanding the
-                    # recent rate roughly double the base keeps chance-low
-                    # baselines from manufacturing claims.
-                    and share_recent >= 2.0 * base + 0.05):
-                pvalue = statsig.binomial_sf(recent_df, recent_n, base)
-                # The effect gates pre-select for extremeness, so the BH
-                # family downstream only ever sees gate survivors and
-                # cannot correct the multiplicity that matters. Correct
-                # here for the REAL family: every candidate topic that
-                # was tested (Bonferroni on len(candidates)).
-                if pvalue > ALPHA / max(1, len(candidates)):
-                    pvalue = None
-                else:
-                    trend = "rising"
+            pvalue = statsig.binomial_sf(recent_df, recent_n, base)
+            gate_ok = (
+                recent_df >= TOPIC_RISING_MIN_RECENT
+                and share_recent >= TOPIC_RISING_MIN_SHARE
+                and share_recent >= base + TOPIC_RISING_MIN_GAIN
+                # AND a substantial RELATIVE gain: the binomial p-value
+                # conditions on a base estimated from the same window's
+                # earlier half, so a chance-low earlier half makes an
+                # ordinary recent half look "rising". Demanding the
+                # recent rate roughly double the base keeps chance-low
+                # baselines from manufacturing claims.
+                and share_recent >= 2.0 * base + 0.05
+            )
         is_presence = (total >= TOPIC_PRESENCE_MIN_ENTRIES
                        and share >= TOPIC_PRESENCE_MIN_SHARE
                        and share <= TOPIC_PRESENCE_MAX_SHARE
-                       and days_n >= TOPIC_PRESENCE_MIN_DAYS)
+                       and days_n >= TOPIC_PRESENCE_MIN_DAYS
+                       and len(followers.get(label, ())) >= TOPIC_PRESENCE_MIN_CONTEXTS)
+        if is_presence:
+            # Cluster-coverage bar: occurrences a repeated sentence already
+            # explains (the engine surfaces that sentence as a phrase card)
+            # must not double as a "steady presence" measurement.
+            covered = _cluster_covered_days(phrase_clusters, label)
+            if len(df_days[label] & covered) >= TOPIC_PRESENCE_CLUSTER_COVER * days_n:
+                is_presence = False
         if pvalue is None and not is_presence:
             continue
-        detail: dict[str, Any] = {
-            "trend": trend,
+        shared_detail: dict[str, Any] = {
             "entries": total,
             "distinct_days": days_n,
             "share": round(share, 3),
             "share_earlier": round(share_earlier, 3),
             "share_recent": round(share_recent, 3),
         }
-        if pvalue is not None:
-            detail["p_value"] = round(pvalue, 6)
-        kept_tokens.update(toks)
-        ranked.append((total, _Signal(
+        fallback: _Signal | None = None
+        if is_presence:
+            fallback = _Signal(
+                pid=f"topic:{label}",
+                kind="topic",
+                label=label,
+                occurrences=total,
+                pvalue=None,
+                detail={**shared_detail, "trend": "steady", "presence": True},
+                evidence_days=sorted(df_days[label]),
+            )
+        if pvalue is None:
+            # Untestable trend (thin halves): the presence variant, or
+            # nothing, IS the signal.
+            if fallback is not None:
+                signals.append(fallback)
+            continue
+        signals.append(_Signal(
             pid=f"topic:{label}",
             kind="topic",
             label=label,
             occurrences=total,
             pvalue=pvalue,
-            detail=detail,
+            detail={**shared_detail, "trend": "rising", "p_value": round(pvalue, 6)},
             evidence_days=sorted(df_days[label]),
-        )))
-
-    # Rising claims first (they carry the news), then presence.
-    ranked.sort(key=lambda item: (item[1].pvalue is None, -item[0], item[1].pid))
-    return [signal for _, signal in ranked[:TOPIC_MAX_SIGNALS]]
+            gate_ok=gate_ok,
+            fallback=fallback,
+        ))
+    return signals
 
 
 # --- lifecycle merge ------------------------------------------------------------------
 
+# The detail field that carries a claim's CORE semantics, per kind: when a
+# re-qualification rewrites it, the claim itself has changed.
+_SEMANTIC_DETAIL_KEYS = {
+    "temporal": "day",          # the dominant weekday
+    "mood_correlation": "direction",
+    "link": "direction",
+    "mood_shift": "direction",
+}
+
+
+def _semantic_flip(record: StoredPattern, signal: _Signal) -> bool:
+    """True when a re-qualification rewrites the claim's core semantics
+    (the dominant weekday flipped, a mood direction reversed)."""
+    key = _SEMANTIC_DETAIL_KEYS.get(signal.kind)
+    if key is None:
+        return False
+    old = record.detail.get(key)
+    new = signal.detail.get(key)
+    return old is not None and new is not None and old != new
+
+
 def _iso(day: date) -> str:
     return day.isoformat()
+
+
+def _replication_satisfied(
+    record: StoredPattern, signal: _Signal, prior_evidence: set[str]
+) -> bool:
+    """True when a statistical claim has an INDEPENDENT second observation.
+
+    Two distinct qualification days are necessary but not sufficient:
+    consecutive recomputes share ~179 of 180 window days, so "qualified
+    again tomorrow" used to mean "the same fluke, scored twice" — measured:
+    ~17% of daily-cadence pure-noise runs surfaced at least one false
+    statistical card (mostly mood_shift's ~11-day EWMA memory re-qualifying
+    a single excursion). What counts as independent depends on the claim
+    (see EVIDENCE_DATE_KINDS / WINDOW_STAT_KINDS above):
+
+      * evidence-date kinds: this run's signal must contribute at least
+        one evidence day the record did not already hold — the claim
+        re-derived on data that did not produce the first qualification.
+      * window-stat kinds: the first and latest qualification days must
+        be >= REPLICATION_MIN_SPREAD_DAYS calendar days apart, so the
+        window itself has moved between the two observations.
+
+    Sensitivity cost, honestly stated: a real claim now surfaces a day or
+    two later than the bare 2-day gate allowed (it still surfaces on the
+    first recompute after genuinely new corroborating data exists).
+    """
+    if len(record.qualification_days) < 2:
+        return False
+    if record.kind in EVIDENCE_DATE_KINDS:
+        return any(_iso(day) not in prior_evidence for day in signal.evidence_days)
+    spread = (date.fromisoformat(record.qualification_days[-1])
+              - date.fromisoformat(record.qualification_days[0])).days
+    return spread >= REPLICATION_MIN_SPREAD_DAYS
 
 
 def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None:
@@ -1259,8 +1534,29 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
     qualified_pids = set()
 
     for signal in qualified:
-        qualified_pids.add(signal.pid)
         record = patterns.get(signal.pid)
+        if record is not None and _semantic_flip(record, signal):
+            # Semantic flip: the re-qualified claim contradicts the stored
+            # one ("mostly on Sundays" → "mostly on Wednesdays"). Keeping
+            # the pid would let the retired claim's evidence, age and
+            # confirmation status prop up a claim that never earned them —
+            # the label would silently change under an intact history. The
+            # old record retires instead (a surfaced claim fades honestly;
+            # a never-surfaced candidate archives quietly) and the flipped
+            # signal starts over under a fresh pid: new candidate clock,
+            # and for statistical kinds the replication gate re-applies.
+            if record.state in ("emerging", "confirmed"):
+                record.state = "fading"
+            elif record.state == "candidate":
+                record.state = "archived"
+            base_pid = signal.pid
+            suffix = 2
+            while (f"{base_pid}~{suffix}" in patterns
+                   or f"{base_pid}~{suffix}" in qualified_pids):
+                suffix += 1
+            signal.pid = f"{base_pid}~{suffix}"
+            record = None
+        qualified_pids.add(signal.pid)
         if record is None:
             record = StoredPattern(
                 pid=signal.pid, kind=signal.kind, label=signal.label,
@@ -1285,16 +1581,28 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
         record.first_qualified = record.first_qualified or today_iso
         days = sorted(set(record.qualification_days) | {today_iso})
         record.qualification_days = days[-QUALIFICATION_DAYS_CAP:]
+        # The replication gate compares this run's signal against the
+        # evidence recorded BEFORE this merge — a "new evidence day" is new
+        # relative to everything earlier runs already counted.
+        prior_evidence = set(record.evidence_dates)
         evidence = sorted(set(record.evidence_dates)
                           | {_iso(d) for d in signal.evidence_days})
         record.evidence_dates = evidence[-EVIDENCE_DATES_CAP:]
 
-        # Lifecycle promotion: strong evidence surfaces immediately; weaker
-        # signals must re-qualify on another day (or age a week) first.
+        # Lifecycle promotion. DIRECT-measurement kinds: strong evidence
+        # surfaces immediately; weaker signals must re-qualify on another
+        # day (or age a week) first. STATISTICAL kinds get no instant or
+        # age-based path: an inference from noisy data must replicate
+        # before it earns a card — >= 2 distinct recompute days AND an
+        # independent second observation (_replication_satisfied). A single
+        # lucky p-value stays a candidate forever.
         if record.state == "candidate":
             spread = (date.fromisoformat(record.qualification_days[-1])
                       - date.fromisoformat(record.qualification_days[0])).days
-            if (record.occurrences >= STRONG_EVIDENCE
+            if record.kind in STATISTICAL_KINDS:
+                if _replication_satisfied(record, signal, prior_evidence):
+                    record.state = "emerging"
+            elif (record.occurrences >= STRONG_EVIDENCE
                     or len(record.qualification_days) >= 2
                     or (today - date.fromisoformat(record.first_qualified)).days >= PROMOTE_AGE_DAYS
                     or spread >= PROMOTE_AGE_DAYS):
@@ -1307,15 +1615,29 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
             # the confirmation clock restarts here, or the next run's age
             # check would read the stale first_qualified and promote the
             # pattern straight to "confirmed" without re-proving itself.
-            record.state = "emerging"
-            record.first_qualified = today_iso
+            # Statistical kinds must additionally replicate (the same
+            # independent-second-observation bar as first promotion) — one
+            # lucky re-qualification after months of silence is the same
+            # single-run fluke the promotion gate exists to stop.
+            if record.kind not in STATISTICAL_KINDS or _replication_satisfied(
+                record, signal, prior_evidence
+            ):
+                record.state = "emerging"
+                record.first_qualified = today_iso
 
     # Aging: patterns that stopped qualifying fade, archive, then are dropped.
+    # A STATISTICAL pattern that never earned a card (still a candidate)
+    # skips the user-visible "fading" state entirely — surfacing a claim the
+    # replication gate just refused to promote would be the same fluke with
+    # a sadder label. Direct-measurement candidates keep the normal path.
     for pid in sorted(patterns):
         record = patterns[pid]
         if pid in qualified_pids or not record.last_qualified:
             continue
         stale_days = (today - date.fromisoformat(record.last_qualified)).days
+        if record.state == "candidate" and stale_days > GRACE_DAYS \
+                and record.kind in STATISTICAL_KINDS:
+            record.state = "archived"
         if record.state in ACTIVE_STATES and stale_days > GRACE_DAYS:
             record.state = "fading"
         if record.state == "fading" and stale_days > ARCHIVE_DAYS:
@@ -1339,6 +1661,20 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
 
 # --- the update entry point -------------------------------------------------------------
 
+def _record_is_sensitive(record: StoredPattern) -> bool:
+    """True when a surfaced pattern's own wording is suppress-tier crisis
+    content (label, or any stored phrase variant — the representative is
+    often the mildest phrasing of a darker cluster)."""
+    if crisis.matches_suppress(record.label):
+        return True
+    variants = record.detail.get("variants")
+    if isinstance(variants, list):
+        return any(
+            isinstance(variant, str) and crisis.matches_suppress(variant)
+            for variant in variants
+        )
+    return False
+
 @dataclass
 class BrainUpdate:
     new_state: dict
@@ -1349,8 +1685,19 @@ class BrainUpdate:
 
 
 def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate:
-    """Fold the corpus into the persistent store; surface what earned it."""
-    store = state if isinstance(state, dict) and isinstance(state.get("patterns"), dict) else fresh_state()
+    """Fold the corpus into the persistent store; surface what earned it.
+
+    Pure: the caller's ``state`` is never mutated. Copy-on-entry via a
+    dump/load roundtrip — cheap (the store is capped at MAX_STORED_PATTERNS
+    small records), and it doubles as normalization: whatever the caller
+    held is re-validated exactly as if it had crossed the encrypted-store
+    boundary. The recompute path reloads state from bytes each run anyway,
+    so this changes nothing observable there.
+    """
+    if isinstance(state, dict) and isinstance(state.get("patterns"), dict):
+        store = load_state(dump_state(state))
+    else:
+        store = fresh_state()
 
     cutoff = today - timedelta(days=WINDOW_DAYS)
     ordered = sorted(entries, key=lambda e: e.entry_date)
@@ -1393,19 +1740,54 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
 
     signals: list[_Signal] = []
     if per_entry:
-        signals.extend(_detect_themes(residual_per_entry, weekday_total, len(per_entry)))
-        signals.extend(_detect_phrases(window))
+        # One nuisance estimate per run: lag-1 autocorrelation of the daily
+        # residual series, deflating per-group n in the link/mood Welch
+        # tests (consecutive-day residuals are not independent evidence).
+        resid_lag1 = _daily_lag1_autocorr(day_residuals)
+        # The recurring-phrase clusters feed BOTH the phrase detector and
+        # the topic presence gate (a presence a repeated sentence already
+        # explains is the same measurement twice) — computed once per run.
+        clusters = _phrase_clusters(window)
+        signals.extend(_detect_themes(residual_per_entry, weekday_total, len(per_entry), resid_lag1))
+        signals.extend(_detect_phrases(clusters))
         signals.extend(_detect_mood_shift(day_sentiments))
-        signals.extend(_detect_links(day_themes, day_residuals, today))
+        signals.extend(_detect_links(day_themes, day_residuals, today, resid_lag1))
         signals.extend(_detect_mood_dynamics(day_sentiments, day_residuals, today))
-        signals.extend(_detect_topics(per_entry))
+        signals.extend(_detect_topics(per_entry, clusters))
 
-    # Multiple-testing correction across every statistical claim this run.
+    # Multiple-testing correction over the FULL family: every test that ran
+    # this run, whether or not its effect gates passed. Correcting only the
+    # gate survivors would be selection-then-test — the gates select for
+    # extremeness, so the family must count every test and the gates filter
+    # the corrected survivors instead.
     tested = [s for s in signals if s.pvalue is not None]
-    rejected = statsig.benjamini_hochberg([s.pvalue for s in tested], q=ALPHA)
-    qualified = [s for s in signals if s.pvalue is None] + [
-        s for s, keep in zip(tested, rejected) if keep
-    ]
+    survivors = statsig.benjamini_hochberg([s.pvalue for s in tested], q=ALPHA)
+    surviving = {id(s) for s, keep in zip(tested, survivors) if keep}
+    qualified: list[_Signal] = []
+    for signal in signals:
+        if signal.pvalue is None:
+            qualified.append(signal)  # direct-measurement family
+        elif id(signal) in surviving and signal.gate_ok:
+            qualified.append(signal)  # tested claim survives correction
+        elif signal.fallback is not None:
+            qualified.append(signal.fallback)  # measured presence stands
+    # Topic housekeeping happens post-correction: nested labels collapse
+    # into the broader kept topic, rising claims outrank presence
+    # measurements, and the per-run cap bounds what QUALIFIED — never the
+    # family itself.
+    ranked_topics = sorted(
+        (s for s in qualified if s.kind == "topic"),
+        key=lambda s: (s.pvalue is None, -s.occurrences, s.pid),
+    )
+    kept_tokens: set[str] = set()
+    kept_topic_pids: set[str] = set()
+    for topic in ranked_topics:
+        toks = topic.label.split()
+        if any(t in kept_tokens for t in toks) or len(kept_topic_pids) >= TOPIC_MAX_SIGNALS:
+            continue
+        kept_tokens.update(toks)
+        kept_topic_pids.add(topic.pid)
+    qualified = [s for s in qualified if s.kind != "topic" or s.pid in kept_topic_pids]
     # A theme may field several weekday candidates (all tested, all in the
     # family); only the best survivor becomes this run's pattern, and a
     # theme whose every candidate failed correction makes no claim.
@@ -1464,6 +1846,12 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
                 "last_seen": record.last_seen,
                 "is_new": is_new,
                 "sample_days": n_window_entries,
+                # Crisis interlock: when the wording itself is suppress-tier,
+                # the card is marked so the client renders the NON-QUOTING
+                # variant (and the question engine never touches it —
+                # enforced again there). Computed at surfacing time, never
+                # stored: the flag follows the current phrase contract.
+                **({"sensitive": True} if _record_is_sensitive(record) else {}),
             },
         ))
 

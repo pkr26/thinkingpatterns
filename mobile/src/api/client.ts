@@ -9,6 +9,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "../secureStore";
 
+/** Every endpoint is versioned under /api/v1. The server still mounts the
+ *  legacy /api tree during the transition, but new clients speak v1 — the
+ *  unified error envelope ({"detail", "code"}) is only guaranteed there. */
+const API_PREFIX = "/api/v1";
+
 const BASE_URL_KEY = "@mindpattern/base_url";
 /** Stores the exact URL the user consented to for plain HTTP (not a
  *  sticky global flag: consenting to one host must not silently bless
@@ -168,6 +173,48 @@ export function detailToMessage(detail: unknown, status: number): string {
   return `request failed (${status})`;
 }
 
+/** The server's unified error codes (v1 contract). Consumers branch on the
+ *  machine-readable code first and fall back to status/detail for legacy
+ *  servers that predate the envelope. */
+export const API_ERROR_CODES = [
+  "validation_error",
+  "quota_exceeded",
+  "blob_quota_exceeded",
+  "verification_failed",
+  "rate_limited",
+  "payload_too_large",
+  "not_found",
+  "conflict",
+  "unauthorized",
+] as const;
+export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
+
+/** A code is attacker-controllable text like `detail`, but it feeds BRANCH
+ *  logic, not dialogs: accept only the known slugs (anything else degrades
+ *  to undefined, and the caller falls back to status/detail matching). */
+function sanitizeCode(code: unknown): ApiErrorCode | undefined {
+  return typeof code === "string" && (API_ERROR_CODES as readonly string[]).includes(code)
+    ? (code as ApiErrorCode)
+    : undefined;
+}
+
+/** Retry-After on a 429 is seconds (or an HTTP-date); it is untrusted input
+ *  — clamp to a sane ceiling so a hostile server cannot park the queue for
+ *  days. Returns undefined when absent or unparseable. */
+const MAX_RETRY_AFTER_MS = 60 * 60_000;
+export function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+  }
+  const date = Date.parse(header);
+  if (Number.isFinite(date)) {
+    return Math.min(Math.max(0, date - Date.now()), MAX_RETRY_AFTER_MS);
+  }
+  return undefined;
+}
+
 /** Session-death hook: invoked on ANY authenticated 401 BEFORE the
  *  ApiError is thrown, so every call site (entry save, insights fetch,
  *  question fetch, queue flush) reacts identically instead of each
@@ -253,20 +300,40 @@ async function request(
         // a hook must never mask the ApiError below
       }
     }
-    throw new ApiError(response.status, detailToMessage((data as { detail?: unknown }).detail, response.status));
+    // Some network stacks / mocked responses carry no headers object at
+    // all — treat Retry-After as absent rather than crashing the path.
+    const retryAfter =
+      response.status === 429 && typeof response.headers?.get === "function"
+        ? parseRetryAfter(response.headers.get("retry-after"))
+        : undefined;
+    throw new ApiError(
+      response.status,
+      detailToMessage((data as { detail?: unknown }).detail, response.status),
+      sanitizeCode((data as { code?: unknown }).code),
+      retryAfter,
+    );
   }
   return data;
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    /** Machine-readable v1 error code; undefined on legacy servers. */
+    public code?: ApiErrorCode,
+    /** Server-advised retry delay (429 Retry-After), clamped; else absent. */
+    public retryAfterMs?: number,
+  ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
 /** One entry row as the backend serializes it (EntryOut). The server is
- *  untrusted — this types the shape for callers, it is not a guarantee. */
+ *  untrusted — this types the shape for callers, it is not a guarantee, and
+ *  unknown extra fields (e.g. a future "sensitive" flag) pass through
+ *  untouched: nothing here strips or rejects them. */
 export interface ListedEntry {
   id: string;
   client_entry_id: string;
@@ -292,16 +359,17 @@ export const api = {
   },
   isLoggedIn: async () => (await secureStore.getItem(TOKEN_KEY)) !== null,
 
-  meta: () => request("GET", "/api/meta"),
+  meta: () => request("GET", `${API_PREFIX}/meta`),
 
   register: (username: string, saltB64: string, authKeyB64: string) =>
-    request("POST", "/api/auth/register", { username, salt: saltB64, verifier: authKeyB64 }, {}, { sensitive: true }),
+    request("POST", `${API_PREFIX}/auth/register`, { username, salt: saltB64, verifier: authKeyB64 }, {}, { sensitive: true }),
   // POST body, never a URL path: usernames must not land in proxy access logs.
-  saltFor: (username: string) => request("POST", "/api/auth/salt", { username }),
+  saltFor: (username: string) => request("POST", `${API_PREFIX}/auth/salt`, { username }),
   cacheSalt: async (username: string, saltB64: string) => {
     // Bind the salt to the origin it was served from: an offline unlock
     // under server B must never derive keys with server A's salt.
-    const record = JSON.stringify({ o: await getBaseUrl(), s: saltB64 });
+    // v1 envelope: pre-v1 records were a bare { o, s } — see getCachedSalt.
+    const record = JSON.stringify({ v: 1, o: await getBaseUrl(), s: saltB64 });
     await AsyncStorage.setItem(saltKey(username), record);
   },
   /** The last server-known salt for this username FROM THE CURRENT SERVER,
@@ -310,9 +378,22 @@ export const api = {
     const raw = await AsyncStorage.getItem(saltKey(username));
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as { o?: unknown; s?: unknown };
+      const parsed = JSON.parse(raw) as { v?: unknown; o?: unknown; s?: unknown };
+      // v1 envelope, or the legacy bare { o, s } shape (no v field) — both
+      // carry the same two strings; anything else refuses rather than guesses.
+      const legacy = parsed.v === undefined;
+      if (!(legacy || parsed.v === 1)) return null;
       if (typeof parsed.o !== "string" || typeof parsed.s !== "string") return null;
-      return parsed.o === (await getBaseUrl()) ? parsed.s : null;
+      if (parsed.o !== (await getBaseUrl())) return null;
+      if (legacy) {
+        // Read-through migration (same idiom as the mood log): refresh the
+        // record to the v1 envelope so the legacy window stays bounded. A
+        // failed rewrite never fails the read.
+        await AsyncStorage.setItem(saltKey(username), JSON.stringify({ v: 1, o: parsed.o, s: parsed.s })).catch(
+          () => {},
+        );
+      }
+      return parsed.s;
     } catch {
       return null; // legacy/corrupt record: refuse rather than guess
     }
@@ -321,21 +402,31 @@ export const api = {
     await AsyncStorage.removeItem(saltKey(username));
   },
   login: (username: string, authKeyB64: string) =>
-    request("POST", "/api/auth/login", { username, verifier: authKeyB64 }, {}, { sensitive: true }),
+    request("POST", `${API_PREFIX}/auth/login`, { username, verifier: authKeyB64 }, {}, { sensitive: true }),
   /** Server-side kill switch: invalidates every bearer token for the account. */
-  logout: () => request("POST", "/api/auth/logout"),
+  logout: () => request("POST", `${API_PREFIX}/auth/logout`),
 
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string) =>
-    request("POST", "/api/entries", { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
-  /** Paginates through every page (server caps pages at 500 entries). */
+    request("POST", `${API_PREFIX}/entries`, { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
+  /** Paginates through every page (server caps pages at 500 entries).
+   *  Offset pagination can drift under CONCURRENT inserts (a new entry
+   *  shifts later rows down one page boundary): the consumer-side fix is
+   *  the dedupe below — entries are append-mostly, so the residual risk is
+   *  a missed just-inserted row, which the next incremental pull (since=)
+   *  picks up. Full-history consumers should still key on client_entry_id. */
   listEntries: async (since?: string): Promise<ListedEntry[]> => {
     const all: ListedEntry[] = [];
+    const seen = new Set<string>();
     const pageSize = 500;
     for (let page = 0; page < MAX_LIST_PAGES; page++) {
       const params = new URLSearchParams({ limit: String(pageSize), offset: String(page * pageSize) });
       if (since) params.set("since", since);
-      const result = (await request("GET", `/api/entries?${params.toString()}`)) as ListedEntry[];
-      all.push(...result);
+      const result = (await request("GET", `${API_PREFIX}/entries?${params.toString()}`)) as ListedEntry[];
+      for (const entry of result) {
+        if (seen.has(entry.client_entry_id)) continue; // page-boundary drift
+        seen.add(entry.client_entry_id);
+        all.push(entry);
+      }
       if (result.length < pageSize) return all;
     }
     // A hostile or broken server can return full pages forever — abort
@@ -349,22 +440,25 @@ export const api = {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
-    return request("DELETE", `/api/entries/${encodeURIComponent(clientEntryId)}`);
+    return request("DELETE", `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`);
   },
 
   openProcessingSession: (dataKeyB64: string) =>
-    request("POST", "/api/processing/sessions", { data_key: dataKeyB64 }, {}, { sensitive: true }),
+    request("POST", `${API_PREFIX}/processing/sessions`, { data_key: dataKeyB64 }, {}, { sensitive: true }),
   recompute: (processingToken: string) =>
-    request("POST", "/api/insights/recompute", undefined, { "X-Processing-Token": processingToken }),
-  insights: () => request("GET", "/api/insights"),
-  questionToday: () => request("GET", "/api/questions/today"),
+    request("POST", `${API_PREFIX}/insights/recompute`, undefined, { "X-Processing-Token": processingToken }),
+  insights: () => request("GET", `${API_PREFIX}/insights`),
+  questionToday: () => request("GET", `${API_PREFIX}/questions/today`),
 
-  exportAccount: () => request("GET", "/api/account/export"),
-  /** Requires the password-derived verifier: a stolen token cannot erase data. */
+  exportAccount: () => request("GET", `${API_PREFIX}/account/export`),
+  /** Requires the password-derived verifier: a stolen token cannot erase
+   *  data. The verifier travels in the X-Account-Verifier header (the v1
+   *  preference), never the URL; the server still accepts the legacy body
+   *  field during the transition. */
   deleteAccount: (verifierB64: string) =>
-    request("DELETE", "/api/account", { verifier: verifierB64 }, {}, { sensitive: true }),
+    request("DELETE", `${API_PREFIX}/account`, undefined, { "X-Account-Verifier": verifierB64 }, { sensitive: true }),
   /** Explicit, re-authenticated opt-in for third-party LLM analysis. */
-  getLlmConsent: () => request("GET", "/api/account/llm-consent"),
+  getLlmConsent: () => request("GET", `${API_PREFIX}/account/llm-consent`),
   setLlmConsent: (enabled: boolean, verifierB64: string) =>
-    request("PUT", "/api/account/llm-consent", { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
+    request("PUT", `${API_PREFIX}/account/llm-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
 };

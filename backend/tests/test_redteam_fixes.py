@@ -123,7 +123,12 @@ async def test_validation_error_does_not_echo_input(client):
     })
     assert response.status_code == 422
     assert marker not in response.text
-    assert "input" not in json.loads(response.text)["detail"][0]
+    # Unified envelope: detail is a human STRING (never the old FastAPI
+    # list-of-objects shape) naming only the failed field, plus the code.
+    body = response.json()
+    assert isinstance(body["detail"], str)
+    assert "blob" in body["detail"]
+    assert body["code"] == "validation_error"
 
 
 # --- INFO: security headers exist even on unhandled 500s -------------------------
@@ -312,7 +317,10 @@ async def test_llm_consent_requires_verifier(client, settings):
         headers=emu.headers,
         json={"enabled": True, "verifier": wrong},
     )
-    assert refused.status_code == 401
+    # 403, not 401: the session authenticated; the re-authentication failed.
+    # (401 tells clients "session expired", looping them into re-login.)
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "verification_failed"
     enabled = await client.put(
         "/api/account/llm-consent",
         headers=emu.headers,

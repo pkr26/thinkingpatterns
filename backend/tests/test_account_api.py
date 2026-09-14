@@ -93,8 +93,11 @@ async def test_delete_requires_correct_verifier(client):
 
     wrong = b64mod.b64encode(b"\x00" * 32).decode()
     refused = await client.request("DELETE", "/api/account", headers=emu.headers, json={"verifier": wrong})
-    assert refused.status_code == 401
-    assert "credentials" in refused.json()["detail"]
+    # 403 verification_failed: the bearer token is valid; the password proof
+    # is not. (401 means "session expired" to clients.)
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == "invalid credentials"
+    assert refused.json()["code"] == "verification_failed"
 
     # The failed attempt destroyed nothing.
     still_there = await client.get("/api/entries", headers=emu.headers)
@@ -118,3 +121,76 @@ async def test_double_delete_fails_cleanly(client):
     await emu.register(client)
     assert await emu.delete_account(client) == 204
     assert await emu.delete_account(client) == 401
+
+
+async def test_llm_consent_records_timestamp_and_disclosure(client, monkeypatch):
+    """GDPR Art. 7: enabling writes the record (timestamp + disclosure
+    version), disabling clears it, re-enabling refreshes it."""
+    from datetime import datetime, timezone
+
+    from app.api import account as account_api
+
+    emu = ClientEmulator("consentrecord", "p")
+    await emu.register(client)
+
+    def put(enabled: bool):
+        return client.put(
+            "/api/account/llm-consent",
+            headers=emu.headers,
+            json={"enabled": enabled, "verifier": emu.auth_key_b64},
+        )
+
+    # A fresh account has no record at all.
+    initial = await client.get("/api/account/llm-consent", headers=emu.headers)
+    assert initial.json() == {
+        "enabled": False, "llm_consent_at": None, "llm_consent_disclosure": None,
+    }
+
+    t1 = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(account_api, "utcnow", lambda: t1)
+    on = await put(True)
+    assert on.status_code == 200
+    assert on.json()["enabled"] is True
+    assert datetime.fromisoformat(on.json()["llm_consent_at"]) == t1
+    assert on.json()["llm_consent_disclosure"] == account_api.LLM_DISCLOSURE_VERSION == "v1"
+
+    # The read path reports the same record (the client toggle reflects it).
+    got = await client.get("/api/account/llm-consent", headers=emu.headers)
+    assert datetime.fromisoformat(got.json()["llm_consent_at"]) == t1
+    assert got.json()["llm_consent_disclosure"] == "v1"
+
+    # Withdrawal clears both fields — no stale consent claim on the row.
+    off = await put(False)
+    assert off.json() == {
+        "enabled": False, "llm_consent_at": None, "llm_consent_disclosure": None,
+    }
+
+    # Re-enabling records a FRESH timestamp, not the resurrected old one.
+    t2 = datetime(2026, 9, 9, 9, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(account_api, "utcnow", lambda: t2)
+    on2 = await put(True)
+    assert datetime.fromisoformat(on2.json()["llm_consent_at"]) == t2 > t1
+    assert on2.json()["llm_consent_disclosure"] == "v1"
+
+
+async def test_export_bundle_carries_the_consent_record(client, monkeypatch):
+    """The user section of the export bundle shows the same Art. 7 record."""
+    from datetime import datetime, timezone
+
+    from app.api import account as account_api
+
+    emu = ClientEmulator("consentexport", "p")
+    await emu.register(client)
+    t1 = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(account_api, "utcnow", lambda: t1)
+    on = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert on.status_code == 200
+
+    bundle = (await client.get("/api/account/export", headers=emu.headers)).json()
+    assert bundle["llm_consent"] is True
+    assert datetime.fromisoformat(bundle["llm_consent_at"]) == t1
+    assert bundle["llm_consent_disclosure"] == "v1"

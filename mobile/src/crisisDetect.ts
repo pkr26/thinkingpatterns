@@ -7,13 +7,25 @@
  * memory over the plaintext the user just typed. Nothing is sent, stored,
  * or logged: the caller shows support resources and forgets the result.
  *
- * The phrase list is deliberately conservative: it fires on high-signal
- * phrases and errs toward false positives over misses (a false positive
- * costs one gentle dialog; a miss costs a life). It stays phrase-based —
- * not single common words — so everyday journaling ("the assessment was
- * brutal", "that killed my mood") does not trip it.
+ * The phrase lists come from src/crisisPhrases.ts, the embedded copy of
+ * shared/crisis_phrases.json (the cross-platform source of truth — see
+ * that file's header for the embed + parity-test pattern). Two tiers:
  *
- * Accepted false positives (documented, not shipped as sloppy regexes):
+ *  - detectCrisisLanguage (the DIALOG tier) is deliberately conservative:
+ *    it fires on high-signal phrases and errs toward false positives over
+ *    misses (a false positive costs one gentle dialog; a miss costs a
+ *    life). It stays phrase-based — not single common words — so everyday
+ *    journaling ("the assessment was brutal", "that killed my mood") does
+ *    not trip it.
+ *
+ *  - matchesCrisisSuppress (the SUPPRESS tier = dialog + suppress_extra)
+ *    is deliberately broader: it powers non-quoting rendering for
+ *    crisis-adjacent patterns (a card that acknowledges the pattern
+ *    without quoting the phrase back) and question suppression. A false
+ *    positive there only means a pattern is not quoted.
+ *
+ * Accepted false positives of the dialog tier (documented, not shipped as
+ * sloppy regexes):
  *  - Any use of the word "suicide"/"suicidal", even in a prevention or
  *    academic context ("we discussed suicide prevention in class").
  *  - "cut myself" / "cutting myself" fires even in benign grooming or
@@ -28,47 +40,31 @@
  *
  * iOS Smart Punctuation note: iOS keyboards substitute the curly
  * apostrophe U+2019 for ASCII ' by default, so every apostrophe-tolerant
- * pattern accepts BOTH characters — otherwise "I can't go on" typed on
- * an iPhone silently missed detection.
+ * pattern accepts BOTH characters (the ['’]? classes in the shared
+ * list) — otherwise "I can't go on" typed on an iPhone silently missed
+ * detection.
  */
+import { CRISIS_DIALOG_PATTERNS, CRISIS_SUPPRESS_EXTRA_PATTERNS } from "./crisisPhrases";
 
-/** One entry per phrase family; `\s+` tolerates odd spacing/newlines and
- *  the `['\u2019]?` classes the dropped or curly apostrophe of quick
- *  typing. Case-insensitive. */
-const CRISIS_PATTERNS: readonly RegExp[] = [
-  // "suicide" / "suicidal" — unambiguous even as single words.
-  /\bsuicid(?:e|al)\b/i,
-  // "kill myself" / "killing myself"
-  /\bkill(?:ing)?\s+myself\b/i,
-  // "want to die" / "wanted to die" / "wanting to die"; "wanna die";
-  // "wish I was dead"; "wish I could die"; "feel like dying"
-  /\b(?:wants?|wanted|wanting)\s+to\s+die\b/i,
-  /\bwanna\s+(?:to\s+)?die\b/i,
-  /\bwish\s+(?:i\s+)?(?:was|were)\s+dead\b/i,
-  /\bwish\s+(?:i\s+)?could\s+die\b/i,
-  /\bfeel(?:s|ing)?\s+like\s+dying\b/i,
-  // "end it all" / "ending it all"
-  /\bend(?:ing)?\s+it\s+all\b/i,
-  // "end my life" / "ending my life" / "take my (own) life" / "taking my life"
-  /\b(?:end|ending|take|taking)\s+my\s+(?:own\s+)?life\b/i,
-  // "self harm" / "self-harm" / "self harming"
-  /\bself[-\s]?harm(?:ing)?\b/i,
-  // "hurt myself" / "hurting myself"
-  /\bhurt(?:ing)?\s+myself\b/i,
-  // "cut myself" / "cutting myself" (accepted FP: shaving/kitchen — see header)
-  /\bcut(?:ting)?\s+myself\b/i,
-  // "no reason to live" / "no reason to go on" / "nothing to live for"
-  /\bno\s+reason\s+to\s+(?:live|go\s+on)\b/i,
-  /\bnothing\s+to\s+live\s+for\b/i,
-  // "can't go on" / "cant go on" / "cannot go on" (ASCII or curly apostrophe)
-  /\b(?:can['\u2019]?t|cannot)\s+go\s+on\b/i,
-  // "better off without me"
-  /\bbetter\s+off\s+without\s+me\b/i,
-  // "don't want to be here / live / exist / be alive" (and "do not" spellings)
-  /\b(?:don['\u2019]?t|do\s+not)\s+want\s+to\s+(?:be\s+here|live|exist|be\s+alive)\b/i,
-];
+/** Compiled once at module load; every pattern in the shared contract is
+ *  guaranteed lookahead-free and dual-engine (Python re + ECMAScript). */
+const DIALOG_PATTERNS: readonly RegExp[] = CRISIS_DIALOG_PATTERNS.map((pattern) => new RegExp(pattern, "i"));
 
-/** True when `text` contains crisis language. Pure: no I/O, no state. */
+/** The suppress tier is dialog + suppress_extra — one compiled list. */
+const SUPPRESS_PATTERNS: readonly RegExp[] = [
+  ...CRISIS_DIALOG_PATTERNS,
+  ...CRISIS_SUPPRESS_EXTRA_PATTERNS,
+].map((pattern) => new RegExp(pattern, "i"));
+
+/** True when `text` contains crisis language (dialog tier — fire the
+ *  gentle support dialog). Pure: no I/O, no state. */
 export function detectCrisisLanguage(text: string): boolean {
-  return CRISIS_PATTERNS.some((pattern) => pattern.test(text));
+  return DIALOG_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/** True when `text` belongs to the broader suppression tier — the caller
+ *  renders a NON-QUOTING card (or suppresses a generated question) for
+ *  crisis-adjacent patterns. Pure: no I/O, no state. */
+export function matchesCrisisSuppress(text: string): boolean {
+  return SUPPRESS_PATTERNS.some((pattern) => pattern.test(text));
 }

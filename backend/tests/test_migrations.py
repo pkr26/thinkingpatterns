@@ -9,8 +9,10 @@ event loop.
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
@@ -75,7 +77,7 @@ def test_migrations_reproduce_create_all_schema(tmp_path, monkeypatch):
     # The schema diff above ignores the version table; assert the stamp too.
     with mig_engine.connect() as conn:
         rows = conn.exec_driver_sql("SELECT version_num FROM alembic_version").all()
-    assert rows == [("73031d06d71b",)]
+    assert rows == [("a7c91e4b2d03",)]  # head: users GDPR consent record columns
     mig_engine.dispose()
     ref_engine.dispose()
 
@@ -97,6 +99,53 @@ def test_autogenerate_against_migrated_head_is_empty(tmp_path, monkeypatch):
         diff = compare_metadata(ctx, Base.metadata)
     engine.dispose()
     assert diff == []
+
+
+def test_insights_unique_constraint_revision_roundtrips(tmp_path, monkeypatch):
+    """upgrade head adds the constraint; downgrade to the initial revision
+    removes it; upgrading again restores it (batch-mode table rebuild)."""
+    db_file = tmp_path / "roundtrip.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    _upgrade_head(db_url, monkeypatch)
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    uniques = inspect(engine).get_unique_constraints("insights")
+    assert any(u["name"] == "uq_insights_user_kind_date" for u in uniques)
+    engine.dispose()
+
+    command.downgrade(Config(str(BACKEND_DIR / "alembic.ini")), "73031d06d71b")
+    engine = create_engine(f"sqlite:///{db_file}")
+    uniques = inspect(engine).get_unique_constraints("insights")
+    assert not any(u["name"] == "uq_insights_user_kind_date" for u in uniques)
+    engine.dispose()
+
+    command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
+    engine = create_engine(f"sqlite:///{db_file}")
+    uniques = inspect(engine).get_unique_constraints("insights")
+    assert any(u["name"] == "uq_insights_user_kind_date" for u in uniques)
+    engine.dispose()
+
+
+def test_consent_record_revision_roundtrips(tmp_path, monkeypatch):
+    """The GDPR consent columns arrive at head, leave on downgrade to the
+    previous revision, and come back on re-upgrade (batch-mode rebuild)."""
+    db_file = tmp_path / "consent-roundtrip.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    _upgrade_head(db_url, monkeypatch)
+
+    def consent_columns() -> set[str]:
+        engine = create_engine(f"sqlite:///{db_file}")
+        names = {c["name"] for c in inspect(engine).get_columns("users")}
+        engine.dispose()
+        return names
+
+    assert {"llm_consent_at", "llm_consent_disclosure"} <= consent_columns()
+
+    command.downgrade(Config(str(BACKEND_DIR / "alembic.ini")), "e930dbc4f001")
+    assert not ({"llm_consent_at", "llm_consent_disclosure"} & consent_columns())
+
+    command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
+    assert {"llm_consent_at", "llm_consent_disclosure"} <= consent_columns()
 
 
 def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
@@ -122,3 +171,47 @@ def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
                 assert [e.client_entry_id for e in entries] == ["e1"]
 
     asyncio.run(smoke())
+
+
+def test_postgres_alembic_upgrade_head_and_current(monkeypatch):
+    """The real migration path against real PostgreSQL: plain DDL, the
+    advisory lock, batch mode OFF — everything the SQLite tests above
+    cannot exercise. Skips everywhere except CI's backend-postgres job,
+    which exports MINDPATTERN_TEST_DB_URL pointing at a throwaway database
+    (the conftest autouse fixture refuses any database whose name lacks
+    "test" before this test body ever runs)."""
+    db_url = os.environ.get("MINDPATTERN_TEST_DB_URL", "").strip()
+    if not db_url.startswith("postgresql"):
+        pytest.skip("MINDPATTERN_TEST_DB_URL is not a PostgreSQL URL")
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+
+    from app.db import build_engine
+
+    async def _reset_schema() -> None:
+        # App tests sharing this database may already have create_all-built
+        # the schema; drop it so `upgrade head` runs EVERY revision's DDL
+        # for real instead of dying on the first CREATE TABLE.
+        engine = build_engine(db_url)
+        async with engine.begin() as conn:
+            await conn.exec_driver_sql("DROP SCHEMA public CASCADE")
+            await conn.exec_driver_sql("CREATE SCHEMA public")
+        await engine.dispose()
+
+    asyncio.run(_reset_schema())
+
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    command.upgrade(cfg, "head")
+    command.current(cfg)  # via the alembic API, as the deploy entrypoint does
+
+    from alembic.script import ScriptDirectory
+
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+
+    async def _stamp() -> list[str]:
+        engine = build_engine(db_url)
+        async with engine.connect() as conn:
+            rows = (await conn.exec_driver_sql("SELECT version_num FROM alembic_version")).all()
+        await engine.dispose()
+        return [row[0] for row in rows]
+
+    assert asyncio.run(_stamp()) == heads

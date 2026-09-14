@@ -3,24 +3,43 @@
  * counter (memory-only — journaling-frequency metadata does not belong on
  * disk in plaintext). All heavy state lives encrypted on the server and is
  * decrypted on demand.
+ *
+ * The context value is MEMOIZED and every function is a stable useCallback:
+ * consumers like InsightsScreen depend on them in useCallback/useEffect
+ * dependency lists, and a provider that re-published fresh function
+ * identities every render used to refire those effects — double fetch and
+ * double decrypt per mount.
  */
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { api, setUnauthorizedHandler } from "./api/client";
 import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
+import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
- *  another save attempt. A different account on the same device never sees
- *  it, and signOut wipes it — a signed-out session must not retain the
- *  previous user's plaintext draft in the JS heap. */
+ *  another save attempt. The stash SURVIVES vault.lock() — backgrounding
+ *  must not destroy an unsent draft — and is wiped only on sign-out /
+ *  account switch / account deletion (all of which run signOut). A
+ *  different account on the same device never sees it. */
 let stashedDraft: { userId: string; text: string } | null = null;
 
-/** Stash an in-progress draft before a 401-forced lock unmounts the editor. */
+/** Stash an in-progress draft before a vault lock unmounts the editor. */
 export function stashDraft(userId: string, text: string): void {
   stashedDraft = { userId, text };
+}
+
+/** True when a draft is stashed for THIS account (does not consume it). */
+export function hasDraft(userId: string): boolean {
+  return stashedDraft !== null && stashedDraft.userId === userId;
+}
+
+/** Read the stashed draft for THIS account WITHOUT consuming it — for a
+ *  screen that wants to preview/merge instead of taking ownership. */
+export function peekDraft(userId: string): string | null {
+  return stashedDraft !== null && stashedDraft.userId === userId ? stashedDraft.text : null;
 }
 
 /** Consumes the stash ONLY for the account it was written under — the
@@ -125,6 +144,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         vault.lock();
       } else if (state === "active") {
         touchActivity();
+        // Reconnect sync: foregrounding with a live session flushes the
+        // offline queue. Ciphertext-only uploads — a locked vault is fine —
+        // and flushQueueOnReconnect throttles foreground/background flaps.
+        void flushQueueOnReconnect();
       }
     });
     return () => {
@@ -136,7 +159,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     };
   }, [touchActivity]);
 
-  const refreshActiveDays = async () => {
+  const markLoggedIn = useCallback((): void => setAuthStatus("loggedIn"), []);
+
+  const refreshActiveDays = useCallback(async (): Promise<void> => {
     try {
       const insights = await api.insights();
       if (typeof insights?.active_days === "number" && Number.isFinite(insights.active_days)) {
@@ -145,9 +170,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // offline / not yet computed — keep last known value
     }
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async (): Promise<void> => {
+    // Coordinate with any in-flight queue flush FIRST: the uploads below
+    // (logout revocation + session clear) turn its pending requests into
+    // 401s, and that self-inflicted 401 must REQUEUE the current user's
+    // items — not move them to the rejected store (see abortInFlightFlush).
+    abortInFlightFlush();
     // Best-effort server revocation (retires every token for the account);
     // local cleanup proceeds regardless of connectivity.
     try {
@@ -177,25 +207,26 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     await api.clearSession();
     setAuthStatus("loggedOut");
     setActiveDays(0);
-  };
+  }, []);
 
-  return (
-    <SessionContext.Provider
-      value={{
-        authStatus,
-        unlocked,
-        activeDays,
-        unlockDays,
-        markLoggedIn: () => setAuthStatus("loggedIn"),
-        setUnlockDays,
-        touchActivity,
-        refreshActiveDays,
-        signOut,
-      }}
-    >
-      {children}
-    </SessionContext.Provider>
+  // Memoized value + stable callbacks: consumers' effects depend on these
+  // identities, so they must change only when the underlying DATA changes.
+  const value = useMemo<SessionState>(
+    () => ({
+      authStatus,
+      unlocked,
+      activeDays,
+      unlockDays,
+      markLoggedIn,
+      setUnlockDays,
+      touchActivity,
+      refreshActiveDays,
+      signOut,
+    }),
+    [authStatus, unlocked, activeDays, unlockDays, markLoggedIn, touchActivity, refreshActiveDays, signOut],
   );
+
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
 export function useSession(): SessionState {

@@ -1,5 +1,12 @@
 # MindPattern — v1 Build Plan
 
+> **Status note (2026-09): v1 has shipped.** This file is the historical
+> build plan, kept for the record and updated only where it had drifted
+> from the shipped reality; the root `README.md` is authoritative. Where
+> the two disagree, believe the README. (Test status at this update:
+> backend 658 passed + 1 Postgres-gated skip, mobile 759 passed across 33
+> files, probe 9/9.)
+
 Personal pattern-recognition engine for mental state. Journal → encrypted sync →
 "mini-brain" analysis → pattern surfacing after a 30-day threshold → one
 reflective question per day. No advice, no diagnosis.
@@ -82,10 +89,12 @@ takes voice input through the OS keyboard's dictation (see mobile/README.md).
   without it (entries still authenticate or the recompute fails).
 - Gate: patterns are only computed/stored/returned after **30 distinct
   active days**; before that the app shows only client-side sentiment.
-- Client cadence: after entry sync the mobile app refreshes the brain at
-  most once per calendar day, only when a patterns blob already exists
-  (the first analysis remains an explicit user action on the Question
-  screen); the processing session is single-use as always.
+- Client cadence, as shipped: recompute is only ever **explicit** — the
+  Question screen's button opens the single-use processing session itself,
+  and no screen ships the data key automatically or on a casual gesture.
+  (The post-sync at-most-daily auto-refresh sketched here was removed after
+  the red-team audit; `mobile/src/brainSync.ts` now keeps only the
+  per-account stamp's account-deletion hygiene.)
 
 ## 4. Daily questions
 
@@ -95,24 +104,37 @@ reflective pool. Every template is a question (tests enforce this — the
 
 ## 5. API surface
 
+Canonical mount is `/api/v1`; the same routers still answer under the
+deprecated unversioned `/api` alias for existing clients.
+
 ```
-GET  /healthz
-GET  /api/meta                                                        → {unlock_days, llm_available}
-POST /api/auth/register        {username, salt, verifier}            → {token}   (+ per-username rate bucket)
-POST /api/auth/salt            {username}                            → {salt}    (decoy if unknown/deactivated)
-POST /api/auth/login           {username, verifier}                  → {token}
-POST /api/auth/logout          (bearer)                              → 204, revokes ALL tokens (epoch bump)
-POST /api/entries              {client_entry_id, blob, entry_date}   → {id}      (no pre-account dates; quotas)
-GET  /api/entries?since=&offset=&limit=                               → [blobs]
-DEL  /api/entries/{client_entry_id}                                   → 204 (rate-limited)
-POST /api/processing/sessions  {data_key}                             → {session_token}  (single-use)
-POST /api/insights/recompute   (X-Processing-Token)                   → {phase, patterns_stored, analyzer}
-GET  /api/insights                                                    → {phase, active_days, blob}
-GET  /api/questions/today                                              → {blob} | 404
-GET  /api/account/export                                               → streamed ciphertext bundle
-PUT  /api/account/llm-consent   {enabled, verifier}                    → {enabled}
-DEL  /api/account               {verifier}                             → hard cascade delete
+GET  /healthz                                                            (liveness; no DB touch)
+GET  /readyz                                                             (readiness: DB SELECT 1 → 503 on failure)
+GET  /api/v1/meta                                                        → {unlock_days, llm_available, api_version, version}
+POST /api/v1/auth/register        {username, salt, verifier}             → {token}   (+ per-username rate bucket)
+POST /api/v1/auth/salt            {username}                             → {salt}    (decoy if unknown/deactivated)
+POST /api/v1/auth/login           {username, verifier}                   → {token}
+POST /api/v1/auth/logout          (bearer)                               → 204, revokes ALL tokens (epoch bump)
+POST /api/v1/entries              {client_entry_id, blob, entry_date}    → {id}      (no pre-account dates; ≤ server-today+1; quotas)
+GET  /api/v1/entries?since=&offset=&limit=                                → [blobs]
+DEL  /api/v1/entries/{client_entry_id}                                    → 204 (rate-limited)
+POST /api/v1/processing/sessions  {data_key}                              → {session_token}  (single-use)
+POST /api/v1/insights/recompute   (X-Processing-Token)                    → {phase, patterns_stored, analyzer}
+GET  /api/v1/insights                                                     → {phase, active_days, blob}
+GET  /api/v1/questions/today                                              → {blob} | 404
+GET  /api/v1/account/export                                               → streamed ciphertext bundle (rate-limited)
+PUT  /api/v1/account/llm-consent   {enabled, verifier}                    → {enabled}  (records llm_consent_at + disclosure "v1"; cleared on disable)
+DEL  /api/v1/account               (X-Account-Verifier header; JSON body deprecated fallback) → hard cascade delete
 ```
+
+Every error response is one envelope: `{"detail": <human string>, "code":
+<snake_case>}` — e.g. `unauthorized`, `invalid_credentials`,
+`processing_session_required`/`processing_session_invalid`,
+`verification_failed` (403), `not_found`, `conflict`, `account_deleted`
+(410), `payload_too_large`, `quota_exceeded`/`blob_quota_exceeded`,
+`validation_error`, `rate_limited` (+ `Retry-After`), `bad_request`,
+`entry_blob_invalid`/`entry_payload_malformed`, `internal_error`,
+`service_unavailable`.
 
 Rate limiting (fixed window, in-memory, bounded key count) on auth, salt,
 register (per-IP + per-username), entries (create/delete), processing,

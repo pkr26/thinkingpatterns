@@ -7,6 +7,8 @@ values (hand-computable binomial sums, published t-table quantiles).
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from app.services import statsig
@@ -142,6 +144,68 @@ class TestCohensD:
 
     def test_identical_groups_zero(self):
         assert statsig.cohens_d([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == 0.0
+
+
+class TestEffectiveSampleSize:
+    def test_no_autocorrelation_keeps_n(self):
+        assert statsig.effective_sample_size(30, None) == 30.0
+        assert statsig.effective_sample_size(30, 0.0) == 30.0
+        # Negative autocorrelation never INFLATES the effective sample.
+        assert statsig.effective_sample_size(30, -0.5) == 30.0
+
+    def test_known_deflation(self):
+        # Bartlett n(1-r)/(1+r): n=30, r=0.5 -> 10.
+        assert statsig.effective_sample_size(30, 0.5) == pytest.approx(10.0)
+
+    def test_floor_and_cap(self):
+        assert statsig.effective_sample_size(100, 0.9) == pytest.approx(100 * 0.1 / 1.9)
+        # The lag-1 estimate itself is capped at 0.9 (beyond that the
+        # formula is explosive); the n floor binds for tiny samples.
+        assert statsig.effective_sample_size(100, 0.999) == pytest.approx(100 * 0.1 / 1.9)
+        assert statsig.effective_sample_size(4, 0.5) == 3.0      # floor above n
+
+
+class TestFisherZDifference:
+    def test_equal_correlations_are_no_evidence(self):
+        # One-sided upper tail at z = 0 sits at 0.5 — "no rise detected".
+        assert statsig.fisher_z_difference_p(0.4, 30, 0.4, 30) == pytest.approx(0.5)
+
+    def test_strong_rise_is_significant(self):
+        # atanh(0.8) = 1.0986, se = sqrt(2/27) = 0.2722, z = 4.04.
+        p = statsig.fisher_z_difference_p(0.8, 30, 0.0, 30)
+        assert p < 1e-4
+
+    def test_reversed_direction_is_no_evidence(self):
+        # One-sided in the direction of the claim ("more than usual").
+        assert statsig.fisher_z_difference_p(0.0, 30, 0.8, 30) > 0.999
+
+    def test_degenerate_inputs_fail_closed(self):
+        assert statsig.fisher_z_difference_p(0.9, 3, 0.0, 30) == 1.0
+        # |r| = 1 would blow up atanh; clamped, never a crash.
+        assert 0.0 <= statsig.fisher_z_difference_p(1.0, 30, 0.0, 30) <= 1.0
+
+
+class TestWelchAutocorrelation:
+    def test_lag1_deflation_weakens_significance(self):
+        a = [-0.5, -0.4, -0.6, -0.45, -0.55, -0.5, -0.42, -0.58] * 3
+        b = [0.4, 0.5, 0.35, 0.45, 0.55, 0.42, 0.5, 0.38] * 3
+        _, p_plain = statsig.welch_test(a, b)
+        _, p_deflated = statsig.welch_test(a, b, lag1=0.6)
+        assert p_deflated > p_plain  # less independent evidence, weaker claim
+
+    def test_lag1_none_matches_plain(self):
+        a, b = [0.1, 0.2, 0.15, 0.05], [0.9, 0.8, 0.85, 0.95]
+        assert statsig.welch_test(a, b, lag1=None) == statsig.welch_test(a, b)
+
+
+class TestSampleSd:
+    def test_matches_variance(self):
+        values = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0]
+        assert statsig.sample_sd(values) == pytest.approx(math.sqrt(statsig._variance(values)))
+
+    def test_degenerate(self):
+        assert statsig.sample_sd([]) == 0.0
+        assert statsig.sample_sd([1.5]) == 0.0
 
 
 def test_determinism_trivially_stable():

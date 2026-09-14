@@ -13,9 +13,18 @@
  * the pre-encryption format (raw JSON arrays) migrate transparently on
  * the next write. A corrupt/tampered blob degrades to empty: this log is
  * disposable metadata and must never crash or lock the app.
+ *
+ * Key custody: the public functions take the vault's SHARED dataKey buffer.
+ * recordMood is commonly fire-and-forget, and vault.lock() (e.g. a
+ * background transition) zeroizes that buffer mid-await — encrypting the
+ * pending write under an all-zero key would produce a blob no future read
+ * can open (the log would silently reset). Every public call therefore
+ * SNAPSHOTS the key bytes into a private copy at call time, works from the
+ * copy, and zeroizes the copy in finally.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
+import { zeroize } from "./crypto/kdf";
 
 export interface MoodDay {
   date: string; // YYYY-MM-DD
@@ -115,35 +124,52 @@ async function write(dataKey: Buffer, userId: string, days: MoodDay[]): Promise<
 
 /** Upsert one day's mood (latest value wins for the same date). */
 export async function recordMood(dataKey: Buffer, userId: string, date: string, value: number): Promise<void> {
-  return serialized(async () => {
-    const { days } = await read(dataKey, userId);
-    const clean = Math.max(-1, Math.min(1, value));
-    const existing = days.findIndex((d) => d.date === date);
-    if (existing >= 0) days[existing] = { date, value: clean };
-    else days.push({ date, value: clean });
-    await write(dataKey, userId, days);
-  });
+  // Snapshot the key NOW, at call time — NOT inside the serialized block,
+  // which may run much later (or after a lock zeroized the shared buffer).
+  const keyCopy = Buffer.from(dataKey);
+  try {
+    await serialized(async () => {
+      const { days } = await read(keyCopy, userId);
+      const clean = Math.max(-1, Math.min(1, value));
+      const existing = days.findIndex((d) => d.date === date);
+      if (existing >= 0) days[existing] = { date, value: clean };
+      else days.push({ date, value: clean });
+      await write(keyCopy, userId, days);
+    });
+  } finally {
+    zeroize(keyCopy);
+  }
 }
 
 /** The most recent *days* mood entries, oldest first. */
 export async function recentMoods(dataKey: Buffer, userId: string, days = 30): Promise<MoodDay[]> {
-  const readResult = await read(dataKey, userId);
-  return readResult.days.slice(-days);
+  const keyCopy = Buffer.from(dataKey);
+  try {
+    const readResult = await read(keyCopy, userId);
+    return readResult.days.slice(-days);
+  } finally {
+    zeroize(keyCopy);
+  }
 }
 
 /** Consecutive writing days ending today (yesterday counts, with grace). */
 export async function localStreak(dataKey: Buffer, userId: string, today = todayIso()): Promise<number> {
-  const { days } = await read(dataKey, userId);
-  if (days.length === 0) return 0;
-  const set = new Set(days.map((d) => d.date));
-  let cursor = set.has(today) ? today : set.has(yesterday(today)) ? yesterday(today) : null;
-  if (!cursor) return 0;
-  let streak = 0;
-  while (set.has(cursor)) {
-    streak += 1;
-    cursor = yesterday(cursor);
+  const keyCopy = Buffer.from(dataKey);
+  try {
+    const { days } = await read(keyCopy, userId);
+    if (days.length === 0) return 0;
+    const set = new Set(days.map((d) => d.date));
+    let cursor = set.has(today) ? today : set.has(yesterday(today)) ? yesterday(today) : null;
+    if (!cursor) return 0;
+    let streak = 0;
+    while (set.has(cursor)) {
+      streak += 1;
+      cursor = yesterday(cursor);
+    }
+    return streak;
+  } finally {
+    zeroize(keyCopy);
   }
-  return streak;
 }
 
 /** Test seam: wipe the log (sign-out hygiene for tests and account switch). */

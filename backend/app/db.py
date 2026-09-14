@@ -25,9 +25,17 @@ from sqlalchemy.pool import StaticPool
 from .models import Base
 
 
-def build_engine(database_url: str) -> AsyncEngine:
+def build_engine(
+    database_url: str,
+    *,
+    pool_size: int = 5,
+    max_overflow: int = 10,
+    pool_timeout: int = 30,
+) -> AsyncEngine:
     if database_url.startswith("sqlite"):
-        # A single shared connection keeps in-memory SQLite alive across sessions.
+        # A single shared connection keeps in-memory SQLite alive across
+        # sessions. No pool sizing args: aiosqlite + StaticPool has one
+        # connection, and pool_size/max_overflow would break or mislead it.
         engine = create_async_engine(
             database_url,
             poolclass=StaticPool,
@@ -44,7 +52,17 @@ def build_engine(database_url: str) -> AsyncEngine:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
         return engine
-    return create_async_engine(database_url, echo=False, pool_pre_ping=True)
+    # Production (asyncpg): bounded, env-tuned pool (MINDPATTERN_DB_POOL_*) —
+    # the defaults otherwise come from SQLAlchemy and can't be sized for the
+    # deployment. pool_pre_ping drops connections the server already closed.
+    return create_async_engine(
+        database_url,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+    )
 
 
 def build_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

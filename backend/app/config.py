@@ -18,11 +18,25 @@ rejects SQLite and weak secrets.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
+logger = logging.getLogger("mindpattern")
+
 DEFAULT_INSECURE_SECRET = "dev-insecure-secret-change-me"
+
+# Upper bounds for the numeric settings (the lower bound is 1, or 1024 for
+# byte counts — see Settings.__post_init__). Past these the value is
+# misconfiguration, not tuning: a year-long token TTL turns a token leak
+# into a permanent account takeover; a processing session that never
+# expires keeps a data key usable in memory; a day-long rate window
+# misleads Retry-After and makes the counter's eviction useless.
+MAX_TOKEN_TTL_SECONDS = 30 * 86_400  # 30 days
+MAX_PROCESSING_SESSION_TTL = 3_600  # 1 hour — sessions are single-use anyway
+MAX_RATE_WINDOW_SECONDS = 3_600  # 1 hour per window
+MAX_RATE_LIMIT = 100_000  # hits per window
 
 
 def _int_env(name: str, default: int) -> int:
@@ -78,6 +92,11 @@ class Settings:
     processing_rate_window: int = 60
     read_rate_limit: int = 300
     read_rate_window: int = 60
+    # Export streams the whole account (up to the 256 MiB blob quota) per
+    # request — far heavier than an ordinary read, so it gets its own tight
+    # bucket instead of riding the 300/min read bucket.
+    export_rate_limit: int = 5
+    export_rate_window: int = 60
 
     # Whole-request body cap, enforced before the JSON is parsed. Field-level
     # caps in schemas.py bound what is *stored*; this bounds what is *read*.
@@ -89,6 +108,13 @@ class Settings:
     # decrypts. The 30-day threshold still counts ALL entry dates (from DB
     # metadata, no decryption needed), so the cap cannot un-lock a phase.
     recompute_entry_limit: int = 2_000
+
+    # Connection pool for the (Postgres) production engine. SQLite ignores
+    # these — its StaticPool single shared connection is what keeps
+    # in-memory databases alive across sessions.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    db_pool_timeout: int = 30
 
     llm_url: str = ""
     llm_api_key: str = ""
@@ -141,11 +167,41 @@ class Settings:
             "processing_rate_window",
             "read_rate_limit",
             "read_rate_window",
+            "export_rate_limit",
+            "export_rate_window",
             "max_entries_per_user",
             "recompute_entry_limit",
+            "db_pool_size",
+            "db_pool_timeout",
         ):
             if getattr(self, name) < 1:
                 raise RuntimeError(f"{name} must be >= 1")
+        # max_overflow of 0 is legitimate (a hard pool cap), so it gets its
+        # own lower bound.
+        if self.db_max_overflow < 0:
+            raise RuntimeError("db_max_overflow must be >= 0")
+        if self.token_ttl_seconds > MAX_TOKEN_TTL_SECONDS:
+            raise RuntimeError(f"token_ttl_seconds must be <= {MAX_TOKEN_TTL_SECONDS}")
+        if self.processing_session_ttl > MAX_PROCESSING_SESSION_TTL:
+            raise RuntimeError(f"processing_session_ttl must be <= {MAX_PROCESSING_SESSION_TTL}")
+        for name in (
+            "auth_rate_window",
+            "entries_rate_window",
+            "processing_rate_window",
+            "read_rate_window",
+            "export_rate_window",
+        ):
+            if getattr(self, name) > MAX_RATE_WINDOW_SECONDS:
+                raise RuntimeError(f"{name} must be <= {MAX_RATE_WINDOW_SECONDS}")
+        for name in (
+            "auth_rate_limit",
+            "entries_rate_limit",
+            "processing_rate_limit",
+            "read_rate_limit",
+            "export_rate_limit",
+        ):
+            if getattr(self, name) > MAX_RATE_LIMIT:
+                raise RuntimeError(f"{name} must be <= {MAX_RATE_LIMIT}")
         for name in ("max_body_bytes", "max_user_blob_bytes"):
             if getattr(self, name) < 1024:
                 raise RuntimeError(f"{name} must be >= 1024")
@@ -177,6 +233,14 @@ class Settings:
                     "for http://localhost / http://127.0.0.1 with "
                     "MINDPATTERN_ENV=development exactly."
                 )
+            if not self.llm_api_key.strip():
+                # Warn but boot: loopback dev servers (Ollama etc.) commonly
+                # need no key, and llm_available=False deployments never set
+                # the URL at all.
+                logger.warning(
+                    "MINDPATTERN_LLM_URL is set but MINDPATTERN_LLM_API_KEY is "
+                    "empty — LLM requests will go out without an API key"
+                )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -199,6 +263,11 @@ class Settings:
             max_entries_per_user=_int_env("MINDPATTERN_MAX_ENTRIES_PER_USER", 10_000),
             max_user_blob_bytes=_int_env("MINDPATTERN_MAX_USER_BLOB_BYTES", 256 * 1024 * 1024),
             recompute_entry_limit=_int_env("MINDPATTERN_RECOMPUTE_ENTRY_LIMIT", 2_000),
+            db_pool_size=_int_env("MINDPATTERN_DB_POOL_SIZE", 5),
+            db_max_overflow=_int_env("MINDPATTERN_DB_MAX_OVERFLOW", 10),
+            db_pool_timeout=_int_env("MINDPATTERN_DB_POOL_TIMEOUT", 30),
+            export_rate_limit=_int_env("MINDPATTERN_EXPORT_RATE_LIMIT", 5),
+            export_rate_window=_int_env("MINDPATTERN_EXPORT_RATE_WINDOW", 60),
             llm_url=os.getenv("MINDPATTERN_LLM_URL", ""),
             llm_api_key=os.getenv("MINDPATTERN_LLM_API_KEY", ""),
             llm_model=os.getenv("MINDPATTERN_LLM_MODEL", "gpt-4o-mini"),

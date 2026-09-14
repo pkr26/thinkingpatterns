@@ -23,7 +23,7 @@ vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
   return {
     ...actual,
-    deriveKeys: vi.fn(() => ({
+    deriveKeysAsync: vi.fn(async () => ({
       masterKey: Buffer.alloc(32, 1),
       authKey: Buffer.alloc(32, 2),
       dataKey: Buffer.alloc(32, 3),
@@ -43,7 +43,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 
 const { api, ApiError } = await import("../../src/api/client");
 const { storeUnlockProof, verifyUnlockProof } = await import("../../src/unlockProof");
-const { deriveKeys } = await import("../../src/crypto/MindPatternCrypto");
+const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { UnlockScreen } = await import("../../src/screens/UnlockScreen");
 const { vault } = await import("../../src/vault");
 const {
@@ -65,8 +65,8 @@ let lastDerived: { masterKey: Buffer; authKey: Buffer; dataKey: Buffer } | null 
 beforeEach(() => {
   resetApi(api as never);
   lastDerived = null;
-  vi.mocked(deriveKeys).mockReset();
-  vi.mocked(deriveKeys).mockImplementation(() => {
+  vi.mocked(deriveKeysAsync).mockReset();
+  vi.mocked(deriveKeysAsync).mockImplementation(async () => {
     lastDerived = {
       masterKey: Buffer.alloc(32, 1),
       authKey: Buffer.alloc(32, 2),
@@ -89,6 +89,10 @@ describe("UnlockScreen", () => {
     await flush();
     expect(textOf(root)).toContain("Locked");
     expect(textOf(root)).toContain("Re-enter your password");
+    // The honest copy: keys only you hold + the one bounded exception.
+    expect(textOf(root)).toContain("Your journal is encrypted with keys only you hold");
+    expect(textOf(root)).toContain("held in memory, then destroyed");
+    expect(textOf(root)).not.toContain("never leave this device");
     expect(touchableByLabel(root, "Unlock").props.disabled).toBe(true);
 
     await typeInto(root, "password", "something");
@@ -103,7 +107,7 @@ describe("UnlockScreen", () => {
 
     expect(api.getUsername).toHaveBeenCalledTimes(1);
     expect(api.saltFor).toHaveBeenCalledWith("alice");
-    expect(vi.mocked(deriveKeys)).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
+    expect(vi.mocked(deriveKeysAsync)).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
     expect(api.login).toHaveBeenCalledTimes(1);
     expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
     expect(vault.isUnlocked()).toBe(true);
@@ -137,7 +141,7 @@ describe("UnlockScreen", () => {
 
     expect(api.login).not.toHaveBeenCalled();
     expect(api.setSession).not.toHaveBeenCalled();
-    expect(vi.mocked(deriveKeys)).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
+    expect(vi.mocked(deriveKeysAsync)).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
     expect(vault.isUnlocked()).toBe(true);
     expect(Alert.alert).not.toHaveBeenCalled();
     expect(refreshActiveDays).toHaveBeenCalledTimes(1);
@@ -207,7 +211,8 @@ describe("UnlockScreen", () => {
     await pressLabel(root, "Unlock");
     await flush();
     expect(vault.isUnlocked()).toBe(false);
-    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "server unreachable");
+    // Calm mapped copy, not raw server text.
+    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Couldn't reach the server — check your connection.");
     expect(textOf(root)).toContain("Need help now? Crisis resources");
   });
 
@@ -220,18 +225,22 @@ describe("UnlockScreen", () => {
   });
 
   it("pins the visual language of the screen", async () => {
+    // Design-system pass: theme-composed styles; primary fill is the
+    // AA-passing #3b5bdb; the crisis affordance keeps its own surface.
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<UnlockScreen />);
     await flush();
-    expectStyle(root, { flex: 1, justifyContent: "center", padding: 32, gap: 12, backgroundColor: "#0f1115" });
-    expectStyle(root, { fontSize: 34, fontWeight: "700", color: "#e8eaf0", textAlign: "center" });
-    expectStyle(root, {
-      fontSize: 14, color: "#8a91a3", textAlign: "center", marginBottom: 24, lineHeight: 20,
-    });
+    expectStyle(root, { flex: 1, justifyContent: "center" }); // container base
+    expectStyle(root, { backgroundColor: "#0f1115", padding: 32, gap: 12 }); // container themed
+    expectStyle(root, { fontSize: 34, fontWeight: "700", textAlign: "center" }); // title base
+    expectStyle(root, { color: "#e8eaf0" }); // title themed
+    expectStyle(root, { textAlign: "center", marginBottom: 24, lineHeight: 20 }); // subtitle base
+    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // subtitle themed
     expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 16 });
-    expectStyle(root, { backgroundColor: "#4f7cff", borderRadius: 10, padding: 16, alignItems: "center", marginTop: 8 });
-    expectStyle(root, { color: "#fff", fontSize: 16, fontWeight: "600" });
-    expectStyle(root, { color: "#7f9bff", textAlign: "center", marginTop: 16 });
+    expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
+    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // button text
+    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 }); // help surface
   });
 
   it("supports submitting from the keyboard", async () => {
@@ -264,13 +273,14 @@ describe("UnlockScreen", () => {
     expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Wrong password.");
   });
 
-  it("surfaces other error messages verbatim", async () => {
+  it("maps server errors to calm copy (no raw technical text)", async () => {
     vi.mocked(api.saltFor).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<UnlockScreen />);
     await typeInto(root, "password", "pw");
     await pressLabel(root, "Unlock");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "server unreachable");
+    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Couldn't reach the server — check your connection.");
+    expect(Alert.alert).not.toHaveBeenCalledWith("Unlock failed", "server unreachable");
   });
 
   // A non-Error login rejection (hostile proxy garbage) is NOT trusted as
@@ -322,14 +332,14 @@ describe("UnlockScreen", () => {
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it("a non-Error failure in the outer flow reports 'unknown error'", async () => {
+  it("a non-Error failure in the outer flow reports calm fallback copy", async () => {
     vi.mocked(api.getUsername).mockRejectedValue("boom" as never);
     const root = await render(<UnlockScreen />);
     await typeInto(root, "password", "pw");
     await pressLabel(root, "Unlock");
     await flush();
     expect(vault.isUnlocked()).toBe(false);
-    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "unknown error");
+    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Something went wrong — try again.");
   });
 
   it("ignores a second unlock press while one is in flight", async () => {
@@ -358,7 +368,7 @@ describe("UnlockScreen", () => {
     const keyboard = root.root.findByType(reactNative.KeyboardAvoidingView);
     expect(keyboard.props.behavior).toBe("padding");
     expect(keyboard.props.style).toEqual(
-      { flex: 1, justifyContent: "center", padding: 32, gap: 12, backgroundColor: "#0f1115" },
+      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#0f1115", padding: 32, gap: 12 }],
     );
 
     const original = reactNative.Platform.OS;

@@ -109,7 +109,7 @@ describe("stored base URL policy", () => {
     expect(await storage.getItem("mindpattern.moodlog.user-1")).toBeNull();
 
     // The very next request carries NO Authorization header to the new origin.
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true }, 200, "https://evil.example.com/api/meta")));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true }, 200, "https://evil.example.com/api/v1/meta")));
     await api.meta();
     const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
@@ -145,7 +145,7 @@ describe("request plumbing", () => {
     await api.setSession("tok-1", "user-1", "alice");
     await api.meta();
     const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/meta`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/meta`);
     expect(init.method).toBe("GET");
     expect(init.headers).toMatchObject({ "Content-Type": "application/json", Authorization: "Bearer tok-1" });
   });
@@ -345,7 +345,7 @@ describe("listEntries pagination", () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([{ id: 1 }]));
     await api.listEntries("2026-01-01");
     const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/entries?limit=500&offset=0&since=2026-01-01`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=0&since=2026-01-01`);
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
   });
 
@@ -360,10 +360,10 @@ describe("listEntries pagination", () => {
     // The wire path carries ONLY the pagination params — a spurious
     // `since=undefined` would break incremental sync.
     expect((vi.mocked(fetch).mock.calls[0] as [string])[0]).toBe(
-      `${DEFAULT_BASE_URL}/api/entries?limit=500&offset=0`,
+      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=0`,
     );
     expect((vi.mocked(fetch).mock.calls[1] as [string])[0]).toBe(
-      `${DEFAULT_BASE_URL}/api/entries?limit=500&offset=500`,
+      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=500`,
     );
   });
 });
@@ -372,19 +372,19 @@ describe("endpoint wiring", () => {
   it("posts credentials in bodies, never in URLs", async () => {
     await api.saltFor("alice");
     let [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/auth/salt`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/auth/salt`);
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ username: "alice" }));
 
     await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=");
     [url, init] = vi.mocked(fetch).mock.calls[1] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/auth/register`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/auth/register`);
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ username: "alice", salt: "c2FsdA==", verifier: "dmVyaWZpZXI=" }));
 
     await api.login("alice", "dmVyaWZpZXI=");
     [url, init] = vi.mocked(fetch).mock.calls[2] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/auth/login`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/auth/login`);
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ username: "alice", verifier: "dmVyaWZpZXI=" }));
   });
@@ -409,44 +409,46 @@ describe("endpoint wiring", () => {
     };
 
     await api.createEntry("e-1", "YmxvYg==", "2026-09-03");
-    await expectCall(0, "POST", "/api/entries", {
+    await expectCall(0, "POST", "/api/v1/entries", {
       client_entry_id: "e-1",
       blob: "YmxvYg==",
       entry_date: "2026-09-03",
     });
 
     await api.deleteEntry("e-1");
-    await expectCall(1, "DELETE", "/api/entries/e-1", undefined);
+    await expectCall(1, "DELETE", "/api/v1/entries/e-1", undefined);
 
     await api.openProcessingSession("a2V5");
-    await expectCall(2, "POST", "/api/processing/sessions", { data_key: "a2V5" });
+    await expectCall(2, "POST", "/api/v1/processing/sessions", { data_key: "a2V5" });
 
     await api.recompute("ptok");
-    await expectCall(3, "POST", "/api/insights/recompute", undefined, { "X-Processing-Token": "ptok" });
+    await expectCall(3, "POST", "/api/v1/insights/recompute", undefined, { "X-Processing-Token": "ptok" });
 
     await api.insights();
-    await expectCall(4, "GET", "/api/insights", undefined);
+    await expectCall(4, "GET", "/api/v1/insights", undefined);
 
     await api.questionToday();
-    await expectCall(5, "GET", "/api/questions/today", undefined);
+    await expectCall(5, "GET", "/api/v1/questions/today", undefined);
 
     await api.exportAccount();
-    await expectCall(6, "GET", "/api/account/export", undefined);
+    await expectCall(6, "GET", "/api/v1/account/export", undefined);
 
+    // The v1 account-deletion verifier travels in the dedicated header, not
+    // the body (the legacy body field is still accepted server-side).
     await api.deleteAccount("dmVyaWY=");
-    await expectCall(7, "DELETE", "/api/account", { verifier: "dmVyaWY=" });
+    await expectCall(7, "DELETE", "/api/v1/account", undefined, { "X-Account-Verifier": "dmVyaWY=" });
 
     await api.getLlmConsent();
-    await expectCall(8, "GET", "/api/account/llm-consent", undefined);
+    await expectCall(8, "GET", "/api/v1/account/llm-consent", undefined);
 
     await api.setLlmConsent(false, "dmVyaWY=");
-    await expectCall(9, "PUT", "/api/account/llm-consent", { enabled: false, verifier: "dmVyaWY=" });
+    await expectCall(9, "PUT", "/api/v1/account/llm-consent", { enabled: false, verifier: "dmVyaWY=" });
 
     await api.logout();
-    await expectCall(10, "POST", "/api/auth/logout", undefined);
+    await expectCall(10, "POST", "/api/v1/auth/logout", undefined);
 
     await api.meta();
-    await expectCall(11, "GET", "/api/meta", undefined);
+    await expectCall(11, "GET", "/api/v1/meta", undefined);
   });
 });
 
@@ -500,6 +502,35 @@ describe("persisted storage keys", () => {
     await storage.setItem("@mindpattern/salt_bob", JSON.stringify({ o: "http://x" }));
     expect(await api.getCachedSalt("bob")).toBeNull();
   });
+
+  it("migrates a legacy bare { o, s } salt record to the v1 envelope on read", async () => {
+    await storage.setItem("@mindpattern/salt_carol", JSON.stringify({ o: DEFAULT_BASE_URL, s: "c2FsdA==" }));
+    expect(await api.getCachedSalt("carol")).toBe("c2FsdA==");
+    // Read-through migration refreshed the record in place.
+    const migrated = JSON.parse((await storage.getItem("@mindpattern/salt_carol")) as string);
+    expect(migrated).toEqual({ v: 1, o: DEFAULT_BASE_URL, s: "c2FsdA==" });
+  });
+
+  it("refuses a salt record with an unknown envelope version", async () => {
+    await storage.setItem("@mindpattern/salt_dave", JSON.stringify({ v: 2, o: DEFAULT_BASE_URL, s: "c2FsdA==" }));
+    expect(await api.getCachedSalt("dave")).toBeNull();
+  });
+
+  it("a failed salt-migration rewrite never fails the read", async () => {
+    await storage.setItem("@mindpattern/salt_eve", JSON.stringify({ o: DEFAULT_BASE_URL, s: "c2FsdA==" }));
+    const originalSetItem = storage.setItem.bind(storage);
+    (storage as { setItem: typeof storage.setItem }).setItem = async (key: string, value: string) => {
+      if (key === "@mindpattern/salt_eve") throw new Error("disk full");
+      return originalSetItem(key, value);
+    };
+    try {
+      expect(await api.getCachedSalt("eve")).toBe("c2FsdA==");
+    } finally {
+      (storage as { setItem: typeof storage.setItem }).setItem = originalSetItem;
+    }
+    // The legacy record is still there (the failed rewrite left it intact).
+    expect(JSON.parse((await storage.getItem("@mindpattern/salt_eve")) as string).v).toBeUndefined();
+  });
 });
 
 describe("error-detail sanitization", () => {
@@ -528,7 +559,7 @@ describe("redirect origin validation", () => {
   });
 
   it("refuses responses that landed on a foreign origin", async () => {
-    vi.mocked(fetch).mockResolvedValue(redirectedResponse("https://evil.example/api/meta") as never);
+    vi.mocked(fetch).mockResolvedValue(redirectedResponse("https://evil.example/api/v1/meta") as never);
     await expect(api.meta()).rejects.toMatchObject({
       status: 0,
       message: expect.stringContaining("redirected"),
@@ -536,7 +567,7 @@ describe("redirect origin validation", () => {
   });
 
   it("accepts same-origin redirects (path-only)", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => redirectedResponse("https://api.example.com/v1/api/meta")));
+    vi.stubGlobal("fetch", vi.fn(async () => redirectedResponse("https://api.example.com/v1/api/v1/meta")));
     try {
       await setBaseUrl("https://api.example.com/v1");
       await expect(api.meta()).resolves.toEqual({ evil: true });
@@ -570,7 +601,7 @@ describe("sensitive-request redirect hardening", () => {
   });
 
   it("refuses sensitive requests that landed on a foreign origin", async () => {
-    const response = jsonResponse({ token: "x" }, 200, "https://evil.example/api/auth/login");
+    const response = jsonResponse({ token: "x" }, 200, "https://evil.example/api/v1/auth/login");
     vi.mocked(fetch).mockResolvedValue(response as never);
     await expect(api.login("alice", "dmVyaWZpZXI=")).rejects.toMatchObject({
       message: expect.stringContaining("redirected"),
@@ -623,7 +654,7 @@ describe("deleteEntry path validation", () => {
   it("percent-encodes legitimate ids into the path", async () => {
     await api.deleteEntry("e-2026-09-04-abc_def");
     const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/entries/e-2026-09-04-abc_def`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/entries/e-2026-09-04-abc_def`);
   });
 
   it("matches the backend's 1-64 length band exactly", async () => {
@@ -645,5 +676,84 @@ describe("sanitizer: non-http schemes", () => {
   it("strips custom scheme URLs from server-provided detail", async () => {
     expect(detailToMessage("open evilapp://pay now", 400)).toBe("open now");
     expect(detailToMessage("go ftp://files.evil.example/x now", 400)).toBe("go now");
+  });
+});
+
+describe("v1 error envelope", () => {
+  it("exposes the machine-readable code on ApiError", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "wrong verifier", code: "verification_failed" }, 403));
+    const error = await api.deleteAccount("dg==").catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 403, code: "verification_failed", message: "wrong verifier" });
+  });
+
+  it("parses every contract code and rejects unknown codes (branch input is untrusted)", async () => {
+    for (const code of [
+      "validation_error",
+      "quota_exceeded",
+      "blob_quota_exceeded",
+      "verification_failed",
+      "rate_limited",
+      "payload_too_large",
+      "not_found",
+      "conflict",
+      "unauthorized",
+    ]) {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "x", code }, 400));
+      await expect(api.meta()).rejects.toMatchObject({ code });
+    }
+    // A hostile or buggy server inventing a slug must not steer client
+    // branching: the code degrades to absent and callers fall back to
+    // status/detail.
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "x", code: "delete_everything" }, 400));
+    await expect(api.meta()).rejects.toMatchObject({ code: undefined });
+  });
+
+  it("leaves code undefined when the server predates the envelope (legacy fallback)", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "entry already exists" }, 409));
+    await expect(api.createEntry("e", "b", "2026-01-01")).rejects.toMatchObject({
+      status: 409,
+      code: undefined,
+      message: "entry already exists",
+    });
+  });
+
+  it("honors Retry-After on 429 (seconds, HTTP-date, clamped, absent)", async () => {
+    const withRetryAfter = (value: string | null): Response => {
+      const response = jsonResponse({ detail: "rate limited", code: "rate_limited" }, 429);
+      if (value !== null) response.headers.set("retry-after", value);
+      return response;
+    };
+
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter("30"));
+    await expect(api.meta()).rejects.toMatchObject({ status: 429, code: "rate_limited", retryAfterMs: 30_000 });
+
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter(new Date(Date.now() + 5_000).toUTCString()));
+    const dated = await api.meta().catch((e: unknown) => e as ApiError);
+    expect(dated.retryAfterMs).toBeGreaterThan(0);
+    expect(dated.retryAfterMs).toBeLessThanOrEqual(5_000);
+
+    // Absurd values are clamped to the one-hour ceiling.
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter("99999999"));
+    await expect(api.meta()).rejects.toMatchObject({ retryAfterMs: 3_600_000 });
+
+    // Unparseable and absent both degrade to undefined.
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter("whenever"));
+    await expect(api.meta()).rejects.toMatchObject({ retryAfterMs: undefined });
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter(null));
+    await expect(api.meta()).rejects.toMatchObject({ retryAfterMs: undefined });
+  });
+});
+
+describe("listEntries drift hardening", () => {
+  it("dedupes rows repeated across page boundaries (concurrent-insert drift)", async () => {
+    // A new insert between pages shifted row e-499 onto both pages.
+    const page1 = Array.from({ length: 500 }, (_, i) => ({ client_entry_id: `e-${i}` }));
+    const page2 = [{ client_entry_id: "e-499" }, { client_entry_id: "e-500" }];
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page2));
+    const entries = await api.listEntries();
+    expect(entries).toHaveLength(501);
+    expect(entries.filter((e) => e.client_entry_id === "e-499")).toHaveLength(1);
   });
 });

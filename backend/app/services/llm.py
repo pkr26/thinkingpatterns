@@ -28,7 +28,16 @@ from .patterns import Analysis, JournalEntry, Pattern
 
 MAX_LABEL_CHARS = 80
 MAX_OCCURRENCES = 100_000
+# The kinds the model may claim. The analyze()/extract_patterns() prompt is
+# BUILT from this tuple, so the endpoint can never be asked for (or
+# rewarded for) a kind the sanitizer would drop.
 _ALLOWED_KINDS = ("temporal", "mood_correlation", "recurring_phrase", "mood_shift")
+_PATTERNS_PROMPT = (
+    "You extract behavioral patterns from journal entries. Return strict "
+    "JSON: {\"patterns\": [{\"kind\": \"" + "|".join(_ALLOWED_KINDS) + "\", "
+    "\"label\": str, \"occurrences\": int, \"confidence\": 0..1, \"detail\": {}}]}. "
+    "No advice, no diagnosis."
+)
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _URL_OR_PHONE = re.compile(r"https?://|www\.|\d{5,}", re.IGNORECASE)
 # Tokens allowed in labels even when the corpus never contains them:
@@ -66,20 +75,29 @@ def _clean_label(raw: object) -> str | None:
     return label
 
 
-def _label_grounded(label: str, corpus_lower: list[str]) -> bool:
+def _corpus_tokens(corpus_lower: list[str]) -> set[str]:
+    """The user's own vocabulary: word tokens across every entry."""
+    tokens: set[str] = set()
+    for text in corpus_lower:
+        tokens.update(patterns.WORD_RE.findall(text))
+    return tokens
+
+
+def _label_grounded(label: str, corpus_vocab: set[str]) -> bool:
     """Every content token of the label must occur in the user's own text.
 
     Model output is hostile: without corpus grounding, a prompt-injected
     journal entry turns into an arbitrary label ("URGENT: call 555-0134")
     rendered on pattern cards and interpolated into the daily question.
     Function words are exempt; everything else must be the user's wording.
+    Matching is on WORD TOKENS, never substrings — "rage" is not grounded
+    by "forage".
     """
-    corpus_blob = " \u0001 ".join(corpus_lower)
     for token in label.lower().split():
         stripped = token.strip(".,!?;:'\"()[]")
         if len(stripped) < 3 or stripped in _GROUNDING_ALLOWLIST:
             continue
-        if stripped not in corpus_blob:
+        if stripped not in corpus_vocab:
             return False
     return True
 
@@ -111,7 +129,7 @@ def sanitize_pattern(item: object, corpus_texts: list[str]) -> Pattern | None:
     # EVERY kind's label is corpus-grounded, not just recurring_phrase: an
     # injected label rides onto cards and into the daily question whatever
     # its kind. recurring_phrase keeps its stricter verbatim-substring rule.
-    if not _label_grounded(label, lowered):
+    if not _label_grounded(label, _corpus_tokens(lowered)):
         return None
     if kind == "recurring_phrase":
         # A "recurring phrase" the user never wrote is model fiction (or a
@@ -150,10 +168,10 @@ def sanitize_pattern(item: object, corpus_texts: list[str]) -> Pattern | None:
             # JSON for strict parsers (JS, Swift).
             if math.isfinite(value):
                 detail[numeric] = min(hi, max(lo, value))
-        for text_key in ("first", "last"):
-            value = _clean_label(detail_raw.get(text_key))
-            if value:
-                detail[text_key] = value
+        # detail.first/last are DROPPED: they are free-text fields that
+        # cannot be corpus-grounded (a date is not a word in the text), and
+        # the deterministic brain computes its own evidence dates — the
+        # model adds nothing trustworthy there.
     return Pattern(
         kind=kind, label=label, occurrences=occurrences, confidence=confidence, detail=detail
     )
@@ -195,6 +213,28 @@ class LLMAnalyzer:
             )
         return user_payload
 
+    def _fetch_patterns(self, entries: list[JournalEntry]) -> list[Pattern]:
+        """One endpoint round-trip + sanitize; raises on ANY failure.
+
+        The single shared path behind extract_patterns() and analyze() —
+        the two used to carry their own (drifting) prompt copies.
+        """
+        body = self._post({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": _PATTERNS_PROMPT},
+                {"role": "user", "content": json.dumps(self._recent_payload(entries))},
+            ],
+        })
+        content = body["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+        corpus = [entry.text for entry in entries]
+        return [
+            pattern
+            for item in parsed.get("patterns", [])
+            if (pattern := sanitize_pattern(item, corpus)) is not None
+        ]
+
     def extract_patterns(self, entries: list[JournalEntry]) -> list[Pattern]:
         """Sanitized patterns from the model ([] on ANY failure).
 
@@ -204,55 +244,14 @@ class LLMAnalyzer:
         hostile before it is trusted. Empty result simply means "no
         model additions" — the brain's own patterns stand.
         """
-        system_prompt = (
-            "You extract behavioral patterns from journal entries. Return strict "
-            "JSON: {\"patterns\": [{\"kind\": \"temporal|mood_correlation|recurring_phrase|mood_shift\", "
-            "\"label\": str, \"occurrences\": int, \"confidence\": 0..1, \"detail\": {}}]}. "
-            "No advice, no diagnosis."
-        )
         try:
-            body = self._post({
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(self._recent_payload(entries))},
-                ],
-            })
-            content = body["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
-            corpus = [entry.text for entry in entries]
-            return [
-                pattern
-                for item in parsed.get("patterns", [])
-                if (pattern := sanitize_pattern(item, corpus)) is not None
-            ]
+            return self._fetch_patterns(entries)
         except Exception:
             return []
 
     def analyze(self, entries: list[JournalEntry]) -> Analysis:
-        system_prompt = (
-            "You extract behavioral patterns from journal entries. Return strict "
-            "JSON: {\"patterns\": [{\"kind\": \"temporal|mood_correlation|recurring_phrase\", "
-            "\"label\": str, \"occurrences\": int, \"confidence\": 0..1, \"detail\": {}}]}. "
-            "No advice, no diagnosis."
-        )
-        user_payload = self._recent_payload(entries)
         try:
-            body = self._post({
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": json.dumps(user_payload)},
-                ],
-            })
-            content = body["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
-            corpus = [entry.text for entry in entries]
-            found = [
-                pattern
-                for item in parsed.get("patterns", [])
-                if (pattern := sanitize_pattern(item, corpus)) is not None
-            ]
+            found = self._fetch_patterns(entries)
         except Exception:
             # One rule-based pass, computed once, used for both the fallback
             # and the envelope fields below — never two full corpus passes.

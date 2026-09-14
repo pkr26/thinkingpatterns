@@ -243,8 +243,9 @@ async def test_wrong_key_recompute_leaves_previous_insights_intact(client, setti
 
 def _production_app(monkeypatch) -> object:
     # asyncpg is not installed in the unit-test venv; the engine is never
-    # used without the lifespan, so substitute a placeholder.
-    monkeypatch.setattr("app.main.build_engine", lambda url: None)
+    # used without the lifespan, so substitute a placeholder (build_engine
+    # takes pool kwargs now — accept and ignore them).
+    monkeypatch.setattr("app.main.build_engine", lambda url, **_: None)
     settings = Settings(
         environment="production",
         database_url="postgresql+asyncpg://u:p@h/db",
@@ -278,17 +279,34 @@ async def test_security_headers_on_every_response(client):
 
 
 async def test_authenticated_reads_are_rate_limited(client, settings):
-    # Unbounded export/list loops are a self-service DoS: each export reads
-    # every row the user owns.
+    # Unbounded list/read loops are a self-service DoS: each read walks the
+    # rows the user owns. (Export rides its own tighter bucket now — see
+    # test_export_has_a_dedicated_rate_bucket.)
     settings.read_rate_limit = 2
     emu = ClientEmulator("reader", "pw")
     await emu.register(client)
     statuses = [
-        (await client.get("/api/account/export", headers=emu.headers)).status_code
+        (await client.get("/api/entries", headers=emu.headers)).status_code
         for _ in range(4)
     ]
     assert statuses[:2] == [200, 200]
     assert statuses[2:] == [429, 429]
+
+
+async def test_export_has_a_dedicated_rate_bucket(client, settings):
+    # Export streams up to the whole blob quota per request; it must not
+    # inherit the generous read bucket (300/min default).
+    emu = ClientEmulator("exportcap", "pw")
+    await emu.register(client)
+    statuses = [
+        (await client.get("/api/account/export", headers=emu.headers)).status_code
+        for _ in range(7)
+    ]
+    assert statuses[:5] == [200] * 5  # default export_rate_limit
+    assert statuses[5:] == [429, 429]
+    # ...while ordinary reads still flow (separate bucket).
+    read = await client.get("/api/entries", headers=emu.headers)
+    assert read.status_code == 200
 
 
 # --- hostile input ------------------------------------------------------------

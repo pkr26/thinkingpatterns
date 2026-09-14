@@ -10,6 +10,7 @@ import { vi } from "vitest";
 export const navigationStub = {
   navigate: vi.fn(),
   popToTop: vi.fn(),
+  replace: vi.fn(),
 };
 
 export function createNativeStackNavigator() {

@@ -23,11 +23,19 @@ machine, and migration tooling has no business needing a token secret. Both
 dialects are handled: SQLite migrations run with render_as_batch=True (SQLite
 cannot ALTER most things; batch mode rebuilds the table), PostgreSQL runs
 plain DDL.
+
+PostgreSQL concurrency: when several replicas first-boot at once against one
+database (compose/swarm scale-out), their entrypoints can run ``alembic
+upgrade head`` simultaneously. A session-level advisory lock serializes the
+DDL; lock_timeout/statement_timeout make a blocked migration FAIL (the
+orchestrator restarts the replica and it retries) instead of hanging the
+boot forever. SQLite needs none of this (single-writer file databases).
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from alembic import context
@@ -36,9 +44,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.models import Base
 
+logger = logging.getLogger("mindpattern.alembic")
+
 config = context.config
 
 target_metadata = Base.metadata
+
+# Arbitrary fixed key for the migration advisory lock (any int64; stable
+# across releases so every replica's migration runner contends on it).
+ADVISORY_LOCK_ID = 727272
 
 
 def _database_url() -> str:
@@ -65,13 +79,28 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(
-        connection=connection,
-        target_metadata=target_metadata,
-        render_as_batch=connection.dialect.name == "sqlite",
-    )
-    with context.begin_transaction():
-        context.run_migrations()
+    is_postgres = connection.dialect.name == "postgresql"
+    if is_postgres:
+        # Bound every wait BEFORE taking the advisory lock: lock_timeout
+        # covers the lock acquisition itself, statement_timeout any single
+        # slow DDL statement.
+        connection.exec_driver_sql("SET lock_timeout = '15s'")
+        connection.exec_driver_sql("SET statement_timeout = '300s'")
+        connection.exec_driver_sql(f"SELECT pg_advisory_lock({ADVISORY_LOCK_ID})")
+    try:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=connection.dialect.name == "sqlite",
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+    finally:
+        if is_postgres:
+            try:
+                connection.exec_driver_sql(f"SELECT pg_advisory_unlock({ADVISORY_LOCK_ID})")
+            except Exception:  # the disconnect alone releases the lock
+                logger.warning("pg_advisory_unlock failed; disconnect releases the lock", exc_info=True)
 
 
 async def run_migrations_online() -> None:
@@ -85,3 +114,4 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())
+

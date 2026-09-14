@@ -61,8 +61,13 @@ def encrypt(
     return nonce + ciphertext
 
 
-def decrypt(key: bytes, blob: bytes, aad: bytes | None = None) -> bytes:
-    """Verify and decrypt an envelope; raises TamperError on any mismatch."""
+def decrypt(key: bytes | bytearray, blob: bytes, aad: bytes | None = None) -> bytes:
+    """Verify and decrypt an envelope; raises TamperError on any mismatch.
+
+    ``key`` is any bytes-like: AESGCM accepts bytearray, and the enclave
+    deliberately passes ONE reusable mutable buffer (zeroized after the
+    batch) instead of an immutable per-call copy that would linger until GC.
+    """
     if len(key) != KEY_SIZE:
         raise CryptoError(f"key must be {KEY_SIZE} bytes, got {len(key)}")
     if len(blob) < MIN_BLOB_SIZE:

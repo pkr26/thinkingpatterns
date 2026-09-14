@@ -43,6 +43,38 @@ export function deriveMasterKey(password: string, salt: Buffer, iterations = KDF
   return engine.pbkdf2Sync(password, salt, iterations, 32, "sha256");
 }
 
+/**
+ * The async derivation — PREFER this in UI paths. The sync form freezes
+ * the JS thread for ~100-400ms at 600k iterations; the engine's async
+ * pbkdf2 (quick-crypto's JSI worker on device, node:crypto's thread pool
+ * in tests) keeps the UI responsive. Same bytes, same vectors.
+ */
+export async function deriveMasterKeyAsync(
+  password: string,
+  salt: Buffer,
+  iterations = KDF_ITERATIONS,
+): Promise<Buffer> {
+  if (salt.length < MIN_SALT_SIZE) {
+    throw new Error(`salt must be at least ${MIN_SALT_SIZE} bytes`);
+  }
+  if (iterations < 1) {
+    throw new Error("iterations must be positive");
+  }
+  return new Promise((resolve, reject) => {
+    engine.pbkdf2(password, salt, iterations, 32, "sha256", (err, derivedKey) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      if (!derivedKey) {
+        reject(new Error("pbkdf2 produced no key"));
+        return;
+      }
+      resolve(Buffer.from(derivedKey));
+    });
+  });
+}
+
 export function deriveAuthKey(masterKey: Buffer): Buffer {
   // Empty salt -> RFC 5869 default of HashLen zeros, matching the backend.
   return hkdfSha256(masterKey, authInfo());

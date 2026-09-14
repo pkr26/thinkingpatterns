@@ -45,6 +45,13 @@ export const Platform = {
 export const Alert = { alert: vi.fn() };
 export const Share = { share: vi.fn(async () => ({})) };
 
+/** The theme system reads the OS scheme through this hook; tests default to
+ *  the dark palette and override with mockReturnValue("light"). */
+export const useColorScheme = vi.fn((): "dark" | "light" => "dark");
+
+/** Keyboard.dismiss is the keyboard-dismiss affordance on the Entry screen. */
+export const Keyboard = { dismiss: vi.fn() };
+
 /** AppState stub: listeners are captured so tests can fire background /
  *  inactive transitions and assert the vault auto-lock. */
 export const AppState = {

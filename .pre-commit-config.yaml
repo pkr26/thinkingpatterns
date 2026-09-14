@@ -1,0 +1,22 @@
+# Pre-commit hooks for the backend tree. Install once: `pre-commit install`.
+# The ruff version here (v0.16.6) is the same one CI pins and the config in
+# backend/pyproject.toml was verified against.
+#
+# Heads-up on ruff-format: the tree is not yet format-clean (46 files would
+# reformat under ruff 0.16.6 defaults). The hook only touches files you
+# actually stage, but the first time you touch an unformatted file the diff
+# will include its reformatting. A one-time `ruff format backend/` commit is
+# the deliberate way to adopt it — then ruff format --check can join CI.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+        files: ^backend/
+      - id: trailing-whitespace
+        files: ^backend/

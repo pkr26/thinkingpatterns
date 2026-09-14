@@ -178,3 +178,20 @@ def daterange(days: int, end: date) -> list[date]:
     """The last *days* calendar days ending at *end* (inclusive)."""
     from datetime import timedelta
     return [end - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+
+
+# ---------------------------------------------------------------------------
+# Added 2026-09-07 (additive only): the preferred verifier transport for
+# DELETE /account is the X-Account-Verifier header; the JSON body remains as
+# a deprecated fallback and keeps its coverage through delete_account() above.
+# ---------------------------------------------------------------------------
+
+
+async def delete_account_via_header(client: AsyncClient, emu: ClientEmulator) -> int:
+    """DELETE /account with the verifier in X-Account-Verifier (preferred)."""
+    response = await client.request(
+        "DELETE",
+        "/api/account",
+        headers={**emu.headers, "X-Account-Verifier": emu.auth_key_b64},
+    )
+    return response.status_code

@@ -111,8 +111,13 @@ class Pattern:
         if self.kind == "link":
             direction = self.detail.get("direction", "lower")
             lag = self.detail.get("lag_days", 1)
-            return (f"The day after '{self.label}' comes up, your entries read "
-                    f"{direction} (about {lag} day later).")
+            # The lag reported is the MODAL exposed gap (see brain._detect_links);
+            # "the day after" is only said when the data says it.
+            if lag == 1:
+                return (f"The day after '{self.label}' comes up, your entries "
+                        f"read {direction}.")
+            return (f"In the days after '{self.label}' comes up, your entries "
+                    f"read {direction} (about {lag} days later).")
         if self.kind == "inertia":
             return ("Your mood has been carrying over from day to day more "
                     "than usual for you.")

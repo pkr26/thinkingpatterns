@@ -4,7 +4,7 @@
  * (the client emulator) — if these ever disagree, shared/vectors.json fails.
  */
 import { buildAad, decrypt, encrypt } from "./envelope";
-import { deriveAuthKey, deriveDataKey, deriveMasterKey, zeroize } from "./kdf";
+import { deriveAuthKey, deriveDataKey, deriveMasterKey, deriveMasterKeyAsync, zeroize } from "./kdf";
 
 export interface Keys {
   masterKey: Buffer;
@@ -21,6 +21,13 @@ export interface EntryPayload {
 
 export function deriveKeys(password: string, salt: Buffer): Keys {
   const masterKey = deriveMasterKey(password, salt);
+  return { masterKey, authKey: deriveAuthKey(masterKey), dataKey: deriveDataKey(masterKey) };
+}
+
+/** deriveKeys without the JS-thread freeze (see deriveMasterKeyAsync) —
+ *  the login/unlock screens' preferred path. */
+export async function deriveKeysAsync(password: string, salt: Buffer): Promise<Keys> {
+  const masterKey = await deriveMasterKeyAsync(password, salt);
   return { masterKey, authKey: deriveAuthKey(masterKey), dataKey: deriveDataKey(masterKey) };
 }
 

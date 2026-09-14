@@ -9,6 +9,12 @@ Responsibilities, in order:
     cannot cover unhandled exceptions; sitting as raw ASGI can.)
  3. Convert unhandled exceptions into a logged, header-stamped 500 with no
     internals leaked; deeply-nested JSON (RecursionError) becomes a 400.
+ 4. Warn once at first sight of X-Forwarded-For while trust_proxy_headers is
+    off — the usual symptom of a proxy deployment that forgot to opt in, in
+    which case rate limiting keys on the proxy's address for every client.
+
+Error bodies here carry the same {"detail", "code"} envelope the app's
+exception handlers emit (they bypass those handlers by design, see 2).
 """
 
 from __future__ import annotations
@@ -28,18 +34,28 @@ SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
     (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
 )
 
-_OVERSIZE_BODY = json.dumps({"detail": "request body too large"}).encode("utf-8")
-_NESTED_BODY = json.dumps({"detail": "request body too deeply nested"}).encode("utf-8")
-_BAD_LENGTH = json.dumps({"detail": "invalid content-length"}).encode("utf-8")
-_INTERNAL = json.dumps({"detail": "internal server error"}).encode("utf-8")
+_OVERSIZE_BODY = json.dumps(
+    {"detail": "request body too large", "code": "payload_too_large"}
+).encode("utf-8")
+_NESTED_BODY = json.dumps(
+    {"detail": "request body too deeply nested", "code": "bad_request"}
+).encode("utf-8")
+_BAD_LENGTH = json.dumps(
+    {"detail": "invalid content-length", "code": "bad_request"}
+).encode("utf-8")
+_INTERNAL = json.dumps(
+    {"detail": "internal server error", "code": "internal_error"}
+).encode("utf-8")
 
 
 class HardeningMiddleware:
     """ASGI middleware: body-size cap + security headers + last-ditch 500s."""
 
-    def __init__(self, app, max_body_bytes: int) -> None:
+    def __init__(self, app, max_body_bytes: int, trust_proxy_headers: bool = False) -> None:
         self.app = app
         self.max_body_bytes = max_body_bytes
+        self.trust_proxy_headers = trust_proxy_headers
+        self._xff_warned = False
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -48,6 +64,16 @@ class HardeningMiddleware:
 
         # --- 1. Cheap content-length rejection, before anything is read ----
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        if b"x-forwarded-for" in headers and not self.trust_proxy_headers and not self._xff_warned:
+            # One operator-visible nudge, then quiet: with trust off the
+            # header is ignored and every proxied client shares the proxy's
+            # rate-limit bucket.
+            self._xff_warned = True
+            logger.warning(
+                "X-Forwarded-For received but MINDPATTERN_TRUST_PROXY_HEADERS "
+                "is off — rate limiting keys on the direct peer (the proxy?) "
+                "for every client; enable it only behind a trusted reverse proxy"
+            )
         content_length = headers.get(b"content-length")
         if content_length is not None:
             try:

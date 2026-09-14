@@ -10,7 +10,12 @@
 import { vi, type Mock } from "vitest";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string,
+    public retryAfterMs?: number,
+  ) {
     super(message);
     this.name = "ApiError";
   }

@@ -55,7 +55,7 @@ async def decrypt_brain_state(client, emu) -> dict:
     return json.loads(plain.decode("utf-8"))
 
 
-async def test_brain_state_row_exists_and_is_encrypted(client):
+async def test_brain_state_row_exists_and_is_encrypted(client, monkeypatch):
     emu = ClientEmulator("brainstate", "pw-brain")
     await emu.register(client)
     await seed(client, emu, days=70)
@@ -65,8 +65,28 @@ async def test_brain_state_row_exists_and_is_encrypted(client):
     assert state["v"] == 2
     assert state["patterns"], "the store must hold the qualified patterns"
     temporal = state["patterns"]["temporal:work"]
-    assert temporal["state"] == "emerging"  # 10 occurrences ≥ STRONG_EVIDENCE
+    # Replication gate: statistical kinds qualify as `candidate` on the first
+    # recompute day and surface only after re-qualifying on a SECOND distinct
+    # recompute day — the instant STRONG_EVIDENCE promotion path was removed
+    # for statistical kinds because a single-day extreme can be noise.
+    assert temporal["state"] == "candidate"
     assert temporal["first_qualified"] == TODAY.isoformat()
+
+    class _NextDay(date):
+        @classmethod
+        def today(cls) -> date:
+            return date.today() + timedelta(days=1)
+
+    monkeypatch.setattr("app.api.insights.date_type", _NextDay)
+    # The second observation needs NEW evidence: a work entry on a day the
+    # fixture wrote CALM text for (never a Sunday). A next-day recompute of
+    # the unchanged corpus no longer promotes statistical kinds — that was
+    # the same window re-scored, not replication.
+    fresh_day = TODAY if TODAY.weekday() != 6 else TODAY - timedelta(days=1)
+    await emu.create_entry(client, WORK_ANXIOUS, fresh_day, client_entry_id="fresh-work")
+    await emu.recompute(client)
+    state = await decrypt_brain_state(client, emu)
+    assert state["patterns"]["temporal:work"]["state"] == "emerging"
     # The blob is real ciphertext, not plaintext JSON in the DB.
     from sqlalchemy import select
 
@@ -174,6 +194,57 @@ async def test_tampered_brain_state_retries_without_it(client):
     # ENTRY as the brain state, analyzing one entry too few.
     insights = await emu.decrypt_insights(client)
     assert insights["stats"]["total_entries"] == 70
+
+
+async def test_malformed_entry_during_amnesia_retry_is_a_400(client):
+    # State tampered AND one entry AEAD-valid but semantically bad JSON:
+    # the primary run dies on the state's GCM tag, the retry (amnesia)
+    # reaches the entry parser and must surface the same 400 the primary
+    # malformed-payload path gives — it used to escape as a 500.
+    emu = ClientEmulator("retrymalformed", "pw-retry-malformed")
+    await emu.register(client)
+    await seed(client, emu, days=70)
+    await emu.recompute(client)  # a prior brain-state row must exist
+
+    from sqlalchemy import select
+
+    from app.models import Entry, Insight
+
+    app = client._transport.app  # noqa: SLF001 — test reachability into state
+    async with app.state.sessionmaker() as session:
+        state_row = (
+            (
+                await session.execute(
+                    select(Insight)
+                    .where(Insight.user_id == emu.user_id, Insight.kind == "brain")
+                )
+            )
+            .scalars()
+            .first()
+        )
+        corrupted = bytearray(bytes(state_row.blob))
+        corrupted[-1] ^= 1
+        state_row.blob = bytes(corrupted)
+        entry_row = (
+            (await session.execute(select(Entry).where(Entry.user_id == emu.user_id)))
+            .scalars()
+            .first()
+        )
+        # Valid envelope, garbage payload — authentication passes, parsing fails.
+        entry_row.blob = crypto.encrypt(
+            emu.data_key,
+            b"{definitely not json",
+            crypto.build_aad("entry", emu.user_id, entry_row.client_entry_id),
+        )
+        await session.commit()
+
+    token = await emu.open_processing_session(client)
+    response = await client.post(
+        "/api/insights/recompute",
+        headers={**emu.headers, "X-Processing-Token": token},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "entry_payload_malformed"
 
 
 async def test_llm_enrichment_merges_into_surfaced_patterns(client, settings, monkeypatch):

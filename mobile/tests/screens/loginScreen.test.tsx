@@ -1,6 +1,8 @@
 /**
  * LoginScreen: register/login flows, short-password gate, key custody on
- * failure (derived buffers zeroized, vault locked), and the mode toggle.
+ * failure (derived buffers zeroized, vault locked), the mode toggle, and
+ * registration honesty (no-reset warning, confirm password, strength hint).
+ * Keys derive via deriveKeysAsync (no JS-thread freeze) — the mock is async.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -15,7 +17,7 @@ vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
   return {
     ...actual,
-    deriveKeys: vi.fn((password: string, salt: Buffer) => ({
+    deriveKeysAsync: vi.fn(async (password: string, salt: Buffer) => ({
       masterKey: Buffer.alloc(32, 1),
       authKey: Buffer.from(`${password}|${salt.toString("base64")}`.padEnd(32, "\0")),
       dataKey: Buffer.alloc(32, 3),
@@ -32,8 +34,9 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api, ApiError } = await import("../../src/api/client");
-const { deriveKeys } = await import("../../src/crypto/MindPatternCrypto");
+const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { LoginScreen } = await import("../../src/screens/LoginScreen");
+const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");
 const { render, flush, textOf, pressLabel, typeInto, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
 const { resetApi, SALT_B64 } = await import("../helpers/apiMock");
@@ -44,8 +47,8 @@ let lastDerived: { masterKey: Buffer; authKey: Buffer; dataKey: Buffer } | null 
 beforeEach(() => {
   resetApi(api as never);
   lastDerived = null;
-  vi.mocked(deriveKeys).mockReset();
-  vi.mocked(deriveKeys).mockImplementation((password: string, salt: Buffer) => {
+  vi.mocked(deriveKeysAsync).mockReset();
+  vi.mocked(deriveKeysAsync).mockImplementation(async (password: string, salt: Buffer) => {
     lastDerived = {
       masterKey: Buffer.alloc(32, 1),
       authKey: Buffer.from(`${password}|${salt.toString("base64")}`.padEnd(32, "\0")),
@@ -57,6 +60,7 @@ beforeEach(() => {
   refreshActiveDays.mockClear();
   Alert.alert.mockClear();
   vault.lock();
+  takePendingOnboarding(); // drain leftovers so one test cannot leak into the next
   sessionState = { markLoggedIn, refreshActiveDays };
 });
 
@@ -74,16 +78,25 @@ describe("LoginScreen chrome", () => {
   });
 
   it("pins the visual language of the screen", async () => {
+    // Design-system pass: theme-composed styles; the button fill moved to
+    // the AA-passing #3b5bdb and the switch link is a themed GhostButton.
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<LoginScreen />);
     await flush();
-    expectStyle(root, { flex: 1, justifyContent: "center", padding: 32, gap: 12, backgroundColor: "#0f1115" });
-    expectStyle(root, { fontSize: 34, fontWeight: "700", color: "#e8eaf0", textAlign: "center" });
-    expectStyle(root, { fontSize: 14, color: "#8a91a3", textAlign: "center", marginBottom: 24 });
+    expectStyle(root, { flex: 1, justifyContent: "center" }); // container base
+    expectStyle(root, { backgroundColor: "#0f1115", padding: 32, gap: 12 }); // container themed
+    expectStyle(root, { fontSize: 34, fontWeight: "700", textAlign: "center" }); // title base
+    expectStyle(root, { color: "#e8eaf0" }); // title themed
+    expectStyle(root, { textAlign: "center", marginBottom: 24 }); // subtitle base
+    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // subtitle themed
     expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 16 });
-    expectStyle(root, { backgroundColor: "#4f7cff", borderRadius: 10, padding: 16, alignItems: "center", marginTop: 8 });
-    expectStyle(root, { color: "#fff", fontSize: 16, fontWeight: "600" });
-    expectStyle(root, { color: "#7f9bff", textAlign: "center", marginTop: 16 });
+    expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
+    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // button text
+    expectStyle(root, { padding: 12 }); // GhostButton base
+    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // ghost text
+    // The crisis affordance keeps its distinct surface.
+    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 });
   });
 
   it("switches to register mode and back", async () => {
@@ -125,6 +138,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "12345678");
     await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "12345678");
     await pressLabel(root, "Create account");
     await flush();
     expect(api.register).toHaveBeenCalledTimes(1);
@@ -136,10 +150,11 @@ describe("registration", () => {
     await typeInto(root, "username", " alice ");
     await typeInto(root, "password", "correct horse");
     await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "correct horse");
     await pressLabel(root, "Create account");
     await flush();
 
-    expect(deriveKeys).toHaveBeenCalledWith("correct horse", expect.any(Buffer));
+    expect(deriveKeysAsync).toHaveBeenCalledWith("correct horse", expect.any(Buffer));
     expect(api.register).toHaveBeenCalledWith("alice", expect.any(String), expect.any(String));
     expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
     expect(vault.isUnlocked()).toBe(true);
@@ -149,17 +164,59 @@ describe("registration", () => {
     expect((inputByPlaceholder(root, "password").props as { value: string }).value).toBe("");
   });
 
+  it("a successful REGISTRATION queues first-run onboarding (the navigator consumes it once)", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "correct horse");
+    await pressLabel(root, "Create account");
+    await flush();
+    expect(markLoggedIn).toHaveBeenCalledTimes(1);
+    expect(takePendingOnboarding()).toBe(true);
+    // One-shot: the pending flag is consumed, not sticky.
+    expect(takePendingOnboarding()).toBe(false);
+  });
+
+  it("a failed registration queues NO onboarding", async () => {
+    vi.mocked(api.register).mockRejectedValue(new ApiError(409, "username already taken"));
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "correct horse");
+    await pressLabel(root, "Create account");
+    await flush();
+    expect(markLoggedIn).not.toHaveBeenCalled();
+    expect(takePendingOnboarding()).toBe(false);
+  });
+
+  it("a plain LOGIN never queues onboarding", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Sign in");
+    await flush();
+    expect(markLoggedIn).toHaveBeenCalledTimes(1);
+    expect(takePendingOnboarding()).toBe(false);
+  });
+
   it("zeroizes derived keys and keeps the vault locked when registration fails", async () => {
     vi.mocked(api.register).mockRejectedValue(new ApiError(409, "username already taken"));
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "correct horse");
     await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "correct horse");
     await pressLabel(root, "Create account");
     await flush();
 
     expect(vault.isUnlocked()).toBe(false);
-    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "username already taken");
+    // Calm mapped copy — no raw server detail in the dialog (audit fix).
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Couldn't create account",
+      "That username is already taken. Try another, or sign in instead.",
+    );
     expect(markLoggedIn).not.toHaveBeenCalled();
     // The failed attempt's key material is scrubbed, not left in memory.
     expect(lastDerived).not.toBeNull();
@@ -194,7 +251,7 @@ describe("login", () => {
     await flush();
 
     expect(api.saltFor).toHaveBeenCalledWith("alice");
-    expect(deriveKeys).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
+    expect(deriveKeysAsync).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
     const expectedAuthKey = Buffer.from(`correct horse|${SALT_B64}`.padEnd(32, "\0")).toString("base64");
     expect(api.login).toHaveBeenCalledWith("alice", expectedAuthKey);
     expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
@@ -270,7 +327,7 @@ describe("login", () => {
     await pressLabel(root, "Sign in");
     await flush();
     expect(vault.isUnlocked()).toBe(false);
-    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "invalid credentials");
+    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "That username or password didn't match.");
   });
 
   it("locks a previously unlocked vault when a new sign-in fails", async () => {
@@ -291,7 +348,7 @@ describe("login", () => {
     const keyboard = root.root.findByType(reactNative.KeyboardAvoidingView);
     expect(keyboard.props.behavior).toBe("padding");
     expect(keyboard.props.style).toEqual(
-      { flex: 1, justifyContent: "center", padding: 32, gap: 12, backgroundColor: "#0f1115" },
+      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#0f1115", padding: 32, gap: 12 }],
     );
 
     const original = reactNative.Platform.OS;
@@ -306,7 +363,7 @@ describe("login", () => {
   });
 
   it("cleans up when key derivation itself fails", async () => {
-    vi.mocked(deriveKeys).mockImplementation(() => {
+    vi.mocked(deriveKeysAsync).mockImplementation(async () => {
       throw new Error("salt must be at least 8 bytes");
     });
     const root = await render(<LoginScreen />);
@@ -339,6 +396,7 @@ describe("register-mode edge cases", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "long enough pw");
     await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "long enough pw");
     await pressLabel(root, "Create account");
     await flush();
     const saltB64 = vi.mocked(api.register).mock.calls[0][1];
@@ -353,17 +411,18 @@ describe("register-mode edge cases", () => {
     await typeInto(root, "password", "tiny");
     await pressLabel(root, "Sign in");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "offline");
+    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "Couldn't reach the server — check your connection.");
   });
 
-  it("falls back to 'unknown error' for non-Error failures", async () => {
+  it("falls back to calm copy for non-Error failures", async () => {
     vi.mocked(api.login).mockRejectedValue("nope" as never);
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "correct horse");
     await pressLabel(root, "Sign in");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "unknown error");
+    // Was "unknown error"; the error-copy pass made the fallback a sentence.
+    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "Something went wrong — try again.");
   });
 
   it("renders the android keyboard behavior when the platform differs", async () => {
@@ -394,5 +453,85 @@ describe("register-mode edge cases", () => {
     });
     await flush();
     expect(vault.isUnlocked()).toBe(true);
+  });
+});
+
+describe("registration honesty (audit fix)", () => {
+  it("shows the no-reset warning only in register mode", async () => {
+    const root = await render(<LoginScreen />);
+    await flush();
+    expect(textOf(root)).not.toContain("There is no password reset.");
+    await pressLabel(root, "New here? Create an account");
+    expect(textOf(root)).toContain(
+      "There is no password reset. If you forget this password, no one — including us — can recover your journal.",
+    );
+  });
+
+  it("requires the confirmation to match before any network call", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "correct HORSE");
+    // Live inline mismatch hint…
+    expect(textOf(root)).toContain("Passwords don't match.");
+    // …and a gate at submit.
+    await pressLabel(root, "Create account");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Passwords don't match", expect.stringContaining("no reset"));
+    expect(api.register).not.toHaveBeenCalled();
+    // Fixing the typo clears the hint.
+    await typeInto(root, "confirm password", "correct horse");
+    expect(textOf(root)).not.toContain("Passwords don't match.");
+  });
+
+  it("shows the strength hint as the password improves (never shaming)", async () => {
+    const root = await render(<LoginScreen />);
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "password", "abc");
+    expect(textOf(root)).toContain("Password strength: weak.");
+    expect(textOf(root)).toContain("aim for a short sentence");
+    await typeInto(root, "password", "abcDEF12");
+    expect(textOf(root)).toContain("Password strength: fair.");
+    await typeInto(root, "password", "a very long passphrase with mixed Case and 123 !");
+    expect(textOf(root)).toContain("Password strength: strong.");
+    expect(textOf(root)).not.toContain("aim for a short sentence");
+    // Login mode shows no hint.
+    await pressLabel(root, "Already have an account? Sign in");
+    expect(textOf(root)).not.toContain("Password strength:");
+  });
+
+  it("marks fields for password managers (new-password on register)", async () => {
+    const root = await render(<LoginScreen />);
+    await flush();
+    expect(inputByPlaceholder(root, "password").props.textContentType).toBe("password");
+    expect(inputByPlaceholder(root, "password").props.autoComplete).toBe("current-password");
+    expect(inputByPlaceholder(root, "username").props.textContentType).toBe("username");
+    await pressLabel(root, "New here? Create an account");
+    expect(inputByPlaceholder(root, "password").props.textContentType).toBe("newPassword");
+    expect(inputByPlaceholder(root, "password").props.autoComplete).toBe("new-password");
+    expect(inputByPlaceholder(root, "confirm password").props.textContentType).toBe("newPassword");
+  });
+
+  it("every field has an explicit accessibilityLabel (not placeholder-only)", async () => {
+    const root = await render(<LoginScreen />);
+    await pressLabel(root, "New here? Create an account");
+    expect(inputByPlaceholder(root, "username").props.accessibilityLabel).toBe("Username");
+    expect(inputByPlaceholder(root, "password").props.accessibilityLabel).toBe("Password");
+    expect(inputByPlaceholder(root, "confirm password").props.accessibilityLabel).toBe("Confirm password");
+  });
+});
+
+describe("passwordStrength heuristic", () => {
+  it("scores length and variety without any library", async () => {
+    const { passwordStrength } = await import("../../src/screens/LoginScreen");
+    expect(passwordStrength("").label).toBe("weak");
+    expect(passwordStrength("short").label).toBe("weak");
+    expect(passwordStrength("eightchr").label).toBe("weak");
+    expect(passwordStrength("Eightchr1").label).toBe("fair");
+    expect(passwordStrength("a quite long lowercase sentence").label).toBe("fair");
+    expect(passwordStrength("a Quite long sentence, with 5 things!").label).toBe("strong");
+    expect(passwordStrength("weak").hint).toContain("Longer is stronger");
+    expect(passwordStrength("a Quite long sentence, with 5 things!").hint).toBe("");
   });
 });

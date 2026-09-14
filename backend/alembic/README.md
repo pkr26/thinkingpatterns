@@ -53,3 +53,13 @@ autogenerate against a fully-migrated database must produce an empty diff.
 - SQLite runs with `render_as_batch=True` (SQLite cannot ALTER most things;
   batch mode rebuilds tables when needed). PostgreSQL runs plain DDL. The
   initial revision is create-only and dialect-neutral.
+- On PostgreSQL, migrations run under a session-level advisory lock
+  (`pg_advisory_lock(727272)`) so concurrent first-boots of several replicas
+  serialize instead of racing the same DDL; `lock_timeout=15s` /
+  `statement_timeout=300s` make a blocked migration fail (the orchestrator
+  retries the boot) instead of hanging forever. SQLite takes neither —
+  single-writer file databases don't need it.
+- A database adopted via `alembic stamp head` while head was the initial
+  revision must be re-stamped: `stamp` only records "current", it does not
+  apply later revisions — run `alembic upgrade head` to pick up
+  `e930dbc4f001` (insights unique constraint) and beyond.

@@ -21,7 +21,11 @@ from app.main import create_app
 @pytest.fixture
 def settings() -> Settings:
     s = Settings(environment="development")
-    s.database_url = "sqlite+aiosqlite://"
+    # CI can point the whole suite at a real database (e.g.
+    # postgresql+asyncpg://...) via MINDPATTERN_TEST_DB_URL; the default is
+    # the per-test in-memory SQLite. Row cleanup for the shared database
+    # lives in the autouse fixture at the bottom of this file.
+    s.database_url = _test_db_url() or "sqlite+aiosqlite://"
     s.token_secret = "test-secret-not-for-production"
     s.processing_session_ttl = 300
     s.unlock_threshold_days = 30
@@ -42,3 +46,55 @@ async def client(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as c:
         yield c
+
+
+# ---------------------------------------------------------------------------
+# MINDPATTERN_TEST_DB_URL support (added 2026-09-07; default path unchanged)
+# ---------------------------------------------------------------------------
+
+
+def _test_db_url() -> str:
+    """External test database URL, or "" for the in-memory default."""
+    return os.environ.get("MINDPATTERN_TEST_DB_URL", "").strip()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _shared_test_db_cleanup():
+    """Wipe rows between tests when the suite runs against a SHARED database.
+
+    The default in-memory SQLite gives every test a fresh database through
+    the app fixture; an external URL (the Postgres CI job) does not, so rows
+    would leak between tests. Children are deleted before parents to respect
+    FK order; the schema itself is never dropped. Cheap no-op when the env
+    var is unset.
+
+    Safety rails: this DELETES EVERY ROW of every app table after each test,
+    so a non-SQLite URL must name a database containing "test" (the CI
+    contract uses .../mindpattern_test). Parallel pytest workers would need
+    one database each — the CI job runs serially.
+    """
+    url = _test_db_url()
+    if not url:
+        yield
+        return
+    if not url.startswith("sqlite"):
+        from urllib.parse import urlparse
+
+        db_name = (urlparse(url).path or "").lstrip("/")
+        if "test" not in db_name:
+            raise RuntimeError(
+                f"MINDPATTERN_TEST_DB_URL points at database {db_name!r}; the "
+                "per-test cleanup deletes all rows, so only a throwaway "
+                "database whose name contains 'test' is accepted"
+            )
+    from app.db import build_engine
+    from app.models import Base
+
+    engine = build_engine(url)
+    try:
+        yield
+    finally:
+        async with engine.begin() as conn:
+            for table in reversed(Base.metadata.sorted_tables):
+                await conn.execute(table.delete())
+        await engine.dispose()

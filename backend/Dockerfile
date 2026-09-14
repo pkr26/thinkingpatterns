@@ -1,9 +1,10 @@
-# TODO(release): pin by digest (`FROM python:3.14.x-slim@sha256:…`) at release
-# time — 3.14-slim is a mutable tag. Docker was unavailable in the environment
-# this file was authored in, so neither a patch tag nor a digest could be
-# confirmed from a local cache; resolve with `docker buildx imagetools
-# inspect python:3.14-slim` before the release build.
-FROM python:3.14-slim
+# Pinned by digest (multi-arch manifest list, resolved 2026-09-07 via the
+# Docker Hub registry API — Docker was unavailable locally, so this was
+# verified against the registry, not a local cache). 3.14-slim is a mutable
+# tag; the digest makes every build byte-identical. Dependabot (docker
+# ecosystem, .github/dependabot.yml) will propose digest bumps as new
+# 3.14-slim images publish.
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 
 WORKDIR /srv
 

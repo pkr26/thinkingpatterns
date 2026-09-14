@@ -152,3 +152,46 @@ class TestSecureProcessingContext:
         blob = crypto.encrypt(key, b"one shot", aad)
         result = run_isolated(key, [(aad, blob)], lambda plains: bytes(plains[0]))
         assert result == b"one shot"
+
+    def test_one_key_buffer_drives_every_decryption_and_is_zeroized(self, monkeypatch):
+        # Per-item bytes(self._key) minted N immutable key copies that
+        # lingered unzeroized until GC; the context now mints ONE bytearray
+        # working copy per run, feeds it to every decrypt call, and scrubs
+        # it with the rest of the run's buffers.
+        key = crypto.generate_key()
+        _, blobs = make_blobs(key, count=4)
+        from app.security import enclave
+
+        seen_keys = []
+        real_decrypt = enclave.decrypt
+
+        def spy(k, blob, aad=None):
+            seen_keys.append(k)
+            return real_decrypt(k, blob, aad)
+
+        monkeypatch.setattr("app.security.enclave.decrypt", spy)
+        result = SecureProcessingContext(key).run(blobs, lambda plains: len(plains))
+        assert result == 4
+        assert len(seen_keys) == 4
+        assert all(k is seen_keys[0] for k in seen_keys), \
+            "every item must decrypt with the same working buffer"
+        assert isinstance(seen_keys[0], bytearray)
+        assert all(b == 0 for b in seen_keys[0]), "working key copy survived the window"
+
+    def test_key_buffer_zeroized_even_when_decryption_fails(self, monkeypatch):
+        key = crypto.generate_key()
+        _, blobs = make_blobs(key, count=3)
+        tampered = [(aad, bytes(blob[:-1]) + bytes([blob[-1] ^ 1])) for aad, blob in blobs]
+        from app.security import enclave
+
+        seen_keys = []
+        real_decrypt = enclave.decrypt
+
+        def spy(k, blob, aad=None):
+            seen_keys.append(k)
+            return real_decrypt(k, blob, aad)
+
+        monkeypatch.setattr("app.security.enclave.decrypt", spy)
+        with pytest.raises(crypto.TamperError):
+            SecureProcessingContext(key).run(tampered, lambda plains: plains)
+        assert seen_keys and all(b == 0 for b in seen_keys[0])

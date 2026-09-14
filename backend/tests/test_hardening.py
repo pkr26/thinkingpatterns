@@ -368,7 +368,7 @@ async def test_create_all_only_runs_in_development(monkeypatch):
     async def _init(engine):
         inited.append(engine)
 
-    monkeypatch.setattr(main_mod, "build_engine", lambda url: _Engine())
+    monkeypatch.setattr(main_mod, "build_engine", lambda url, **_: _Engine())
     monkeypatch.setattr(main_mod, "init_models", _init)
 
     prod = main_mod.create_app(Settings(
@@ -396,7 +396,7 @@ async def test_docs_hidden_in_any_non_development_env(monkeypatch, env):
     import httpx
     from app.main import create_app
 
-    monkeypatch.setattr("app.main.build_engine", lambda url: None)
+    monkeypatch.setattr("app.main.build_engine", lambda url, **_: None)  # pool kwargs accepted, engine unused
     settings = Settings(
         environment=env,
         database_url="postgresql+asyncpg://u:p@h/db",

@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "description": "The generic reflective question pool, shared so the backend question engine and the mobile client (pre-threshold, day-1 questions) rotate over identical content. Every entry must be a question (end with '?') and must contain no advice language (the word 'should' never appears) — both platforms pin these invariants by test.",
+  "questions": [
+    "What took up most space in your mind today?",
+    "What felt different today compared to yesterday?",
+    "When did you feel most like yourself today?",
+    "What's one small thing that went right today?",
+    "What thought repeated itself today?",
+    "If today had a title, what would it be?",
+    "What are you carrying into tomorrow?",
+    "What did you notice today that you usually overlook?"
+  ]
+}

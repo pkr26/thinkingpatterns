@@ -29,3 +29,9 @@ coverage/
 backend/mindpattern.db
 backend/demo.db
 *.db
+.tools/
+
+# Tool caches (local-only)
+.ruff_cache/
+.mypy_cache/
+.pre-commit-cache

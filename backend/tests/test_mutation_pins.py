@@ -69,6 +69,11 @@ ALL_MINDPATTERN_ENV_VARS = [
     "MINDPATTERN_MAX_ENTRIES_PER_USER",
     "MINDPATTERN_MAX_USER_BLOB_BYTES",
     "MINDPATTERN_RECOMPUTE_ENTRY_LIMIT",
+    "MINDPATTERN_EXPORT_RATE_LIMIT",
+    "MINDPATTERN_EXPORT_RATE_WINDOW",
+    "MINDPATTERN_DB_POOL_SIZE",
+    "MINDPATTERN_DB_MAX_OVERFLOW",
+    "MINDPATTERN_DB_POOL_TIMEOUT",
     "MINDPATTERN_LLM_URL",
     "MINDPATTERN_LLM_API_KEY",
     "MINDPATTERN_LLM_MODEL",
@@ -116,6 +121,12 @@ def test_settings_defaults_are_pinned(clean_env):
         "max_entries_per_user": 10_000,
         "max_user_blob_bytes": 256 * 1024 * 1024,
         "recompute_entry_limit": 2_000,
+        # Added 2026-09-07: dedicated export bucket + env-sized PG pool.
+        "export_rate_limit": 5,
+        "export_rate_window": 60,
+        "db_pool_size": 5,
+        "db_max_overflow": 10,
+        "db_pool_timeout": 30,
         "llm_url": "",
         "llm_api_key": "",
         "llm_model": "gpt-4o-mini",
@@ -274,7 +285,9 @@ EXPECTED_ROUTES = {
     (insights_api, "/insights/recompute", "POST"): ({"insights"}, "insights-recompute"),
     (insights_api, "/insights", "GET"): ({"insights"}, "insights-read"),
     (insights_api, "/questions/today", "GET"): ({"insights"}, "questions-read"),
-    (account_api, "/account/export", "GET"): ({"account"}, "account-read"),
+    # Dedicated export bucket since 2026-09-07 (was "account-read"): one
+    # export streams up to the whole blob quota.
+    (account_api, "/account/export", "GET"): ({"account"}, "account-export"),
     (account_api, "/account/llm-consent", "GET"): ({"account"}, "account-consent-read"),
     (account_api, "/account/llm-consent", "PUT"): ({"account"}, "account-consent"),
     (account_api, "/account", "DELETE"): ({"account"}, "account-delete"),
@@ -510,20 +523,29 @@ async def test_cors_middleware_contract(settings):
     application = create_app(settings)
     cors = next(m for m in application.user_middleware if m.cls.__name__ == "CORSMiddleware")
     assert cors.kwargs["allow_methods"] == ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    assert cors.kwargs["allow_headers"] == ["Authorization", "Content-Type", "X-Processing-Token"]
+    # Pin updated 2026-09-08: X-Account-Verifier joined the list — it is the
+    # preferred DELETE /account re-auth transport and a browser client must
+    # be allowed to send it cross-origin (origins themselves stay opt-in).
+    assert cors.kwargs["allow_headers"] == [
+        "Authorization", "Content-Type", "X-Processing-Token", "X-Account-Verifier",
+    ]
     assert cors.kwargs["allow_origins"] == []
 
 
 async def test_validation_errors_expose_only_loc_and_msg(app, client):
+    # Envelope unification (2026-09-07): detail is now ONE human string that
+    # names the failed fields and pydantic's reasons — never the input, never
+    # the old list-of-dicts shape (mobile parses detail as a string).
     response = await client.post("/api/auth/register", json={})
     assert response.status_code == 422
-    errors = response.json()["detail"]
-    assert isinstance(errors, list) and errors
-    for error in errors:
-        # Keys exactly loc+msg, and BOTH values actually populated.
-        assert set(error) == {"loc", "msg"}
-        assert error["loc"] is not None and len(error["loc"]) > 0
-        assert isinstance(error["msg"], str) and len(error["msg"]) > 0
+    body = response.json()
+    assert body["code"] == "validation_error"
+    assert isinstance(body["detail"], str)
+    assert "username" in body["detail"]
+    assert "salt" in body["detail"]
+    assert "verifier" in body["detail"]
+    assert "Field required" in body["detail"]
+    assert "input" not in body  # the echo channel stays closed
 
 
 async def test_module_level_app_is_a_real_app():
@@ -606,10 +628,16 @@ async def test_entries_rejects_whitespace_in_base64_blob(client):
 async def test_processing_session_rejects_whitespace_in_base64_key(client):
     emu = ClientEmulator("b64key", "pw-b64-key")
     await emu.register(client)
+    # Same length as a valid key (44 chars, the schema cap) but with a space
+    # inside: length validation passes, the HANDLER's strict b64 must reject.
+    # (The old payload appended a space to a valid key; with the cap now
+    # exactly 44 that variant is rejected by length instead — also fine, but
+    # it stops pinning the base64 branch.)
+    key_with_space = base64.b64encode(b"k" * 32).decode()[:-1] + " "
     response = await client.post(
         "/api/processing/sessions",
         headers=emu.headers,
-        json={"data_key": base64.b64encode(b"k" * 32).decode() + " "},
+        json={"data_key": key_with_space},
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "data_key must be base64"
@@ -646,7 +674,10 @@ async def test_entry_validation_details_are_exact(client):
     future = await client.post(
         "/api/entries", headers=emu.headers,
         json={"client_entry_id": "e-future", "blob": base64.b64encode(b"x" * 40).decode(),
-              "entry_date": (TODAY + timedelta(days=1)).isoformat()},
+              # Two days out: one day of FORWARD grace absorbs device-local
+              # dates east of UTC (added 2026-09-07), so the rejection pin
+              # moved past the grace window.
+              "entry_date": (TODAY + timedelta(days=2)).isoformat()},
     )
     assert future.status_code == 422
     assert future.json()["detail"] == "entry_date cannot be in the future"
@@ -1244,9 +1275,12 @@ def test_llm_prompt_and_payload_shape_are_pinned():
     assert payload["model"] == "mini"
     system, user = payload["messages"]
     assert system["role"] == "system"
+    # Tracks the engine round's llm.py: the kind list grew "mood_shift"
+    # (2026-09-08, engine agent's _ALLOWED_KINDS). The pin stays an exact
+    # string so a prompt mutation still kills a mutant.
     assert system["content"] == (
         "You extract behavioral patterns from journal entries. Return strict "
-        'JSON: {"patterns": [{"kind": "temporal|mood_correlation|recurring_phrase", '
+        'JSON: {"patterns": [{"kind": "temporal|mood_correlation|recurring_phrase|mood_shift", '
         '"label": str, "occurrences": int, "confidence": 0..1, "detail": {}}]}. '
         "No advice, no diagnosis."
     )
@@ -1330,14 +1364,19 @@ def test_question_pool_dedups_duplicates():
 
 
 # ---------------------------------------------------------------------------
-# Schema validation boundaries (schemas.py): pydantic-level 422s return a
-# LIST detail; handler-level 422s return a STRING detail. The shape tells
-# them apart, which is exactly what constraint-removal mutants blur.
+# Schema validation boundaries (schemas.py). Since the 2026-09-07 error
+# envelope unification, EVERY error detail is a string with a machine code;
+# the pydantic-vs-handler layer distinction is now carried by the message
+# text, which the exact-string pins below still assert (a min_length mutant
+# still changes which message answers).
 # ---------------------------------------------------------------------------
 
 
 def _is_validation_shaped(detail) -> bool:
-    return isinstance(detail, list)
+    # Envelope shape: a non-empty human string. (Was: isinstance(detail,
+    # list) — FastAPI's default list-of-objects detail, removed by the
+    # unified {"detail": str, "code": str} envelope.)
+    return isinstance(detail, str) and bool(detail)
 
 
 async def test_register_schema_boundaries(client):
@@ -1503,18 +1542,19 @@ async def test_single_character_fields_reach_the_handlers(client):
     assert r3.status_code == 401
     assert r3.json()["detail"] == "invalid credentials"
 
-    # Account deletion and LLM consent verifiers: same flat 401 flow.
+    # Account deletion and LLM consent verifiers: authenticated requests with
+    # a bad proof are 403 (since 2026-09-07; 401 means "session expired").
     r4 = await client.request(
         "DELETE", "/api/account", headers=emu.headers, json={"verifier": "A"},
     )
-    assert r4.status_code == 401
+    assert r4.status_code == 403
     assert r4.json()["detail"] == "invalid credentials"
 
     r5 = await client.put(
         "/api/account/llm-consent", headers=emu.headers,
         json={"enabled": True, "verifier": "A"},
     )
-    assert r5.status_code == 401
+    assert r5.status_code == 403
     assert r5.json()["detail"] == "invalid credentials"
 
     # Register username: 1 char passes pydantic? No — the pattern (3..64)
@@ -1571,7 +1611,8 @@ async def test_processing_key_schema_boundaries(client):
     assert one_char.status_code == 422
     assert one_char.json()["detail"] == "data_key must be base64"
 
-    # 65-char data key: pydantic cap (64) fires before the size handler.
+    # 65-char data key: the pydantic cap (exactly 44 since 2026-09-07 —
+    # b64(32 bytes)) fires before the size handler.
     k48 = base64.b64encode(b"k" * 48).decode()
     assert len(k48) == 64
     over = await client.post(
@@ -1749,14 +1790,19 @@ async def test_delete_account_with_wrong_but_valid_verifier_detail(client):
     response = await client.request(
         "DELETE", "/api/account", headers=emu.headers, json={"verifier": wrong}
     )
-    assert response.status_code == 401
+    # 403 verification_failed since 2026-09-07: the session is valid, the
+    # password proof is not — 401 means "session expired" to clients.
+    assert response.status_code == 403
     assert response.json()["detail"] == "invalid credentials"
 
 
 async def test_meta_payload_is_exact(client):
     response = await client.get("/api/meta")
     assert response.status_code == 200
-    assert response.json() == {"version": "1.0.0", "unlock_days": 30, "llm_available": False}
+    assert response.json() == {
+        # api_version added with the /api/v1 mount (2026-09-07).
+        "version": "1.0.0", "api_version": "v1", "unlock_days": 30, "llm_available": False,
+    }
 
 
 def test_enclave_key_mismatch_message_is_pinned():

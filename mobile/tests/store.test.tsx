@@ -12,9 +12,18 @@ vi.mock("../src/api/client", async () => {
   return { ApiError, api: makeApiMock(), setUnauthorizedHandler: vi.fn() };
 });
 
+// The queue module is mocked at the wiring boundary: what the store must do
+// is CALL the coordination/sync entry points (their internals carry their
+// own suite in offlineQueue.test.ts / reconnectFlush.test.ts).
+vi.mock("../src/offlineQueue", () => ({
+  abortInFlightFlush: vi.fn(),
+  flushQueueOnReconnect: vi.fn(async () => {}),
+}));
+
 const { api, setUnauthorizedHandler } = await import("../src/api/client");
+const { abortInFlightFlush, flushQueueOnReconnect } = await import("../src/offlineQueue");
 const { resetApi } = await import("./helpers/apiMock");
-const { SessionProvider, useSession, stashDraft, takeStashedDraft } = await import("../src/store");
+const { SessionProvider, useSession, stashDraft, takeStashedDraft, hasDraft, peekDraft } = await import("../src/store");
 const { vault } = await import("../src/vault");
 const { render, flush, textOf, act } = await import("./helpers/rtr");
 
@@ -33,6 +42,8 @@ beforeEach(() => {
   resetApi(api as never);
   vi.mocked(setUnauthorizedHandler).mockClear();
   vi.mocked(AppState.addEventListener).mockClear();
+  vi.mocked(abortInFlightFlush).mockClear();
+  vi.mocked(flushQueueOnReconnect).mockClear();
   vault.lock();
 });
 
@@ -516,5 +527,118 @@ describe("M9: unlock_days sanitization", () => {
     );
     await flush();
     expect(textOf(root)).toBe("loggedOut|false|0|365");
+  });
+});
+
+describe("context identity stabilization", () => {
+  // The audit finding: context functions were recreated every render, so a
+  // consumer's useCallback(..., [refreshActiveDays]) (InsightsScreen.load)
+  // refired its effect on every provider render — double fetch + decrypt
+  // per mount. Pin: an unrelated state change must not refire the effect.
+  it("keeps function identities stable across unrelated state changes", async () => {
+    let loads = 0;
+    let seen: Session | null = null;
+    function Consumer() {
+      const s = useSession();
+      seen = s;
+      const load = React.useCallback(async () => {
+        loads += 1;
+      }, [s.refreshActiveDays]);
+      React.useEffect(() => {
+        void load();
+      }, [load]);
+      return <Text>{`${s.unlockDays}`}</Text>;
+    }
+    const root = await render(
+      <SessionProvider>
+        <Consumer />
+      </SessionProvider>,
+    );
+    await flush();
+    expect(loads).toBe(1);
+    const firstSignOut = seen!.signOut;
+    const firstRefresh = seen!.refreshActiveDays;
+
+    // An unrelated state change re-renders consumers with new data...
+    await act(async () => {
+      seen!.setUnlockDays(7);
+    });
+    await flush();
+    expect(textOf(root)).toBe("7");
+
+    // ...but the effect did not refire, and the published references are
+    // literally the same objects.
+    expect(loads).toBe(1);
+    expect(seen!.signOut).toBe(firstSignOut);
+    expect(seen!.refreshActiveDays).toBe(firstRefresh);
+  });
+});
+
+describe("sign-out flush coordination", () => {
+  it("signOut aborts the in-flight flush BEFORE revoking the session", async () => {
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true);
+    await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    await act(async () => {
+      await session.signOut();
+    });
+    expect(abortInFlightFlush).toHaveBeenCalledTimes(1);
+    // The abort must land before the token dies — a flush 401 after that
+    // point is self-inflicted and requeues instead of rejecting.
+    const abortOrder = vi.mocked(abortInFlightFlush).mock.invocationCallOrder[0]!;
+    expect(abortOrder).toBeLessThan(vi.mocked(api.logout).mock.invocationCallOrder[0]!);
+    expect(abortOrder).toBeLessThan(vi.mocked(api.clearSession).mock.invocationCallOrder[0]!);
+  });
+});
+
+describe("reconnect flush wiring", () => {
+  it("foregrounding triggers a queue flush; backgrounding does not", async () => {
+    await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    await act(async () => {
+      listener("active");
+    });
+    expect(flushQueueOnReconnect).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      listener("background");
+    });
+    expect(flushQueueOnReconnect).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      listener("active");
+    });
+    expect(flushQueueOnReconnect).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("draft stash survival", () => {
+  // The draft stash must survive vault.lock() — a background transition
+  // unmounts the editor, and the unsent text waits for re-unlock.
+  it("a stashed draft survives vault.lock() within the session", () => {
+    stashDraft("user-1", "half-written thoughts");
+    vault.lock(); // what a background transition does
+    expect(hasDraft("user-1")).toBe(true);
+    expect(peekDraft("user-1")).toBe("half-written thoughts");
+    // peek does not consume; take does — exactly once.
+    expect(peekDraft("user-1")).toBe("half-written thoughts");
+    expect(takeStashedDraft("user-1")).toBe("half-written thoughts");
+    expect(hasDraft("user-1")).toBe(false);
+    expect(peekDraft("user-1")).toBeNull();
+  });
+
+  it("hasDraft/peekDraft are account-bound and never consume", () => {
+    stashDraft("user-1", "alice's draft");
+    expect(hasDraft("user-2")).toBe(false);
+    expect(peekDraft("user-2")).toBeNull();
+    // The owning account still gets it back afterwards.
+    expect(takeStashedDraft("user-1")).toBe("alice's draft");
   });
 });

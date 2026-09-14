@@ -230,3 +230,47 @@ describe("L6: recordMood serialization (no lost updates)", () => {
     expect(days.map((d) => d.date)).toEqual(["2026-09-01", "2026-09-02"]);
   });
 });
+
+describe("vault-lock race (zeroize mid-write)", () => {
+  // recordMood is fire-and-forget with the vault's SHARED dataKey buffer.
+  // The bug: backgrounding mid-await ran vault.lock(), zeroizing the
+  // buffer, and the pending write encrypted under an all-zero key — the
+  // next read failed GCM and the mood history silently reset to empty.
+  it("a lock landing mid-record cannot corrupt the log (key is snapshotted at call time)", async () => {
+    const liveDataKey = Buffer.alloc(32, 5); // stands in for the vault's buffer
+    const originalBytes = Buffer.from(liveDataKey); // the test's own copy
+    // Zeroize the shared buffer the moment the stored bytes have been read
+    // — the worst possible interleaving for the pending write.
+    const originalGetItem = storage.getItem.bind(storage);
+    let armed = true;
+    (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
+      const value = await originalGetItem(k);
+      if (armed && k === "mindpattern.moodlog.u1") {
+        armed = false;
+        liveDataKey.fill(0); // this is what vault.lock() does to the buffer
+      }
+      return value;
+    };
+    try {
+      await recordMood(liveDataKey, "u1", "2026-09-01", 0.5);
+    } finally {
+      (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
+    }
+    // The pending write encrypted under the SNAPSHOT, not the zeroed buffer:
+    // the day is intact under the original key bytes...
+    expect(await recentMoods(originalBytes, "u1", 30)).toEqual([{ date: "2026-09-01", value: 0.5 }]);
+    // ...and the stored blob is definitely NOT under the all-zero key.
+    expect(await recentMoods(Buffer.alloc(32), "u1", 30)).toEqual([]);
+  });
+
+  it("a lock mid-READ cannot produce a spurious empty trend", async () => {
+    const liveDataKey = Buffer.alloc(32, 6);
+    const originalBytes = Buffer.from(liveDataKey);
+    await recordMood(originalBytes, "u1", "2026-09-01", 0.25);
+    liveDataKey.fill(0); // locked between reads — the next call snapshots
+    // A read after a lock simply sees the locked (zeroed) key: degrades to
+    // empty, as any wrong key does — but the log itself is intact.
+    expect(await recentMoods(liveDataKey, "u1", 30)).toEqual([]);
+    expect(await recentMoods(originalBytes, "u1", 30)).toEqual([{ date: "2026-09-01", value: 0.25 }]);
+  });
+});

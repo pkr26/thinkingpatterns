@@ -159,7 +159,10 @@ def correlation_p(r: float, n: int) -> float:
     """Two-sided p-value for a Pearson correlation over n pairs.
 
     t = r*sqrt((n-2)/(1-r^2)) under H0: rho = 0; degenerate inputs (n < 4
-    or |r| >= 1 with no residual df) are "no evidence".
+    or |r| >= 1 with no residual df) are "no evidence". NOTE: the engine
+    no longer tests this null for comparative claims ("more than usual"
+    is a DIFFERENCE of correlations — see fisher_z_difference_p); this
+    remains the right primitive for a standalone r ≠ 0 question.
     """
     if n < 4 or not -1.0 < r < 1.0:
         return 1.0
@@ -176,7 +179,54 @@ def _variance(values: list[float]) -> float:
     return sum((v - m) ** 2 for v in values) / (len(values) - 1)
 
 
-def welch_test(a: list[float], b: list[float], variance_floor: float = 0.0) -> tuple[float, float]:
+def sample_sd(values: list[float]) -> float:
+    """Sample standard deviation (n-1); 0.0 when unmeasurable (n < 2)."""
+    if len(values) < 2:
+        return 0.0
+    return math.sqrt(_variance(values))
+
+
+def effective_sample_size(n: int, lag1: float | None) -> float:
+    """Effective independent-observation count under lag-1 autocorrelation.
+
+    Bartlett-style deflation n_eff = n * (1 - r) / (1 + r): an AR(1) series
+    with r = 0.5 carries the information of about n/3 independent points.
+    Day-level mood residuals are exactly such a series (that is what the
+    inertia detector measures), so tests over them must not count the raw
+    n. Clamped to [3, n]: the floor keeps Welch's degrees of freedom
+    defined, the cap means a zero/negative/unknown autocorrelation never
+    INFLATES the effective sample beyond the observed one.
+    """
+    if n <= 0:
+        return 0.0
+    if lag1 is None or lag1 <= 0.0:
+        return float(n)
+    r = min(lag1, 0.9)  # cap: r -> 1 would nuke n_eff to the floor anyway
+    return max(3.0, min(float(n), n * (1.0 - r) / (1.0 + r)))
+
+
+def fisher_z_difference_p(r_recent: float, n_recent: int, r_earlier: float, n_earlier: int) -> float:
+    """One-sided p for H0: rho_recent <= rho_earlier, Fisher z transform.
+
+    The inertia claim is comparative — "mood is carrying over MORE than
+    usual for you" — so its p-value must test the difference of two
+    correlations, not the (much easier) null r = 0. One-sided because the
+    effect gates already commit the direction before the test runs;
+    degenerate inputs (tiny windows) fail closed to "no evidence".
+    """
+    if n_recent < 4 or n_earlier < 4:
+        return 1.0
+    z_recent = math.atanh(max(-0.9999, min(0.9999, r_recent)))
+    z_earlier = math.atanh(max(-0.9999, min(0.9999, r_earlier)))
+    se = math.sqrt(1.0 / (n_recent - 3) + 1.0 / (n_earlier - 3))
+    if se <= 0.0:
+        return 1.0
+    z = (z_recent - z_earlier) / se
+    return min(1.0, 0.5 * math.erfc(z / math.sqrt(2.0)))  # upper tail only
+
+
+def welch_test(a: list[float], b: list[float], variance_floor: float = 0.0,
+               lag1: float | None = None) -> tuple[float, float]:
     """Welch's unequal-variance t-test: (t statistic, two-sided p-value).
 
     Degenerate inputs (n < 2 per side, or zero pooled standard error
@@ -188,8 +238,14 @@ def welch_test(a: list[float], b: list[float], variance_floor: float = 0.0) -> t
     but TWO constant groups fabricate a t-test on variance the data never
     had (p ~ 1e-22 from pure floor), so that case is forced to "no
     evidence" regardless of the floor.
+
+    ``lag1``: when the observations come from an autocorrelated series
+    (day-overlapping mood residuals), the raw n overstates the evidence;
+    pass the series' lag-1 autocorrelation and each side's n is deflated
+    to its effective size (see effective_sample_size) before the standard
+    error and degrees of freedom are computed.
     """
-    n1, n2 = len(a), len(b)
+    n1, n2 = float(len(a)), float(len(b))
     if n1 < 2 or n2 < 2:
         return 0.0, 1.0
     m1, m2 = _mean(a), _mean(b)
@@ -199,6 +255,9 @@ def welch_test(a: list[float], b: list[float], variance_floor: float = 0.0) -> t
         return 0.0, 1.0
     v1 = max(v1_actual, variance_floor**2)
     v2 = max(v2_actual, variance_floor**2)
+    if lag1 is not None:
+        n1 = effective_sample_size(len(a), lag1)
+        n2 = effective_sample_size(len(b), lag1)
     se2 = v1 / n1 + v2 / n2
     if se2 <= 0.0:
         return 0.0, 1.0

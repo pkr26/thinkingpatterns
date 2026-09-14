@@ -5,33 +5,99 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  # One active run per ref; a new push cancels the now-stale one.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Test tooling pinned to the exact versions that ran the 573-test suite
+  # green locally against the lock file (Python 3.14.7). Runtime deps come
+  # from requirements.lock.txt; these are the only versions not in it.
+  PYTEST_PINS: "pytest==9.1.1 pytest-asyncio==1.4.0 pytest-cov==7.1.0"
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14"  # matches the dev venv and the Docker base image
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
       - name: Install dependencies
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           # Runtime deps come from the pinned lock file — the same set the
-          # suite was verified against; test tooling is unpinned dev-only.
+          # suite was verified against; test tooling is pinned above to the
+          # versions that ran green locally.
           pip install -r requirements.lock.txt
-          pip install pytest pytest-asyncio pytest-cov
+          pip install $PYTEST_PINS
       - name: Backend tests with coverage
         working-directory: backend
         # --cov-fail-under pins the floor at the suite's measured total
         # (97% at the time this gate was added); lower it only deliberately.
         run: python -m pytest tests/ --cov=app --cov-report=term --cov-fail-under=97
 
+  backend-postgres:
+    # The same suite against real Postgres. conftest.py reads
+    # MINDPATTERN_TEST_DB_URL (default stays in-memory SQLite). This job
+    # exists because SQLite and Postgres differ on constraint, locking, and
+    # type behavior, and Postgres is what docker-compose deploys.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # Same tag family as docker-compose.yml's db service (digest-pinned
+        # there). This is a throwaway service container, so the password is
+        # a non-secret CI string, not an operator credential.
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: mindpattern_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      MINDPATTERN_TEST_DB_URL: postgresql+asyncpg://postgres:ci-postgres-password@localhost:5432/mindpattern_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+          pip install $PYTEST_PINS
+      - name: Full suite against Postgres
+        working-directory: backend
+        # No --cov-fail-under here: coverage is gated in the `backend` job;
+        # this job's signal is "the suite passes under Postgres semantics".
+        run: python -m pytest tests/
+
   mobile:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -45,3 +111,145 @@ jobs:
       - name: Mobile tests (98% per-file coverage thresholds enforced)
         working-directory: mobile
         run: npm test
+
+  contract-gates:
+    # The repo's two standalone proof tools, wired as gates (they were built
+    # for this and previously ran only by hand):
+    # - backend/probe_brain.py: planted-pattern corpus the brain must get
+    #   right (9/9, zero false associations); exits non-zero on any FAIL.
+    # - mobile/tools/verify_vectors.mjs: cross-platform crypto vectors run
+    #   over the REAL compiled TS modules — npm ci is required so
+    #   node_modules/.bin/tsc exists; without it the tool falls back to a
+    #   weaker webcrypto reference check that cannot see app-code bugs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Backend deps for the probe
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+      - name: Mobile deps for the real-module vector check
+        working-directory: mobile
+        run: npm ci
+      - name: Ground-truth brain probe (9/9 required)
+        working-directory: backend
+        run: python probe_brain.py
+      - name: Cross-platform crypto vectors
+        working-directory: mobile
+        run: node tools/verify_vectors.mjs
+
+  docker:
+    # Verifies the deployable artifact end to end: the image builds, the
+    # compose stack boots, migrations land, and both probes answer.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the backend image
+        run: docker build ./backend
+      - name: Write a throwaway .env
+        # Random per run; nothing here survives `compose down -v` below.
+        run: |
+          {
+            echo "MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+          } > .env
+      - name: Start the stack
+        # --wait blocks until every service's healthcheck passes (the api
+        # healthcheck is the same urllib probe the Dockerfile ships).
+        run: docker compose up -d --build --wait
+      - name: Assert health endpoints
+        # /healthz is the liveness probe; /readyz proves the DB is usable
+        # (SELECT 1). The retry loop covers healthcheck-flap races --wait
+        # cannot see.
+        run: |
+          curl --retry 10 --retry-delay 3 --retry-all-errors --fail --silent --show-error \
+            http://127.0.0.1:8000/healthz
+          curl --retry 10 --retry-delay 3 --retry-all-errors --fail --silent --show-error \
+            http://127.0.0.1:8000/readyz
+      - name: Assert migrations are at head
+        # The entrypoint ran `alembic upgrade head` before uvicorn; verify
+        # the result instead of trusting the boot log.
+        run: docker compose exec -T api alembic current | grep -q "(head)"
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - name: Install lint tooling
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+          pip install ruff==0.16.6 mypy==2.3.1
+      - name: Ruff
+        working-directory: backend
+        # Rule set in backend/pyproject.toml ([tool.ruff]) is verified green
+        # on the current tree. `ruff format --check` is deliberately NOT
+        # gated: 46 files would reformat today — adopt it with a one-time
+        # format commit, not a red gate on every PR.
+        run: ruff check .
+      - name: mypy (advisory)
+        working-directory: backend
+        # TODO(types): remove continue-on-error once the errors under app/
+        # (16 in 4 files when this gate was added; status note lives in
+        # [tool.mypy] in backend/pyproject.toml) are fixed. A hard gate
+        # today would block every PR.
+        continue-on-error: true
+        run: python -m mypy
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - name: pip-audit the pinned backend supply chain
+        working-directory: backend
+        # Audits the exact pinned runtime set against the OSV database.
+        # Clean as of 2026-09-07 (pip-audit 2.10.1).
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit==2.10.1
+          pip-audit -r requirements.lock.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: npm audit (high severity and above)
+        working-directory: mobile
+        # TODO(supply-chain): advisory until the Metro chain is fixed —
+        # 5 high-severity advisories at the time this gate was added, all
+        # transitive through react-native's bundler (image-size parser DoS,
+        # GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq): build-time tooling,
+        # not code shipped in the app bundle. The fix is a lockfile regen
+        # (`npm audit fix`) or a react-native bump; flip this to a hard gate
+        # when it lands.
+        continue-on-error: true
+        run: npm audit --audit-level=high

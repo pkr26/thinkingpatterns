@@ -165,3 +165,89 @@ describe("secureStore", () => {
     expect(await fresh.getItem("k")).toBe("v");
   });
 });
+
+describe("secureStore v1 envelope", () => {
+  it("writes the { v: 1, c } envelope", async () => {
+    await secureStore.setItem("k", "plaintext-marker-value");
+    const rawText = (await storage.getItem("k")) as string;
+    const raw = JSON.parse(rawText);
+    expect(raw.v).toBe(1);
+    expect(typeof raw.c).toBe("string");
+    expect(rawText).not.toContain("plaintext-marker-value");
+  });
+
+  it("reads the legacy bare-base64 shape and migrates it on read", async () => {
+    // Plant a legacy record: a valid ciphertext WITHOUT the envelope.
+    await secureStore.setItem("k", "legacy-value");
+    const enveloped = JSON.parse((await storage.getItem("k")) as string) as { c: string };
+    await storage.setItem("k", enveloped.c); // the pre-envelope format
+
+    expect(await secureStore.getItem("k")).toBe("legacy-value");
+    // Read-through migration refreshed the storage shape.
+    const raw = JSON.parse((await storage.getItem("k")) as string);
+    expect(raw.v).toBe(1);
+    expect(await secureStore.getItem("k")).toBe("legacy-value");
+  });
+
+  it("a failed migration rewrite never fails the read", async () => {
+    await secureStore.setItem("k", "legacy-value");
+    const enveloped = JSON.parse((await storage.getItem("k")) as string) as { c: string };
+    await storage.setItem("k", enveloped.c);
+    const originalSetItem = storage.setItem.bind(storage);
+    (storage as { setItem: typeof storage.setItem }).setItem = async (key: string, value: string) => {
+      if (key === "k") throw new Error("disk full");
+      return originalSetItem(key, value);
+    };
+    try {
+      expect(await secureStore.getItem("k")).toBe("legacy-value");
+    } finally {
+      (storage as { setItem: typeof storage.setItem }).setItem = originalSetItem;
+    }
+    expect(await storage.getItem("k")).toBe(enveloped.c); // legacy copy intact
+  });
+
+  it("a well-formed envelope with the wrong version or corrupt ciphertext reads as absent", async () => {
+    await secureStore.setItem("k", "v");
+    const enveloped = JSON.parse((await storage.getItem("k")) as string) as { c: string };
+    await storage.setItem("k", JSON.stringify({ v: 2, c: enveloped.c }));
+    expect(await secureStore.getItem("k")).toBeNull();
+    await storage.setItem("k", JSON.stringify({ v: 1, c: "!!!not-ciphertext!!!" }));
+    expect(await secureStore.getItem("k")).toBeNull();
+    await storage.setItem("k", "{not json");
+    expect(await secureStore.getItem("k")).toBeNull();
+  });
+});
+
+describe("SecureStoreBackend seam", () => {
+  it("a swapped backend receives all persistence; null restores the fallback", async () => {
+    // A fresh module graph so the seam and the store under test are the
+    // SAME instance (this file's resetModules tests create fresh copies).
+    vi.resetModules();
+    const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+    const mod = await import("../src/secureStore");
+    const fake = new Map<string, string>();
+    const custom = {
+      readDeviceKey: async () => fake.get("__device_k__") ?? null,
+      writeDeviceKey: async (k: string) => void fake.set("__device_k__", k),
+      getItem: async (k: string) => fake.get(k) ?? null,
+      setItem: async (k: string, v: string) => void fake.set(k, v),
+      removeItem: async (k: string) => void fake.delete(k),
+    };
+    try {
+      mod.setSecureStoreBackend(custom);
+      await mod.secureStore.setItem("token", "tok-behind-the-seam");
+      // Nothing touched AsyncStorage: the backend owns persistence now.
+      expect(await freshStorage.getItem("token")).toBeNull();
+      expect(fake.has("__device_k__")).toBe(true);
+      expect(await mod.secureStore.getItem("token")).toBe("tok-behind-the-seam");
+      await mod.secureStore.removeItem("token");
+      expect(await mod.secureStore.getItem("token")).toBeNull();
+    } finally {
+      mod.setSecureStoreBackend(null);
+    }
+    // The fallback is fully functional again (and re-derives its own key).
+    await mod.secureStore.setItem("k", "fallback");
+    expect(await mod.secureStore.getItem("k")).toBe("fallback");
+    expect(await freshStorage.getItem("k")).not.toBeNull();
+  });
+});

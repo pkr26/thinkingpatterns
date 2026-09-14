@@ -17,6 +17,10 @@ vi.mock("../src/offlineQueue", () => ({
   enqueue: vi.fn(async () => {}),
   flushQueue: vi.fn(async () => 0),
   QueueFullError: class QueueFullError extends Error {},
+  // The Settings screen's recovery surface reads these on mount.
+  rejectedEntryCount: vi.fn(async () => 0),
+  requeueRejected: vi.fn(async () => 0),
+  quarantinedQueueExists: vi.fn(async () => false),
 }));
 
 let sessionState: Record<string, unknown> = { authStatus: "loading", unlocked: false };
@@ -30,6 +34,7 @@ vi.mock("../src/store", async (importOriginal) => {
 
 const { AppNavigator } = await import("../src/navigation");
 const { api } = await import("../src/api/client");
+const { takePendingOnboarding } = await import("../src/onboarding");
 const { render, flush, textOf, screenNames, screenOptions } = await import("./helpers/rtr");
 const { resetApi } = await import("./helpers/apiMock");
 const { vault } = await import("../src/vault");
@@ -39,6 +44,8 @@ beforeEach(() => {
   resetApi(api as never);
   navigationStub.navigate.mockClear();
   navigationStub.popToTop.mockClear();
+  navigationStub.replace.mockClear();
+  takePendingOnboarding(); // drain any leftover so tests cannot leak into each other
   vault.lock();
   sessionState = { authStatus: "loading", unlocked: false };
 });
@@ -51,9 +58,17 @@ describe("AppNavigator", () => {
     expect(screenNames(root)).toEqual(["Booting", "Crisis"]);
     expect(root.root.findAllByType(ActivityIndicator)).toHaveLength(1);
     expect(screenOptions(root, "Booting")).toEqual({ headerShown: false });
-    // Boot splash visual contract.
+    // Branded splash (design-system pass): name + calm tagline, themed bg.
+    // The tagline is honest copy (audit fix): "Your patterns. Your keys.
+    // Nobody else's." overstated it — the key visits server memory once
+    // during a consented analysis.
+    expect(textOf(root)).toContain("MindPattern");
+    expect(textOf(root)).toContain("Your patterns, from your words. Encrypted on this device.");
     const { expectStyle } = await import("./helpers/rtr");
-    expectStyle(root, { flex: 1, backgroundColor: "#0f1115", alignItems: "center", justifyContent: "center" });
+    expectStyle(root, { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 });
+    expectStyle(root, { backgroundColor: "#0f1115" });
+    expectStyle(root, { fontSize: 28, fontWeight: "700" }); // brand
+    expectStyle(root, { color: "#e8eaf0" }); // brand themed
   });
 
   it("logged out: the login screen plus crisis access — nothing else", async () => {
@@ -104,7 +119,7 @@ describe("AppNavigator", () => {
     const root = await render(<AppNavigator />);
     await flush();
 
-    expect(screenNames(root)).toEqual(["Entry", "Insights", "Question", "Settings", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "Privacy", "Crisis"]);
     const text = textOf(root);
     expect(text).toContain("Save entry");
     expect(text).toContain("Show today's question");
@@ -112,10 +127,68 @@ describe("AppNavigator", () => {
     expect(text).toContain("Delete my account and data");
     // Screen titles are the product's navigation contract.
     expect(screenOptions(root, "Entry")).toEqual({ title: "Today" });
+    expect(screenOptions(root, "History")).toEqual({ title: "History" });
     expect(screenOptions(root, "Insights")).toEqual({ title: "Patterns" });
     expect(screenOptions(root, "Question")).toEqual({ title: "One question" });
     expect(screenOptions(root, "Settings")).toEqual({ title: "Settings" });
+    expect(screenOptions(root, "Privacy")).toEqual({ title: "Privacy" });
     // Crisis help is a first-class screen: offline, always one hop away.
     expect(screenOptions(root, "Crisis")).toEqual({ title: "Get help" });
+  });
+
+  it("a just-registered account lands on onboarding FIRST, before the journal", async () => {
+    const { queueOnboarding } = await import("../src/onboarding");
+    queueOnboarding(); // what LoginScreen does on a successful register
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    const root = await render(<AppNavigator />);
+    await flush();
+
+    expect(screenNames(root)).toEqual([
+      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "Privacy", "Crisis",
+    ]);
+    expect(screenOptions(root, "Onboarding")).toEqual({ headerShown: false });
+    // The first panel is what a brand-new account actually sees.
+    expect(textOf(root)).toContain("Write each day");
+  });
+
+  it("a plain login or unlock never sees onboarding (the pending flag is one-shot)", async () => {
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    const root = await render(<AppNavigator />);
+    await flush();
+    expect(screenNames(root)).not.toContain("Onboarding");
+    // Even after a previous registration queued it, the flag was consumed
+    // by that first transition — re-entering the main flow shows the
+    // journal directly.
+  });
+
+  it("leaving the main flow resets the onboarding gate (a LATER registration can show it again)", async () => {
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    const root = await render(<AppNavigator />);
+    await flush();
+    expect(screenNames(root)).not.toContain("Onboarding");
+
+    // Sign out: the main branch unmounts; the gate re-arms.
+    vault.lock();
+    sessionState = { authStatus: "loggedOut", unlocked: false };
+    const { act } = await import("./helpers/rtr");
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    await flush();
+    expect(screenNames(root)).toEqual(["Login", "Crisis"]);
+
+    // A new registration on the same device queues onboarding again.
+    const { queueOnboarding } = await import("../src/onboarding");
+    queueOnboarding();
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    await flush();
+    expect(screenNames(root)[0]).toBe("Onboarding");
   });
 });

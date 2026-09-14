@@ -8,11 +8,12 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { deriveMasterKey, deriveAuthKey, deriveDataKey, zeroize, KDF_ITERATIONS } from "../src/crypto/kdf";
+import { deriveMasterKey, deriveMasterKeyAsync, deriveAuthKey, deriveDataKey, zeroize, KDF_ITERATIONS } from "../src/crypto/kdf";
 import { decrypt, encrypt, generateKey, TamperError, NONCE_SIZE } from "../src/crypto/envelope";
 import { buildAad } from "../src/crypto/aad";
 import {
   deriveKeys,
+  deriveKeysAsync,
   encryptEntry,
   decryptEntry,
   decryptInsights,
@@ -68,6 +69,40 @@ describe("kdf validation", () => {
     // keys from every backend-derived value.
     expect(deriveAuthKey(master).toString("base64")).toBe(v.auth_key);
     expect(deriveDataKey(master).toString("base64")).toBe(v.data_key);
+  });
+});
+
+describe("async PBKDF2 (JS-thread-friendly derivation)", () => {
+  it("derives byte-identical keys to the sync path (vector-pinned)", async () => {
+    const v = vectors[0];
+    const salt = Buffer.from(v.salt, "base64");
+    const master = await deriveMasterKeyAsync(v.password, salt, v.iterations);
+    expect(master.toString("base64")).toBe(v.master_key);
+    const keys = await deriveKeysAsync(v.password, salt);
+    expect(keys.authKey.toString("base64")).toBe(v.auth_key);
+    expect(keys.dataKey.toString("base64")).toBe(v.data_key);
+  });
+
+  it("applies the same validation as the sync path", async () => {
+    await expect(deriveMasterKeyAsync("pw", Buffer.alloc(7, 1))).rejects.toThrow(/salt must be at least 8 bytes/);
+    await expect(deriveMasterKeyAsync("pw", SALT, 0)).rejects.toThrow(/iterations must be positive/);
+  });
+
+  it("rejects when the engine reports an error or no key", async () => {
+    // kdf.ts's "./engine" import is aliased to the node:crypto-backed test
+    // engine, so the failure injection must patch THAT module's object.
+    const { engine } = await import("./helpers/nodeEngine");
+    const original = engine.pbkdf2.bind(engine);
+    try {
+      engine.pbkdf2 = ((_p: unknown, _s: unknown, _i: unknown, _k: unknown, _d: unknown, cb: (e: Error | null, k?: Buffer) => void) =>
+        cb(new Error("native failure"))) as typeof engine.pbkdf2;
+      await expect(deriveMasterKeyAsync("pw", SALT, 1)).rejects.toThrow("native failure");
+      engine.pbkdf2 = ((_p: unknown, _s: unknown, _i: unknown, _k: unknown, _d: unknown, cb: (e: Error | null, k?: Buffer) => void) =>
+        cb(null, undefined)) as typeof engine.pbkdf2;
+      await expect(deriveMasterKeyAsync("pw", SALT, 1)).rejects.toThrow("pbkdf2 produced no key");
+    } finally {
+      engine.pbkdf2 = original;
+    }
   });
 });
 

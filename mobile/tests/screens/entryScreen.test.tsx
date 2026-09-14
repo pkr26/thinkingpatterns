@@ -29,9 +29,11 @@ class QueueAbandonedError extends Error {
   }
 }
 const recordMood = vi.fn(async () => {});
+const recentMoods = vi.fn(async (): Promise<{ date: string; value: number }[]> => []);
+const localStreak = vi.fn(async () => 0);
 vi.mock("../../src/moodLog", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/moodLog")>();
-  return { ...actual, recordMood, localDateISO: vi.fn(() => "2026-09-04") };
+  return { ...actual, recordMood, recentMoods, localStreak, localDateISO: vi.fn(() => "2026-09-04") };
 });
 
 // C2: saving/syncing an entry must NEVER auto-ship the data key — the
@@ -57,11 +59,14 @@ vi.mock("../../src/store", async (importOriginal) => {
 const { api, ApiError } = await import("../../src/api/client");
 const { encryptEntry } = await import("../../src/crypto/MindPatternCrypto");
 const { enqueue, flushQueue, QueueFullError: QFErr, QueueAbandonedError: QAErr } = await import("../../src/offlineQueue");
-const { takeStashedDraft } = await import("../../src/store");
+const { localDateISO } = await import("../../src/moodLog");
+const { recordCrisisDialogShown } = await import("../../src/crisisDialog");
+const { takeStashedDraft, stashDraft } = await import("../../src/store");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
 const { render, flush, textOf, pressLabel, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
+const storage = (await import("../helpers/storageMock")).default;
 
 const keys = { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) };
 const nav = { navigate: vi.fn() };
@@ -75,12 +80,21 @@ beforeEach(() => {
   vi.mocked(flushQueue).mockImplementation(async () => 0);
   vi.mocked(encryptEntry).mockClear();
   vi.mocked(encryptEntry).mockImplementation(() => ({ blobB64: "QkxPQg==" }));
+  vi.mocked(recentMoods).mockReset();
+  vi.mocked(recentMoods).mockImplementation(async () => []);
+  vi.mocked(localStreak).mockReset();
+  vi.mocked(localStreak).mockImplementation(async () => 0);
   Alert.alert.mockClear();
   nav.navigate.mockClear();
   touchActivity.mockClear();
   vault.lock();
   vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
+  // The crisis-dialog throttle stamp lives in AsyncStorage
+  // (@mindpattern/crisis_dialog_<userId>) and localDateISO feeds its day:
+  // reset both so one test's shown dialog cannot throttle the next test's.
+  storage.__reset();
+  vi.mocked(localDateISO).mockReturnValue("2026-09-04");
   // The draft stash is module state (in store.tsx): consume any leftover
   // so one test's stashed draft cannot leak into the next.
   takeStashedDraft("user-1");
@@ -117,11 +131,27 @@ describe("EntryScreen progress display", () => {
     ).toBe("");
     const scroll = root.root.findByType(reactNative.ScrollView);
     expect(scroll.props.contentContainerStyle).toEqual({ padding: 20, gap: 16 });
-    expect(scroll.props.style).toEqual({ flex: 1, backgroundColor: "#0f1115" });
+    // Themed container: [base, colors] pair (design-system pass).
+    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    // Keyboard hygiene: drag-to-dismiss on the scroll container.
+    expect(scroll.props.keyboardDismissMode).toBe("on-drag");
   });
 
-  it("renders a progress bar proportional to active days", async () => {
-    sessionState = { activeDays: 12, unlockDays: 30 };
+  it("a hostile unlockDays of 0 still renders a full bar, never NaN/Infinity", async () => {
+    sessionState = { activeDays: 5, unlockDays: 0, touchActivity };
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    const { View } = await import("react-native");
+    const fill = root.root
+      .findAllByType(View)
+      .map((n) => n.props.style)
+      .flat()
+      .find((s: unknown) => typeof s === "object" && s !== null && "width" in (s as object));
+    expect(fill).toMatchObject({ width: "100%" });
+    expect(textOf(root)).toContain("Patterns unlocked");
+  });
+
+  it("renders a progress bar proportional to active days", async () => {    sessionState = { activeDays: 12, unlockDays: 30 };
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
     const { View } = await import("react-native");
@@ -143,23 +173,35 @@ describe("EntryScreen progress display", () => {
   });
 
   it("pins the visual language of the screen (styles are a product contract)", async () => {
+    // Design-system pass: styles now compose theme tokens (dark palette),
+    // and the audit's failing colors moved: button fill #4f7cff → #3b5bdb
+    // (white label 3.71:1 → 5.67:1), input minHeight 220 → autogrow 140.
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
-    expectStyle(root, { flex: 1, backgroundColor: "#0f1115" }); // container
+    expectStyle(root, { flex: 1 }); // container base
+    expectStyle(root, { backgroundColor: "#0f1115" }); // themed container
     expectStyle(root, { gap: 6 }); // progressRow
     expectStyle(root, { color: "#8a91a3", fontSize: 13 }); // progressLabel
-    expectStyle(root, { height: 6, borderRadius: 3, backgroundColor: "#1a1e26", overflow: "hidden" }); // progressTrack
-    expectStyle(root, { height: 6, borderRadius: 3, backgroundColor: "#4f7cff" }); // progressFill
+    expectStyle(root, { height: 6, overflow: "hidden" }); // progressTrack base
+    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 3 }); // progressTrack themed
+    expectStyle(root, { height: 6 }); // progressFill base
+    expectStyle(root, { backgroundColor: "#4f7cff", borderRadius: 3, width: "0%" }); // progressFill themed
+    expectStyle(root, { minHeight: 140, textAlignVertical: "top" }); // input base (autogrow)
     expectStyle(root, {
-      backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 12, padding: 16,
-      fontSize: 16, minHeight: 220, textAlignVertical: "top",
-    }); // input
-    expectStyle(root, { backgroundColor: "#4f7cff", borderRadius: 10, padding: 16, alignItems: "center" }); // button
-    expectStyle(root, { color: "#fff", fontSize: 16, fontWeight: "600" }); // buttonText
+      backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 12, padding: 16, fontSize: 16,
+    }); // input themed
+    expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton base
+    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // PrimaryButton themed (AA fix)
+    expectStyle(root, { fontWeight: "600" }); // buttonText base
+    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // buttonText themed
     expectStyle(root, { flexDirection: "row", gap: 10 }); // navRow
-    expectStyle(root, { flex: 1, backgroundColor: "#1a1e26", borderRadius: 10, padding: 14, alignItems: "center" }); // navButton
-    expectStyle(root, { color: "#7f9bff", fontSize: 14, fontWeight: "600" }); // navText
+    expectStyle(root, { flex: 1, padding: 14, alignItems: "center", justifyContent: "center" }); // navButton base
+    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 10, minHeight: 44 }); // navButton themed
+    expectStyle(root, { color: "#7f9bff", fontSize: 14, fontWeight: "600", textAlign: "center" }); // navText
+    // The help action is unmistakable: help surface + heavier label.
+    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 });
+    expectStyle(root, { color: "#e8eaf0", fontSize: 14, fontWeight: "700", textAlign: "center" });
   });
 
   it("flushes the offline queue on mount once the user id resolves", async () => {
@@ -212,8 +254,10 @@ describe("EntryScreen save pipeline", () => {
     );
     expect(api.createEntry).toHaveBeenCalledTimes(1);
     expect(Alert.alert).not.toHaveBeenCalled();
-    // Editor cleared and disabled again.
+    // Editor cleared and disabled again; success is a quiet inline line,
+    // not a modal (the save-feedback inversion fix).
     expect(touchableByLabel(root, "Save entry").props.disabled).toBe(true);
+    expect(textOf(root)).toContain("Saved ✓");
   });
 
   it("records local sentiment into the device-only mood log", async () => {
@@ -304,11 +348,12 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "keep me");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Entry rejected", expect.stringContaining("entry_date"));
+    // Calm copy, no raw server detail in the dialog (audit error-copy fix).
+    expect(Alert.alert).toHaveBeenCalledWith("Entry not accepted", expect.stringContaining("still on screen"));
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it("queues the same encrypted entry when offline", async () => {
+  it("queues the same encrypted entry when offline — confirmed inline, no modal", async () => {
     vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<EntryScreen navigation={nav} />);
     await writeEntry(root, "offline thought");
@@ -318,7 +363,9 @@ describe("EntryScreen save pipeline", () => {
     expect(enqueue).toHaveBeenCalledTimes(1);
     const queued = vi.mocked(enqueue).mock.calls[0][0];
     expect(queued).toMatchObject({ userId: "user-1", blobB64: "QkxPQg==", entryDate: expect.any(String) });
-    expect(Alert.alert).toHaveBeenCalledWith("Saved offline", expect.stringContaining("back online"));
+    // The interruptive "Saved offline" modal became an inline status line.
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Saved — will sync when online");
   });
 
   it("protects the queue instead of overflowing it", async () => {
@@ -345,7 +392,14 @@ describe("EntryScreen save pipeline", () => {
     const alerts = Alert.alert.mock.calls.map((c) => c[0]);
     expect(alerts).toEqual(["Not saved"]);
     expect(alerts).not.toContain("Saved offline");
-    expect(Alert.alert).toHaveBeenCalledWith("Not saved", expect.stringContaining("still on screen"));
+    // The "Not saved" alert now carries an OK button that chains the
+    // (throttled) support dialog for crisis-flagged text — this entry is
+    // ordinary, so the chain stays quiet.
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Not saved",
+      expect.stringContaining("still on screen"),
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
     // The draft stays in the editor for another attempt.
     expect(
       (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
@@ -371,7 +425,7 @@ describe("EntryScreen save pipeline", () => {
     expect(Alert.alert).toHaveBeenCalledWith("Could not save", "vault is locked");
   });
 
-  it("falls back to 'unknown error' for non-Error failures", async () => {
+  it("falls back to calm copy for non-Error failures", async () => {
     vi.mocked(encryptEntry).mockImplementation(() => {
       throw "crypto exploded"; // eslint-disable-line no-throw-literal
     });
@@ -379,7 +433,8 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "secret");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Could not save", "unknown error");
+    // Was "unknown error"; the error-copy pass made the fallback a sentence.
+    expect(Alert.alert).toHaveBeenCalledWith("Could not save", "Something went wrong — try again.");
   });
 
   it("queues on non-ApiError upload failures (plain network error)", async () => {
@@ -389,20 +444,102 @@ describe("EntryScreen save pipeline", () => {
     await pressLabel(root, "Save entry");
     await flush();
     expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(Alert.alert).toHaveBeenCalledWith("Saved offline", expect.any(String));
+    // Inline confirmation, not a modal.
+    expect(textOf(root)).toContain("Saved — will sync when online");
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("a second press in the same frame cannot double-upload (synchronous guard)", async () => {
+    let resolveCreate: ((v: unknown) => void) | undefined;
+    vi.mocked(api.createEntry).mockImplementation(
+      () => new Promise((resolve) => (resolveCreate = resolve)),
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "double tap me");
+    const { touchableByLabel, act } = await import("../helpers/rtr");
+    const button = touchableByLabel(root, "Save entry");
+    await act(async () => {
+      // Two onPress invocations before the first await settles: the
+      // synchronous in-flight ref must swallow the second.
+      void (button.props as { onPress: () => unknown }).onPress();
+      void (button.props as { onPress: () => unknown }).onPress();
+    });
+    await act(async () => {
+      resolveCreate?.({});
+    });
+    await flush();
+    expect(api.createEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("the editor stays editable while idle and locks while a save is in flight", async () => {
+    let resolveCreate: ((v: unknown) => void) | undefined;
+    vi.mocked(api.createEntry).mockImplementation(
+      () => new Promise((resolve) => (resolveCreate = resolve)),
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(true);
+    await writeEntry(root, "slow save");
+    const { firePress, act } = await import("../helpers/rtr");
+    await firePress(root, "Save entry");
+    // Mid-save the field is non-editable so the clear on success cannot
+    // wipe text typed over an in-flight request.
+    expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(false);
+    await act(async () => {
+      resolveCreate?.({});
+    });
+    await flush();
+    expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(true);
+  });
+
+  it("shows a soft character count only near the 100k cap", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "short");
+    expect(textOf(root)).not.toContain("/ 100,000");
+    await writeEntry(root, "x".repeat(95_000));
+    expect(textOf(root)).toContain("95,000 / 100,000");
+  });
+
+  it("offers a keyboard-dismiss affordance once there is text", async () => {
+    const { Keyboard } = await import("react-native");
+    vi.mocked(Keyboard.dismiss).mockClear();
+    const root = await render(<EntryScreen navigation={nav} />);
+    expect(textOf(root)).not.toContain("Hide keyboard");
+    await writeEntry(root, "anything");
+    await pressLabel(root, "Hide keyboard");
+    expect(Keyboard.dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the journal input private from keyboard caches", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    const input = inputByPlaceholder(root, "What's going on today?");
+    expect(input.props.autoCorrect).toBe(false);
+    expect(input.props.spellCheck).toBe(false);
+    expect(input.props.autoCapitalize).toBe("sentences");
+    expect(input.props.textContentType).toBe("none");
+    expect(input.props.accessibilityLabel).toBe("Journal entry");
+  });
+
+  it("the progress bar is a real progressbar to assistive tech", async () => {
+    sessionState = { activeDays: 12, unlockDays: 30, touchActivity };
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    const bar = root.root.findAll((n) => n.props.accessibilityRole === "progressbar")[0];
+    expect(bar.props.accessibilityValue).toEqual({ min: 0, max: 30, now: 12 });
+    expect(bar.props.accessibilityLabel).toBe("Progress toward your patterns: 12 of 30 days");
   });
 });
 
 describe("EntryScreen navigation", () => {
-  it("offers Patterns, Question, Settings and crisis-help shortcuts", async () => {
+  it("offers History, Patterns, Question, Settings and crisis-help shortcuts", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
-    expect(allText(root).join(" ")).toContain("Patterns");
+    expect(allText(root).join(" ")).toContain("History");
+    await pressLabel(root, "History");
     await pressLabel(root, "Patterns");
     await pressLabel(root, "Question");
     await pressLabel(root, "Settings");
     await pressLabel(root, "Get help");
-    expect(nav.navigate.mock.calls).toEqual([["Insights"], ["Question"], ["Settings"], ["Crisis"]]);
+    expect(nav.navigate.mock.calls).toEqual([["History"], ["Insights"], ["Question"], ["Settings"], ["Crisis"]]);
   });
 
   it("renders the busy spinner instead of the button label while saving", async () => {
@@ -460,6 +597,9 @@ describe("EntryScreen crisis detection (on-device, pre-encryption)", () => {
 
     nav.navigate.mockClear();
     Alert.alert.mockClear();
+    // The dialog is throttled to once per calendar day per account — the
+    // second half of this test runs on the NEXT day so it re-arms.
+    vi.mocked(localDateISO).mockReturnValue("2026-09-05");
     const second = await render(<EntryScreen navigation={nav} />);
     await writeEntry(second, "no reason to live anymore");
     await pressLabel(second, "Save entry");
@@ -485,8 +625,10 @@ describe("EntryScreen crisis detection (on-device, pre-encryption)", () => {
     await flush();
     expect(enqueue).toHaveBeenCalledTimes(1);
     const alerts = Alert.alert.mock.calls.map((c) => c[0]);
-    expect(alerts).toContain("Saved offline");
     expect(alerts).toContain("Support is available");
+    // The offline save itself is confirmed inline, not with a modal.
+    expect(alerts).not.toContain("Saved offline");
+    expect(textOf(root)).toContain("Saved — will sync when online");
   });
 
   it("does NOT point to support when the save failed (401 keeps the draft, no celebration dialog)", async () => {
@@ -511,6 +653,7 @@ describe("EntryScreen crisis detection (on-device, pre-encryption)", () => {
     const alerts = Alert.alert.mock.calls.map((c) => c[0]);
     expect(alerts).toEqual(["Offline storage full"]);
     await pressAlertButton("OK");
+    await flush(); // the throttled support dialog fires after the storage stamp resolves
     expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Offline storage full", "Support is available"]);
     await pressAlertButton("View support resources");
     expect(nav.navigate).toHaveBeenCalledWith("Crisis");
@@ -530,6 +673,84 @@ describe("EntryScreen crisis detection (on-device, pre-encryption)", () => {
     await pressAlertButton("OK");
     const alerts = Alert.alert.mock.calls.map((c) => c[0]);
     expect(alerts).toEqual(["Offline storage full"]);
+  });
+});
+
+describe("EntryScreen crisis-dialog throttle (once per calendar day per account)", () => {
+  it("a second crisis-flagged save the same day does NOT re-show the dialog", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Support is available"]);
+
+    // Same account, same calendar day: the save still succeeds and
+    // confirms inline — but the dialog does not fire again (fatigue
+    // trains dismissal; src/crisisDialog.ts).
+    Alert.alert.mockClear();
+    await writeEntry(root, "no reason to live anymore");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Saved ✓");
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("the dialog fires again on the next calendar day", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Support is available"]);
+
+    Alert.alert.mockClear();
+    vi.mocked(localDateISO).mockReturnValue("2026-09-05"); // a new LOCAL day re-arms it
+    await writeEntry(root, "I can't go on");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Support is available"]);
+  });
+
+  it("the queue-abandoned path chains the support dialog (it dropped it before)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new QAErr());
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Not saved"]);
+    // The entry went nowhere, but the crisis is still on screen — the
+    // support pointer chains off the loud alert's OK.
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Not saved", "Support is available"]);
+    await pressAlertButton("View support resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+  });
+
+  it("the queue-abandoned chain respects the day's throttle stamp", async () => {
+    // The dialog already ran today: the abandoned save must not re-show it.
+    await recordCrisisDialogShown("user-1", "2026-09-04");
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new QAErr());
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on");
+    await pressLabel(root, "Save entry");
+    await flush();
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Not saved"]);
+  });
+
+  it("the queue-abandoned chain stays quiet for an ordinary entry", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new QAErr());
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "a perfectly ordinary day");
+    await pressLabel(root, "Save entry");
+    await flush();
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Not saved"]);
   });
 });
 
@@ -617,12 +838,392 @@ describe("EntryScreen draft-stash hygiene", () => {
   });
 });
 
-describe("EntryScreen inactivity auto-lock wiring", () => {
-  it("resets the idle countdown on every keystroke", async () => {
+describe("EntryScreen draft survival on ANY unmount (backgrounding fix)", () => {
+  // NOTE: react-test-renderer defers effect cleanups until the next act();
+  // the unmounts below are act-wrapped so the stash happens deterministically
+  // (on device, the native renderer commits the cleanup at unmount).
+  it("stashes a non-empty draft on unmount and restores it with a chip on the next mount", async () => {
+    const first = await render(<EntryScreen navigation={nav} />);
+    await flush(); // getUserId resolved — the screen knows its account
+    await writeEntry(first, "half-written, phone rang");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => first.unmount()); // background-lock unmount: no save, no alert
+
+    const second = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(
+      (inputByPlaceholder(second, "What's going on today?").props as { value: string }).value,
+    ).toBe("half-written, phone rang");
+    expect(textOf(second)).toContain("Draft restored");
+  });
+
+  it("stashes nothing when the editor is empty or whitespace", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "   ");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => root.unmount());
+    expect(takeStashedDraft("user-1")).toBeNull();
+  });
+
+  it("stashes nothing after a successful save (the editor was cleared)", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "done and saved");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Saved ✓");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => root.unmount());
+    expect(takeStashedDraft("user-1")).toBeNull();
+  });
+
+  it("typing after a restore dismisses the chip", async () => {
+    const first = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(first, "bring me back");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => first.unmount());
+
+    const second = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(second)).toContain("Draft restored");
+    await writeEntry(second, "bring me back, continued");
+    expect(textOf(second)).not.toContain("Draft restored");
+  });
+
+  it("a failed getUserId() on mount never enables a blind stash (account-binding)", async () => {
+    vi.mocked(api.getUserId).mockRejectedValue(new Error("storage exploded"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "orphaned typing");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => root.unmount());
+    // No known owner → nothing stashed under a guess.
+    expect(takeStashedDraft("user-1")).toBeNull();
+  });
+});
+
+describe("EntryScreen status line and platform plumbing", () => {
+  it("a second save replaces the live status timer instead of stacking", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "first");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Saved ✓");
+    // Second save while the first status is still on screen: the timer is
+    // cleared and re-armed, not stacked (branch: statusTimer was live).
+    await writeEntry(root, "second");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Saved ✓");
+    expect(api.createEntry).toHaveBeenCalledTimes(2);
+  });
+
+  it("an unmount before getUserId resolves neither restores nor stashes", async () => {
+    let resolveUserId!: (v: string | null) => void;
+    vi.mocked(api.getUserId).mockImplementation(
+      () => new Promise<string | null>((resolve) => (resolveUserId = resolve)),
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    const { act } = await import("../helpers/rtr");
+    await act(async () => root.unmount()); // cleanup runs here (see note above)
+    await act(async () => {
+      resolveUserId("user-1");
+    });
+    // The cancelled flag swallowed the late resolution: no flush, no crash.
+    expect(flushQueue).not.toHaveBeenCalled();
+  });
+
+  it("uses the padding keyboard behavior on iOS and none on Android", async () => {
+    const reactNative = await import("react-native");
+    const root = await render(<EntryScreen navigation={nav} />);
+    expect(root.root.findByType(reactNative.KeyboardAvoidingView).props.behavior).toBe("padding");
+    const original = reactNative.Platform.OS;
+    (reactNative.Platform as { OS: string }).OS = "android";
+    try {
+      const androidRoot = await render(<EntryScreen navigation={nav} />);
+      expect(androidRoot.root.findByType(reactNative.KeyboardAvoidingView).props.behavior).toBeUndefined();
+    } finally {
+      (reactNative.Platform as { OS: string }).OS = original;
+    }
+  });
+});
+
+describe("EntryScreen inactivity auto-lock wiring", () => {  it("resets the idle countdown on every keystroke", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await typeInto(root, "What's going on today?", "t");
     await typeInto(root, "What's going on today?", "to");
     await typeInto(root, "What's going on today?", "tod");
     expect(touchActivity).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("EntryScreen 'Already wrote today' (device-local hint)", () => {
+  it("shows the chip when today's date is in the mood log", async () => {
+    vi.mocked(recentMoods).mockResolvedValue([
+      { date: "2026-09-03", value: 0.4 },
+      { date: "2026-09-04", value: -0.2 }, // localDateISO is pinned to 2026-09-04
+    ]);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Already wrote today");
+  });
+
+  it("stays hidden when today is not in the log (absence is never a verdict)", async () => {
+    vi.mocked(recentMoods).mockResolvedValue([{ date: "2026-09-01", value: 0.4 }]);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).not.toContain("Already wrote today");
+  });
+
+  it("a failing mood-log read never breaks the screen", async () => {
+    vi.mocked(recentMoods).mockRejectedValue(new Error("decrypt failed"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).not.toContain("Already wrote today");
+    expect(textOf(root)).toContain("Save entry");
+  });
+
+  it("a successful save flips the chip on immediately", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).not.toContain("Already wrote today");
+    await writeEntry(root, "writing right now");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Already wrote today");
+  });
+
+  it("a failed save does NOT claim today was written", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "validation_error"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "not going anywhere");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).not.toContain("Already wrote today");
+  });
+});
+
+describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
+  it("renders all five options as a radio group with labels and selected state", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    const radios = root.root.findAll((n) => n.props.accessibilityRole === "radio");
+    expect(radios.map((r) => r.props.accessibilityLabel)).toEqual([
+      "Mood: Heavy",
+      "Mood: Low",
+      "Mood: Okay",
+      "Mood: Good",
+      "Mood: Light",
+    ]);
+    expect(radios.every((r) => r.props.accessibilityState?.selected === false)).toBe(true);
+    // The group itself is labeled, and picking one flips only its state.
+    expect(root.root.findAll((n) => n.props.accessibilityLabel === "Mood check-in")).toHaveLength(1);
+    await pressLabel(root, "Good");
+    const after = root.root.findAll((n) => n.props.accessibilityRole === "radio");
+    expect(after.find((r) => r.props.accessibilityLabel === "Mood: Good")?.props.accessibilityState).toEqual({
+      selected: true,
+    });
+    expect(after.find((r) => r.props.accessibilityLabel === "Mood: Heavy")?.props.accessibilityState).toEqual({
+      selected: false,
+    });
+    // Tapping is real interaction: the idle countdown restarts.
+    expect(touchActivity).toHaveBeenCalled();
+  });
+
+  it("an explicit pick wins: it rides in the payload AND lands in the mood log", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "a long heavy day");
+    await pressLabel(root, "Heavy");
+    await pressLabel(root, "Save entry");
+    await flush();
+    // The encrypted payload's sentiment field carries the explicit pick…
+    expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBe(-1);
+    // …and the device-local log records it instead of the text estimate.
+    expect(recordMood).toHaveBeenCalledWith(
+      keys.dataKey,
+      "user-1",
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      -1,
+    );
+    expect(textOf(root)).toContain("Saved ✓");
+  });
+
+  it("no pick: the payload stays null and the log takes the text estimate (today's behavior)", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "good great happy");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
+    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), 1);
+  });
+
+  it("tapping the pick again clears it — saving falls back to the estimate", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Light");
+    await pressLabel(root, "Light"); // second tap undoes the pick
+    expect(
+      root.root.findAll((n) => n.props.accessibilityRole === "radio")
+        .every((r) => r.props.accessibilityState?.selected === false),
+    ).toBe(true);
+    await writeEntry(root, "bad sad anxious");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
+    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), -1);
+  });
+
+  it("a successful save clears the pick — the check-in is per entry", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Low");
+    await writeEntry(root, "a hard morning");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Saved ✓");
+    expect(
+      root.root.findAll((n) => n.props.accessibilityRole === "radio")
+        .every((r) => r.props.accessibilityState?.selected === false),
+    ).toBe(true);
+  });
+
+  it("a FAILED save keeps the pick (the entry and its mood are still on screen)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "validation_error"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Low");
+    await writeEntry(root, "still here");
+    await pressLabel(root, "Save entry");
+    await flush();
+    const low = root.root
+      .findAll((n) => n.props.accessibilityRole === "radio")
+      .find((r) => r.props.accessibilityLabel === "Mood: Low");
+    expect(low?.props.accessibilityState).toEqual({ selected: true });
+  });
+});
+
+describe("EntryScreen writing streak (device-local, hidden at zero)", () => {
+  it("shows the current streak next to the threshold progress", async () => {
+    vi.mocked(localStreak).mockResolvedValue(4);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Writing streak: 4 days");
+  });
+
+  it("singular reads right: 1 day", async () => {
+    vi.mocked(localStreak).mockResolvedValue(1);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Writing streak: 1 day");
+    expect(textOf(root)).not.toContain("1 days");
+  });
+
+  it("stays hidden at 0 (no guilt) and when the read fails", async () => {
+    vi.mocked(localStreak).mockResolvedValue(0);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).not.toContain("Writing streak");
+
+    vi.mocked(localStreak).mockRejectedValue(new Error("decrypt failed"));
+    const second = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(second)).not.toContain("Writing streak");
+    expect(textOf(second)).toContain("Save entry");
+  });
+
+  it("refreshes after a successful save", async () => {
+    vi.mocked(localStreak).mockResolvedValueOnce(2).mockResolvedValue(3);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Writing streak: 2 days");
+    await writeEntry(root, "today's entry");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Writing streak: 3 days");
+  });
+});
+
+describe("EntryScreen focus-time draft restore (the 'Write about this' bridge)", () => {
+  /** A navigation prop whose addListener captures focus callbacks. */
+  function navWithFocus() {
+    const listeners: Array<() => void> = [];
+    const focusNav = {
+      navigate: vi.fn(),
+      addListener: vi.fn((_event: string, cb: () => void) => {
+        listeners.push(cb);
+        return vi.fn();
+      }),
+    };
+    return { focusNav, fireFocus: () => listeners.forEach((cb) => cb()) };
+  }
+
+  it("a draft stashed AFTER mount restores on focus — the bridge works while the editor stays mounted", async () => {
+    const { focusNav, fireFocus } = navWithFocus();
+    const root = await render(<EntryScreen navigation={focusNav} />);
+    await flush(); // mount restore ran with nothing stashed
+    // The Question screen stashes its text and navigates here.
+    stashDraft("user-1", "What took up most space in your mind today?");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => fireFocus());
+    await flush();
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("What took up most space in your mind today?");
+    expect(textOf(root)).toContain("Draft restored");
+    // Cleanup unsubscribes the focus listener without complaint.
+    await act(async () => root.unmount());
+  });
+
+  it("a focus restore APPENDS the bridged question below in-progress typing (never drops it)", async () => {
+    const { focusNav, fireFocus } = navWithFocus();
+    const root = await render(<EntryScreen navigation={focusNav} />);
+    await flush();
+    await writeEntry(root, "my own words already here");
+    stashDraft("user-1", "a stashed question");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => fireFocus());
+    await flush();
+    // The bridge used to consume the stash and silently DROP the question
+    // over non-empty text; now it appends below a blank line (one-shot).
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("my own words already here\n\na stashed question");
+    expect(textOf(root)).toContain("Draft restored");
+    // …and the stash was consumed, not left to surprise a later mount.
+    expect(takeStashedDraft("user-1")).toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("an editor holding only whitespace counts as empty for the bridge (set, not appended)", async () => {
+    const { focusNav, fireFocus } = navWithFocus();
+    const root = await render(<EntryScreen navigation={focusNav} />);
+    await flush();
+    await writeEntry(root, "  \n  ");
+    stashDraft("user-1", "a stashed question");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => fireFocus());
+    await flush();
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("a stashed question");
+    await act(async () => root.unmount());
+  });
+
+  it("focus with nothing stashed and no resolved account is a quiet no-op", async () => {
+    const { focusNav, fireFocus } = navWithFocus();
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    const root = await render(<EntryScreen navigation={focusNav} />);
+    await flush();
+    const { act } = await import("../helpers/rtr");
+    await act(async () => fireFocus());
+    await flush();
+    expect(
+      (inputByPlaceholder(root, "What's going on today?").props as { value: string }).value,
+    ).toBe("");
+    await act(async () => root.unmount());
   });
 });

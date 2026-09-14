@@ -281,11 +281,26 @@ def test_build_engine_selects_pooling_by_database_kind(monkeypatch):
 
     monkeypatch.setattr(db_module, "create_async_engine", fake_create_engine)
     db_module.build_engine("postgresql+asyncpg://u:p@host:5432/db")
-    assert calls[0][1] == {"echo": False, "pool_pre_ping": True}
+    # Pool sizing is explicit and env-fed (MINDPATTERN_DB_POOL_*) — the
+    # deployment tunes it instead of inheriting SQLAlchemy's defaults.
+    assert calls[0][1] == {
+        "echo": False,
+        "pool_pre_ping": True,
+        "pool_size": 5,
+        "max_overflow": 10,
+        "pool_timeout": 30,
+    }
+    db_module.build_engine("postgresql+asyncpg://u:p@host:5432/db", pool_size=9, max_overflow=2, pool_timeout=7)
+    assert calls[1][1]["pool_size"] == 9
+    assert calls[1][1]["max_overflow"] == 2
+    assert calls[1][1]["pool_timeout"] == 7
     db_module.build_engine("sqlite+aiosqlite://")
-    assert "poolclass" in calls[1][1]
-    assert calls[1][1]["connect_args"] == {"check_same_thread": False}
-    assert calls[1][1]["echo"] is False  # no SQL echo in either branch
+    # SQLite: StaticPool, and NO pool sizing args (they'd break/mislead the
+    # single shared in-memory connection).
+    assert "poolclass" in calls[2][1]
+    assert "pool_size" not in calls[2][1] and "max_overflow" not in calls[2][1]
+    assert calls[2][1]["connect_args"] == {"check_same_thread": False}
+    assert calls[2][1]["echo"] is False  # no SQL echo in either branch
 
 
 # ---------------------------------------------------------------------------
@@ -372,14 +387,16 @@ async def test_login_with_undecodable_verifier_is_invalid_credentials(client):
     assert response.json()["detail"] == "invalid credentials"
 
 
-async def test_delete_account_with_undecodable_verifier_is_401(client):
+async def test_delete_account_with_undecodable_verifier_is_403(client):
+    # Wrong verifier on an AUTHENTICATED request is 403 verification_failed:
+    # 401 tells clients "session expired, re-login", which is wrong here.
     emu = ClientEmulator("delbad", "pw-del-bad")
     await emu.register(client)
     response = await client.request(
         "DELETE", "/api/account", headers=emu.headers, json={"verifier": "%%%not-base64%%%"}
     )
-    assert response.status_code == 401
-    assert response.json()["detail"] == "invalid credentials"
+    assert response.status_code == 403
+    assert response.json() == {"detail": "invalid credentials", "code": "verification_failed"}
 
 
 async def test_delete_account_for_deactivated_account_is_404(client, app):

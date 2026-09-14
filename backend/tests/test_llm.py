@@ -118,8 +118,8 @@ def test_sanitize_filters_detail_fields():
                 "mood_delta": "-0.4",     # numeric string -> float kept
                 "day_fraction": 0.55,
                 "span_days": "soon",      # non-numeric -> dropped
-                "first": "2026-07-01",
-                "last": "bad\x00label",   # cleaned
+                "first": "2026-07-01",    # ungroundable free text -> dropped
+                "last": "bad\x00label",   # ungroundable free text -> dropped
             },
         },
         ["a work day"],
@@ -129,8 +129,10 @@ def test_sanitize_filters_detail_fields():
     assert kept.detail["mood_delta"] == -0.4
     assert kept.detail["day_fraction"] == 0.55
     assert "span_days" not in kept.detail
-    assert kept.detail["first"] == "2026-07-01"
-    assert kept.detail["last"] == "bad label"
+    # detail.first/last are dropped (they cannot be token-grounded in the
+    # corpus and the deterministic brain owns evidence dates anyway) — the
+    # old pin kept them after mere label-cleaning.
+    assert "first" not in kept.detail and "last" not in kept.detail
 
     bad_day = sanitize_pattern(
         {"kind": "temporal", "label": "work", "detail": {"day": "Someday"}}, ["a work day"]
@@ -141,12 +143,14 @@ def test_sanitize_filters_detail_fields():
     weird = sanitize_pattern({"kind": "temporal", "label": "work", "detail": "junk"}, ["a work day"])
     assert weird is not None
     assert weird.detail == {}
-    # Empty first/last strings are dropped.
-    blank = sanitize_pattern(
-        {"kind": "temporal", "label": "work", "detail": {"first": "", "last": None}}, ["a work day"]
-    )
-    assert blank is not None
-    assert "first" not in blank.detail and "last" not in blank.detail
+
+
+def test_label_grounding_is_word_token_not_substring():
+    # "rage" must NOT be grounded by "forage" (substring matching bug).
+    corpus = ["the barn had forage and storage bins"]
+    assert sanitize_pattern({"kind": "temporal", "label": "rage"}, corpus) is None
+    # ... while the actual word grounds fine.
+    assert sanitize_pattern({"kind": "temporal", "label": "forage"}, corpus) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +207,14 @@ def test_analyze_slices_to_the_most_recent_max_entries():
 
 def test_analyze_caps_pattern_count_at_max_patterns():
     analyzer = _make_analyzer()
-    corpus = [entry(i, "work " + " ".join(f"work{j}" for j in range(45))) for i in range(35)]
+    # Distinct alphabetic tokens: grounding is word-TOKEN based, so labels
+    # must be real corpus words (digit-suffixed labels like "work0" are no
+    # longer corpus tokens — that was the substring-grounding loophole).
+    words = [f"word{c}" for c in "abcdefghijklmnopqrstuvwxyz"]
+    corpus = [entry(i, "work " + " ".join(words)) for i in range(35)]
     flood = [
-        {"kind": "temporal", "label": f"work{i}", "occurrences": 1, "confidence": 0.1}
-        for i in range(MAX_PATTERNS + 5)
+        {"kind": "temporal", "label": w, "occurrences": 1, "confidence": 0.1}
+        for w in words
     ]
     analyzer._post = lambda payload: _llm_response(flood)
     analysis = analyzer.analyze(corpus)

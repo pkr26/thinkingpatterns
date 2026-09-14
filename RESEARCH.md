@@ -20,11 +20,12 @@ reproduces the audit's main finding).*
    not a tweak; it is conforming to the field's core standard.
 
 2. **The strongest-evidence patterns we could detect (meta-analytic support):**
-   within-person **sleep → next-day mood** (lag-1; Bourke et al. 2026 meta-analysis of
-   118 studies), **day-of-week and time-of-day rhythms** (Golder & Macy 2011, Science;
+   within-person **sleep → next-day mood** (lag-1; Konjarski et al. 2018,
+   *Sleep Medicine Reviews* 42, meta-analysis of experience-sampling studies),
+   **day-of-week and time-of-day rhythms** (Golder & Macy 2011, Science;
    Mappiness), **mood inertia** (autocorrelation; Houben et al. 2015 meta-analysis), and
    **EWMA control charts over daily mood with a personal baseline** — which we already
-   implement, correctly citing Snippe et al. 2023. We are right about EWMA and wrong
+   implement, correctly citing Snippe et al. 2024. We are right about EWMA and wrong
    about almost everything downstream of sentiment.
 
 3. **Our deterministic, no-fake-insights philosophy is validated and differentiated —
@@ -135,14 +136,14 @@ Evidence grades: **[S]trong** (meta-analytic or large-scale replication), **[M]o
 | Standard | Source | Implication for the brain |
 |---|---|---|
 | **[S] Within-person centering** — associations on deviations from the person's own mean, never pooled raw scores | Bolger & Laurenceau 2013, *Intensive Longitudinal Methods*; Shiffman, Stone & Hufford 2008 (EMA canonical design) | Replace raw mood-correlation input with per-user detrended residuals (e.g., subtract a rolling personal baseline). This kills our demonstrated false-positive mode. |
-| **[S] Idiographic > nomothetic** — group-level structures often don't describe the individual (non-ergodicity); personalized models required | Fisher et al., *Annual Review of Clinical Psychology* ("Personalized models of psychopathology"); Fried et al. 2023 WARN-D protocol | Our per-user engine is architecturally right; frame it as "idiographic, within-person" — that language is the accepted standard. |
+| **[S] Idiographic > nomothetic** — group-level structures often don't describe the individual (non-ergodicity); personalized models required | Fisher, Medaglia & Jeronimus 2018, *PNAS* 115(27) (non-ergodicity); Wright & Woods 2020, *Annu Rev Clin Psychol* 16:49–74 (personalized models of psychopathology); Fried et al. 2023 WARN-D protocol | Our per-user engine is architecturally right; frame it as "idiographic, within-person" — that language is the accepted standard. |
 | **[S] Momentary vs retrospective are different measures** | Stone & Shiffman 2002 | Tag entries as momentary ("right now") vs end-of-day; don't mix streams silently. |
 
 ### 2.2 Mood dynamics (what to detect)
 
 | Signal | Evidence | Notes for the brain |
 |---|---|---|
-| **EWMA control chart, personal baseline** | **[S]** Snippe et al. 2023, *Psychological Medicine* (foresaw recurrence in 41 patients tapering antidepressants); Smit, Schat & Ceulemans 2023, *Assessment* (methods paper: λ ≈ 0.05–0.25 on day-averaged EMA, person-specific limits) | Already implemented. Note: their λ is much smaller than our 0.3 → smoother, fewer false alarms. Restlessness was the idiographic prodrome — multi-signal EWMA (per-theme mood, not just global) is the validated extension. |
+| **EWMA control chart, personal baseline** | **[S]** Snippe et al. 2024, *J Psychopathol Clin Sci* (foresaw recurrence in patients tapering antidepressants); Smit, Schat & Ceulemans 2023, *Assessment* (methods paper: λ ≈ 0.05–0.25 on day-averaged EMA, person-specific limits) | Already implemented. Note: their λ is much smaller than our 0.3 → smoother, fewer false alarms. Restlessness was the idiographic prodrome — multi-signal EWMA (per-theme mood, not just global) is the validated extension. |
 | **Mood inertia (lag-1 autocorrelation)** | **[S]** Kuppens, Allen & Sheeber 2010; Koval et al. 2012; Houben et al. 2015 meta-analysis (*Psychological Bulletin*): inertia/instability ↔ lower wellbeing, prospective prediction of onset | New detector, trivially computable on daily sentiment series: "your mood has been carrying over day-to-day more than usual." |
 | **Affective instability (variance/switch frequency)** | **[M]** Henry 2012; Stange 2016; Taylor 2021 (bipolar prospective) | Surface as *observation* ("bigger swings than your usual"), never "bipolar flag" — individual cutoffs unvalidated, diagnosis language crosses FDA line. |
 | **Critical slowing down (rising autocorr + variance before transition)** | **[C]** van de Leemput et al. 2014, *PNAS*; mixed replications (2024 *Clinical Psychological Science* replication: ~33% of participants; Wichers 2016 N-of-1 success; Helmich 2024 methodological critique) | Use only as a *supporting* signal bundled with EWMA, or skip. Never as a standalone claim. |
@@ -161,9 +162,9 @@ Evidence grades: **[S]trong** (meta-analytic or large-scale replication), **[M]o
 
 | Signal | Evidence | Notes |
 |---|---|---|
-| **Sleep → next-day mood (stronger than reverse)** | **[S]** Bourke et al. 2026, *Sleep Medicine Reviews* (meta-analysis, 118 studies); Triantafillou et al. 2019; Difrancesco et al. 2021 | Lag-1/lag-2 within-person cross-correlation between theme-days and next-day mood. Our audit's recommendation #3, now meta-analytically grounded. Phrasing: "the day after 'sleep' comes up, your entries read lower" — observation, causality never claimed. |
+| **Sleep → next-day mood (stronger than reverse)** | **[S]** Konjarski et al. 2018, *Sleep Medicine Reviews* 42 (meta-analysis of experience-sampling/daily-diary studies); Triantafillou et al. 2019; Difrancesco et al. 2021 | Lag-1/lag-2 within-person cross-correlation between theme-days and next-day mood. Our audit's recommendation #3, now meta-analytically grounded. Phrasing: "the day after 'sleep' comes up, your entries read lower" — observation, causality never claimed. |
 | **Stress spillover / slow recovery** | **[S]** Bolger, DeLongis, Kessler & Wethington 1989 (classic 42-day diary); daily-stress literature | Stressor-theme day → mood not recovered next day = "slow recovery" link. |
-| **Physical activity → same/next-day affect** | **[S]** Liao, Shonkoff & Dunton 2015 review; Rehder et al. 2026, *Nature Human Behaviour* IPD meta-analysis | Our 'health' theme partially proxies activity; with wearable data (later) this strengthens. |
+| **Physical activity → same/next-day affect** | **[S]** Liao, Shonkoff & Dunton 2015 review | Our 'health' theme partially proxies activity; with wearable data (later) this strengthens. |
 
 ### 2.5 Language markers (journal-text features)
 
@@ -195,8 +196,11 @@ Evidence grades: **[S]trong** (meta-analytic or large-scale replication), **[M]o
 - **PANAS** (Watson, Clark & Tellegen 1988) is the affect standard; **circumplex**
   (Russell 1980; Posner et al. 2005): valence × arousal — two sliders capture affect
   economically. Single-item mood measures are psychometrically defensible (Verster 2021;
-  Allen 2022; Song 2023) — our one-slider-per-entry model is fine; a second "energy"
-  slider would align with the circumplex and give EWMA a second validated channel.
+  Allen 2022; Song 2023). What v1 actually ships: a daily mood score DERIVED from entry
+  text (the deterministic graded lexicon), with an optional client-computed sentiment
+  tag honored when present — no self-report slider exists yet; adding one (and a second
+  "energy" slider for the circumplex) is planned work that would give EWMA a second
+  validated channel.
 - **PHQ-9** thresholds 5/10/15/20 (Kroenke et al. 2001); MCID ≈ 4–5 points (Löwe 2006;
   Bauer-Staeb 2021). We don't administer screeners (and shouldn't, wellness-framed) —
   but our *internal* "is this shift meaningful" bar should borrow the MCID mindset:
@@ -228,7 +232,7 @@ emotion granularity** once licensing is confirmed.
 | Requirement | Standard/source | Us today |
 |---|---|---|
 | Crisis resources reachable in 1–2 taps from anywhere; 988 call/text/chat + Crisis Text Line 741741 + 911 guidance; offline-cached | 2026 Frontiers framework; APA advisory; only ~35% of apps comply | **Missing entirely** |
-| Safe-messaging-compliant response to self-harm/suicidal content; route to humans, never AI reassurance | #chatsafe (Orygen/JED); Illinois WOPR Act (2025) mandates escalation for behavioral-health AI; character.ai litigation settled Jan 2026 | Missing (our LLM path returns `[]` on any failure — silent) |
+| Safe-messaging-compliant response to self-harm/suicidal content; route to humans, never AI reassurance | #chatsafe (Orygen/JED); Illinois WOPR Act (2025) mandates escalation for behavioral-health AI; character.ai litigation ongoing | Missing (our LLM path returns `[]` on any failure — silent) |
 | Persistent "not a medical device / not an emergency service" disclaimer | Apple 1.4.1; Youper pattern; FDA boundary | Partial (footnote in Insights screen) |
 | No diagnosis/treatment/relapse-*prediction* claims | FDA general-wellness line; AMA; APA; NICE ESF Tier B posture | Mostly good — but README phrasing ("foreseeing depressive recurrence") flirts with the line; keep the citation, soften the claim to "detects sustained shifts" |
 | Granular, withdrawable opt-in per processing purpose (pattern analysis vs LLM), never bundled | GDPR Art. 9 explicit consent; Washington MHMDA opt-in; FTC orders | Good (re-auth for LLM enable) — add named-provider/retention/no-training disclosure at the consent screen |
@@ -256,6 +260,33 @@ diagnosis, never an alarm, never a push notification about crisis content. This 
 moves us from the non-compliant 65% to the compliant 35%, and it is the single most
 judge-visible safety upgrade.
 
+### 4.4 Self-harm/ED adjacency — the two-tier suppression philosophy
+
+The crisis-language contract (shared/crisis_phrases.json) runs two deliberately
+asymmetric tiers. The **dialog tier** (client-side, pre-encryption, fires the support
+dialog) stays conservative: a false positive there costs one gentle dialog, so it is
+phrase-anchored and mostly first-person ("cutting myself", "want to die"). The
+**suppress tier** (dialog + `suppress_extra`; server-side card sensitivity + question
+filter, client-side non-quoting belt) is deliberately broader, because a false positive
+there only means a pattern is not *quoted back* — the card still surfaces, in the
+gentle non-quoting variant.
+
+Bare topic words ("cutting", "self-loathing") and eating-disorder phrasing ("starve
+myself", "make/made myself throw up") belong to the suppress tier only. The 2026
+re-audit showed why: a corpus whose last month read "the urge for cutting was loud"
+produced a *quoted* "'cutting' has been taking up more space…" topic card and quoted
+engagement questions — mirroring crisis-adjacent wording back as an invitation to
+engage. For a user journaling recovery from anorexia or self-harm, the right artifact
+is the non-quoting card that acknowledges a difficult thought and points at humans —
+never an algorithmically mirrored prompt to sit with it.
+
+The honest residual: single-word suppression over-triggers on benign topics ("cutting
+back on sugar", "a cutting board", "I burned myself on the stove"). Those patterns
+render as the soft non-quoting card — a missed quote, not a dialog, not an alarm. We
+accept that asymmetry on purpose: the cost of a false positive is a slightly vaguer
+card; the cost of a false negative is quoting self-harm ideation back to the person
+who wrote it.
+
 ---
 
 ## 5. Mapping: evidence → v3 mini-brain changes
@@ -266,7 +297,7 @@ Prioritized by (evidence strength × impact on insight quality × implementation
 |---|---|---|---|
 | 1 | **Within-person detrending before all mood associations** (rolling personal baseline; also detrend weekly cycles) | Bolger & Laurenceau 2013; Golder & Macy 2011 | S — fixes the false-positive class we demonstrated |
 | 2 | **VADER sentiment engine** replacing the hand lexicon | Hutto & Gilbert 2014; industry NLP standard | S |
-| 3 | **Lagged link detector** ("the day after X, your entries read Y"; lag-1/lag-2, within-person) | Bourke et al. 2026 meta; Bolger et al. 1989 | M — new pattern kind `link` |
+| 3 | **Lagged link detector** ("the day after X, your entries read Y"; lag-1/lag-2, within-person) | Konjarski et al. 2018 meta; Bolger et al. 1989 | M — new pattern kind `link` |
 | 4 | **Mood-inertia + instability metrics** (rolling autocorrelation/variance of daily sentiment) | Houben et al. 2015 meta; Kuppens et al. 2010 | S — new pattern kind `inertia` |
 | 5 | **Rumination framing for phrase clusters** (negative-valence recurring near-duplicates → RNT observation with distinct copy + question templates) | Ehring & Watkins 2008; Al-Mosaiwi 2018 (absolutist density inside clusters) | S — mostly copy + one metric |
 | 6 | **Time-of-day capture + diurnal pattern kind** (client sends local time bucket; morning/evening asymmetry detection) | Golder & Macy 2011; diurnal-variation literature | M — touches client payload (v2 payload already versioned) |
@@ -301,19 +332,20 @@ pmc.ncbi.nlm.nih.gov/articles/PMC10632923/ (MindDoc).
 
 **§2 Clinical:** Shiffman, Stone & Hufford 2008 (*Annu Rev Clin Psychol*);
 Stone & Shiffman 2002 (*Ann Behav Med*); Bolger & Laurenceau 2013 (*Intensive
-Longitudinal Methods*, Guilford); Fisher et al. (*Annu Rev Clin Psychol*, personalized
-models); Fried et al. 2023 WARN-D (*Clin Psychol Sci*); Snippe et al. 2023 (*Psychol
-Med*); Smit, Schat & Ceulemans 2023 (*Assessment* 30(5)); Schreuder et al. 2024;
+Longitudinal Methods*, Guilford); Fisher, Medaglia & Jeronimus 2018 (*PNAS*
+115(27)); Wright & Woods 2020 (*Annu Rev Clin Psychol* 16:49–74, personalized
+models); Fried et al. 2023 WARN-D (*Clin Psychol Sci*); Snippe et al. 2024 (*J
+Psychopathol Clin Sci*); Smit, Schat & Ceulemans 2023 (*Assessment* 30(5)); Schreuder et al. 2024;
 van de Leemput et al. 2014 (*PNAS* 111(1)) + 2014 critique letter + Wichers 2016
 (*Psychosom Psychother*) + 2024 replication (*Clin Psychol Sci*); Kuppens, Allen &
 Sheeber 2010 (*Psychol Sci* 21(7)); Koval et al. 2012 (*Cogn Emot*); Houben et al.
-2015 (*Psychol Bull* 142(4)); Birchwood, Spencer & McGovern 2000 (*Adv Psychiatr
+2015 (*Psychol Bull* 141(4):901–930); Birchwood, Spencer & McGovern 2000 (*Adv Psychiatr
 Treat*); Morriss et al. 2018 (Cochrane); Golder & Macy 2011 (*Science* 333);
 Bryson & MacKerron 2017 (*Econ J*, Mappiness); Monk et al. 1990 (SRM); Frank et al.
 1997 (*Biol Psychiatry*); Rosenthal et al. 1984 (*Arch Gen Psychiatry*);
-Bourke et al. 2026 (*Sleep Med Rev*, meta-analysis); Triantafillou et al. 2019
+Konjarski et al. 2018 (*Sleep Med Rev* 42, meta-analysis); Triantafillou et al. 2019
 (*JMIR Ment Health*); Difrancesco et al. 2021 (*J Affect Disord*); Liao, Shonkoff &
-Dunton 2015 (*Front Psychol*); Rehder et al. 2026 (*Nat Hum Behav*);
+Dunton 2015 (*Front Psychol*);
 Al-Mosaiwi & Johnstone 2018 (*Clin Psychol Sci* 6(2)); Edwards & Holtzman 2017
 (*J Res Pers*); Kashdan, Barrett & McKnight 2015 (*Curr Dir Psychol Sci*); Erbas et al.
 2022 (*Assessment*); Ehring & Watkins 2008 (*Int J Cogn Ther*); Rosenkranz et al. 2020;
@@ -337,7 +369,7 @@ gdpr-info.eu/art-9-gdpr; Washington MHMDA (RCW 19.373, eff. 2024); California CM
 support.google.com (Play health declaration); who.int 2021 AI guidance + 2024 LMM
 guidance; apa.org Nov-2025 health advisory on AI chatbots/wellness apps;
 ama-assn.org AI-chatbot positions; Illinois WOPR Act (HB 1806, PA 104-0054, 2025);
-Utah HB 452; character.ai settlements (Jan 2026, Fortune/JURIST); Orygen #chatsafe
+Utah HB 452; character.ai litigation (ongoing; Fortune/JURIST coverage); Orygen #chatsafe
 (+ PMC10395901); Wysa crisis-support research (blogs.wysa.io; PMC6286427);
 mental.jmir.org/2024/1/e52763 (safety planning); Frontiers 2026 crisis-UX framework
 (fdgth.2026.1814547); openai.com/enterprise-privacy (+ ZDR); nice.org.uk ESF tiers;

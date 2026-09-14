@@ -11,26 +11,31 @@
  * unlockProof.ts) is opened with the freshly derived key: the wrong
  * password fails AEAD authentication and the vault stays locked, so a
  * mistyped password can never encrypt new entries under a wrong key.
+ *
+ * HONEST COPY (audit fix): the old subtitle claimed "Your keys never leave
+ * this device" — false, since a processing session ships the data key once
+ * (single-use, memory-only). The subtitle now tells the truth calmly.
  */
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
 } from "react-native";
 import qcrypto from "react-native-quick-crypto"; // registers the Buffer global used below
 import { api, ApiError } from "../api/client";
-import { deriveKeys } from "../crypto/MindPatternCrypto";
+import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
 import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { storeUnlockProof, verifyUnlockProof } from "../unlockProof";
+import { useTheme } from "../theme";
+import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
+import { requestFailureCopy } from "../components/errors";
 
 /** Throttles offline password guessing: each failed offline proof check
  *  pauses before the dialog appears (PBKDF2 already costs ~100ms+ per
@@ -38,6 +43,7 @@ import { storeUnlockProof, verifyUnlockProof } from "../unlockProof";
 const FAILED_PROOF_DELAY_MS = 500;
 
 export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Element {
+  const t = useTheme();
   const { signOut, refreshActiveDays } = useSession();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -65,7 +71,8 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         saltB64 = cached;
         offline = true; // the salt fetch already proved the network dead
       }
-      derived = deriveKeys(password, Buffer.from(saltB64, "base64"));
+      // Async derivation: no 100–400ms JS-thread freeze mid-flow.
+      derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
       const keys = derived;
       let verifiedOnline = false;
       if (!offline) {
@@ -106,12 +113,12 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     } catch (err) {
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
       vault.lock(); // a failed unlock must never leave stale keys live
+      // 401 = wrong password (our own sealed proof throws the same). Other
+      // ApiErrors map to calm copy; our own local Error text passes through.
       const message =
         err instanceof ApiError && err.status === 401
           ? "Wrong password."
-          : err instanceof Error
-            ? err.message
-            : "unknown error";
+          : requestFailureCopy(err);
       Alert.alert("Unlock failed", message);
     } finally {
       setBusy(false);
@@ -119,43 +126,47 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <Text style={styles.title}>Locked</Text>
-      <Text style={styles.subtitle}>
-        Your keys never leave this device. Re-enter your password to unlock this session.
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxxl, gap: t.spacing.md }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <Text style={[styles.title, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
+        Locked
+      </Text>
+      <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
+        Your journal is encrypted with keys only you hold. Re-enter your password to unlock this
+        device. When you ask for your patterns, the key visits the server once — held in memory,
+        then destroyed. Nothing else ever leaves.
       </Text>
       <TextInput
-        style={styles.input}
+        style={{
+          backgroundColor: t.colors.card,
+          color: t.colors.text,
+          borderRadius: t.radius.md,
+          padding: 14,
+          fontSize: 16,
+        }}
         placeholder="password"
-        placeholderTextColor="#5c6370"
+        placeholderTextColor={t.colors.placeholder}
         secureTextEntry
         value={password}
         onChangeText={setPassword}
         onSubmitEditing={unlock}
+        accessibilityLabel="Password"
+        textContentType="password"
+        autoComplete="current-password"
       />
-      <TouchableOpacity style={styles.button} onPress={unlock} disabled={busy || !password}>
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Unlock</Text>}
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => void signOut()}>
-        <Text style={styles.switch}>Sign out instead</Text>
-      </TouchableOpacity>
+      <PrimaryButton label="Unlock" onPress={unlock} disabled={!password} busy={busy} />
+      <GhostButton label="Sign out instead" onPress={() => void signOut()} />
       {/* Crisis help needs no unlock and no network — the locked state is
           exactly when it must be one tap away. */}
-      <TouchableOpacity style={styles.helpButton} onPress={() => navigation.navigate("Crisis")}>
-        <Text style={styles.helpText}>Need help now? Crisis resources</Text>
-      </TouchableOpacity>
+      <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 32, gap: 12, backgroundColor: "#0f1115" },
-  title: { fontSize: 34, fontWeight: "700", color: "#e8eaf0", textAlign: "center" },
-  subtitle: { fontSize: 14, color: "#8a91a3", textAlign: "center", marginBottom: 24, lineHeight: 20 },
-  input: { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 16 },
-  button: { backgroundColor: "#4f7cff", borderRadius: 10, padding: 16, alignItems: "center", marginTop: 8 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  switch: { color: "#7f9bff", textAlign: "center", marginTop: 16 },
-  helpButton: { backgroundColor: "#242a38", borderRadius: 10, padding: 16, alignItems: "center", marginTop: 24 },
-  helpText: { color: "#7f9bff", fontSize: 14, fontWeight: "600" },
+  container: { flex: 1, justifyContent: "center" },
+  title: { fontSize: 34, fontWeight: "700", textAlign: "center" },
+  subtitle: { textAlign: "center", marginBottom: 24, lineHeight: 20 },
 });

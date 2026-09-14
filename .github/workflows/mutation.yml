@@ -1,0 +1,80 @@
+name: Mutation testing
+
+# Policy: deep mutation runs are scheduled, not per-PR. mutmut over the
+# backend security + services cores means running the test suite once per
+# mutant — far too slow for pull-request feedback, so PRs are gated by the
+# coverage floors in ci.yml instead, and this workflow is the scheduled
+# deep check. Surviving mutants do NOT fail the run (`--CI` exits non-zero
+# only on fatal errors); the artifact is the deliverable. Triage survivors
+# against reports/mutation_report.md, which documents scope and caveats.
+#
+# The .mutmut-cache directory is cached between runs so a campaign that
+# exceeds one job's time budget resumes where it stopped instead of
+# restarting every week. Delete the cache (or change the key) after
+# deliberately changing the mutation scope.
+
+on:
+  schedule:
+    # Mondays 03:17 UTC — deliberately off the crowded :00/:30 marks.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutmut-backend:
+    runs-on: ubuntu-latest
+    # Long budget: mutation runs are resumable via the cache below, so an
+    # incomplete run still makes durable progress.
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+          # Pins match ci.yml's test tooling; mutmut matches the version the
+          # last local campaign used (see reports/mutation_report.md).
+          pip install pytest==9.1.1 pytest-asyncio==1.4.0 pytest-cov==7.1.0 mutmut==2.4.4
+      - name: Restore mutmut progress cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: backend/.mutmut-cache
+          # Fresh key each run so the updated cache is saved at the end;
+          # restore-keys falls back to the newest previous campaign state.
+          key: mutmut-${{ github.run_id }}
+          restore-keys: mutmut-
+      - name: Run mutmut over the security + services cores
+        working-directory: backend
+        # scripts/mutmut_runner.sh is the per-mutant runner (configured in
+        # pyproject.toml): it normalizes pytest collection crashes to kills.
+        # --paths-to-mutate narrows pyproject's deep scope to the cores for
+        # this scheduled run; widen it back only with the time budget to match.
+        # `timeout` stops mutmut 30 min before the job limit so the collect/
+        # upload steps below still run; mutmut's cache records each completed
+        # mutant, so a stopped campaign resumes next week. A timeout shows
+        # as a red run — that honestly means "campaign incomplete", and the
+        # partial results artifact is still uploaded.
+        run: timeout 270m mutmut run --paths-to-mutate app/security/,app/services/ --no-progress --CI
+      - name: Collect results
+        if: always()
+        working-directory: backend
+        run: mutmut results > mutmut-results.txt || true
+      - name: Upload mutmut results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutmut-results
+          path: backend/mutmut-results.txt
+          if-no-files-found: warn

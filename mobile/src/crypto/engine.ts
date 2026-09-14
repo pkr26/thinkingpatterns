@@ -11,6 +11,19 @@
 export interface CryptoEngine {
   randomBytes(size: number): Buffer;
   pbkdf2Sync(password: string | Buffer, salt: Buffer, iterations: number, keylen: number, digest: string): Buffer;
+  /** The async form: quick-crypto (>= 0.7) runs the derivation on its
+   *  native JSI worker and node:crypto on the libuv thread pool — both keep
+   *  the JS thread free, unlike pbkdf2Sync's ~100-400ms freeze at 600k
+   *  iterations. Node-style callback; a missing derivedKey on success is
+   *  treated as an error by the caller. */
+  pbkdf2(
+    password: string | Buffer,
+    salt: Buffer,
+    iterations: number,
+    keylen: number,
+    digest: string,
+    callback: (err: Error | null, derivedKey?: Buffer) => void,
+  ): void;
   hkdfSync(digest: string, ikm: Buffer, salt: Buffer, info: Buffer, length: number): ArrayBuffer;
   createCipheriv(algorithm: string, key: Buffer, iv: Buffer): {
     setAAD(aad: Buffer): unknown;

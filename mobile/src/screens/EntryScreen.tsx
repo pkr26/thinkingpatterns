@@ -2,11 +2,37 @@
  * Daily entry: type (or paste speech-to-text output), encrypt on-device,
  * sync. Entries are encrypted before they leave the phone; the save flow
  * queues locally when offline and retries on next launch.
+ *
+ * Mood check-in: a one-tap row above Save ("How does today feel?") — an
+ * explicit pick wins over the quick text estimate, rides in the encrypted
+ * payload's sentiment field, and lands in the device-local mood log.
+ * Never picking is fine: the text estimate fills the log as before and the
+ * payload sentiment stays null for the server's engine. The row never
+ * blocks saving.
+ *
+ * Drafts survive EVERYTHING: backgrounding locks the vault and unmounts
+ * this screen, but the unmount cleanup stashes any non-empty text
+ * (memory-only, account-bound — see store.tsx) and the next mount restores
+ * it with a small "Draft restored" chip. A half-written entry is never lost
+ * to a phone call. A draft stashed AFTER mount (the Question screen's
+ * "Write about this" bridge) restores through the focus listener — set into
+ * an empty editor, or APPENDED below in-progress typing after a blank line:
+ * the bridge never overwrites the user's words and never silently drops the
+ * question.
+ *
+ * Save feedback is inline and quiet: "Saved ✓" / "Saved — will sync when
+ * online" appear as a transient status line where the user is already
+ * looking. Alerts are reserved for failures that need a decision.
+ *
+ * Keyboard privacy: autoCorrect/spellCheck are OFF and textContentType is
+ * "none" — journal text must not train or linger in keyboard caches.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,32 +45,94 @@ import { encryptEntry } from "../crypto/MindPatternCrypto";
 import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
-import { localDateISO, recordMood } from "../moodLog";
+import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
+import { MOOD_OPTIONS, localSentiment } from "../mood";
 import { detectCrisisLanguage } from "../crisisDetect";
+import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
+import { newClientEntryId } from "../entryId";
+import { useTheme } from "../theme";
+import { PrimaryButton, GhostButton } from "../components/buttons";
+import { InlineStatus, InlineStatusTone, NoticeChip } from "../components/InlineStatus";
+import { NavRow } from "../components/NavRow";
+import { requestFailureCopy } from "../components/errors";
 
 /** Keeps the encrypted payload comfortably under the server's ~1 MiB cap. */
 const MAX_ENTRY_CHARS = 100_000;
+/** The character count stays out of the way until the cap is near. */
+const SHOW_COUNT_ABOVE = 90_000;
+/** How long the transient save confirmation stays on screen. */
+const STATUS_MS = 2_600;
 
 export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Element {
+  const t = useTheme();
   const { activeDays, unlockDays, touchActivity } = useSession();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
+  /** Device-local signal: today's date appears in the on-device mood log.
+   *  (Entries written on another device aren't in it — the chip's absence
+   *  never means "you didn't write", so it's a nudge-free, calm hint.) */
+  const [wroteToday, setWroteToday] = useState(false);
+  /** The explicit mood check-in pick, or null (never required to save). */
+  const [selectedMood, setSelectedMood] = useState<number | null>(null);
+  /** Current writing streak from the device-local mood log; hidden at 0
+   *  (no guilt — a streak you don't have is not a debt). */
+  const [streak, setStreak] = useState(0);
+  // Refs mirror what the unmount cleanup and the double-tap guard need —
+  // state alone arrives a frame too late for both.
+  const textRef = useRef(text);
+  const userIdRef = useRef<string | null>(null);
+  const savingRef = useRef(false);
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
+
+  /** Transient confirmation; replaces itself cleanly and never stacks. */
+  const showStatus = (message: string, tone: InlineStatusTone) => {
+    if (statusTimer.current) clearTimeout(statusTimer.current);
+    setStatusTone(tone);
+    setStatus(message);
+    statusTimer.current = setTimeout(() => setStatus(null), STATUS_MS);
+  };
 
   useEffect(() => {
     let cancelled = false;
+    // Restore the draft a lock/background unmount stashed — only for the
+    // same account it was written under (takeStashedDraft enforces
+    // that), and only if the user has not already started typing: a late
+    // getUserId() resolution must not clobber fresh text.
+    const restoreDraftFor = (id: string) => {
+      const restored = takeStashedDraft(id);
+      // textRef (not state) is the latest committed text: a resolution (or
+      // a focus event) that lands after the user started typing consumes
+      // the stash without applying it over fresh text (one-shot).
+      if (restored !== null && textRef.current === "") {
+        setText(restored);
+        setDraftRestored(true);
+      }
+    };
     api
       .getUserId()
       .then((id) => {
         if (cancelled) return;
+        userIdRef.current = id;
         if (id) flushQueue(id).catch(() => {});
-        // Restore the draft a 401-forced lock stashed before the unmount —
-        // only for the same account it was written under (takeStashedDraft
-        // enforces that), and only if the user has not already started
-        // typing: a late getUserId() resolution must not clobber fresh text.
         if (id) {
-          const restored = takeStashedDraft(id);
-          if (restored !== null) {
-            setText((current) => (current === "" ? restored : current));
+          restoreDraftFor(id);
+          // "Already wrote today" from the device-local mood log (the only
+          // entry signal that needs no network round-trip).
+          if (vault.isUnlocked()) {
+            recentMoods(vault.get().dataKey, id, 30)
+              .then((days) => setWroteToday(days.some((d) => d.date === localDateISO())))
+              .catch(() => {});
+            // The streak line next to the progress bar — device-local too.
+            localStreak(vault.get().dataKey, id)
+              .then(setStreak)
+              .catch(() => {});
           }
         }
       })
@@ -52,8 +140,39 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // The storage read failed: leaving the stash in place (instead of
         // dropping it) keeps the draft recoverable on the next mount.
       });
+    // A draft stashed AFTER this screen mounted — the Question screen's
+    // "Write about this" bridge — arrives while the editor is already
+    // alive underneath; the focus event is the signal to pick it up.
+    const focusSub = typeof navigation?.addListener === "function"
+      ? (navigation.addListener("focus", () => {
+          const id = userIdRef.current;
+          if (!id) return;
+          const bridged = takeStashedDraft(id);
+          if (bridged === null) return;
+          // The bridge must neither overwrite in-progress typing NOR
+          // silently drop the question: empty editor → set it; non-empty →
+          // append below a blank line. (Mount-time restore above keeps the
+          // stricter empty-only rule — that stash is the user's OWN
+          // interrupted draft, where a late resolution must not splice
+          // older text under fresh typing.)
+          const existing = textRef.current;
+          if (existing.trim() === "") {
+            setText(bridged);
+          } else {
+            setText(`${existing.trimEnd()}\n\n${bridged}`);
+          }
+          setDraftRestored(true);
+        }) as (() => void) | undefined)
+      : undefined;
     return () => {
       cancelled = true;
+      focusSub?.();
+      if (statusTimer.current) clearTimeout(statusTimer.current);
+      // THE draft guarantee: any non-empty text on unmount — background
+      // lock, navigation, session expiry — is stashed for this account.
+      const draft = textRef.current;
+      const owner = userIdRef.current;
+      if (owner && draft.trim()) stashDraft(owner, draft);
     };
     // NOTE (privacy hardening): this screen no longer triggers the daily
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
@@ -68,6 +187,11 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       Alert.alert("Entry too long", `Entries are limited to ${MAX_ENTRY_CHARS.toLocaleString()} characters.`);
       return;
     }
+    // Double-tap guard: two presses inside one frame both pass a state-only
+    // check; the ref is synchronous. The 409-dedupe on the server would hide
+    // the second upload, but the user would wait on it.
+    if (savingRef.current) return;
+    savingRef.current = true;
     setBusy(true);
     try {
       const keys = vault.get();
@@ -80,15 +204,21 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // LOCAL calendar day: the UTC day is wrong for non-UTC users in the
       // evening (it feeds entry ids, dates and the mood log).
       const today = localDateISO();
-      const clientEntryId = `e-${today}-${Date.now().toString(36)}`;
-      // sentiment: null — analysis sentiment is computed by the server's
-      // graded engine at recompute time. The client's quick score below is
-      // display/local-log only and never rides in the encrypted payload.
-      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, today, null);
+      const clientEntryId = newClientEntryId(today);
+      // sentiment: the explicit check-in pick rides in the encrypted
+      // payload when the user made one. Without a pick it stays null — the
+      // server's graded engine re-scores the text at recompute time either
+      // way; the quick score below never rides in the payload.
+      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, today, selectedMood);
       // The local mood log powers the baseline-phase trend view; it is
       // device-only metadata, encrypted under the data key, and never
-      // leaves the phone.
-      void recordMood(keys.dataKey, userId, today, localSentiment(trimmed)).catch(() => {});
+      // leaves the phone. The explicit check-in wins when there is one;
+      // otherwise the quick text estimate fills in, as before. The streak
+      // line refreshes once the write lands.
+      void recordMood(keys.dataKey, userId, today, selectedMood ?? localSentiment(trimmed))
+        .then(() => localStreak(keys.dataKey, userId))
+        .then(setStreak)
+        .catch(() => {});
       // Crisis detection is ON-DEVICE and pre-encryption by necessity: the
       // server only ever sees ciphertext, so it cannot notice a crisis.
       // The result is never stored or transmitted — it only decides whether
@@ -106,6 +236,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             { text: "Not now", style: "cancel" },
           ],
         );
+      // Throttled to at most once per calendar day per account
+      // (src/crisisDialog.ts): a dialog on EVERY crisis-flagged save trains
+      // dismissal. The stamp records BEFORE the dialog so sequential saves
+      // cannot double-fire; a storage failure fails toward showing.
+      const maybeShowCrisisAlert = async () => {
+        if (await crisisDialogShownOn(userId, today)) return;
+        await recordCrisisDialogShown(userId, today);
+        showCrisisAlert();
+      };
+      let queuedOffline = false;
       try {
         await api.createEntry(clientEntryId, blobB64, today);
       } catch (err) {
@@ -122,15 +262,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         }
         if (err instanceof ApiError && err.status === 422) {
           // The server permanently rejects this blob; queueing it would
-          // poison the offline queue with an entry that can never sync.
-          Alert.alert("Entry rejected", `${err.message} — your entry is still on screen.`);
+          // poison the offline queue with an entry that can never sync. No
+          // server detail text in the dialog — just the honest outcome.
+          Alert.alert("Entry not accepted", "The server couldn't store this entry as-is. Your entry is still on screen.");
           return;
         }
         // Offline, 5xx or throttled: queue the SAME encrypted entry —
         // the AAD is already bound to this clientEntryId and this account.
         try {
           await enqueue({ userId, clientEntryId, blobB64, entryDate: today });
-          Alert.alert("Saved offline", "This entry will sync when you're back online.");
+          queuedOffline = true;
         } catch (queueErr) {
           if (queueErr instanceof QueueFullError) {
             // The entry text is still on screen — a crisis-flagged entry
@@ -138,17 +279,20 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             Alert.alert(
               "Offline storage full",
               "Your oldest unsynced entries are protected — connect and sync before writing more. This entry is still on screen.",
-              [{ text: "OK", onPress: () => { if (crisisLanguage) showCrisisAlert(); } }],
+              [{ text: "OK", onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } }],
             );
             return;
           }
           if (queueErr instanceof QueueAbandonedError) {
             // The queue was wiped (sign-out / account deletion) mid-save:
             // the entry is NOT saved. Be loud — no "Saved offline", and the
-            // draft stays on screen.
+            // draft stays on screen. A crisis-flagged entry that went
+            // nowhere must STILL point at support (throttled like every
+            // other path): the crisis is on screen even if the save isn't.
             Alert.alert(
               "Not saved",
               "The offline queue was cleared while saving (were you signed out?). Your entry is still on screen.",
+              [{ text: "OK", onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } }],
             );
             return;
           }
@@ -156,10 +300,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         }
       }
       setText("");
-      if (crisisLanguage) showCrisisAlert();
+      setDraftRestored(false);
+      setSelectedMood(null); // the check-in is per entry — never carry it over
+      setWroteToday(true); // this save just wrote today
+      // The save-feedback fix: BOTH outcomes are a quiet inline line now.
+      showStatus(queuedOffline ? "Saved — will sync when online" : "Saved ✓", queuedOffline ? "neutral" : "ok");
+      if (crisisLanguage) await maybeShowCrisisAlert();
     } catch (err) {
-      Alert.alert("Could not save", err instanceof Error ? err.message : "unknown error");
+      Alert.alert("Could not save", requestFailureCopy(err));
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   };
@@ -169,72 +319,145 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const progress = unlockDays > 0 ? Math.min(1, activeDays / unlockDays) : 1;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, gap: 16 }}>
-      <View style={styles.progressRow}>
-        <Text style={styles.progressLabel}>
-          {activeDays >= unlockDays ? "Patterns unlocked" : `${activeDays}/${unlockDays} days to your patterns`}
-        </Text>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <ScrollView
+        style={[styles.container, { backgroundColor: t.colors.bg }]}
+        contentContainerStyle={{ padding: t.spacing.xl, gap: t.spacing.lg }}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={{ gap: 6 }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            {activeDays >= unlockDays ? "Patterns unlocked" : `${activeDays}/${unlockDays} days to your patterns`}
+          </Text>
+          <View
+            style={[styles.progressTrack, { backgroundColor: t.colors.card, borderRadius: t.radius.sm }]}
+            accessibilityRole="progressbar"
+            accessibilityLabel={`Progress toward your patterns: ${Math.min(activeDays, unlockDays)} of ${unlockDays} days`}
+            accessibilityValue={{ min: 0, max: unlockDays, now: Math.min(activeDays, unlockDays) }}
+          >
+            <View
+              style={[
+                styles.progressFill,
+                { backgroundColor: t.colors.primaryBright, borderRadius: t.radius.sm, width: `${progress * 100}%` },
+              ]}
+            />
+          </View>
+          {streak > 0 && (
+            <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+              Writing streak: {streak} {streak === 1 ? "day" : "days"}
+            </Text>
+          )}
         </View>
-      </View>
-      <TextInput
-        style={styles.input}
-        multiline
-        placeholder="What's going on today?"
-        placeholderTextColor="#5c6370"
-        value={text}
-        onChangeText={(next) => {
-          touchActivity(); // typing resets the inactivity auto-lock
-          setText(next);
-        }}
-      />
-      <TouchableOpacity style={styles.button} onPress={save} disabled={busy || !text.trim()}>
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save entry</Text>}
-      </TouchableOpacity>
-      <View style={styles.navRow}>
-        <NavButton label="Patterns" onPress={() => navigation.navigate("Insights")} />
-        <NavButton label="Question" onPress={() => navigation.navigate("Question")} />
-        <NavButton label="Settings" onPress={() => navigation.navigate("Settings")} />
-        <NavButton label="Get help" onPress={() => navigation.navigate("Crisis")} />
-      </View>
-    </ScrollView>
+        {wroteToday && <NoticeChip text="Already wrote today" accessibilityLabel="Already wrote today" />}
+        {draftRestored && <NoticeChip text="Draft restored" />}
+        <TextInput
+          style={[
+            styles.input,
+            {
+              backgroundColor: t.colors.card,
+              color: t.colors.text,
+              borderRadius: t.radius.lg,
+              padding: t.spacing.lg,
+              fontSize: t.type.bodyLarge.fontSize,
+            },
+          ]}
+          multiline
+          placeholder="What's going on today?"
+          placeholderTextColor={t.colors.placeholder}
+          value={text}
+          editable={!busy} // text typed mid-save must not be wiped by the clear
+          onChangeText={(next) => {
+            touchActivity(); // typing resets the inactivity auto-lock
+            if (draftRestored) setDraftRestored(false);
+            setText(next);
+          }}
+          accessibilityLabel="Journal entry"
+          // Privacy: keep journal text out of keyboard suggestion caches.
+          autoCorrect={false}
+          spellCheck={false}
+          autoCapitalize="sentences"
+          textContentType="none"
+        />
+        {text.length > SHOW_COUNT_ABOVE && (
+          <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "right" }}>
+            {text.length.toLocaleString()} / {MAX_ENTRY_CHARS.toLocaleString()}
+          </Text>
+        )}
+        {/* The explicit check-in: one tap, radio semantics, never required.
+            Tapping the selected option again clears it (back to the text
+            estimate) — changing your mind costs nothing. */}
+        <View style={{ gap: t.spacing.sm }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            How does today feel? Optional — one tap is enough.
+          </Text>
+          <View style={styles.moodRow} accessibilityLabel="Mood check-in">
+            {MOOD_OPTIONS.map((option) => {
+              const selected = selectedMood === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.label}
+                  style={[
+                    styles.moodOption,
+                    {
+                      backgroundColor: selected ? t.colors.primary : t.colors.card,
+                      borderRadius: t.radius.md,
+                      minHeight: t.minTouch,
+                    },
+                  ]}
+                  onPress={() => {
+                    touchActivity();
+                    setSelectedMood(selected ? null : option.value);
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`Mood: ${option.label}`}
+                >
+                  <Text
+                    style={{
+                      color: selected ? t.colors.onPrimary : t.colors.body,
+                      fontSize: t.type.bodySmall.fontSize,
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+        {text.length > 0 && (
+          <GhostButton label="Hide keyboard" onPress={() => Keyboard.dismiss()} center={false} />
+        )}
+        <PrimaryButton label="Save entry" onPress={save} disabled={!text.trim()} busy={busy} />
+        <InlineStatus message={status} tone={statusTone} />
+        <NavRow
+          items={[
+            { label: "History", onPress: () => navigation.navigate("History") },
+            { label: "Patterns", onPress: () => navigation.navigate("Insights") },
+            { label: "Question", onPress: () => navigation.navigate("Question") },
+            { label: "Settings", onPress: () => navigation.navigate("Settings") },
+            {
+              label: "Get help",
+              onPress: () => navigation.navigate("Crisis"),
+              tone: "help",
+              accessibilityLabel: "Get help — crisis resources",
+            },
+          ]}
+        />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
-}
-
-function NavButton({ label, onPress }: { label: string; onPress: () => void }): React.JSX.Element {
-  return (
-    <TouchableOpacity style={styles.navButton} onPress={onPress}>
-      <Text style={styles.navText}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-/** Quick client-side mood estimate: drives the local (device-only) trend
- * view before patterns unlock. Never sent as plaintext metadata and never
- * stored in the encrypted payload — the server's graded engine re-scores
- * the text at analysis time. */
-function localSentiment(text: string): number {
-  const positive = (text.toLowerCase().match(/\b(good|great|happy|calm|grateful|relaxed|excited|proud|hopeful)\b/g) ?? []).length;
-  const negative = (text.toLowerCase().match(/\b(bad|sad|anxious|anxiety|stressed|angry|worried|tired|lonely|overwhelmed)\b/g) ?? []).length;
-  // When positive == negative the ratio below already evaluates to 0, so
-  // `-` and `+` agree on every reachable input.
-  // Stryker disable ArithmeticOperator
-  if (positive + negative === 0) return 0;
-  // Stryker restore ArithmeticOperator
-  return Number(((positive - negative) / (positive + negative)).toFixed(2));
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0f1115" },
-  progressRow: { gap: 6 },
-  progressLabel: { color: "#8a91a3", fontSize: 13 },
-  progressTrack: { height: 6, borderRadius: 3, backgroundColor: "#1a1e26", overflow: "hidden" },
-  progressFill: { height: 6, borderRadius: 3, backgroundColor: "#4f7cff" },
-  input: { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 12, padding: 16, fontSize: 16, minHeight: 220, textAlignVertical: "top" },
-  button: { backgroundColor: "#4f7cff", borderRadius: 10, padding: 16, alignItems: "center" },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  navRow: { flexDirection: "row", gap: 10 },
-  navButton: { flex: 1, backgroundColor: "#1a1e26", borderRadius: 10, padding: 14, alignItems: "center" },
-  navText: { color: "#7f9bff", fontSize: 14, fontWeight: "600" },
+  flex: { flex: 1 },
+  container: { flex: 1 },
+  progressTrack: { height: 6, overflow: "hidden" },
+  progressFill: { height: 6 },
+  // Autogrowing multiline: a modest floor, no ceiling — the box grows with
+  // the entry instead of forcing a fixed 220pt frame.
+  input: { minHeight: 140, textAlignVertical: "top" },
+  moodRow: { flexDirection: "row", gap: 8 },
+  moodOption: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
 });

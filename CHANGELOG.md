@@ -1,0 +1,194 @@
+# Changelog
+
+All notable changes to this project are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
+[Semantic Versioning](https://semver.org/).
+
+## Unreleased
+
+Post-release remediation wave across the whole tree, grouped. (Backend now
+658 tests + 1 Postgres-gated skip; mobile 759 tests across 33 files; probe
+9/9.)
+
+### Security
+
+- Enclave keeps ONE zeroized working copy of the data key per recompute
+  run — per-item immutable `bytes(key)` copies would have lingered
+  unzeroized until GC.
+- Entry dates may be at most server-today + 1 day (device-local timezone
+  grace); backdating rules (no pre-account dates) unchanged.
+- Unified cross-platform crisis-language contract at
+  `shared/crisis_phrases.json`: a conservative client-side `dialog` tier,
+  and a suppress tier (`dialog` + `suppress_extra`) for server-side
+  question/card suppression. Crisis-adjacent patterns carry
+  `detail.sensitive=true`; the app renders a non-quoting card ("A difficult
+  thought has been returning…") with a support link instead of quoting the
+  text.
+- LLM consent is recorded (`llm_consent_at` + `llm_consent_disclosure`
+  "v1"), cleared on disable, and included in the export bundle.
+- Salt-lookup enumeration posture documented honestly: per-request
+  enumeration is closed (identical decoys for unknown AND deactivated
+  accounts); the longitudinal membership-transition oracle (decoy→real on
+  register, real→decoy on deactivation) is inherent to name-based systems
+  and is stated, not claimed away.
+- Mobile session token is stored AES-256-GCM-encrypted under a per-install
+  device key (`mobile/src/secureStore.ts`) — with the plain limitation that
+  the device key currently lives in AsyncStorage too (documented fallback
+  pending react-native-keychain), so backups include both key and
+  ciphertext.
+
+### Analysis engine
+
+- Full-family Benjamini–Hochberg: every testable candidate's p-value is
+  computed pre-gate and the effect gates filter only corrected survivors
+  (selecting on extremeness first voided FDR control — measured: ~half of
+  pure-noise corpora surfaced a false statistical card).
+- Replication gate: statistical kinds (temporal, mood_correlation, link,
+  inertia, instability, mood_shift) surface only after qualifying on ≥2
+  distinct recompute days that constitute an independent second observation
+  — evidence-date kinds need a qualification day contributing NEW evidence;
+  window-stat kinds need qualification days ≥2 calendar days apart.
+  Consequence: re-running an unchanged corpus the next day no longer
+  surfaces anything. Direct-measurement kinds keep immediate surfacing.
+- Measured false-card rates on pure noise: 0/60 single-shot; ≤1/24 runs
+  (4.2%) at daily cadence (14 recomputes), the survivor a documented
+  FDR-budget boundary case, not a gate leak (regression:
+  `test_daily_cadence_pure_noise_replication_bound`).
+- Sentiment lexicon curated: context-dependent words removed ("kind",
+  "fed", "present"); "hardly"/"barely" are negation-only per VADER.
+- Link cards report the modal exposed gap (`lag_days` + gap1/gap2 counts)
+  and say "the day after" only when gap 1 is the mode.
+- Inertia's comparative claim uses a Fisher-z difference test; link/mood
+  tests use autocorrelation-deflated effective sample sizes.
+- Presence topics require ≥4 distinct following-token contexts and are
+  suppressed when ≥80% covered by the run's recurring-phrase clusters
+  (anti-boilerplate); they carry `detail.presence=true`.
+- `update()` is copy-on-entry pure (input state never mutated); semantic
+  flips (dominant weekday / direction) retire the old pid to fading and
+  fork `pid~2` instead of silently relabeling under an intact history.
+- LLM grounding is word-token based (no substring grounding).
+
+### API
+
+- Canonical mount `/api/v1`; `/api` kept as a deprecated legacy alias.
+  `GET /api/v1/meta` returns `{unlock_days, llm_available, api_version,
+  version}` so clients can discover the canonical base.
+- `GET /readyz` (DB `SELECT 1`; 503 on failure) alongside `/healthz`.
+- `DELETE /account` prefers the `X-Account-Verifier` header (JSON body is a
+  deprecated fallback — DELETE bodies are unreliable across clients and
+  proxies).
+- Uniform error envelope `{"detail", "code"}` with snake_case codes:
+  unauthorized, invalid_credentials, processing_session_required,
+  verification_failed (403, wrong verifier), processing_session_invalid,
+  not_found, conflict, account_deleted (410), payload_too_large,
+  quota_exceeded, blob_quota_exceeded, validation_error, rate_limited
+  (+Retry-After), bad_request, entry_blob_invalid, entry_payload_malformed,
+  internal_error, service_unavailable. 422s still never echo input.
+- Export endpoint rate-limited (`MINDPATTERN_EXPORT_RATE_LIMIT`/`_WINDOW`,
+  defaults 5/60); numeric settings gained upper bounds (token TTL ≤ 30d,
+  processing TTL ≤ 3600s, rate windows ≤ 3600s).
+
+### Database
+
+- `insights` carries `UniqueConstraint(user_id, kind, for_date)` with
+  dialect upsert writes (`on_conflict_do_update`) — multi-worker-safe.
+- Question rows older than 90 days are purged during recompute.
+- Recompute reads are SQL-bounded (`LIMIT recompute_entry_limit`) and never
+  hold a transaction across analysis (the write phase is a second, short
+  transaction).
+- Connection pool env-configurable (`MINDPATTERN_DB_POOL_SIZE` /
+  `_MAX_OVERFLOW` / `_POOL_TIMEOUT`, defaults 5/10/30).
+- Alembic: pg advisory lock (727272) + `lock_timeout` 15s +
+  `statement_timeout` 300s on Postgres; the entrypoint retries migration
+  5× at 3s intervals before failing closed. New revisions e930dbc4f001
+  (insights unique) and a7c91e4b2d03 (consent record).
+- `MINDPATTERN_TEST_DB_URL` runs the pytest suite against an external DB
+  (CI's Postgres job; non-sqlite URLs must contain "test" in the DB name).
+
+### Mobile
+
+- Entry history screen (read/edit/delete; edit = delete + re-upload under a
+  fresh id, delete first so a failed replacement never duplicates).
+- Explicit one-tap mood check-in (a deliberate tap always wins over
+  inferred sentiment); day-1 generic reflective questions pre-threshold,
+  answered fully on-device (pool pinned to `shared/generic_questions.json`);
+  "Write about this" question→journal bridge.
+- 3-panel first-run onboarding (daily habit + 30-day threshold, encryption
+  with the one honest exception, no-recovery warning + 13+ line) and an
+  in-app offline privacy policy screen.
+- Dark + light theme with a full accessibility pass (labels/roles, ≥ 4.5:1
+  contrast pinned by tests, 44pt targets); honest inline save/sync feedback
+  ("Saved ✓" / "Saved — will sync when online" / a loud "Not saved").
+- Daily auto-recompute removed after the red-team audit: shipping the data
+  key is only ever an explicit user act from the Question screen.
+- Client targets `/api/v1` and sends the account verifier by header.
+- Push-only sync documented as deliberate v1 scope (single-device writer;
+  History pulls this account's entries; no multi-device conflict model).
+- Recovered-entries surface in Settings: rejected/quarantined uploads are
+  preserved, never destroyed.
+
+### CI/DevOps
+
+- CI overhaul: Postgres service job running the full backend suite against
+  real Postgres, matrix Python 3.12/3.14, Docker build + compose boot gate
+  (healthz/readyz assertions, migration-at-head check), contract gates for
+  `probe_brain.py` and `verify_vectors.mjs`, and a supply-chain job
+  (pip-audit; npm audit advisory until the Metro chain is fixed).
+- Lint/type tooling: ruff gate (green rule set), advisory mypy step,
+  pre-commit config, Dependabot for pip/npm/github-actions/docker.
+- Scheduled weekly mutation testing (mutmut, resumable cache, results
+  artifact); still not a PR gate.
+- Packaging/hygiene: Dockerfile base image pinned by digest, compose
+  postgres pinned by digest, entrypoint migration retry loop, optional
+  profile-gated backup service with documented retention/encryption duties,
+  MIT LICENSE, this changelog.
+- Deliberate observability trade-off, stated plainly: no metrics or crash
+  reporting ship in v1 (privacy posture) — production visibility is
+  healthz/readyz + container logs. Documented gap, not an oversight.
+
+## 1.0.0 - 2026-09-07
+
+First release-quality tree after three audit/remediation rounds (security
+adversarial audit, analysis-methodology audit, red-team round).
+
+### Engine
+
+- Deterministic, idiographic "mini-brain" v3: temporal (every weekday
+  tested, Benjamini–Hochberg FDR), within-person mood correlations on
+  residuals, lag-1 day-after links, inertia, instability, EWMA mood shift,
+  rumination clustering, emergent topics, MinHash/LSH recurring phrases.
+- Pattern lifecycle (`candidate → emerging → confirmed → fading →
+  archived`, 45-day evidence half-life) with per-card evidence panels.
+- Graded VADER-style sentiment engine; corrupt state degrades to amnesia.
+- Ground-truth probe (`probe_brain.py`, 9/9 required, zero false
+  associations) that exits non-zero on failure.
+
+### Security model
+
+- Client-side key derivation (PBKDF2-HMAC-SHA256, 600k) with HKDF split
+  into auth key (server stores `scrypt(auth_key)`) and data key.
+- AES-256-GCM blobs AAD-bound to (user, entry, context); cross-platform
+  TS⇄Python crypto pinned by `shared/vectors.json` (incl. non-ASCII AAD).
+- Single-use, memory-only processing sessions with key zeroization;
+  30-active-day revelation threshold enforced server-side.
+- Enumeration-resistant salt lookup with decoys; epoch token revocation;
+  re-authentication for account deletion and LLM enablement.
+- Fail-closed ops gates (production default env, ≥32-char token secret, no
+  SQLite outside development), security headers on every response, 2 MiB
+  body cap, bounded rate limiting, no access logs in the image.
+
+### Platform
+
+- FastAPI backend (Python 3.12+), Alembic migrations run by the container
+  entrypoint, docker-compose stack (postgres + api).
+- React Native mobile client (iOS/Android) with offline sync queue,
+  device-local baseline mood trend, offline crisis resources screen.
+- Optional consent-gated, output-sanitized LLM analysis path (off by
+  default).
+
+### Verification
+
+- 573 backend tests (unit + API integration + crypto vectors +
+  production-hardening + adversarial regressions), 97% coverage floor.
+- 425 mobile tests with 98% per-file coverage thresholds.
+- Mutation-tested security + services cores (mutmut; Stryker on mobile).

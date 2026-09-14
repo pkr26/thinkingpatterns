@@ -1,7 +1,8 @@
 /**
- * SettingsScreen: server-URL policy with the explicit insecure-HTTP
- * consent dialog, re-authenticated LLM consent toggle, encrypted export
- * (incl. share-sheet dismissal), and the three-stage destructive delete.
+ * SettingsScreen: server-URL policy (now under "Advanced") with the
+ * explicit insecure-HTTP consent dialog, re-authenticated LLM consent
+ * toggle, encrypted export (incl. share-sheet dismissal), the three-stage
+ * destructive delete, the recovered-entries surface, and the About section.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -21,13 +22,21 @@ vi.mock("../../src/api/client", async (importOriginal) => {
 
 const authKeyB64 = () => authKey.toString("base64");
 const verifyPasswordForVault = vi.fn(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
-vi.mock("../../src/reauth", () => ({
-  verifyPasswordForVault: (...args: unknown[]) => verifyPasswordForVault(...(args as [string])),
-}));
+vi.mock("../../src/reauth", async (importOriginal) => {
+  // The error classifiers stay REAL: the screen branches 403-vs-401 on them.
+  const actual = await importOriginal<typeof import("../../src/reauth")>();
+  return {
+    ...actual,
+    verifyPasswordForVault: (...args: unknown[]) => verifyPasswordForVault(...(args as [string])),
+  };
+});
 
 vi.mock("../../src/offlineQueue", () => ({
   flushQueue: vi.fn(async () => 0),
   clearQueue: vi.fn(async () => {}),
+  rejectedEntryCount: vi.fn(async () => 0),
+  requeueRejected: vi.fn(async () => 0),
+  quarantinedQueueExists: vi.fn(async () => false),
 }));
 
 const signOut = vi.fn(async () => {});
@@ -37,7 +46,9 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api, getBaseUrl, getInsecureConsentUrl, setBaseUrl } = await import("../../src/api/client");
-const { flushQueue, clearQueue } = await import("../../src/offlineQueue");
+const { flushQueue, clearQueue, rejectedEntryCount, requeueRejected, quarantinedQueueExists } = await import(
+  "../../src/offlineQueue"
+);
 const { SettingsScreen } = await import("../../src/screens/SettingsScreen");
 const { vault } = await import("../../src/vault");
 const {
@@ -69,6 +80,13 @@ beforeEach(() => {
   vi.mocked(setBaseUrl).mockReset();
   vi.mocked(setBaseUrl).mockImplementation(async () => null);
   vi.mocked(flushQueue).mockClear();
+  vi.mocked(flushQueue).mockImplementation(async () => 0);
+  vi.mocked(rejectedEntryCount).mockReset();
+  vi.mocked(rejectedEntryCount).mockImplementation(async () => 0);
+  vi.mocked(requeueRejected).mockReset();
+  vi.mocked(requeueRejected).mockImplementation(async () => 0);
+  vi.mocked(quarantinedQueueExists).mockReset();
+  vi.mocked(quarantinedQueueExists).mockImplementation(async () => false);
   signOut.mockClear();
   nav.popToTop.mockClear();
   nav.navigate.mockClear();
@@ -103,7 +121,7 @@ describe("SettingsScreen chrome", () => {
     expect(root.root.findAllByType(Switch)).toHaveLength(1);
     const sw = root.root.findAllByType(Switch)[0];
     expect(sw.props.value).toBe(true);
-    expect(sw.props.trackColor).toEqual({ true: "#4f7cff", false: "#1a1e26" });
+    expect(sw.props.trackColor).toEqual({ true: "#4f7cff", false: "#141821" });
   });
 
   it("renders an empty, idle form before the stored URL resolves", async () => {
@@ -124,21 +142,27 @@ describe("SettingsScreen chrome", () => {
   });
 
   it("pins the visual language of the screen", async () => {
+    // Design-system pass: theme-composed styles; the footnote moved off the
+    // failing #5c6370 onto muted #8a91a3; the button fill is AA-passing.
     const { expectStyle } = await import("../helpers/rtr");
     vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expectStyle(root, { flex: 1, backgroundColor: "#0f1115", padding: 24, gap: 14 });
-    expectStyle(root, { color: "#8a91a3", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginTop: 8 });
-    expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 15 });
-    expectStyle(root, { backgroundColor: "#4f7cff", borderRadius: 10, padding: 16, alignItems: "center" });
-    expectStyle(root, { backgroundColor: "#c0392b" }); // danger
-    expectStyle(root, { padding: 12, alignItems: "center" }); // ghost
+    expectStyle(root, { flex: 1 }); // container base
+    expectStyle(root, { backgroundColor: "#0f1115", padding: 24, gap: 14 }); // container themed
+    expectStyle(root, { color: "#8a91a3", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginTop: 8 }); // label
+    expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 15 }); // input
+    expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
+    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { backgroundColor: "#c0392b", minHeight: 44 }); // danger fill
+    expectStyle(root, { padding: 12 }); // GhostButton base
     expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // ghostText
-    expectStyle(root, { color: "#fff", fontSize: 16, fontWeight: "600" }); // buttonText
-    expectStyle(root, { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#1a1e26", borderRadius: 10, padding: 14 });
+    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // buttonText
+    expectStyle(root, { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }); // row base
+    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 10 }); // row themed
     expectStyle(root, { color: "#b6bdc9", fontSize: 13, flex: 1, lineHeight: 18 }); // rowText
-    expectStyle(root, { color: "#5c6370", fontSize: 12, textAlign: "center", marginTop: 16, lineHeight: 18 }); // footnote
+    expectStyle(root, { color: "#8a91a3", fontSize: 12, lineHeight: 18 }); // footnote (contrast fix)
+    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 }); // help surface
   });
 
   it("shows the insecure-HTTP dialog even before stored consent resolves", async () => {
@@ -370,11 +394,12 @@ describe("LLM consent toggle", () => {
     });
     await flush();
     await reauth(root);
-    expect(Alert.alert).toHaveBeenCalledWith("Could not complete", "invalid credentials");
+    // Calm fallback copy — no raw error text in the dialog (audit fix).
+    expect(Alert.alert).toHaveBeenCalledWith("Could not complete", "Something went wrong — try again.");
     expect(root.root.findAllByType(Switch)[0].props.value).toBe(false);
   });
 
-  it("falls back to 'unknown error' for non-Error consent failures", async () => {
+  it("falls back to calm copy for non-Error consent failures", async () => {
     vi.mocked(api.setLlmConsent).mockRejectedValue("nope" as never);
     const root = await renderWithLlm();
     const sw = root.root.findAllByType(Switch)[0];
@@ -384,7 +409,7 @@ describe("LLM consent toggle", () => {
     });
     await flush();
     await reauth(root);
-    expect(Alert.alert).toHaveBeenCalledWith("Could not complete", "unknown error");
+    expect(Alert.alert).toHaveBeenCalledWith("Could not complete", "Something went wrong — try again.");
   });
 });
 
@@ -454,22 +479,28 @@ describe("encrypted export", () => {
     expect(Share.share).not.toHaveBeenCalled();
   });
 
-  it("surfaces export failures", async () => {
-    vi.mocked(api.exportAccount).mockRejectedValue(new Error("rate limited"));
+  it("surfaces export failures with calm copy (status-mapped for ApiError)", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vi.mocked(api.exportAccount).mockRejectedValue(new ApiError(429, "rate_limited", "rate_limited", 5_000));
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await pressLabel(root, "Export my data (encrypted)");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "rate limited");
+    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "Too many attempts — wait a moment, then try again.");
+    // A plain library Error degrades to the fallback sentence, never an echo.
+    vi.mocked(api.exportAccount).mockRejectedValue(new Error("rate limited"));
+    await pressLabel(root, "Export my data (encrypted)");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "Something went wrong — try again.");
   });
 
-  it("falls back to 'unknown error' for non-Error export failures", async () => {
+  it("falls back to calm copy for non-Error export failures", async () => {
     vi.mocked(api.exportAccount).mockRejectedValue("nope" as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await pressLabel(root, "Export my data (encrypted)");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "unknown error");
+    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "Something went wrong — try again.");
   });
 
   it("keeps working when the pre-export flush itself fails", async () => {
@@ -565,6 +596,9 @@ describe("destructive delete", () => {
     await storage.setItem("mindpattern.moodlog.user-1", "[{\"date\":\"2026-09-01\",\"value\":0.5}]");
     await storage.setItem("@mindpattern/last_recompute_user-1", "2026-09-04");
     await storage.setItem("@mindpattern/salt_alice", "c2FsdA==");
+    // Per-account acknowledgments die with the account too.
+    await storage.setItem("@mindpattern/keyship_consent_user-1", "1");
+    await storage.setItem("@mindpattern/onboarding_seen_user-1", "1");
 
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
@@ -577,6 +611,8 @@ describe("destructive delete", () => {
     expect(clearQueue).toHaveBeenCalledTimes(1); // the queue wipe itself
     expect(await storage.getItem("mindpattern.moodlog.user-1")).toBeNull();
     expect(await storage.getItem("@mindpattern/last_recompute_user-1")).toBeNull();
+    expect(await storage.getItem("@mindpattern/keyship_consent_user-1")).toBeNull();
+    expect(await storage.getItem("@mindpattern/onboarding_seen_user-1")).toBeNull();
     expect(api.clearCachedSalt).toHaveBeenCalledWith("alice");
   });
 
@@ -590,11 +626,11 @@ describe("destructive delete", () => {
     await flush();
     await reauth(root);
 
-    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", "invalid credentials");
+    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", "Something went wrong — try again.");
     expect(signOut).not.toHaveBeenCalled();
   });
 
-  it("falls back to 'unknown error' for non-Error delete failures", async () => {
+  it("falls back to calm copy for non-Error delete failures", async () => {
     vi.mocked(api.deleteAccount).mockRejectedValue("nope" as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
@@ -603,7 +639,7 @@ describe("destructive delete", () => {
     await pressAlertButton("Continue to password");
     await flush();
     await reauth(root);
-    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", "unknown error");
+    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", "Something went wrong — try again.");
   });
 
   // H2: a wrong password must never delete anything.
@@ -678,5 +714,252 @@ describe("sign out", () => {
     });
     await flush();
     expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(false);
+  });
+});
+
+describe("verification-failure branching (403 vs 401)", () => {
+  it("a 403 on the LLM toggle keeps the card up for a retry (NOT a session death)", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
+    vi.mocked(api.setLlmConsent).mockRejectedValue(new ApiError(403, "verification_failed", "verification_failed"));
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const sw = root.root.findAllByType(Switch)[0];
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    await reauth(root);
+    expect(Alert.alert).toHaveBeenCalledWith("That password didn't match", expect.stringContaining("try again"));
+    // The card stays: pending is intact, the password field is cleared.
+    expect(textOf(root)).toContain("Enter your password to enable");
+    expect((inputByPlaceholder(root, "password").props as { value: string }).value).toBe("");
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("a 401 on the LLM toggle reports the dead session (vault already locked by the hook)", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
+    vi.mocked(api.setLlmConsent).mockRejectedValue(new ApiError(401, "invalid token"));
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const sw = root.root.findAllByType(Switch)[0];
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    await reauth(root);
+    expect(Alert.alert).toHaveBeenCalledWith("Session expired", "Please unlock again.");
+    // The flow concluded — the card is gone (there is nothing to retry here).
+    expect(textOf(root)).not.toContain("Enter your password to enable");
+  });
+
+  it("a 403 on account deletion keeps the session and offers a retry", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vi.mocked(api.deleteAccount).mockRejectedValue(new ApiError(403, "verification_failed", "verification_failed"));
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Delete my account and data");
+    await pressAlertButton("Continue");
+    await pressAlertButton("Continue to password");
+    await flush();
+    await reauth(root);
+    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", expect.stringContaining("didn't accept that password"));
+    expect(signOut).not.toHaveBeenCalled();
+    expect(vault.isUnlocked()).toBe(true);
+  });
+
+  it("a 401 on account deletion reports the dead session honestly", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vi.mocked(api.deleteAccount).mockRejectedValue(new ApiError(401, "invalid token"));
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Delete my account and data");
+    await pressAlertButton("Continue");
+    await pressAlertButton("Continue to password");
+    await flush();
+    await reauth(root);
+    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", expect.stringContaining("Session expired"));
+    expect(signOut).not.toHaveBeenCalled();
+  });
+});
+
+describe("recovered entries surface", () => {
+  it("is hidden when the rejected store is empty", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).not.toContain("couldn't sync");
+    expect(textOf(root)).not.toContain("Try syncing them again");
+  });
+
+  it("offers one-tap recovery when rejected entries exist (requeue + flush)", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(2);
+    vi.mocked(requeueRejected).mockResolvedValue(2);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("2 entries couldn't sync and were kept safely on this device.");
+    await pressLabel(root, "Try syncing them again");
+    await flush();
+    expect(requeueRejected).toHaveBeenCalledTimes(1);
+    expect(flushQueue).toHaveBeenCalledWith("user-1");
+    expect(Alert.alert).toHaveBeenCalledWith("Recovered entries", expect.stringContaining("moved back into the sync queue"));
+  });
+
+  it("singular wording for a single recovered entry", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(1);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("1 entry couldn't sync and was kept safely on this device.");
+  });
+
+  it("reports honestly when nothing could be moved yet", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(1);
+    vi.mocked(requeueRejected).mockResolvedValue(0);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Try syncing them again");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Recovered entries", expect.stringContaining("stay safely stored"));
+  });
+
+  it("a requeue failure reassures instead of alarming", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(1);
+    vi.mocked(requeueRejected).mockRejectedValue(new Error("disk gone"));
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Try syncing them again");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Could not retry", expect.stringContaining("still safe"));
+  });
+
+  it("shows the quarantine notice when a corrupt queue payload was set aside", async () => {
+    vi.mocked(quarantinedQueueExists).mockResolvedValue(true);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("damaged piece of the offline queue was set aside instead of deleted");
+  });
+});
+
+describe("About and Advanced sections", () => {
+  it("shows the app version and the honest privacy note", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: false, version: "0.9.1" } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("About");
+    expect(textOf(root)).toContain("MindPattern 1.0.0 · server 0.9.1");
+    expect(textOf(root)).toContain("encrypted on this device before it leaves");
+    expect(textOf(root)).toContain("single-use session");
+  });
+
+  it("the privacy policy is one tap from About", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Privacy policy");
+    expect(nav.navigate).toHaveBeenCalledWith("Privacy");
+  });
+
+  it("the daily-reminder row is honest: not in this version, and never a fake control", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Daily reminder");
+    expect(textOf(root)).toContain("Reminders aren't in this version");
+    expect(textOf(root)).toContain("planned for a future update");
+    expect(textOf(root)).toContain("never sent anywhere");
+    // No switch, no button: an honest note, not a pretend feature.
+    expect(root.root.findAllByType(Switch)).toHaveLength(0);
+  });
+
+  it("renders the version without the server part when meta has none", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("MindPattern 1.0.0");
+    expect(textOf(root)).not.toContain("server undefined");
+  });
+
+  it("the developer server-URL setting sits in Advanced, after About", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const texts = (await import("../helpers/rtr")).allText(root);
+    const iAbout = texts.findIndex((t) => t === "About");
+    const iAdvanced = texts.findIndex((t) => t === "Advanced");
+    const iSaveUrl = texts.findIndex((t) => t.includes("Save server URL"));
+    expect(iAbout).toBeGreaterThanOrEqual(0);
+    expect(iAdvanced).toBeGreaterThan(iAbout);
+    expect(iSaveUrl).toBeGreaterThan(iAdvanced);
+    // And the consumer actions come first: export precedes About.
+    expect(texts.findIndex((t) => t.includes("Export my data"))).toBeLessThan(iAbout);
+  });
+});
+
+describe("accessibility", () => {
+  it("labels the LLM switch and reports checked/disabled state", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const sw = root.root.findAllByType(Switch)[0];
+    expect(sw.props.accessibilityLabel).toBe("Allow third-party AI analysis");
+    expect(sw.props.accessibilityState).toEqual({ checked: false, disabled: false });
+  });
+
+  it("labels the inputs explicitly", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(inputByPlaceholder(root, "https://your-server:8000").props.accessibilityLabel).toBe("Server URL");
+    await pressLabel(root, "Delete my account and data");
+    await pressAlertButton("Continue");
+    await pressAlertButton("Continue to password");
+    await flush();
+    expect(inputByPlaceholder(root, "password").props.accessibilityLabel).toBe("Password confirmation");
+  });
+});
+
+describe("recovered entries surface — edge branches", () => {
+  it("singular moved-count and nothing-left copy", async () => {
+    // Mount read → 1; the post-recovery read → 0 left.
+    vi.mocked(rejectedEntryCount).mockResolvedValueOnce(1).mockResolvedValue(0);
+    vi.mocked(requeueRejected).mockResolvedValue(1);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Try syncing them again");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Recovered entries",
+      "1 entry moved back into the sync queue — they upload on the next sync.",
+    );
+  });
+
+  it("some still waiting after the move", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(3);
+    vi.mocked(requeueRejected).mockResolvedValue(2);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Try syncing them again");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Recovered entries",
+      "2 entries moved back into the sync queue — 3 still waiting.",
+    );
+  });
+
+  it("ignores the recovery tap while another action is busy", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(1);
+    let resolveExport: ((v: unknown) => void) | undefined;
+    vi.mocked(api.exportAccount).mockImplementation(
+      () => new Promise((resolve) => (resolveExport = resolve)),
+    );
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const { firePress, act } = await import("../helpers/rtr");
+    await firePress(root, "Export my data (encrypted)");
+    await flush();
+    await pressLabel(root, "Try syncing them again");
+    await flush();
+    expect(requeueRejected).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveExport?.({});
+    });
+    await flush();
   });
 });

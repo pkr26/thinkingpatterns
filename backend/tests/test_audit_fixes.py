@@ -338,7 +338,10 @@ def test_crisis_labels_never_generate_reflective_questions():
 # --- finding: SQLite FK enforcement -------------------------------------------------------
 
 
-async def test_sqlite_foreign_keys_are_enforced(app):
+async def test_sqlite_foreign_keys_are_enforced(app, settings):
+    if not settings.database_url.startswith("sqlite"):
+        pytest.skip("PRAGMA foreign_keys is SQLite-specific (Postgres enforces FKs natively)")
+
     from sqlalchemy import text
 
     async with app.state.engine.begin() as conn:
@@ -537,7 +540,7 @@ def test_phrase_detection_keeps_recent_entries_when_capped(monkeypatch):
     for offset in (14, 10, 5, 0):  # 4 distinct days, 14-day span: qualifies
         window.append(JournalEntry(text=phrase + ".",
                                    entry_date=T0 - timedelta(days=offset), sentiment=None))
-    signals = brain._detect_phrases(window)
+    signals = brain._detect_phrases(brain._phrase_clusters(window))
     assert any("replaying that conversation" in s.label for s in signals)
 
 
@@ -624,13 +627,15 @@ async def test_concurrent_recomputes_for_one_user_serialize(client, monkeypatch)
     assert not overlapped
 
 
-# --- finding: _UserLocks eviction could orphan a parked waiter ----------------------------
+# --- finding: UserLocks eviction could orphan a parked waiter -----------------
+# (the registry moved from app.api.entries to app.locks in the 2026-09
+# remediation round so insights.py stops importing a private router name)
 
 
 async def test_user_locks_never_evict_a_lock_with_waiters():
-    from app.api.entries import _UserLocks
+    from app.locks import UserLocks
 
-    locks = _UserLocks(max_keys=1)
+    locks = UserLocks(max_keys=1)
     entered = asyncio.Event()
     release = asyncio.Event()
     acquired: list[asyncio.Lock] = []
@@ -666,9 +671,9 @@ async def test_user_locks_never_evict_a_lock_with_waiters():
 
 
 async def test_user_locks_still_recycle_idle_entries():
-    from app.api.entries import _UserLocks
+    from app.locks import UserLocks
 
-    locks = _UserLocks(max_keys=2)
+    locks = UserLocks(max_keys=2)
     for key in ("a", "b"):
         async with locks.hold(key):
             pass
@@ -731,9 +736,30 @@ async def test_load_rows_has_stable_total_order(client, app):
         await s.execute(sql_update(Entry).values(
             received_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
         await s.commit()
-        rows = await _load_rows(s, emu.user_id)
+        rows = await _load_rows(s, emu.user_id, limit=10)
     # Entry ids are random uuid hex, so ascending id order can only come from
     # an explicit ORDER BY ... id — never from insertion/rowid order.
     ids = [row.id for row in rows]
     assert len(ids) == 5
     assert ids == sorted(ids)
+
+
+async def test_load_rows_sql_bounds_to_the_most_recent_n(client, app):
+    """The corpus load is LIMITed in SQL (recency DESC + reversed), not
+    fetched whole and sliced in Python: exactly the most recent N entries
+    come back, in chronological order for the analyzer."""
+    from app.api.insights import _load_rows
+
+    emu = ClientEmulator("corpuscap", "pw-corpus-cap")
+    await emu.register(client)
+    await emu.backdate_account(client, days=10)
+    day = date.today()
+    # 6 entries on 6 distinct days; the limit keeps the NEWEST 4.
+    for offset in range(6, 0, -1):
+        d = day - timedelta(days=offset)
+        await emu.create_entry(client, f"day minus {offset}", d,
+                               client_entry_id=f"e-cap-{offset}")
+    async with app.state.sessionmaker() as s:
+        rows = await _load_rows(s, emu.user_id, limit=4)
+    dates = [row.entry_date for row in rows]
+    assert dates == [day - timedelta(days=o) for o in (4, 3, 2, 1)]  # newest 4, ascending

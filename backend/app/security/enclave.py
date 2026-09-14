@@ -6,7 +6,10 @@ The client delivers its data key into a short-lived, memory-only session
 can overwrite the bytes, not just drop the reference. What zeroization
 covers — and honestly does not — is documented on SecureProcessingContext:
 Python strings produced by the analyzer are immutable and linger until GC;
-the buffers the enclave owns are the ones that get scrubbed.
+the buffers the enclave owns are the ones that get scrubbed — including the
+single working copy of the data key a run decrypts with (minting a fresh
+``bytes(key)`` per ITEM would leave N immutable key copies unzeroized
+until GC; one bytearray per run is scrubbed on every exit path instead).
 
 Processing sessions are single-use: the key is destroyed the moment a
 recompute consumes it (success or failure), so the keystore never holds a
@@ -162,7 +165,8 @@ def plaintext_windows() -> int:
 class SecureProcessingContext:
     """decrypt -> analyze -> re-encrypt -> zeroize.
 
-    Zeroization scope (deliberate, documented): the key and the plaintext
+    Zeroization scope (deliberate, documented): the key, the ONE working
+    key copy this run mints for the whole item batch, and the plaintext
     bytearrays this context owns are overwritten on exit. The analyzer it
     calls unavoidably creates Python str copies of plaintext (immutable,
     GC-reclaimed) — the "milliseconds" claim in old marketing copy only ever
@@ -181,14 +185,21 @@ class SecureProcessingContext:
         buffers: list[SecureBuffer] = []
         with _windows_lock:
             _open_plaintext_windows += 1
+        # One working copy of the key for the WHOLE batch: decrypt() took
+        # bytes(self._key) per item, so an N-entry recompute left N
+        # immutable key copies to the GC. bytearray is bytes-like for
+        # AESGCM, so the same buffer can drive every decryption and then be
+        # scrubbed with the rest.
+        key_material = bytearray(self._key)
         try:
             for aad, blob in encrypted:
-                plaintext = decrypt(bytes(self._key), blob, aad)
+                plaintext = decrypt(key_material, blob, aad)
                 buffers.append(SecureBuffer(plaintext))
             return analyze([buf.data for buf in buffers])
         finally:
             for buf in buffers:
                 buf.zeroize()
+            zeroize(key_material)
             zeroize(self._key)
             with _windows_lock:
                 _open_plaintext_windows -= 1

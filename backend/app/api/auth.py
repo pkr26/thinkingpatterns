@@ -31,8 +31,8 @@ import hmac
 import os
 
 import anyio.to_thread
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Request
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,7 @@ from ..cache import (
     make_rate_limiter,
     record_keyed_failure,
 )
-from ..deps import get_session, require_user
+from ..deps import ApiError, get_session, require_user
 from ..models import User
 from ..schemas import LoginRequest, RegisterRequest, SaltLookupRequest, SaltResponse, TokenResponse
 from ..security.kdf import hkdf_sha256
@@ -128,11 +128,21 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
         salt_bytes = base64.b64decode(body.salt, validate=True)
         verifier_bytes = base64.b64decode(body.verifier, validate=True)
     except _b64_decode_error:
-        raise HTTPException(status_code=422, detail="salt and verifier must be base64")
+        raise ApiError(
+            status_code=422, detail="salt and verifier must be base64", code="validation_error"
+        )
     if len(salt_bytes) != SALT_BYTES:
-        raise HTTPException(status_code=422, detail=f"salt must be exactly {SALT_BYTES} bytes")
+        raise ApiError(
+            status_code=422,
+            detail=f"salt must be exactly {SALT_BYTES} bytes",
+            code="validation_error",
+        )
     if len(verifier_bytes) != AUTH_KEY_SIZE:
-        raise HTTPException(status_code=422, detail=f"verifier must be {AUTH_KEY_SIZE} bytes")
+        raise ApiError(
+            status_code=422,
+            detail=f"verifier must be {AUTH_KEY_SIZE} bytes",
+            code="validation_error",
+        )
 
     # Hash FIRST, before the existence check, so the taken/free paths are
     # computationally identical (no timing oracle on top of the status code).
@@ -144,7 +154,7 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
     existing = await session.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none() is not None:
         record_keyed_failure(request, username_key, settings.auth_rate_window)
-        raise HTTPException(status_code=409, detail="username already taken")
+        raise ApiError(status_code=409, detail="username already taken", code="conflict")
 
     user = User(
         username=body.username,
@@ -165,7 +175,7 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
         # index is the authority, the pre-check above is just fast-path UX.
         await session.rollback()
         record_keyed_failure(request, username_key, settings.auth_rate_window)
-        raise HTTPException(status_code=409, detail="username already taken") from exc
+        raise ApiError(status_code=409, detail="username already taken", code="conflict") from exc
     return response
 
 
@@ -213,13 +223,13 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
         await hash_verifier_off_loop(
             b"\x00" * AUTH_KEY_SIZE, b"\x00" * 16, limiter=_auth_limiter(request)
         )
-        raise HTTPException(status_code=401, detail="invalid credentials")
+        raise ApiError(status_code=401, detail="invalid credentials", code="invalid_credentials")
     candidate = await hash_verifier_off_loop(
         verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
     )
     if not hmac.compare_digest(candidate, bytes(user.verifier)):
         record_keyed_failure(request, username_key, settings.auth_rate_window)
-        raise HTTPException(status_code=401, detail="invalid credentials")
+        raise ApiError(status_code=401, detail="invalid credentials", code="invalid_credentials")
     return _issue(request, user)
 
 
@@ -228,12 +238,25 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
     status_code=204,
     dependencies=[Depends(make_rate_limiter("auth-logout", "auth_rate_limit", "auth_rate_window"))],
 )
-async def logout(user: User = Depends(require_user), session: AsyncSession = Depends(get_session)):
+async def logout(
+    request: Request,
+    user: User = Depends(require_user),
+    session: AsyncSession = Depends(get_session),
+):
     """Revoke every bearer token for this account (all devices) at once.
 
     Sign-out on one device cannot selectively kill its own token without
     per-token state; the epoch bump retires them all — the user re-logs-in
     elsewhere, which is the safe direction to err for journal data.
+
+    The bump is a single UPDATE (epoch = epoch + 1), not a read-modify-write
+    of the user row: two overlapping logouts must still bump twice, never
+    lost-update to the same value. Any in-memory processing sessions for the
+    account die with it — after sign-out nothing may still hold the data key
+    (the account-deletion path does the same purge).
     """
-    user.token_epoch = user.token_epoch + 1
+    await session.execute(
+        update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)
+    )
     await session.commit()
+    request.app.state.key_store.destroy_all_for_owner(user.id)

@@ -22,6 +22,12 @@ from datetime import date
 NUM_PERM = 64
 BANDS = 16
 ROWS = 4  # BANDS * ROWS == NUM_PERM
+# Accepted recall: 16 bands x 4 rows proposes a candidate pair with
+# probability 1 - (1 - s^4)^16 ≈ 0.64 at the s = 0.5 confirmation
+# threshold (and ≈ 0.995 at s = 0.8). Clustering is a recall device for
+# recurring-thought hints, not an exact index: a missed pair delays a
+# pattern, it never invents one — and tighter banding would cost the
+# (near-)linear runtime that keeps recompute cheap.
 MERSENNE = (1 << 61) - 1
 DEFAULT_JACCARD = 0.5
 DEFAULT_MIN_SIZE = 3
@@ -97,7 +103,10 @@ def _shingle_hash(shingle: str) -> int:
 
 def signature(tokens: list[str]) -> list[int]:
     """NUM_PERM-component MinHash signature of a token list."""
-    hashes = [_shingle_hash(s) for s in sorted(shingles(tokens))]
+    # No shingle ordering needed: each component is a MIN over all shingle
+    # hashes, and min is order-independent (a wasted sorted() used to run
+    # here). The set dedupes; the generator consumes it in any order.
+    hashes = [_shingle_hash(s) for s in shingles(tokens)]
     if not hashes:
         return [0] * NUM_PERM
     return [

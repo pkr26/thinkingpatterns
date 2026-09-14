@@ -34,11 +34,11 @@ async def seed_corpus(client, emu, days: int) -> None:
             await emu.create_entry(client, CALM, day, client_entry_id=f"c-{day.isoformat()}")
 
 
-async def test_full_pipeline_unlocks_at_threshold(client):
+async def test_full_pipeline_unlocks_at_threshold(client, monkeypatch):
     emu = ClientEmulator("longterm", "deep-password")
     await emu.register(client)
     # 70 days = 10 Sundays: enough mentions (≥8) for the base-rate-corrected
-    # temporal test, and enough occurrences (≥10) for immediate surfacing.
+    # temporal test.
     await seed_corpus(client, emu, days=70)
 
     session_token = await emu.open_processing_session(client)
@@ -50,9 +50,28 @@ async def test_full_pipeline_unlocks_at_threshold(client):
     body = recompute.json()
     assert body["phase"] == "insight"
     assert body["active_days"] == 70
-    assert body["patterns_stored"] >= 2  # temporal + mood_correlation at minimum
     assert body["analyzer"] == "brain"
-    assert body["patterns_new"] >= 1  # first surfacing: everything is new
+    # Replication gate: statistical kinds (temporal, mood_correlation) qualify
+    # as candidates on the first recompute day and surface only after an
+    # INDEPENDENT second observation — a second recompute day that adds new
+    # evidence. A next-day recompute of the UNCHANGED corpus no longer
+    # promotes: consecutive recomputes share ~179/180 window days, so that
+    # was the same data scored twice.
+
+    class _NextDay(date):
+        @classmethod
+        def today(cls) -> date:
+            return date.today() + timedelta(days=1)
+
+    monkeypatch.setattr("app.api.insights.date_type", _NextDay)
+    # The fresh evidence: a work entry on a day the fixture wrote CALM text
+    # for (never a Sunday, so the day is new work evidence every run).
+    fresh_day = TODAY if TODAY.weekday() != 6 else TODAY - timedelta(days=1)
+    await emu.create_entry(client, WORK_ANXIOUS, fresh_day, client_entry_id="fresh-work")
+    second = await emu.recompute(client)
+    assert second["phase"] == "insight"
+    assert second["patterns_stored"] >= 2  # temporal + mood_correlation at minimum
+    assert second["patterns_new"] >= 1  # newly surfaced on the second day
 
     insights = await emu.decrypt_insights(client)
     assert insights["phase"] == "insight"
@@ -62,8 +81,9 @@ async def test_full_pipeline_unlocks_at_threshold(client):
     assert temporal["label"] == "work"
     assert temporal["detail"]["day"] == "Sunday"
 
-    question = await emu.decrypt_question(client, TODAY)
-    assert question["for_date"] == TODAY.isoformat()
+    fake_today = date.today() + timedelta(days=1)
+    question = await emu.decrypt_question(client, fake_today)
+    assert question["for_date"] == fake_today.isoformat()
     assert question["question"].endswith("?")
 
 

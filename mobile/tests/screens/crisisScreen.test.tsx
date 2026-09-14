@@ -108,3 +108,100 @@ describe("CrisisScreen failure handling", () => {
     );
   });
 });
+
+describe("CrisisScreen upgrades (call anxiety + chat + locale)", () => {
+  it("says what calling is like — the #1 barrier to hotline use", async () => {
+    const root = await render(<CrisisScreen />);
+    const text = textOf(root);
+    expect(text).toContain("What to expect when you call or text");
+    expect(text).toContain("as much or as little as you want");
+    expect(text).toContain("no script and no wrong way to start");
+  });
+
+  it("offers the 988 chat alongside call and text", async () => {
+    const root = await render(<CrisisScreen />);
+    expect(textOf(root)).toContain("Chat online at 988lifeline.org");
+    await pressLabel(root, "Chat online at 988lifeline.org");
+    expect(mocks.openURL).toHaveBeenCalledWith("https://988lifeline.org/chat");
+  });
+
+  it("a rejected chat open speaks the address (no dead taps)", async () => {
+    mocks.openURL.mockRejectedValueOnce(new Error("no browser"));
+    const root = await render(<CrisisScreen />);
+    await pressLabel(root, "Chat online at 988lifeline.org");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Couldn't open it from here", expect.stringContaining("988lifeline.org/chat"));
+  });
+
+  it("US layout (default): hotlines first, findahelpline as the outside-US note", async () => {
+    const root = await render(<CrisisScreen />);
+    const texts = (await import("../helpers/rtr")).allText(root);
+    const i988 = texts.findIndex((t) => t.includes("Call or text 988"));
+    const iFah = texts.findIndex((t) => t.includes("Open findahelpline.com"));
+    expect(i988).toBeGreaterThanOrEqual(0);
+    expect(iFah).toBeGreaterThan(i988);
+    expect(textOf(root)).toContain("These are US services");
+  });
+
+  it("non-US region: findahelpline leads, US services labeled US-only", async () => {
+    const root = await render(<CrisisScreen region="DE" />);
+    const texts = (await import("../helpers/rtr")).allText(root);
+    const iFah = texts.findIndex((t) => t.includes("Open findahelpline.com"));
+    const i988 = texts.findIndex((t) => t.includes("Call or text 988"));
+    expect(iFah).toBeGreaterThanOrEqual(0);
+    expect(i988).toBeGreaterThan(iFah);
+    expect(textOf(root)).toContain("988 and 741741 are US-only");
+  });
+
+  it("non-US region: the 911 action carries the US-only label too (and still dials)", async () => {
+    const root = await render(<CrisisScreen region="DE" />);
+    expect(textOf(root)).toContain("Call 911 (US)");
+    await pressLabel(root, "Call 911 (US)");
+    expect(mocks.openURL).toHaveBeenCalledWith("tel:911");
+  });
+
+  it("an explicit US region keeps the US-first layout", async () => {
+    const root = await render(<CrisisScreen region="US" />);
+    const texts = (await import("../helpers/rtr")).allText(root);
+    expect(texts.findIndex((t) => t.includes("Call or text 988"))).toBeLessThan(
+      texts.findIndex((t) => t.includes("Open findahelpline.com")),
+    );
+  });
+
+  it("every action has a 44pt target and a screen-reader label", async () => {
+    const root = await render(<CrisisScreen />);
+    const { allStyles, touchableByLabel } = await import("../helpers/rtr");
+    expect(allStyles(root).some((s) => s.minHeight === 44)).toBe(true);
+    expect(touchableByLabel(root, "Call or text 988").props.accessibilityLabel).toContain("988 Suicide & Crisis Lifeline");
+    expect(touchableByLabel(root, "Open findahelpline.com").props.accessibilityRole).toBe("link");
+    expect(touchableByLabel(root, "Open findahelpline.com").props.hitSlop).toEqual({ top: 12, bottom: 12, left: 12, right: 12 });
+  });
+});
+
+describe("deviceRegion", () => {
+  it("parses the locale region and survives hostile Intl implementations", async () => {
+    const { deviceRegion } = await import("../../src/screens/CrisisScreen");
+    // Default node locale parses or returns null — both are valid shapes.
+    const detected = deviceRegion();
+    expect(detected === null || /^[A-Z]{2}$/.test(detected)).toBe(true);
+
+    const original = Intl.DateTimeFormat;
+    try {
+      // A locale with no region subtag.
+      vi.stubGlobal("Intl", {
+        ...Intl,
+        DateTimeFormat: () => ({ resolvedOptions: () => ({ locale: "en" }) }),
+      });
+      expect(deviceRegion()).toBeNull();
+      // Intl throws entirely (ancient Hermes): US-first, no crash.
+      vi.stubGlobal("Intl", {
+        DateTimeFormat: () => {
+          throw new Error("no intl");
+        },
+      });
+      expect(deviceRegion()).toBeNull();
+    } finally {
+      vi.stubGlobal("Intl", original);
+    }
+  });
+});

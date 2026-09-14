@@ -1,0 +1,36 @@
+# Dependabot: weekly bumps for every ecosystem this repo pins.
+# Runtime Python versions are exact-pinned in backend/requirements.lock.txt
+# and are load-bearing (the suite verifies against that exact set) — review
+# pip PRs against a full local test run, not just CI green.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    # requirements.lock.txt is the operative file; pyproject.toml carries
+    # ranges. Group minor/patch noise into one PR.
+    groups:
+      python-deps:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+    groups:
+      npm-deps:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Backend Dockerfile base image (digest-pinned python:3.14-slim).
+  # Note: dependabot has no docker-compose ecosystem; the postgres digest in
+  # docker-compose.yml is bumped manually (comment there explains how).
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly

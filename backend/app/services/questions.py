@@ -8,11 +8,11 @@ Philosophy invariants, enforced by tests:
 
 from __future__ import annotations
 
-import re
 import zlib
 from datetime import date
 from typing import Sequence
 
+from . import crisis
 from .patterns import Pattern
 
 # Crisis interlock: when a recurring thought is crisis-adjacent (suicidal
@@ -20,14 +20,9 @@ from .patterns import Pattern
 # would you say to it if you could?") is the wrong move for a journaling
 # tool — such patterns are skipped for question generation entirely and the
 # pool falls through to neutral generic questions. The client's offline
-# crisis-resources screen is the supported path for this content.
-CRISIS_LABEL_RE = re.compile(
-    r"suicid\w*|kill(?:ing)? (?:myself|me)|want(?:ed)? to (?:die|be dead|disappear)"
-    r"|end(?:ing)? (?:my life|it all)|self[- ]?harm(?:ing)?|hurt(?:ing)? (?:myself|me)"
-    r"|no reason to live|better off dead|don'?t want to (?:live|be here|wake up)"
-    r"|not want(?:ing)? to (?:live|be here)",
-    re.IGNORECASE,
-)
+# crisis-resources screen is the supported path for this content. The
+# phrase contract lives in services/crisis.py (embedded from
+# shared/crisis_phrases.json); questions consume the broad SUPPRESS tier.
 
 GENERIC_QUESTIONS: tuple[str, ...] = (
     "What took up most space in your mind today?",
@@ -64,11 +59,13 @@ TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
         "Things have read {direction} than your baseline recently — what do the days on either side of that change look like?",
     ),
     "link": (
-        # Lagged day-after links (Bourke et al. 2026 sleep→next-day mood):
-        # the question points at the day in between, not a cause.
-        "The day after '{label}' comes up, your entries read {direction} — what do those in-between days usually contain?",
+        # Lagged day-after links (Konjarski et al. 2018 sleep→next-day
+        # mood): the question points at the day(s) in between, never at a
+        # cause. Wording is lag-neutral — the claim's modal lag lives in
+        # the pattern detail.
+        "'{label}' days are often followed by {direction} days — what do the in-between days usually contain?",
         "You've noticed '{label}' days are followed by {direction} days. What do you do differently on the days between?",
-        "When '{label}' was on your mind yesterday, how did today start?",
+        "When '{label}' was on your mind recently, how did the following day start?",
     ),
     "inertia": (
         "Your mood has been carrying over from day to day more than usual — what does a stuck stretch feel like from the inside?",
@@ -111,22 +108,44 @@ def render_pattern_questions(pattern: Pattern) -> list[str]:
     return rendered
 
 
+def _pattern_is_sensitive(pattern: Pattern) -> bool:
+    """True when a pattern must never be quoted back as a question.
+
+    Three independent tripwires, cheapest last:
+      * the brain marked the surfaced card ``sensitive`` (its label or a
+        stored variant matched the suppress tier at surfacing time);
+      * the label itself matches the suppress tier (patterns that arrived
+        without the flag — LLM extras, legacy payloads);
+      * any stored variant string matches (the representative may be the
+        mildest phrasing of a cluster whose other members are not).
+    """
+    if pattern.detail.get("sensitive"):
+        return True
+    if crisis.matches_suppress(pattern.label):
+        return True
+    variants = pattern.detail.get("variants")
+    if isinstance(variants, list):
+        if any(isinstance(v, str) and crisis.matches_suppress(v) for v in variants):
+            return True
+    return False
+
+
 def build_pool(patterns: Sequence[Pattern]) -> list[str]:
     """Question pool: rendered variants for top patterns first, then generic.
 
-    Crisis-adjacent pattern labels are excluded — their reflective
-    templates would ask the user to engage with a suicidal or self-harm
-    thought; the neutral generic pool serves instead.
+    Crisis-adjacent patterns are excluded — their reflective templates
+    would ask the user to engage with a suicidal or self-harm thought; the
+    neutral generic pool serves instead.
     """
     pool: list[str] = []
     for pattern in sorted(patterns, key=lambda p: (-p.confidence, -p.occurrences, p.label))[:MAX_PATTERN_QUESTIONS]:
-        if CRISIS_LABEL_RE.search(pattern.label):
+        if _pattern_is_sensitive(pattern):
             continue
         pool.extend(render_pattern_questions(pattern))
     pool.extend(GENERIC_QUESTIONS)
     # Belt and braces: no rendered question may quote crisis content even
     # if a label slipped past the pattern-side filter some other way.
-    pool = [q for q in pool if not CRISIS_LABEL_RE.search(q)]
+    pool = [q for q in pool if not crisis.matches_suppress(q)]
     seen: set[str] = set()
     unique = [q for q in pool if not (q in seen or seen.add(q))]
     return unique

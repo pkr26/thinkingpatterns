@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
 
+from .deps import ApiError
+
 # Hard ceiling on tracked keys: bounds memory when an attacker rotates
 # identities (spoofed XFF, IPv6). Past the cap the OLDEST windows are evicted
 # even if not yet stale — worst case a few attackers' buckets reset early,
@@ -152,9 +154,10 @@ def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
 
 
 def _limit_response(retry_after: int) -> HTTPException:
-    return HTTPException(
+    return ApiError(
         status_code=429,
         detail="rate limit exceeded",
+        code="rate_limited",
         headers={"Retry-After": str(max(1, retry_after))},
     )
 
