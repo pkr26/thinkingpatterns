@@ -21,7 +21,13 @@ from app.services import brain, phrases, questions, statsig
 from app.services.patterns import JournalEntry, Pattern
 from tests.helpers import ClientEmulator, daterange
 
-T0 = date(2026, 9, 4)
+# Anchor for all dates in this module. API-touching tests post entries on
+# T0-relative dates while the server judges them against its real clock
+# (account age, decay), so T0 must track today: a fixed pin rots as the
+# wall clock moves past it (daterange(N, T0) windows drift below the
+# backdated account horizon and the API starts rejecting them). Pure
+# brain-function uses of T0 are date-agnostic.
+T0 = date.today()
 
 
 # --- finding 1: client-controlled inner created_at bricked recomputes -------------------
