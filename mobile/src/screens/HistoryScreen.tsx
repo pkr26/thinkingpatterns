@@ -86,6 +86,7 @@ function snippetOf(text: string): string {
  *  held the data key once (processing sessions) — treat the field like any
  *  other rendered value: type-check, clamp. */
 function sanitizeSentiment(value: unknown): number | null {
+  // Stryker disable next-line LogicalOperator,ConditionalExpression: value arrives JSON-parsed from the entry blob; Number.isFinite is false for every non-number, so || vs && and dropping the typeof arm differ only for NaN/Infinity numbers, which JSON cannot encode
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.max(-1, Math.min(1, value));
 }
@@ -93,9 +94,12 @@ function sanitizeSentiment(value: unknown): number | null {
 export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { touchActivity } = useSession();
+  // Stryker disable next-line ObjectLiteral,StringLiteral: nothing ever compares mode.kind to "list" — {} / {kind:""} fail the edit and detail checks identically and fall through to the same list return
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  // Stryker disable next-line BooleanLiteral: the pre-effect first commit is unobservable in tests — react-test-renderer defers the initial render to act's drain, where load()'s setLoading(true) lands in the same flush (outside act nothing commits at all)
   const [loading, setLoading] = useState(true);
+  // Stryker disable next-line BooleanLiteral: same test seam as loading — the load effect's setOffline(false) corrects the initial value in the very first act flush, so only that corrected value is ever observable
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unreadable, setUnreadable] = useState(0);
@@ -103,7 +107,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const [logMoods, setLogMoods] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  // Stryker disable next-line StringLiteral: status starts null (InlineStatus renders nothing) and every setStatus(message) in showStatus is batched with setStatusTone, so the initial tone value is never rendered
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("neutral");
+  // Stryker disable next-line StringLiteral: every path into edit mode goes through startEdit, which sets draft first — the initial draft value is never rendered or read
   const [draft, setDraft] = useState("");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Double-tap guard: two presses inside one frame both pass a state-only
@@ -170,7 +176,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     } finally {
       setLoading(false);
     }
-  }, []);
+    }, // Stryker disable next-line ArrayDeclaration: the literal dep never changes between renders and the callback closes over no render-scope values, so identity and behavior are identical
+     []);
 
   useEffect(() => {
     void load();
@@ -188,9 +195,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       : undefined;
     return () => {
       focusSub?.();
+      // Stryker disable next-line ConditionalExpression,CallExpression: on an unmounted component the later setStatus(null) is a silent no-op in React 18 and clearTimeout(null) is a no-op, so skipping this cleanup has no observable effect
       if (statusTimer.current) clearTimeout(statusTimer.current);
     };
-  }, [load, navigation]);
+    }, // Stryker disable next-line ArrayDeclaration: load is stable (useCallback over constant deps) and the navigation object identity is stable for the screen's lifetime, so the effect body runs exactly once either way
+     [load, navigation]);
 
   /** Badge value: the entry's own check-in pick first, the mood log's day
    *  value as fallback; undefined = no badge (never a verdict). */
@@ -204,13 +213,17 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     try {
       await api.deleteEntry(entry.clientEntryId);
       setEntries((prev) => prev.filter((e) => e.clientEntryId !== entry.clientEntryId));
+      // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state fails the edit/detail checks and falls through to the identical list return
       setMode({ kind: "list" });
+      // Stryker disable next-line StringLiteral: InlineStatus only branches on tone === "ok"; tone "" colors exactly like "neutral"
       showStatus("Entry deleted", "neutral");
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         // Already gone server-side: the end state the user asked for.
         setEntries((prev) => prev.filter((e) => e.clientEntryId !== entry.clientEntryId));
+        // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
         setMode({ kind: "list" });
+        // Stryker disable next-line StringLiteral: InlineStatus only branches on tone === "ok"; tone "" colors exactly like "neutral"
         showStatus("Entry deleted", "neutral");
       } else if (err instanceof ApiError && err.status === 0) {
         Alert.alert(
@@ -409,7 +422,12 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         <Text style={{ color: t.colors.text, fontSize: t.type.bodyLarge.fontSize, lineHeight: 24 }}>{entry.text}</Text>
         <PrimaryButton label="Edit this entry" onPress={() => startEdit(entry)} disabled={busy} />
         <PrimaryButton label="Delete this entry" onPress={() => confirmDelete(entry)} busy={busy} danger />
-        <GhostButton label="Back to history" onPress={() => setMode({ kind: "list" })} disabled={busy} />
+        <GhostButton
+          // Stryker disable next-line ObjectLiteral, StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
+          onPress={() => setMode({ kind: "list" })}
+          label="Back to history"
+          disabled={busy}
+        />
         <InlineStatus message={status} tone={statusTone} />
         <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
       </ScrollView>

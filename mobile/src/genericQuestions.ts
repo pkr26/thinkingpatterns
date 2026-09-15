@@ -35,6 +35,7 @@ export const GENERIC_QUESTIONS: readonly string[] = [
  *  on adjacent pool slots — which is exactly the desired behavior.) */
 function seedFromDate(date: string): number {
   let hash = 5381;
+  // Stryker disable next-line EqualityOperator: the extra iteration multiplies the final seed by 33 (charCodeAt past the end is NaN, an XOR no-op) and 33 ≡ 1 (mod 8) — with the 8-item pool, seed % 8 picks the same index for every date
   for (let i = 0; i < date.length; i++) {
     hash = ((hash * 33) ^ date.charCodeAt(i)) >>> 0;
   }

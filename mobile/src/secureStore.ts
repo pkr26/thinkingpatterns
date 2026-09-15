@@ -93,6 +93,7 @@ async function loadDeviceKey(): Promise<Buffer> {
 }
 
 function deviceKey(): Promise<Buffer> {
+  // Stryker disable next-line ConditionalExpression: cachedKey is only ever set inside loadDeviceKey, which always leaves keyPromise non-null resolving to the same Buffer — the fast path is indistinguishable from returning keyPromise
   if (cachedKey) return Promise.resolve(cachedKey);
   // A failed initialization must not poison later callers: drop the promise
   // so the next call retries fresh.
@@ -104,6 +105,7 @@ function deviceKey(): Promise<Buffer> {
 }
 
 async function setEncrypted(key: string, value: string): Promise<void> {
+  // Stryker disable next-line StringLiteral: an empty encoding string falls back to Buffer's default utf8 decoding (verified byte-identical for every input)
   const blob = encrypt(await deviceKey(), Buffer.from(value, "utf8"));
   await backend.setItem(key, JSON.stringify({ v: 1, c: blob.toString("base64") }));
 }

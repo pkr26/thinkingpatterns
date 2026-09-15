@@ -62,9 +62,11 @@ export function AppNavigator(): React.JSX.Element {
   // Starts false deliberately: mounting DIRECTLY into the main flow counts
   // as a transition (the first render then consumes the pending flag).
   const wasInMain = useRef(false);
+  // Stryker disable next-line BooleanLiteral: showOnboarding is read only inside the main branch, and the first main render always flips wasInMain (it starts false) and overwrites the state — the initial value never reaches the tree
   const [showOnboarding, setShowOnboarding] = useState(false);
   if (inMain !== wasInMain.current) {
     wasInMain.current = inMain;
+    // Stryker disable next-line BooleanLiteral: leaving main sets wasInMain false, so re-entering main always fires the transition again and overwrites this value before it can render
     setShowOnboarding(inMain ? takePendingOnboarding() : false);
   }
   return (

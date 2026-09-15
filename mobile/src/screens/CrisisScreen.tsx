@@ -40,6 +40,7 @@ export function deviceRegion(): string | null {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
     const match = /[-_]([A-Za-z]{2})\b/.exec(locale);
+    // Stryker disable next-line OptionalChaining: match is either null (the mutant's throw is caught and returns null — the same value) or a match whose group 1 always participates, so both forms are observably identical
     const region = match?.[1];
     return region ? region.toUpperCase() : null;
   } catch {

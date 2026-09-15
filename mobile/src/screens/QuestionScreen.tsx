@@ -40,6 +40,7 @@ import { requestFailureCopy } from "../components/errors";
 /** Calm copy for a failed load: calm request copy for ApiErrors, our own
  *  sentence for local Errors, one generic line for anything else. */
 function failureCopy(err: unknown): string {
+  // Stryker disable next-line ConditionalExpression: requestFailureCopy implements the identical three-way mapping (ApiError→status copy, Error→message, else generic) — delegating every error to it is behavior-preserving
   if (err instanceof ApiError) return requestFailureCopy(err);
   if (err instanceof Error) return err.message;
   return "Something went wrong — try again.";
@@ -48,6 +49,7 @@ function failureCopy(err: unknown): string {
 export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { touchActivity } = useSession();
+  // Stryker disable next-line StringLiteral: "unknown" is never rendered or compared — only phase === "baseline" is ever tested, and "" fails that test identically
   const [phase, setPhase] = useState<"unknown" | "baseline" | "insight">("unknown");
   const [dayProgress, setDayProgress] = useState<{ active: number; total: number } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
@@ -81,7 +83,9 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
    *  insight phase, and only after the consent check in load(). */
   const computeQuestion = async () => {
     setBusy(true);
+    // Stryker disable next-line CallExpression: redundant reset — both callers run inside load(), which cleared the error first with no setter in between
     setError(null);
+    // Stryker disable next-line CallExpression: redundant reset — both callers run inside load(), which cleared the notice first with no setter in between
     setNotice(null);
     try {
       const session = await api.openProcessingSession(vault.get().dataKey.toString("base64"));
@@ -124,6 +128,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       }
       if (summary.phase !== "insight") {
         setPhase("baseline");
+        // Stryker disable next-line ConditionalExpression,LogicalOperator: Number.isFinite(x) ⇒ typeof x === "number" for JSON-parsed values, and `active` is only consumed when total > 0 — which itself requires Number.isFinite(active_days)
         const active = typeof summary.active_days === "number" && Number.isFinite(summary.active_days)
           ? summary.active_days
           : 0;
@@ -137,6 +142,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
         setGeneric(genericQuestionForDate());
         return;
       }
+      // Stryker disable next-line StringLiteral: phase is only ever compared to "baseline" (the card guard and the caption) — "" and "insight" both fail that test identically
       setPhase("insight");
       // 2) A question may already exist for today — no key required either.
       try {
@@ -160,6 +166,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       }
       // A failed consent READ errs toward showing the explainer again (the
       // user may never have been told), never toward skipping it silently.
+      // Stryker disable next-line ArrowFunction: !undefined ≡ !false — a failed consent read shows the explainer either way
       if (!(await hasKeyShipConsent(sessionUserId).catch(() => false))) {
         Alert.alert(
           "Your key, briefly",
@@ -196,6 +203,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   /** The question → journal bridge: the question becomes the start of
    *  today's entry via the account-bound draft stash. */
   const writeAbout = async (text: string) => {
+    // Stryker disable next-line ArrowFunction: null and undefined are both falsy in the !userId branch directly below
     const userId = await api.getUserId().catch(() => null);
     if (!userId) {
       Alert.alert("Session damaged", "Account id missing — please sign in again.");

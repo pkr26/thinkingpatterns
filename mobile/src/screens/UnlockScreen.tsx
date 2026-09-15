@@ -103,6 +103,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         }
         if (proof === "wrong") {
           await new Promise((resolve) => setTimeout(resolve, FAILED_PROOF_DELAY_MS));
+          // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
           throw new ApiError(401, "Wrong password.");
         }
       }

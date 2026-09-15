@@ -62,6 +62,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // Stryker disable next-line StringLiteral: dead initializer — register mode is reachable only through the toggle (which clears confirm in the same batch) and login mode never reads confirm
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -81,7 +82,8 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     setBusy(true);
     let derived: Keys | null = null;
     try {
-      let verifiedUserId = "";
+      // Stryker disable next-line StringLiteral: dead initializer — both branches assign body.user_id before the only read at vault.unlock
+    let verifiedUserId = "";
       if (mode === "register") {
         // Buffer.from() copies: quick-crypto's Buffer type differs from
         // node's in the .d.ts, but the bytes are identical.
@@ -132,6 +134,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   };
 
   const strength = mode === "register" && password.length > 0 ? passwordStrength(password) : null;
+  // Stryker disable next-line ConditionalExpression: confirm.length > 0 implies register mode (the confirm field is register-only and every exit to login clears it), so the mode check is redundant — the same-line whole-condition mutant is killable and pinned in loginScreen.pins.test.tsx
   const mismatch = mode === "register" && confirm.length > 0 && confirm !== password;
 
   return (

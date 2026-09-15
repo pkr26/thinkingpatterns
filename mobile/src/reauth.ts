@@ -16,6 +16,7 @@ import { vault } from "./vault";
 function keysEqual(a: Buffer, b: Buffer): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
+  // Stryker disable next-line EqualityOperator: the extra iteration reads undefined on BOTH sides, and undefined ^ undefined coerces to 0 — diff is unchanged
   for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
   return diff === 0;
 }

@@ -15,7 +15,8 @@ npm install
 cd ios && pod install && cd ..        # iOS
 npm run ios                           # or: npm run android
 npm run typecheck                     # strict TS check
-npm test                              # 759 tests across 33 files (98% per-file coverage thresholds)
+npm test                              # 1,015 tests across 51 files (98% per-file coverage thresholds)
+npx stryker run                         # full mutation campaign (99.6% — see ../reports/mutation_report_mobile_2026-09-15.md)
 ```
 
 The API base URL defaults to `http://localhost:8000` and is configurable in

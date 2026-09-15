@@ -55,6 +55,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
       .getUserId()
       .then(async (userId) => {
         if (!userId) return;
+        // Stryker disable next-line ArrowFunction: () => false vs () => undefined are indistinguishable — `seen` is only truthiness-tested in `!cancelled && seen`
         const seen = await hasSeenOnboarding(userId).catch(() => false);
         if (!cancelled && seen) navigation.replace("Entry");
       })
@@ -62,12 +63,14 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
     return () => {
       cancelled = true;
     };
-  }, [navigation]);
+    }, // Stryker disable next-line ArrayDeclaration: navigation is identity-stable for a mounted screen; an extra effect run would only repeat the idempotent seen-check
+     [navigation]);
 
   const finish = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    // Stryker disable next-line ArrowFunction: () => null vs () => undefined are indistinguishable — `userId` is only falsiness-tested in `if (userId)`
     const userId = await api.getUserId().catch(() => null);
     if (userId) {
       // Losing this write just shows the panels once more — never block on it.

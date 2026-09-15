@@ -105,6 +105,7 @@ export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } 
     try {
       const keys = await AsyncStorage.getAllKeys();
       const stale = keys.filter(isOriginBoundKey);
+      // Stryker disable next-line ConditionalExpression,EqualityOperator: stale is always an array (Array#filter), and multiRemove([]) is a documented no-op — an always-taken branch is unobservable
       if (stale.length > 0) await AsyncStorage.multiRemove(stale);
     } catch {
       // getAllKeys unavailable: the session wipe above is the critical part.
@@ -168,6 +169,7 @@ export function detailToMessage(detail: unknown, status: number): string {
         ? (d as { msg: string }).msg
         : "invalid field",
     );
+    // Stryker disable next-line ConditionalExpression,EqualityOperator: parts mirrors detail's length, so the only reachable false case is detail === []; [].join("; ") sanitizes to "" which falls to the identical `request failed (${status})` fallback
     if (parts.length > 0) return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
   }
   return `request failed (${status})`;
@@ -193,6 +195,7 @@ export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
  *  logic, not dialogs: accept only the known slugs (anything else degrades
  *  to undefined, and the caller falls back to status/detail matching). */
 function sanitizeCode(code: unknown): ApiErrorCode | undefined {
+  // Stryker disable next-line ConditionalExpression: Array#includes uses SameValueZero, so any non-string code is never equal to a string slug — the typeof arm is fully subsumed by the includes check
   return typeof code === "string" && (API_ERROR_CODES as readonly string[]).includes(code)
     ? (code as ApiErrorCode)
     : undefined;
@@ -282,6 +285,7 @@ async function request(
         throw new ApiError(0, "server redirected the request off the configured origin — check your server URL");
       }
     } catch (err) {
+      // Stryker disable next-line ConditionalExpression: both arms throw an ApiError with status 0 and the identical redirected-origin message — rethrow vs re-wrap is indistinguishable
       if (err instanceof ApiError) throw err;
       // An unparseable final URL degrades to the same refusal.
       throw new ApiError(0, "server redirected the request off the configured origin — check your server URL");
@@ -295,6 +299,7 @@ async function request(
       // the vault app-wide BEFORE the caller sees the error — a hook
       // failure must never mask the 401 itself.
       try {
+        // Stryker disable next-line OptionalChaining: the call is wrapped in a catch that swallows everything, so onUnauthorized() on a null handler throws the same-swallowed TypeError
         onUnauthorized?.();
       } catch {
         // a hook must never mask the ApiError below
@@ -376,6 +381,7 @@ export const api = {
    *  or null. Enables offline vault unlock without cross-origin replay. */
   getCachedSalt: async (username: string) => {
     const raw = await AsyncStorage.getItem(saltKey(username));
+    // Stryker disable next-line ConditionalExpression: with the guard skipped, JSON.parse of a falsy raw ("" / null) throws or yields null inside the try below, and the catch returns the same null
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as { v?: unknown; o?: unknown; s?: unknown };
@@ -385,6 +391,7 @@ export const api = {
       if (!(legacy || parsed.v === 1)) return null;
       if (typeof parsed.o !== "string" || typeof parsed.s !== "string") return null;
       if (parsed.o !== (await getBaseUrl())) return null;
+      // Stryker disable next-line ConditionalExpression: the read-through rewrite stores {v:1,o,s} — for already-v1 records that is a byte-identical (or normalizing) no-op write, and the returned salt never changes
       if (legacy) {
         // Read-through migration (same idiom as the mood log): refresh the
         // record to the v1 envelope so the legacy window stays bounded. A

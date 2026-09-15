@@ -17,11 +17,12 @@
 import { engine } from "./crypto/engine";
 
 export function newClientEntryId(entryDate: string): string {
-  const suffix = engine
+  const encoded = engine
     .randomBytes(9)
     .toString("base64")
     .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+    .replace(/\//g, "_");
+  // Stryker disable next-line Regex, StringLiteral: base64 of exactly 9 bytes is 12 chars with no padding (9 is a multiple of 3), so "=+" can never match and the replacement string is unreachable
+  const suffix = encoded.replace(/=+$/, "");
   return `e-${entryDate}-${suffix}`;
 }

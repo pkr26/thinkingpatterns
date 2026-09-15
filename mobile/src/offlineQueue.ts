@@ -147,6 +147,7 @@ export class SessionExpiredError extends Error {
 /** A wipe that began after `generation` was captured wins: the read's
  *  follow-up writes (and the caller's commit) must be abandoned. */
 function wipedSince(generation: number | undefined): boolean {
+  // Stryker disable next-line ConditionalExpression: every runtime caller passes an explicit generation (enqueue, flushQueue, requeueRejected, queueLength) — generation is never undefined, so that operand is always true
   return generation !== undefined && queueGeneration !== generation;
 }
 
@@ -235,8 +236,10 @@ export async function quarantinedQueueExists(): Promise<boolean> {
 /** Entries permanently rejected by the server (recovery surface for 4xx). */
 export async function rejectedEntries(): Promise<QueuedEntry[]> {
   const raw = await AsyncStorage.getItem(REJECTED_KEY);
+  // Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral: every raw this guard catches (null, "", the Stryker literal) maps to [] on the mutant path too — via JSON.parse throwing into the catch, or a null envelope reading as [] — no observable difference
   if (raw === null || raw === "") return [];
   try {
+    // Stryker disable next-line OptionalChaining: when parseItemsEnvelope returns null the mutant's null.items TypeError lands in the surrounding catch and returns the same []
     return parseItemsEnvelope(raw)?.items ?? [];
   } catch {
     return [];
@@ -448,6 +451,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
     // Fail-fast: an unreachable/throttled server or a full quota fails
     // every later item identically — stop instead of burning timeouts.
     if (outcome.kind === "reject-and-stop") return sent;
+    // Stryker disable next-line ConditionalExpression: outcome.stop exists only on retry outcomes (undefined — falsy — on every other kind), so `kind === "retry" && outcome.stop` is equivalent to `outcome.stop`
     if (outcome.kind === "retry" && outcome.stop) return sent;
   }
 }
@@ -514,6 +518,7 @@ export async function flushQueueOnReconnect(): Promise<void> {
   lastReconnectFlushAt = now;
   const userId = await api.getUserId();
   if (!userId) return; // signed out (or mid-sign-out): nothing to sync
+  // Stryker disable next-line ConditionalExpression: proceeding with an empty queue makes flushQueue a no-op (peek finds no item, nothing is written, errors are swallowed) — observably identical to the early return
   if ((await queueLength()) === 0) return;
   await flushQueue(userId).catch(() => {
     // Still offline, or the session died: the queue keeps the ciphertext.

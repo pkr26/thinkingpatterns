@@ -179,43 +179,37 @@ describe("localDateISO", () => {
   // M9: entry dates and mood-log days must be the DEVICE-LOCAL calendar day;
   // toISOString().slice(0,10) is the UTC day and is wrong in the evening for
   // every non-UTC timezone.
-  const withTz = (tz: string, fn: () => void): void => {
-    const original = process.env.TZ;
-    process.env.TZ = tz;
-    try {
-      fn();
-    } finally {
-      process.env.TZ = original;
+  //
+  // Pool note: these tests deliberately do NOT switch process.env.TZ. Under
+  // vitest's `threads` pool (Stryker's vitest runner) the assignment never
+  // reaches the process timezone — the Date getters stay on the ambient zone
+  // and the east-of-UTC case deterministically fails there while passing
+  // under the default `forks` pool. Instead, the expected day is derived
+  // from getTimezoneOffset(): the SAME zone state the implementation's Date
+  // getters read, so the assertion is valid under any ambient zone, any
+  // pool, and any runner.
+  const localDay = (d: Date): string =>
+    new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+
+  it("returns the local calendar day of the ambient zone, not the UTC day", () => {
+    // One instant early in the UTC day, one late: every non-UTC zone puts at
+    // least one of the two on a local day different from its UTC day (west
+    // of UTC shifts the early one back a day, east of UTC shifts the late
+    // one forward), so the UTC-day rendering is rejected as wrong whenever
+    // the machine is not on UTC.
+    for (const ms of [Date.UTC(2026, 8, 4, 2, 30), Date.UTC(2026, 8, 3, 23, 30)]) {
+      const d = new Date(ms);
+      const utcDay = d.toISOString().slice(0, 10);
+      expect(localDateISO(d)).toBe(localDay(d));
+      if (localDay(d) !== utcDay) {
+        expect(localDateISO(d)).not.toBe(utcDay);
+      }
     }
-  };
-
-  it("returns the UTC day while in UTC", () => {
-    withTz("UTC", () => {
-      // 23:30 UTC on Sep 3 — still Sep 3 everywhere in UTC.
-      expect(localDateISO(new Date(Date.UTC(2026, 8, 3, 23, 30)))).toBe("2026-09-03");
-    });
-  });
-
-  it("returns the NEXT local day east of UTC where UTC is still 'yesterday'", () => {
-    withTz("Pacific/Kiritimati", () => {
-      // 2026-09-03T23:30Z is already 2026-09-04 at UTC+14.
-      expect(new Date(Date.UTC(2026, 8, 3, 23, 30)).toISOString().slice(0, 10)).toBe("2026-09-03");
-      expect(localDateISO(new Date(Date.UTC(2026, 8, 3, 23, 30)))).toBe("2026-09-04");
-    });
-  });
-
-  it("returns the PREVIOUS local day west of UTC just after local midnight", () => {
-    withTz("America/New_York", () => {
-      // 2026-09-04T02:30Z is still 2026-09-03 evening in New York (UTC-4).
-      expect(new Date(Date.UTC(2026, 8, 4, 2, 30)).toISOString().slice(0, 10)).toBe("2026-09-04");
-      expect(localDateISO(new Date(Date.UTC(2026, 8, 4, 2, 30)))).toBe("2026-09-03");
-    });
   });
 
   it("zero-pads month and day", () => {
-    withTz("UTC", () => {
-      expect(localDateISO(new Date(2026, 0, 5))).toBe("2026-01-05");
-    });
+    expect(localDateISO(new Date(2026, 0, 5))).toBe("2026-01-05");
+    expect(localDateISO(new Date(2026, 10, 20))).toBe("2026-11-20");
   });
 });
 

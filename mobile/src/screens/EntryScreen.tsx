@@ -70,6 +70,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [busy, setBusy] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  // Stryker disable next-line StringLiteral: the initial tone is unobservable — a status message only renders after showStatus set its own tone first
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   /** Device-local signal: today's date appears in the on-device mood log.
    *  (Entries written on another device aren't in it — the chip's absence
@@ -125,6 +126,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           restoreDraftFor(id);
           // "Already wrote today" from the device-local mood log (the only
           // entry signal that needs no network round-trip).
+          // Stryker disable next-line ConditionalExpression: with the vault locked, vault.get() throws inside this .then and the chain's .catch(() => {}) swallows it — recentMoods/localStreak are skipped exactly as with the guard
           if (vault.isUnlocked()) {
             recentMoods(vault.get().dataKey, id, 30)
               .then((days) => setWroteToday(days.some((d) => d.date === localDateISO())))
@@ -178,7 +180,8 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
     // — after the red-team audit it is only ever sent as an explicit act
     // (the Question screen's button), never automatically after a sync.
-  }, []);
+  }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
+     []);
 
   const save = async () => {
     const trimmed = text.trim();
@@ -304,7 +307,13 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       setSelectedMood(null); // the check-in is per entry — never carry it over
       setWroteToday(true); // this save just wrote today
       // The save-feedback fix: BOTH outcomes are a quiet inline line now.
-      showStatus(queuedOffline ? "Saved — will sync when online" : "Saved ✓", queuedOffline ? "neutral" : "ok");
+      // (Hoisted so the "neutral" literal sits alone on its own line:
+      //  InlineStatus colors every non-"ok" tone with the same muted
+      //  color, so "neutral" and "" are visually identical — while the
+      //  "ok" literal on the showStatus line below stays live.)
+      // Stryker disable next-line StringLiteral: InlineStatus colors every non-"ok" tone with the same muted color — "neutral" and "" render identically
+      const offlineTone: InlineStatusTone = "neutral";
+      showStatus(queuedOffline ? "Saved — will sync when online" : "Saved ✓", queuedOffline ? offlineTone : "ok");
       if (crisisLanguage) await maybeShowCrisisAlert();
     } catch (err) {
       Alert.alert("Could not save", requestFailureCopy(err));
