@@ -1,0 +1,7 @@
+[
+  {
+    "id": "C1.server-boot",
+    "status": "BLOCKED",
+    "summary": "2-worker uvicorn is REFUSED: the deployment lock makes the second worker exit at startup (single-process contract is now enforced, not just documented)"
+  }
+]

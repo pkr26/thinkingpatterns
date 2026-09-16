@@ -1,0 +1,22 @@
+[
+  {
+    "id": "H1.metadata-inference",
+    "status": "FINDING",
+    "summary": "operator-view inference from entry_date+length only: subject journals on ['Sunday'] exclusively (15 entries over 120 days); a 21-day silence ending 2026-08-02; 40% of entries are 10x longer than the rest (crisis-length writes vs routine updates) \u2014 an operator can infer religious observance or work schedules, episode timing, and possibly severity from SIZE alone, with zero decryption"
+  },
+  {
+    "id": "H2.export-cleartext-fields",
+    "status": "BLOCKED",
+    "summary": "export bundle: username-in-cleartext=False (dropped in the 2026-09-16 fix), kdf-salt-present=True (required for any future re-import \u2014 a random 16-byte value, not an identifier), entry-plaintext=NO"
+  },
+  {
+    "id": "H2.export-auth-scoped",
+    "status": "BLOCKED",
+    "summary": "unauthenticated export: 401"
+  },
+  {
+    "id": "H3.erasure-live-db",
+    "status": "BLOCKED",
+    "summary": "after DELETE /account: users=0, entries=0, insights=0 rows remain; in-memory keystore holds 0 keys \u2014 live-data erasure is complete and immediate (backups are the residual: see G1)"
+  }
+]

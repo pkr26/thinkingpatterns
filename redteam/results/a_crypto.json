@@ -1,0 +1,62 @@
+[
+  {
+    "id": "A1.single-use",
+    "status": "BLOCKED",
+    "summary": "second pop() rejected (atomic single-use holds)"
+  },
+  {
+    "id": "A1.owner-bind",
+    "status": "BLOCKED",
+    "summary": "pop() with foreign owner rejected"
+  },
+  {
+    "id": "A1.ttl",
+    "status": "BLOCKED",
+    "summary": "expired session rejected: 403 processing_session_invalid"
+  },
+  {
+    "id": "A1.abandoned-session",
+    "status": "INFO",
+    "summary": "abandoned session still holds the data key in server RAM until TTL (held=True) \u2014 but the operator ceiling is now 300s (2026-09-16 fix), exactly matching the consent copy's 'held in memory for up to 5 minutes'; residual exposure is the disclosed 5-minute window, not an hour"
+  },
+  {
+    "id": "A1.theft-owner-bind",
+    "status": "BLOCKED",
+    "summary": "stolen session token unusable by another account: 403 processing_session_invalid (thief still needs the victim bearer token too)"
+  },
+  {
+    "id": "A1.memory-remnants",
+    "status": "BLOCKED",
+    "summary": "post-run GC scan for plaintext marker: 0 lingering str copies (CPython refcounting frees this path promptly; the enclave docstring's honest caveat covers exception paths/analyzer-held refs, not this one)"
+  },
+  {
+    "id": "A4.library-floor",
+    "status": "BLOCKED",
+    "summary": "derive_master_key refuses iterations < 100000 on both platforms \u2014 an honest code path can no longer silently downgrade the 600k contract"
+  },
+  {
+    "id": "A4.server-cannot-verify",
+    "status": "PARTIAL",
+    "summary": "a hand-rolled 1-iteration derivation still registers (201) \u2014 the server never sees the password, so client work factors are structurally unverifiable; the floor removes every accidental/honest downgrade path"
+  },
+  {
+    "id": "A5.nonce-seam",
+    "status": "BLOCKED",
+    "summary": "production encrypt() signature is ['key', 'plaintext', 'aad'] \u2014 no nonce parameter; two identical calls always differ (fresh=True); fixed-nonce output is only reachable via the unmistakably-named encrypt_with_nonce, mirrored in the mobile envelope.ts"
+  },
+  {
+    "id": "A5.nonce-birthday",
+    "status": "BLOCKED",
+    "summary": "random 96-bit nonces, 10000 entries under one key: P(collision) \u2248 6.31e-22 \u2014 negligible within the per-user quota; risk is structural only if the quota is raised or the seam above is used"
+  },
+  {
+    "id": "A5.no-rekey-path",
+    "status": "INFO",
+    "summary": "no password-change/rotate endpoint exists (['/account', '/account/export', '/account/llm-consent', '/auth/login', '/auth/logout', '/auth/register', '/auth/salt']): data key never changes for an account's lifetime; a compromised master secret has no recovery and a forgotten password is permanent data loss (documented design)"
+  },
+  {
+    "id": "A6.corpus-generated",
+    "status": "INFO",
+    "summary": "16 edge-case AAD vectors written to redteam/aad_corpus.json; verdict comes from the TS-side comparison (mobile redteam spec)"
+  }
+]

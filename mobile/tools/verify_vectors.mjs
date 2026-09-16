@@ -161,7 +161,7 @@ for (const [i, v] of encryptVectors.entries()) {
   const nonce = Buffer.from(v.nonce, "base64");
   const plaintext = Buffer.from(v.plaintext, "base64");
   try {
-    const blob = await impl.envelope.encrypt(dataKey, plaintext, aad, nonce);
+    const blob = await impl.envelope.encryptWithFixedNonce(dataKey, plaintext, aad, nonce);
     if (b64(blob) !== v.blob) {
       console.error(`encrypt vector ${i}: fixed-nonce encrypt blob MISMATCH`);
       failures += 1;

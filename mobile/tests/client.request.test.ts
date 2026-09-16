@@ -537,8 +537,9 @@ describe("error-detail sanitization", () => {
   // M12: invisible bidi / zero-width characters must not survive sanitizing.
   it("strips bidi overrides and zero-width characters (RLO/RTO attack)", async () => {
     const detail = "\u202Eev\u2066il\u2069.example.com \u200Bkeep\u200Dme";
-    // The invisible marks are gone; visible text survives.
-    expect(detailToMessage(detail, 403)).toBe("evil.example.com keepme");
+    // The invisible marks are gone AND (2026-09-16 fix) the bare domain is
+    // stripped too — scheme-less domains no longer survive the sanitizer.
+    expect(detailToMessage(detail, 403)).toBe("keepme");
     // And none of the invisible codepoints remain anywhere in the output.
     expect(detailToMessage(detail, 403)).not.toMatch(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069]/);
   });

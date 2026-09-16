@@ -39,23 +39,29 @@ def generate_key() -> bytes:
     return os.urandom(KEY_SIZE)
 
 
-def encrypt(
-    key: bytes,
-    plaintext: bytes,
-    aad: bytes | None = None,
-    nonce: bytes | None = None,
-) -> bytes:
+def encrypt(key: bytes, plaintext: bytes, aad: bytes | None = None) -> bytes:
     """Encrypt and authenticate *plaintext* under *key*, returning the envelope.
 
-    *nonce* is a test seam: when omitted (every production call) a fresh
-    random nonce is generated; when given it must be exactly NONCE_SIZE bytes
-    and is used verbatim (shared/vectors.json pins fixed-nonce output).
+    The nonce is ALWAYS fresh and random — deterministic output is a
+    nonce-reuse hazard, so the fixed-nonce path is deliberately NOT
+    reachable through this function. Test-vector generation uses
+    :func:`encrypt_with_nonce` below (unmistakably named, never called in
+    production paths, and asserted absent from them by tests).
     """
+    return encrypt_with_nonce(key, plaintext, aad, os.urandom(NONCE_SIZE))
+
+
+def encrypt_with_nonce(
+    key: bytes,
+    plaintext: bytes,
+    aad: bytes | None,
+    nonce: bytes,
+) -> bytes:
+    """Fixed-nonce encryption — TEST/VECTOR GENERATION ONLY (never import
+    from a request path). shared/vectors.json pins this output."""
     if len(key) != KEY_SIZE:
         raise CryptoError(f"key must be {KEY_SIZE} bytes, got {len(key)}")
-    if nonce is None:
-        nonce = os.urandom(NONCE_SIZE)
-    elif len(nonce) != NONCE_SIZE:
+    if len(nonce) != NONCE_SIZE:
         raise CryptoError(f"nonce must be {NONCE_SIZE} bytes, got {len(nonce)}")
     ciphertext = AESGCM(key).encrypt(nonce, plaintext, aad)
     return nonce + ciphertext

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "E2.trend-manufactured-temporal",
+    "status": "BLOCKED",
+    "summary": "monotone mood improvement over 120 uniform weekdays: surfaced=['rumination'], temporal claims=0 (within-person detrending + base-rate correction held)"
+  },
+  {
+    "id": "E2.boilerplate-topic",
+    "status": "BLOCKED",
+    "summary": "identical sentence x120: topics surfaced=0 (anti-boilerplate bars held)"
+  },
+  {
+    "id": "E2.pure-noise-surfacing",
+    "status": "BLOCKED",
+    "summary": "pseudo-random word salad x120 days: 2 patterns surfaced, kinds=['topic'] \u2014 statistical kinds stayed silent on noise (the FDR/effect-size guarantee); the surfaced topic cards are direct-measurement of a 14-word vocabulary recurring by construction"
+  },
+  {
+    "id": "E2.constant-mood-crash",
+    "status": "BLOCKED",
+    "summary": "120 perfectly identical entries: engine survived"
+  },
+  {
+    "id": "E2.near-constant-mood-crash",
+    "status": "BLOCKED",
+    "summary": "120 near-identical entries (float-noise sentiments): engine survived"
+  },
+  {
+    "id": "E2.disguised-crisis-recurrence",
+    "status": "BLOCKED",
+    "summary": "disguised crisis phrase x81 days: suppress-tier now CATCHES it (bypass=False, 2026-09-16 normalization fix) and the surfaced card carries sensitive=True \u2014 the client renders a non-quoting card; the recurring pattern is still DETECTED (surfaced=['recurring_phrase']), it is just never quoted back"
+  },
+  {
+    "id": "E2.max-corpus-timing",
+    "status": "BLOCKED",
+    "summary": "200 entries x 20k chars (engine caps): 0.6s, ok=True"
+  },
+  {
+    "id": "E2.non-latin-corpus",
+    "status": "BLOCKED",
+    "summary": "CJK-only corpus x61 days: ok=True, surfaced=0 (engine is latin-token-bound: no crash, no false patterns, and no insight value either \u2014 noted for E1's non-English gap)"
+  }
+]

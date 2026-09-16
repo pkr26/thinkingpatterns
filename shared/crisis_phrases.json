@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server-side question/card suppression; the effective suppress list is dialog + suppress_extra). The dialog tier stays conservative because a false positive costs one gentle dialog; the suppress tier is deliberately broader because a false positive there only means a pattern is not quoted back as a card or question.",
-  "regex_rules": "Every pattern must compile under BOTH Python re and ECMAScript RegExp. No lookahead/lookbehind. Consumers apply case-insensitive matching. Use \\s+ for whitespace, ['\\u2019]? for optional ASCII/curly apostrophes (iOS Smart Punctuation), and \\b word boundaries. Patterns are matched against normalized text.",
+  "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad').",
+  "regex_rules": "Every pattern must compile under BOTH Python re and ECMAScript RegExp. No lookahead/lookbehind. Consumers apply case-insensitive matching AFTER the shared normalization pipeline described in this file's description. \\s+ for whitespace, ['\\u2019]? for optional apostrophes, \\b word boundaries (Latin-script patterns only — \\b never fires next to CJK/Arabic/Devanagari in ECMAScript, so non-Latin patterns are plain substrings).",
   "dialog": [
     "\\bsuicid(?:e|al)\\b",
     "\\bkill(?:ing)?\\s+myself\\b",
@@ -29,7 +29,27 @@
     "\\bkys\\b",
     "\\bno\\s+way\\s+out\\b",
     "\\bsleep\\s+forever\\b",
-    "\\b(?:can['\\u2019]?t|cannot)\\s+do\\s+this\\s+anymore\\b"
+    "\\b(?:can['\\u2019]?t|cannot)\\s+do\\s+this\\s+anymore\\b",
+    "\\boff(?:ing)?\\s+myself\\b",
+    "\\bput\\s+me\\s+out\\s+of\\s+my\\s+misery\\b",
+    "\\bquiero\\s+morir\\b",
+    "\\bme\\s+quiero\\s+matar\\b",
+    "\\bquitarme\\s+la\\s+vida\\b",
+    "\\bje\\s+veux\\s+mourir\\b",
+    "\\bme\\s+suicider\\b",
+    "\\bsuizid\\w*",
+    "\\bich\\s+will\\s+sterben\\b",
+    "\\bbringe\\s+mich\\s+um\\b",
+    "\\bvoglio\\s+morire\\b",
+    "\\bquero\\s+morrer\\b",
+    "\\bme\\s+matar\\b",
+    "我想死",
+    "自杀",
+    "死にたい",
+    "自殺",
+    "أريد أن أموت",
+    "मरना चाहता",
+    "मरना चाहती"
   ],
   "suppress_extra": [
     "\\bsuicid\\w+",
@@ -45,7 +65,12 @@
     "\\bburn(?:ing|ed)?\\s+myself\\b",
     "\\bstarv(?:e|ing|ed)\\s+myself\\b",
     "\\bmake\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b",
-    "\\b(?:made|making)\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b"
+    "\\b(?:made|making)\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b",
+    "\\bdon['\\u2019]?t\\s+see\\s+(?:a\\s+|any\\s+)?future\\b",
+    "\\bno\\s+future\\s+for\\s+me\\b",
+    "\\bhappier\\s+(?:if|when)\\s+(?:i['\\u2019]?m|i\\s+am|i\\s+was)\\s+gone\\b",
+    "\\bhappier\\s+without\\s+me\\b",
+    "\\beveryone\\s+would\\s+be\\s+happier\\b"
   ],
   "fixtures": {
     "dialog_fires": [
@@ -58,7 +83,33 @@
       "I just want to sleep forever",
       "I can't do this anymore",
       "thinking about suicide",
-      "I hurt myself yesterday"
+      "I hurt myself yesterday",
+      "i will su1c1de tonight",
+      "k1ll myself",
+      "un4l1ve myself",
+      "ѕuicide is on my mind",
+      "kіll myself",
+      "сutting myself again",
+      "want to dіe",
+      "su​icide",
+      "kill my​self",
+      "su­icide",
+      "s.u.i.c.i.d.e",
+      "k.i.l.l myself",
+      "c-u-t-t-i-n-g myself",
+      "s u i c i d e",
+      "i am going to off myself",
+      "put me out of my misery",
+      "quiero morir",
+      "me quiero matar",
+      "je veux mourir",
+      "ich will sterben",
+      "voglio morire",
+      "quero morrer",
+      "我想死",
+      "死にたい",
+      "أريد أن أموت",
+      "मरना चाहता हूँ"
     ],
     "dialog_silent": [
       "This traffic is killing me",
@@ -71,7 +122,14 @@
       "cutting back on sugar this month",
       "the cutting board is in the drawer",
       "i burned myself on the stove again",
-      "i'm starving before dinner"
+      "i'm starving before dinner",
+      "i am so sad today",
+      "to be or not to be that is the question",
+      "a e i o u are vowels",
+      "u s a won gold",
+      "killed it at the presentation",
+      "cutting back on sugar this month",
+      "that movie was fine and i liked it"
     ],
     "suppress_only_fires": [
       "this traffic is killing me",
@@ -83,7 +141,11 @@
       "i starve myself when things feel out of control",
       "sometimes i make myself puke",
       "i made myself throw up after dinner",
-      "i burn myself when the panic spikes"
+      "i burn myself when the panic spikes",
+      "i don't see any future for me",
+      "no future for me at all",
+      "everyone would be happier",
+      "you would all be happier without me"
     ]
   }
 }

@@ -15,6 +15,12 @@
 import { engine } from "./engine";
 
 export const KDF_ITERATIONS = 600_000;
+// Runtime floor for caller-supplied iteration counts, mirroring the
+// backend's kdf.MIN_ITERATIONS (2026-09-16 red-team finding A4): the
+// server cannot verify a client's work factor, but the shared libraries
+// on BOTH platforms refuse to derive below this, so no honest code path
+// can silently downgrade the 600k contract.
+export const MIN_ITERATIONS = 100_000;
 const MIN_SALT_SIZE = 8;
 
 // HKDF info strings are rebuilt at call time, not captured at module scope:
@@ -37,8 +43,11 @@ export function deriveMasterKey(password: string, salt: Buffer, iterations = KDF
   if (salt.length < MIN_SALT_SIZE) {
     throw new Error(`salt must be at least ${MIN_SALT_SIZE} bytes`);
   }
-  if (iterations < 1) {
-    throw new Error("iterations must be positive");
+  if (iterations < MIN_ITERATIONS) {
+    throw new Error(
+      `iterations must be at least ${MIN_ITERATIONS} ` +
+        `(got ${iterations}; the cross-platform contract is ${KDF_ITERATIONS})`,
+    );
   }
   return engine.pbkdf2Sync(password, salt, iterations, 32, "sha256");
 }
@@ -57,8 +66,11 @@ export async function deriveMasterKeyAsync(
   if (salt.length < MIN_SALT_SIZE) {
     throw new Error(`salt must be at least ${MIN_SALT_SIZE} bytes`);
   }
-  if (iterations < 1) {
-    throw new Error("iterations must be positive");
+  if (iterations < MIN_ITERATIONS) {
+    throw new Error(
+      `iterations must be at least ${MIN_ITERATIONS} ` +
+        `(got ${iterations}; the cross-platform contract is ${KDF_ITERATIONS})`,
+    );
   }
   return new Promise((resolve, reject) => {
     engine.pbkdf2(password, salt, iterations, 32, "sha256", (err, derivedKey) => {

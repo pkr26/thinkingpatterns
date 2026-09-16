@@ -296,5 +296,8 @@ def test_post_hits_the_configured_endpoint_with_auth(monkeypatch):
     assert body == {"ok": True}
     assert calls[0]["url"] == "https://llm.example.com/v1/chat/completions"  # rstrip("/")
     assert calls[0]["headers"] == {"Authorization": "Bearer test-key"}
-    assert calls[0]["timeout"] == 30
+    # 2026-09-16 remediation (D2): 10s, not 30 — the call runs inside the
+    # secure processing context, so its latency IS the key/plaintext
+    # exposure window.
+    assert calls[0]["timeout"] == 10
     assert calls[0]["json"] == {"model": "mini"}

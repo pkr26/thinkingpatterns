@@ -17,6 +17,13 @@ import hashlib
 import hmac
 
 KDF_ITERATIONS = 600_000
+# Runtime floor for caller-supplied iteration counts. The server cannot
+# verify a client's work factor (it never sees the password), but the
+# shared libraries on BOTH platforms refuse to derive below this — a
+# modified client can still bypass its own floor, yet no honest code path,
+# future refactor, or copy-pasted caller can silently downgrade the 600k
+# contract (2026-09-16 red-team finding A4).
+MIN_ITERATIONS = 100_000
 AUTH_INFO = b"mindpattern/auth/v1"
 DATA_INFO = b"mindpattern/data/v1"
 MIN_SALT_SIZE = 8
@@ -30,8 +37,11 @@ def derive_master_key(
         password = password.encode("utf-8")
     if len(salt) < MIN_SALT_SIZE:
         raise ValueError(f"salt must be at least {MIN_SALT_SIZE} bytes")
-    if iterations < 1:
-        raise ValueError("iterations must be positive")
+    if iterations < MIN_ITERATIONS:
+        raise ValueError(
+            f"iterations must be at least {MIN_ITERATIONS} "
+            f"(got {iterations}; the cross-platform contract is {KDF_ITERATIONS})"
+        )
     return hashlib.pbkdf2_hmac("sha256", password, salt, iterations)
 
 

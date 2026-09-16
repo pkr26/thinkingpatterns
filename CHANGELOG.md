@@ -6,6 +6,72 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Security — 2026-09-16 red-team remediation wave
+
+Full audit: `reports/redteam_audit_2026-09-16.md` (96 executable verdicts);
+reproducible harness in `redteam/`. Post-fix re-run: 63 attacks blocked,
+every remaining finding is a documented design residual. Highlights:
+
+- **Crisis-language normalization (P0).** Both engines now normalize before
+  matching (NFKC, invisible-character stripping, Cyrillic/Greek homograph
+  folding — sigma family mapped by codepoint BEFORE NFKC, leet folding
+  between letters, punctuation-to-space, >=4 single-letter token joining).
+  The red-team bypass corpus went from 30/35 evasions to 1/35 (the partial
+  split "k ill myself" is the designed residual — joining single letters
+  into intact words would eat ordinary prose). New phrases cover unlisted
+  English ("off myself", "out of my misery") and first-person ideation in
+  es/fr/de/it/pt/zh/ja/ar/hi; suppress tier gains hopelessness phrasing.
+  Pinned cross-engine by the shared JSON fixtures.
+- **Recompute availability crash (P0).** `brain.py` mood-shift inflation
+  divided by `(1 - phi)` with phi exactly 1.0 on a
+  constant-within-float-noise baseline — every future recompute for such
+  accounts 500'd. phi is clamped to 0.99 (saturates the existing
+  inflation cap; no honest statistic changes).
+- **The data key never rides plain HTTP (P0).** `openProcessingSession`
+  refuses a consented insecure URL before any fetch — https or loopback
+  only. Ordinary requests keep the BYO-server plain-HTTP consent.
+- **Single-process deployment is enforced, not just documented (P1).** A
+  file-lock keyed by deployment identity makes the second worker of a
+  `uvicorn --workers 2` boot refuse to start (live audit previously showed
+  one "single-use" token answering 6 recomputes and per-worker rate
+  buckets). Same-process re-entrancy preserved for the test suite.
+- **KDF iteration floor (both platforms).** `derive_master_key` /
+  `deriveMasterKey(Async)` refuse iterations < 100,000 — no honest code
+  path can silently downgrade the 600k contract (the server remains
+  structurally unable to verify client work factors).
+- **Nonce test seam removed from production encrypt (both platforms).**
+  Fixed-nonce output moved to unmistakably named `encrypt_with_nonce` /
+  `encryptWithFixedNonce`; `encrypt()` has no nonce parameter at all.
+- **LLM hardening.** Timeout 30s->10s (the call runs inside the secure
+  processing context, so its latency IS the key/plaintext exposure
+  window); `max_tokens=512`, `temperature=0`; labels carrying spelled
+  contact channels ("evil dot com", "call five five five ...") or >=3
+  consecutive number-words are rejected regardless of corpus grounding.
+- **Processing-session TTL ceiling 3600s->300s**, matching the mobile
+  consent copy's "held in memory for up to 5 minutes".
+- **Export bundle no longer carries the cleartext username** (user_id +
+  salt remain — required by the AAD binding / future re-import).
+- **Backups are encrypted at rest.** The compose backup profile pipes
+  pg_dump through `openssl enc -aes-256-cbc -pbkdf2` with a REQUIRED
+  `BACKUP_KEY` (the service refuses to start without one). Retention
+  remains part of the deletion promise.
+- **Mobile error-dialog sanitizer** now strips scheme-less domains
+  ("evil.com/x") and phone-like digit runs; character-level bidi/zero-width
+  tricks were already neutralized.
+- **Startup warning when `TRUST_PROXY_HEADERS=1`** (direct-origin spoofing
+  defeats per-IP limits; the compose default keeps loopback-only binding).
+- Regression pins: `backend/tests/test_redteam_fixes_2026_09_16.py` +
+  `mobile/tests/redteamFixes2026.test.ts`; the obfuscation corpus lives in
+  the shared JSON fixtures and `redteam/crisis_corpus.json`.
+
+Known residuals (documented, not fixable in this wave): SecureStore device
+key needs Keychain/Keystore native custody; the offline unlock proof is an
+offline password oracle (quantified at ~75 ms/guess/core); the auth_key is
+a password-equivalent credential with no rotation path (needs a re-key
+feature); consented LLM egress discloses plaintext by design; server-side
+metadata (journaling dates/sizes) is visible to the operator; lockfile
+hash pins need a networked `pip-compile --generate-hashes` run.
+
 Post-release remediation wave across the whole tree, grouped. (Backend now
 658 tests + 1 Postgres-gated skip; mobile 759 tests across 33 files; probe
 9/9.)

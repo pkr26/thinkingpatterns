@@ -64,9 +64,10 @@ def test_kdf_info_strings_pinned():
 
 def test_salt_boundary_is_exactly_eight_bytes():
     assert kdf.MIN_SALT_SIZE == 8
-    kdf.derive_master_key("p", b"12345678", 10)  # exactly at the boundary: valid
+    # 2026-09-16: iterations must be >= kdf.MIN_ITERATIONS now (finding A4)
+    kdf.derive_master_key("p", b"12345678", kdf.MIN_ITERATIONS)  # exactly at the boundary: valid
     with pytest.raises(ValueError):
-        kdf.derive_master_key("p", b"1234567", 10)  # one byte short
+        kdf.derive_master_key("p", b"1234567", kdf.MIN_ITERATIONS)  # one byte short
 
 
 def test_iteration_boundary_rejects_zero_and_negatives():
@@ -291,9 +292,9 @@ def test_rotation_hits_every_pool_item_within_one_cycle():
 def test_error_messages_round_two():
     from app.security.enclave import SecureProcessingContext
     with pytest.raises(ValueError, match=r"^salt must be at least 8 bytes"):
-        kdf.derive_master_key("p", b"1234567", 10)
-    with pytest.raises(ValueError, match=r"^iterations must be positive"):
-        kdf.derive_master_key("p", b"12345678", 0)
+        kdf.derive_master_key("p", b"1234567", kdf.MIN_ITERATIONS)
+    with pytest.raises(ValueError, match=r"^iterations must be at least"):
+        kdf.derive_master_key("p", b"12345678", kdf.MIN_ITERATIONS - 1)
     with pytest.raises(ValueError, match=r"^invalid HKDF output length"):
         kdf.hkdf_sha256(b"k", None, b"i", 0)
     with pytest.raises(ValueError, match=r"^threshold must be at least 1 day"):
@@ -313,8 +314,10 @@ def test_ttl_of_one_second_is_valid():
     assert len(store) == 1
 
 
-def test_iterations_of_one_is_valid():
-    assert len(kdf.derive_master_key("p", b"12345678", 1)) == 32
+def test_iterations_at_the_floor_are_valid():
+    # 2026-09-16: the floor replaced the old >=1 check (finding A4); one
+    # iteration is now refused by the shipping library.
+    assert len(kdf.derive_master_key("p", b"12345678", kdf.MIN_ITERATIONS)) == 32
 
 
 def test_hkdf_just_above_max_length_rejected():

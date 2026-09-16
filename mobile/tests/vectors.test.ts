@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { deriveMasterKey, deriveAuthKey, deriveDataKey } from "../src/crypto/kdf";
-import { buildAad, decrypt, encrypt } from "../src/crypto/envelope";
+import { buildAad, decrypt, encrypt, encryptWithFixedNonce } from "../src/crypto/envelope";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
@@ -80,7 +80,7 @@ describe("fixed-nonce encrypt vectors (mobile -> backend direction)", () => {
       const dataKey = deriveDataKey(deriveMasterKey(v.password, salt, v.iterations));
       const aad = v.aad_parts ? buildAad(...v.aad_parts) : undefined;
       const nonce = Buffer.from(v.nonce, "base64");
-      const blob = encrypt(dataKey, Buffer.from(v.plaintext, "base64"), aad, nonce);
+      const blob = encryptWithFixedNonce(dataKey, Buffer.from(v.plaintext, "base64"), aad, nonce);
       expect(blob.toString("base64")).toBe(v.blob);
     });
 
@@ -95,7 +95,7 @@ describe("fixed-nonce encrypt vectors (mobile -> backend direction)", () => {
 
   it("nonce seam: wrong-size nonce fails loudly, omission stays random", () => {
     const key = Buffer.alloc(32, 7);
-    expect(() => encrypt(key, Buffer.from("data"), undefined, Buffer.alloc(8))).toThrow();
+    expect(() => encryptWithFixedNonce(key, Buffer.from("data"), undefined, Buffer.alloc(8))).toThrow();
     const a = encrypt(key, Buffer.from("data"));
     const b = encrypt(key, Buffer.from("data"));
     expect(a.equals(b)).toBe(false);

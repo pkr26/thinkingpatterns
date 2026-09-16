@@ -24,8 +24,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 
-const { encrypt, decrypt, buildAad } = await import("../src/crypto/envelope");
-const { deriveMasterKeyAsync } = await import("../src/crypto/kdf");
+const { encrypt, encryptWithFixedNonce, decrypt, buildAad } = await import("../src/crypto/envelope");
+const { deriveMasterKeyAsync, MIN_ITERATIONS } = await import("../src/crypto/kdf");
 
 beforeEach(() => {
   storage.__reset();
@@ -59,7 +59,7 @@ describe("secureStore pins", () => {
     const key = Buffer.alloc(32, 9);
     const { freshStorage, secureStore } = await freshSecureStore(key);
     const nonce = Buffer.from([0xbf, 0x57, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    const blob = encrypt(key, Buffer.from("forged-legacy-secret"), undefined, nonce);
+    const blob = encryptWithFixedNonce(key, Buffer.from("forged-legacy-secret"), undefined, nonce);
     const s = blob.toString("base64");
     expect(s.startsWith("v1c")).toBe(true); // the construction holds
     const c = s.slice(3);
@@ -153,15 +153,20 @@ describe("genericQuestions pins", () => {
 });
 
 describe("kdf and envelope pins", () => {
-  it("deriveMasterKeyAsync accepts an exactly-8-byte salt (the floor is inclusive)", async () => {
-    const master = await deriveMasterKeyAsync("pw", Buffer.alloc(8, 1), 1);
+  it("deriveMasterKeyAsync accepts an exactly-8-byte salt (both floors inclusive)", async () => {
+    const master = await deriveMasterKeyAsync("pw", Buffer.alloc(8, 1), MIN_ITERATIONS);
     expect(master).toHaveLength(32);
-    expect(master.equals(await deriveMasterKeyAsync("pw", Buffer.alloc(8, 1), 1))).toBe(true);
+    expect(master.equals(await deriveMasterKeyAsync("pw", Buffer.alloc(8, 1), MIN_ITERATIONS))).toBe(true);
   });
 
   it("a supplied nonce of the wrong length fails with the exact message", () => {
     const key = Buffer.alloc(32, 1);
-    expect(() => encrypt(key, Buffer.from("x"), undefined, Buffer.alloc(11))).toThrow(/nonce must be 12 bytes/);
-    expect(() => encrypt(key, Buffer.from("x"), undefined, Buffer.alloc(13))).toThrow(/nonce must be 12 bytes/);
+    // 2026-09-16: the seam moved out of encrypt() — the production
+    // signature takes exactly (key, plaintext, aad) and randomizes the
+    // nonce; only encryptWithFixedNonce accepts one (red-team finding A5).
+    expect(encrypt.length).toBe(3);
+    expect(encryptWithFixedNonce.length).toBe(4);
+    expect(() => encryptWithFixedNonce(key, Buffer.from("x"), undefined, Buffer.alloc(11))).toThrow(/nonce must be 12 bytes/);
+    expect(() => encryptWithFixedNonce(key, Buffer.from("x"), undefined, Buffer.alloc(13))).toThrow(/nonce must be 12 bytes/);
   });
 });

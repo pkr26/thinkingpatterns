@@ -56,6 +56,26 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bno\\s+way\\s+out\\b",
   "\\bsleep\\s+forever\\b",
   "\\b(?:can['\\u2019]?t|cannot)\\s+do\\s+this\\s+anymore\\b",
+  "\\boff(?:ing)?\\s+myself\\b",
+  "\\bput\\s+me\\s+out\\s+of\\s+my\\s+misery\\b",
+  "\\bquiero\\s+morir\\b",
+  "\\bme\\s+quiero\\s+matar\\b",
+  "\\bquitarme\\s+la\\s+vida\\b",
+  "\\bje\\s+veux\\s+mourir\\b",
+  "\\bme\\s+suicider\\b",
+  "\\bsuizid\\w*",
+  "\\bich\\s+will\\s+sterben\\b",
+  "\\bbringe\\s+mich\\s+um\\b",
+  "\\bvoglio\\s+morire\\b",
+  "\\bquero\\s+morrer\\b",
+  "\\bme\\s+matar\\b",
+  "我想死",
+  "自杀",
+  "死にたい",
+  "自殺",
+  "أريد أن أموت",
+  "मरना चाहता",
+  "मरना चाहती",
 ];
 
 /** The broader suppression tier's EXTRA patterns (the effective suppress
@@ -70,15 +90,15 @@ export const CRISIS_SUPPRESS_EXTRA_PATTERNS: readonly string[] = [
   "\\boverdose(?:d)?\\b",
   "\\beveryone\\s+would\\s+be\\s+better\\s+off\\b",
   "\\bnot\\s+want(?:ing)?\\s+to\\s+(?:live|be\\s+here)\\b",
-  // Bare self-harm / ED topic words and non-first-person-anchored ideation:
-  // suppress-tier ONLY (a false positive costs one gentle non-quoting card,
-  // never a dialog — the dialog tier stays conservative). "\\bcutting\\b"
-  // closes the re-audit's quoted-topic hole ("the urge for cutting was
-  // loud" surfaced as a quoted rising topic).
   "\\bcutting\\b",
   "\\bself[-\\s]?loathing\\b",
   "\\bburn(?:ing|ed)?\\s+myself\\b",
   "\\bstarv(?:e|ing|ed)\\s+myself\\b",
   "\\bmake\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b",
   "\\b(?:made|making)\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b",
+  "\\bdon['\\u2019]?t\\s+see\\s+(?:a\\s+|any\\s+)?future\\b",
+  "\\bno\\s+future\\s+for\\s+me\\b",
+  "\\bhappier\\s+(?:if|when)\\s+(?:i['\\u2019]?m|i\\s+am|i\\s+was)\\s+gone\\b",
+  "\\bhappier\\s+without\\s+me\\b",
+  "\\beveryone\\s+would\\s+be\\s+happier\\b",
 ];

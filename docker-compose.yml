@@ -59,31 +59,25 @@ services:
     #   docker compose --profile backups up -d backup
     # A plain `docker compose up` never starts this service.
     #
-    # What this gives you: one `pg_dump --format=custom` per day into the
-    # pgbackups named volume, with files older than BACKUP_RETENTION_DAYS
-    # (default 35) deleted after each successful dump.
+    # What this gives you: one ENCRYPTED `pg_dump --format=custom` per day
+    # into the pgbackups named volume, with files older than
+    # BACKUP_RETENTION_DAYS (default 35) deleted after each successful dump.
     #
-    # What you MUST add before this is a real backup story:
-    # * ENCRYPT THE DUMPS AT REST. Every dump contains the full ciphertext
-    #   column set — still opaque blobs (the server is blind to content),
-    #   but also usernames, per-entry dates/timestamps, and ciphertext
-    #   sizes: exactly the metadata the security model promises to hold
-    #   only in the live DB. The pgbackups volume is plaintext on the Docker
-    #   host's disk. Pipe through gpg/openssl before writing, or put the
-    #   volume on an encrypted filesystem, and treat host access as DB access.
-    # * RETENTION IS PART OF THE DELETION PROMISE. `DELETE /api/account`
-    #   removes a user from the live database only (see README "Deletion &
-    #   retention scope"); every dump taken before the deletion still
-    #   contains that user's rows. If dumps never expire, account deletion
-    #   is void against backups. Set BACKUP_RETENTION_DAYS to the expiry
-    #   you actually promise users, and keep it short — the default 35 days
-    #   is a starting point, not a recommendation.
-    # * NEVER COMMIT THE VOLUME CONTENTS. pgbackups is a named volume so
-    #   nothing lands in the repo by default; if you ever switch it to a
-    #   bind mount, the target path must be gitignored (and preferably
-    #   outside the working tree entirely).
-    # * The dumps are only useful if restore is rehearsed:
-    #   `pg_restore --clean` into a scratch database before you need it.
+    # ENCRYPTION (2026-09-16 remediation, finding G1): dumps are piped
+    # through `openssl enc -aes-256-cbc -pbkdf2` with a key from
+    # BACKUP_KEY (REQUIRED — the service refuses to start without it, so a
+    # plaintext dump can never happen by accident). The dump still contains
+    # usernames/dates/ciphertext sizes, but a stolen volume/file is now
+    # ciphertext at rest. Restore:
+    #   openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_KEY \
+    #     -in mindpattern-<stamp>.dump.enc | pg_restore --clean ...
+    #
+    # RETENTION IS PART OF THE DELETION PROMISE. `DELETE /api/account`
+    # removes a user from the live database only; every dump taken before
+    # the deletion still contains that user's rows until it expires. Set
+    # BACKUP_RETENTION_DAYS to the expiry you actually promise users, and
+    # keep it short — the default 35 days is a starting point, not a
+    # recommendation. Never commit the volume contents; rehearse restores.
     profiles: ["backups"]
     # Same pinned image as `db`: pg_dump's major version must match the
     # server's, and reusing the image keeps the deployment to one artifact.
@@ -95,6 +89,9 @@ services:
       # Days to keep dumps. Must match your stated backup-expiry policy —
       # see the retention note above.
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-35}
+      # REQUIRED. Generate once, store in your secret manager / .env:
+      #   openssl rand -base64 32
+      BACKUP_KEY: ${BACKUP_KEY:?set BACKUP_KEY in .env (openssl rand -base64 32) — dumps are AES-256-CBC-encrypted and the key is mandatory}
     volumes:
       - pgbackups:/backups
     depends_on:
@@ -104,22 +101,29 @@ services:
     # No image CMD override trickery: a plain POSIX loop. `$$` escapes keep
     # compose from interpolating the loop's own variables. The dump runs
     # BEFORE the first sleep so `up -d backup` proves itself immediately;
-    # a failed dump leaves no partial file (pg_dump writes atomically per
-    # run and the loop logs to stderr and keeps the previous day's file).
+    # a failed dump leaves no partial file (writes go to a .tmp and are
+    # renamed only after openssl succeeds, so the loop keeps the previous
+    # day's file on any failure).
     entrypoint:
       - sh
       - -c
       - |
-        set -u
+        set -eu
+        # The alpine postgres image ships libcrypto but not always the CLI.
+        command -v openssl >/dev/null 2>&1 || apk add --no-cache openssl >/dev/null
         while :; do
           stamp=$$(date -u +%Y%m%dT%H%M%SZ)
-          out="/backups/mindpattern-$$stamp.dump"
-          if PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "$$out"; then
-            echo "backup: wrote $$out"
-            find /backups -name 'mindpattern-*.dump' -mtime +"$$BACKUP_RETENTION_DAYS" -delete
+          out="/backups/mindpattern-$$stamp.dump.enc"
+          tmp="$$out.tmp"
+          if PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
+              | openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:BACKUP_KEY -out "$$tmp"; then
+            mv "$$tmp" "$$out"
+            echo "backup: wrote $$out (encrypted)"
+            find /backups -name 'mindpattern-*.dump.enc' -mtime +"$$BACKUP_RETENTION_DAYS" -delete
+            rm -f /backups/mindpattern-*.dump.tmp
           else
-            echo "backup: pg_dump failed at $$stamp; keeping previous dumps" >&2
-            rm -f "$$out"
+            echo "backup: pg_dump/encrypt failed at $$stamp; keeping previous dumps" >&2
+            rm -f "$$tmp"
           fi
           sleep 86400
         done

@@ -40,6 +40,21 @@ _PATTERNS_PROMPT = (
 )
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _URL_OR_PHONE = re.compile(r"https?://|www\.|\d{5,}", re.IGNORECASE)
+# Word-spelled contact channels and addresses ("visit evil dot com", "call
+# five five five zero one three four"). The 2026-09-16 red-team corpus
+# showed the URL/digit regex alone cannot see these, and corpus grounding
+# is satisfied by construction when the payload words were planted in an
+# entry first — so the SHAPE is rejected regardless of grounding.
+_SPELLED_CONTACT = re.compile(
+    r"\bdot\s+(?:com|net|org|io|app|dev|co|uk|edu|gov|xyz|me|tv|info)\b"
+    r"|\bat\s+(?:gmail|hotmail|yahoo|outlook|icloud|proton)\b"
+    r"|\b(?:text|call|phone|dial|ring)\s+me\s+at\b",
+    re.IGNORECASE,
+)
+_NUMBER_WORDS = {
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "oh",
+}
 # Tokens allowed in labels even when the corpus never contains them:
 # function words + the fixed UI vocabulary the kinds talk about.
 _GROUNDING_ALLOWLIST = {
@@ -70,8 +85,16 @@ def _clean_label(raw: object) -> str | None:
     label = _CONTROL_CHARS.sub(" ", raw).strip()
     if not label or len(label) > MAX_LABEL_CHARS:
         return None
-    if _URL_OR_PHONE.search(label):
+    if _URL_OR_PHONE.search(label) or _SPELLED_CONTACT.search(label):
         return None
+    # Digit-word runs ("five five five zero one three four") are phone
+    # numbers spelled out — three or more consecutive number-words is never
+    # legitimate pattern vocabulary.
+    run = 0
+    for token in label.lower().replace("-", " ").split():
+        run = run + 1 if token in _NUMBER_WORDS else 0
+        if run >= 3:
+            return None
     return label
 
 
@@ -195,7 +218,7 @@ class LLMAnalyzer:
         """HTTP call isolated for testability (tests monkeypatch this)."""
         import httpx  # imported lazily; keeps the dependency off the unit-test path
 
-        response = httpx.post(f"{self.url}/chat/completions", json=payload, timeout=30,
+        response = httpx.post(f"{self.url}/chat/completions", json=payload, timeout=10,
                               headers={"Authorization": f"Bearer {self.api_key}"})
         response.raise_for_status()
         return response.json()
@@ -221,6 +244,11 @@ class LLMAnalyzer:
         """
         body = self._post({
             "model": self.model,
+            # Bounded generation (2026-09-16 remediation): without these the
+            # endpoint alone decides output length and sampling — a cost-
+            # amplification and jailbreak surface for zero product value.
+            "max_tokens": 512,
+            "temperature": 0.0,
             "messages": [
                 {"role": "system", "content": _PATTERNS_PROMPT},
                 {"role": "user", "content": json.dumps(self._recent_payload(entries))},

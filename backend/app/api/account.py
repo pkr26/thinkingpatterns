@@ -105,7 +105,6 @@ async def export_account(
         head = ExportBundle(
             version=1,
             exported_at=datetime.now(timezone.utc),
-            username=user.username,
             user_id=user.id,
             salt=user.salt,
             llm_consent=bool(user.llm_consent),

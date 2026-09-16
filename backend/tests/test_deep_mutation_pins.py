@@ -821,8 +821,6 @@ async def test_validation_detail_shape(client, app, monkeypatch):
 async def test_validation_detail_defaults_and_truncation(client, app, monkeypatch):
     from app.deps import require_user
 
-    state = {"n": 0}
-
     async def no_msg():
         raise RequestValidationError([{"loc": (), "type": "weird"}])
 
@@ -1225,7 +1223,7 @@ def test_verify_token_malformed_payload_message():
 def test_encrypt_nonce_size_message():
     key = os.urandom(crypto.KEY_SIZE)
     with pytest.raises(crypto.CryptoError, match=rf"^nonce must be {crypto.NONCE_SIZE} bytes, got 5$"):
-        crypto.encrypt(key, b"payload", None, nonce=b"12345")
+        crypto.encrypt_with_nonce(key, b"payload", None, b"12345")
 
 
 async def test_keystore_expiry_boundary_zeroizes_and_messages(monkeypatch):

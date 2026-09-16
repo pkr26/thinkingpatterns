@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { deriveMasterKey, deriveMasterKeyAsync, deriveAuthKey, deriveDataKey, zeroize, KDF_ITERATIONS } from "../src/crypto/kdf";
+import { deriveMasterKey, deriveMasterKeyAsync, deriveAuthKey, deriveDataKey, zeroize, KDF_ITERATIONS, MIN_ITERATIONS } from "../src/crypto/kdf";
 import { decrypt, encrypt, generateKey, TamperError, NONCE_SIZE } from "../src/crypto/envelope";
 import { buildAad } from "../src/crypto/aad";
 import {
@@ -31,25 +31,28 @@ describe("kdf validation", () => {
     for (const bad of ["", "1234567"]) {
       expect(() => deriveMasterKey("pw", Buffer.from(bad, "utf8"))).toThrow(/salt must be at least 8 bytes/);
     }
-    // 8 bytes is the accepted boundary.
-    expect(deriveMasterKey("pw", Buffer.alloc(8, 1), 1).length).toBe(32);
+    // 8 bytes is the accepted boundary (iterations at the 2026-09-16 floor).
+    expect(deriveMasterKey("pw", Buffer.alloc(8, 1), MIN_ITERATIONS).length).toBe(32);
   });
 
-  it("rejects non-positive iteration counts", () => {
-    expect(() => deriveMasterKey("pw", SALT, 0)).toThrow(/iterations must be positive/);
-    expect(() => deriveMasterKey("pw", SALT, -5)).toThrow(/iterations must be positive/);
+  it("rejects iteration counts below the runtime floor", () => {
+    // 2026-09-16 (red-team finding A4): the library floors iterations at
+    // MIN_ITERATIONS — nothing below it derives, ever.
+    expect(() => deriveMasterKey("pw", SALT, 0)).toThrow(/iterations must be at least/);
+    expect(() => deriveMasterKey("pw", SALT, -5)).toThrow(/iterations must be at least/);
+    expect(() => deriveMasterKey("pw", SALT, MIN_ITERATIONS - 1)).toThrow(/iterations must be at least/);
   });
 
   it("defaults to the pinned 600k production iteration count", () => {
     expect(KDF_ITERATIONS).toBe(600_000);
-    expect(deriveMasterKey("pw", SALT, 1).toString("hex")).toBe(
-      deriveMasterKey("pw", SALT, 1).toString("hex"),
+    expect(deriveMasterKey("pw", SALT, MIN_ITERATIONS).toString("hex")).toBe(
+      deriveMasterKey("pw", SALT, MIN_ITERATIONS).toString("hex"),
     );
   });
 
   it("derives independent auth/data keys from the same master", () => {
-    const master = deriveMasterKey("pw", SALT, 1);
-    const auth = deriveMasterKey("pw", SALT, 1); // deterministic
+    const master = deriveMasterKey("pw", SALT, MIN_ITERATIONS);
+    const auth = deriveMasterKey("pw", SALT, MIN_ITERATIONS); // deterministic
     expect(master.equals(auth)).toBe(true);
     const keys = deriveKeys("pw", SALT);
     // One fast sanity anchor without burning another 600k PBKDF2 run.
@@ -85,7 +88,7 @@ describe("async PBKDF2 (JS-thread-friendly derivation)", () => {
 
   it("applies the same validation as the sync path", async () => {
     await expect(deriveMasterKeyAsync("pw", Buffer.alloc(7, 1))).rejects.toThrow(/salt must be at least 8 bytes/);
-    await expect(deriveMasterKeyAsync("pw", SALT, 0)).rejects.toThrow(/iterations must be positive/);
+    await expect(deriveMasterKeyAsync("pw", SALT, 0)).rejects.toThrow(/iterations must be at least/);
   });
 
   it("rejects when the engine reports an error or no key", async () => {
@@ -96,10 +99,10 @@ describe("async PBKDF2 (JS-thread-friendly derivation)", () => {
     try {
       engine.pbkdf2 = ((_p: unknown, _s: unknown, _i: unknown, _k: unknown, _d: unknown, cb: (e: Error | null, k?: Buffer) => void) =>
         cb(new Error("native failure"))) as typeof engine.pbkdf2;
-      await expect(deriveMasterKeyAsync("pw", SALT, 1)).rejects.toThrow("native failure");
+      await expect(deriveMasterKeyAsync("pw", SALT, MIN_ITERATIONS)).rejects.toThrow("native failure");
       engine.pbkdf2 = ((_p: unknown, _s: unknown, _i: unknown, _k: unknown, _d: unknown, cb: (e: Error | null, k?: Buffer) => void) =>
         cb(null, undefined)) as typeof engine.pbkdf2;
-      await expect(deriveMasterKeyAsync("pw", SALT, 1)).rejects.toThrow("pbkdf2 produced no key");
+      await expect(deriveMasterKeyAsync("pw", SALT, MIN_ITERATIONS)).rejects.toThrow("pbkdf2 produced no key");
     } finally {
       engine.pbkdf2 = original;
     }

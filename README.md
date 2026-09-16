@@ -327,6 +327,22 @@ turn it back into readable files offline.
   client payload extension — the entry contract (`v:1`, date-only) is
   versioned for exactly this.
 
+## Red-team audit & remediation (2026-09-16)
+
+A full adversarial audit ran as executable attack harnesses (`redteam/`,
+report in `reports/redteam_audit_2026-09-16.md` — 96 verdicts). Every
+fixable finding was remediated and pinned by regression tests; the
+post-fix campaign re-run shows 63 attacks blocked with the remainder
+documented as design residuals. Headlines: crisis-language normalization
+on both engines (leetspeak/homoglyph/zero-width/non-English bypasses
+closed, 30/35 -> 1/35), the phi=1.0 recompute crash fixed, the data key
+now refuses plain HTTP, multi-worker boots are refused by a deployment
+lock, KDF iteration floors and nonce-seam removal on both platforms, LLM
+generation limits + spelled-contact rejection + 10s timeout, TTL ceiling
+aligned with the consent copy, encrypted backups (required BACKUP_KEY),
+and a username-free export bundle. See CHANGELOG "2026-09-16 red-team
+remediation wave" for the full list.
+
 ## Post-audit changelog (security remediation)
 
 This codebase underwent a multi-pass adversarial audit; all findings were

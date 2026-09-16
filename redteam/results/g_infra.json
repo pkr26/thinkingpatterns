@@ -1,0 +1,77 @@
+[
+  {
+    "id": "G1.backup-profile-config",
+    "status": "BLOCKED",
+    "summary": "compose backup profile: pg_dump=True, 35-day retention=yes, AES-256-CBC dump encryption with a REQUIRED BACKUP_KEY=yes (2026-09-16 fix \u2014 a stolen backup volume is ciphertext at rest). Residual by design: dumps taken before a deletion still hold the user's rows until retention expires; the README states this as the deletion-and-retention scope"
+  },
+  {
+    "id": "G1.dump-contents",
+    "status": "PARTIAL",
+    "summary": "what a dump carries (same columns): 1 usernames, 0 entries, 0 distinct dates, blob sizes (None, None, None) \u2014 with the 2026-09-16 fix this metadata is only readable by a BACKUP_KEY holder (AES-256-CBC at rest); the residual is the retention-vs-deletion window, not plaintext-on-disk"
+  },
+  {
+    "id": "G2.pip-audit",
+    "status": "BLOCKED",
+    "summary": "pip-audit on requirements.lock.txt: rc=0, vulnerability lines=0 []"
+  },
+  {
+    "id": "G2.npm-audit",
+    "status": "NOT-RUN",
+    "summary": "npm audit returned no vulnerability metadata (rc=127; likely offline)"
+  },
+  {
+    "id": "G2.lockfile-hashes",
+    "status": "FINDING",
+    "summary": "requirements.lock.txt: 0/27 requirement lines carry --hash pins; Docker installs with --no-deps"
+  },
+  {
+    "id": "G2.actions-pinning",
+    "status": "BLOCKED",
+    "summary": "GitHub Actions refs: 15 uses, unpinned/floating: []"
+  },
+  {
+    "id": "G2.mutation-gate",
+    "status": "INFO",
+    "summary": "mutation workflow: survivors do not fail the run (True) \u2014 quality signal only, documented"
+  },
+  {
+    "id": "G3.prod-default-secret",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot as expected=True"
+  },
+  {
+    "id": "G3.prod-short-secret",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot as expected=True"
+  },
+  {
+    "id": "G3.prod-sqlite",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot as expected=True"
+  },
+  {
+    "id": "G3.prod-http-llm-url",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot as expected=True"
+  },
+  {
+    "id": "G3.typo-env-fails-closed",
+    "status": "BLOCKED",
+    "summary": "env=staging  refused boot as expected=True"
+  },
+  {
+    "id": "G3.staging-valid-boots-under-prod-gates",
+    "status": "BLOCKED",
+    "summary": "env=staging booted as expected=False"
+  },
+  {
+    "id": "G3.tracked-secrets",
+    "status": "BLOCKED",
+    "summary": "git-tracked secret/db files: none (205 files tracked)"
+  },
+  {
+    "id": "G3.dockerignore-db",
+    "status": "BLOCKED",
+    "summary": "backend/.dockerignore excludes dev DBs: True (mindpattern.db exists on disk in backend/ and must never enter the image)"
+  }
+]

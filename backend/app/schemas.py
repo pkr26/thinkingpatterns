@@ -143,7 +143,10 @@ class InsightOut(BaseModel):
 class ExportBundle(BaseModel):
     version: int
     exported_at: datetime
-    username: str
+    # No username (2026-09-16 remediation, finding H2): the export is the
+    # user's own document; a cleartext name was a free account marker for
+    # anyone who obtained the file. user_id + salt stay — the AAD binding
+    # needs the id, and any future re-import needs the salt.
     user_id: str  # required by the AAD binding — without it the bundle is undecryptable
     salt: str
     llm_consent: bool

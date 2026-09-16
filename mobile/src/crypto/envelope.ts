@@ -19,22 +19,30 @@ export function generateKey(): Buffer {
   return engine.randomBytes(KEY_SIZE);
 }
 
-export function encrypt(key: Buffer, plaintext: Buffer, aad?: Buffer, nonce?: Buffer): Buffer {
+export function encrypt(key: Buffer, plaintext: Buffer, aad?: Buffer): Buffer {
+  // The nonce is ALWAYS fresh and random — deterministic output is a
+  // nonce-reuse hazard, so the fixed-nonce path is deliberately NOT
+  // reachable through this signature. Test-vector generation uses
+  // encryptWithFixedNonce below (unmistakably named, never called from a
+  // production path).
+  return encryptWithFixedNonce(key, plaintext, aad, engine.randomBytes(NONCE_SIZE));
+}
+
+/** Fixed-nonce encryption — TEST/VECTOR GENERATION ONLY (never import from
+ *  a screen or store path). shared/vectors.json pins this output; mirrors
+ *  the backend's crypto.encrypt_with_nonce seam removal (2026-09-16). */
+export function encryptWithFixedNonce(
+  key: Buffer,
+  plaintext: Buffer,
+  aad: Buffer | undefined,
+  nonce: Buffer,
+): Buffer {
   if (key.length !== KEY_SIZE) throw new Error(`key must be ${KEY_SIZE} bytes`);
-  // Trailing optional nonce is a test seam only: omitted (every production
-  // call) means a fresh random nonce, exactly as before; a provided nonce
-  // must be exactly NONCE_SIZE bytes or the call fails loudly.
-  let actualNonce: Buffer;
-  if (nonce === undefined) {
-    actualNonce = engine.randomBytes(NONCE_SIZE);
-  } else {
-    if (nonce.length !== NONCE_SIZE) throw new Error(`nonce must be ${NONCE_SIZE} bytes`);
-    actualNonce = nonce;
-  }
-  const cipher = engine.createCipheriv(ALGO, key, actualNonce);
+  if (nonce.length !== NONCE_SIZE) throw new Error(`nonce must be ${NONCE_SIZE} bytes`);
+  const cipher = engine.createCipheriv(ALGO, key, nonce);
   if (aad) cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  return Buffer.concat([actualNonce, ciphertext, cipher.getAuthTag()]);
+  return Buffer.concat([nonce, ciphertext, cipher.getAuthTag()]);
 }
 
 export class TamperError extends Error {

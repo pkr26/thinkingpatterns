@@ -56,15 +56,109 @@ const SUPPRESS_PATTERNS: readonly RegExp[] = [
   ...CRISIS_SUPPRESS_EXTRA_PATTERNS,
 ].map((pattern) => new RegExp(pattern, "i"));
 
+// ---------------------------------------------------------------------------
+// Normalization pipeline — the shared contract with the backend's
+// app/services/crisis.py (pinned cross-engine by shared/crisis_phrases.json
+// fixtures replayed in both test suites). Added by the 2026-09-16 red-team
+// remediation: leetspeak ("su1c1de"), homoglyphs ("ѕuicide"), zero-width
+// and soft-hyphen injection, and intra-word separators ("s.u.i.c.i.d.e")
+// all bypassed the raw matcher on BOTH engines.
+// ---------------------------------------------------------------------------
+
+/** Format/invisible characters that carry no meaning (zero-width, bidi,
+ *  soft hyphen, BOM, ...). */
+const INVISIBLE = /[\u00ad\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
+
+/** Latin lookalikes from Cyrillic/Greek, by codepoint. NOTE: sigmas are
+ *  mapped BEFORE NFKC — NFKC collapses U+03F2 (lunate sigma, "c"-shaped)
+ *  into U+03C2 (final sigma, "s"-shaped), and only the raw codepoints can
+ *  tell the two confusable families apart. */
+const HOMOGLYPHS: Record<string, string> = {
+  "\u0430": "a", "\u0441": "c", "\u0435": "e", "\u043e": "o", "\u0440": "p",
+  "\u0445": "x", "\u0443": "y", "\u0456": "i", "\u0455": "s", "\u0458": "j",
+  "\u04bb": "h", "\u0501": "d", "\u0261": "g", "\u051b": "q", "\u051d": "w",
+  "\u0475": "v", "\u0437": "3", // з folds to 3, then leet-folds to e
+  "\u03bf": "o", "\u03b1": "a", "\u03b5": "e", "\u03b9": "i", "\u03ba": "k",
+  "\u03c1": "p", "\u03c4": "t", "\u03c5": "u", "\u03bd": "v", "\u03bc": "m",
+  "\u03b7": "n", "\u03c9": "w",
+  "\u03c2": "s", "\u03c3": "s", // final/regular sigma: "s"-shaped
+  "\u03f2": "c",                // lunate sigma: crescent, impersonates "c"
+};
+
+/** Leet substitutions applied ONLY between two letters ("k1ll" -> "kill"
+ *  but "1 want" keeps its digit). */
+const LEET: Record<string, string> = {
+  "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
+  "@": "a", "!": "i", $: "s",
+};
+const LEET_RE = /([a-z])([0-9@!$34578])([a-z])/g;
+
+/** Punctuation becomes a space; letters (any script), digits, ASCII
+ *  apostrophes and hyphens survive. */
+const PUNCT_TO_SPACE =
+  /[^0-9a-z'\-\s\u00c0-\u02af\u0370-\u04ff\u0600-\u06ff\u0900-\u097f\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f]/g;
+
+/** A single-letter token run this long is a spelled-out word ("s u i c i d
+ *  e"), not prose — ordinary English never strings 4+ one-letter words
+ *  together ("i am so sad" keeps its shape; "u s a won gold" is only 3). */
+const SINGLE_LETTER_JOIN = 4;
+
+function leetFold(text: string): string {
+  // Loop until stable: "su1c1de" needs two passes (each replacement makes
+  // the next digit newly adjacent to letters).
+  for (;;) {
+    const folded = text.replace(LEET_RE, (_m, a: string, d: string, b: string) => a + LEET[d] + b);
+    if (folded === text) return text;
+    text = folded;
+  }
+}
+
+/** Canonical matching form — MUST stay byte-compatible with the backend's
+ *  normalize_crisis_text (the JSON fixtures pin both engines). Exported for
+ *  tests and for the phrase-contract parity suite. */
+export function normalizeCrisisText(text: string): string {
+  let out = text
+    .toLowerCase()
+    .replace(INVISIBLE, "")
+    .replace(/[\u0250-\u02ff\u0370-\u052f]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
+    .normalize("NFKC")
+    .replace(/\u2019/g, "'");
+  out = leetFold(out);
+  out = out.replace(PUNCT_TO_SPACE, " ");
+  // Join runs of >=4 single-letter tokens: "s u i c i d e" -> "suicide"
+  // (whitespace- AND hyphen-separated; "c-u-t-t-i-n-g" arrives here as
+  // single-letter tokens after punctuation folding).
+  const tokens = out.split(/[\s-]+/).filter((t) => t.length > 0);
+  const joined: string[] = [];
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length >= SINGLE_LETTER_JOIN) joined.push(run.join(""));
+    else joined.push(...run);
+    run = [];
+  };
+  for (const token of tokens) {
+    if (token.length === 1 && /[a-z]/.test(token)) {
+      run.push(token);
+      continue;
+    }
+    flush();
+    joined.push(token);
+  }
+  flush();
+  return joined.join(" ").trim();
+}
+
 /** True when `text` contains crisis language (dialog tier — fire the
  *  gentle support dialog). Pure: no I/O, no state. */
 export function detectCrisisLanguage(text: string): boolean {
-  return DIALOG_PATTERNS.some((pattern) => pattern.test(text));
+  const normalized = normalizeCrisisText(text);
+  return DIALOG_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 /** True when `text` belongs to the broader suppression tier — the caller
  *  renders a NON-QUOTING card (or suppresses a generated question) for
  *  crisis-adjacent patterns. Pure: no I/O, no state. */
 export function matchesCrisisSuppress(text: string): boolean {
-  return SUPPRESS_PATTERNS.some((pattern) => pattern.test(text));
+  const normalized = normalizeCrisisText(text);
+  return SUPPRESS_PATTERNS.some((pattern) => pattern.test(normalized));
 }

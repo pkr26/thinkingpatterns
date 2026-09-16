@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -13,39 +14,64 @@ from app.security import kdf
 VECTORS_PATH = Path(__file__).resolve().parents[2] / "shared" / "vectors.json"
 
 
+def fast_master(password: str, salt: bytes, iterations: int) -> bytes:
+    """Test-side fast derivation. The shipping library floors iterations at
+    kdf.MIN_ITERATIONS (2026-09-16 remediation, finding A4) — the floor
+    protects production callers, and parameter-semantics tests legitimately
+    want cheap counts, so they derive with hashlib directly."""
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, iterations
+    )
+
+
 def test_deterministic():
-    a = kdf.derive_master_key("password", b"0123456789abcdef", 100)
-    b = kdf.derive_master_key("password", b"0123456789abcdef", 100)
+    a = fast_master("password", b"0123456789abcdef", 100)
+    b = fast_master("password", b"0123456789abcdef", 100)
     assert a == b
 
 
 def test_password_sensitivity():
-    base = kdf.derive_master_key("password", b"0123456789abcdef", 100)
+    base = fast_master("password", b"0123456789abcdef", 100)
     for variant in ("Password", "password ", "passwor"):
-        assert kdf.derive_master_key(variant, b"0123456789abcdef", 100) != base
+        assert fast_master(variant, b"0123456789abcdef", 100) != base
 
 
 def test_salt_sensitivity():
-    base = kdf.derive_master_key("password", b"0123456789abcdef", 100)
-    assert kdf.derive_master_key("password", b"fedcba9876543210", 100) != base
+    base = fast_master("password", b"0123456789abcdef", 100)
+    assert fast_master("password", b"fedcba9876543210", 100) != base
 
 
 def test_iteration_sensitivity():
-    assert (kdf.derive_master_key("p", b"0123456789abcdef", 100)
-            != kdf.derive_master_key("p", b"0123456789abcdef", 101))
+    assert (fast_master("p", b"0123456789abcdef", 100)
+            != fast_master("p", b"0123456789abcdef", 101))
 
 
 def test_rejects_weak_parameters():
     with pytest.raises(ValueError):
-        kdf.derive_master_key("p", b"short", 100)  # salt < 8 bytes
+        kdf.derive_master_key("p", b"short", kdf.MIN_ITERATIONS)  # salt < 8 bytes
     with pytest.raises(ValueError):
         kdf.derive_master_key("p", b"0123456789abcdef", 0)
     with pytest.raises(ValueError):
         kdf.derive_master_key("p", b"0123456789abcdef", -5)
 
 
+def test_iteration_floor_is_enforced():
+    """2026-09-16 remediation (red-team finding A4): the library refuses to
+    derive below MIN_ITERATIONS so no honest caller can silently downgrade
+    the 600k contract; the boundary itself is exactly MIN_ITERATIONS."""
+    with pytest.raises(ValueError, match="iterations must be at least"):
+        kdf.derive_master_key("p", b"0123456789abcdef", kdf.MIN_ITERATIONS - 1)
+    # Exactly at the floor is valid (and equals a raw PBKDF2 of the same cost).
+    assert kdf.derive_master_key("p", b"0123456789abcdef", kdf.MIN_ITERATIONS) == fast_master(
+        "p", b"0123456789abcdef", kdf.MIN_ITERATIONS
+    )
+    # The default is still the full production contract.
+    assert kdf.KDF_ITERATIONS == 600_000
+    assert kdf.MIN_ITERATIONS >= 100_000
+
+
 def test_auth_and_data_keys_are_separated():
-    master = kdf.derive_master_key("password", b"0123456789abcdef", 100)
+    master = fast_master("password", b"0123456789abcdef", 100)
     auth = kdf.derive_auth_key(master)
     data = kdf.derive_data_key(master)
     assert auth != data

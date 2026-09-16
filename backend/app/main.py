@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import __version__, config
+from . import __version__, config, singleprocess
 from .api import api_router, api_v1_router
 from .cache import FixedWindowCounter
 from .db import build_engine, build_sessionmaker, init_models
@@ -42,15 +42,31 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # create_all is a dev/test convenience only. Outside development the
-        # schema comes from `alembic upgrade head` (run by the image
-        # entrypoint before uvicorn starts) — silently pre-creating the schema
-        # here would leave the database without an alembic_version stamp and
-        # break the first real migration with CREATE TABLE conflicts.
-        if is_development:
-            await init_models(app.state.engine)
-        yield
-        await app.state.engine.dispose()
+        # The deployment contract is ONE process per instance: rate limits,
+        # per-user locks, and the processing-session keystore are all
+        # in-process. A second worker used to boot silently and fragment
+        # every one of those guarantees (2026-09-16 red-team finding C1) —
+        # now it refuses to start. Re-entrant within a process (tests).
+        with singleprocess.single_process_guard(
+            settings.token_secret, settings.database_url
+        ):
+            if settings.trust_proxy_headers:
+                config.logger.warning(
+                    "MINDPATTERN_TRUST_PROXY_HEADERS is on: rate-limit identity "
+                    "comes from X-Forwarded-For. The origin MUST only be reachable "
+                    "through a trusted proxy that appends its own observation — "
+                    "direct client access with a spoofable header defeats per-IP "
+                    "limits entirely (2026-09-16 red-team finding B2)."
+                )
+            # create_all is a dev/test convenience only. Outside development the
+            # schema comes from `alembic upgrade head` (run by the image
+            # entrypoint before uvicorn starts) — silently pre-creating the schema
+            # here would leave the database without an alembic_version stamp and
+            # break the first real migration with CREATE TABLE conflicts.
+            if is_development:
+                await init_models(app.state.engine)
+            yield
+            await app.state.engine.dispose()
 
     app = FastAPI(
         title="MindPattern API",

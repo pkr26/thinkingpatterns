@@ -1031,7 +1031,8 @@ async def test_export_bundle_header_is_exact(client):
     head = json.loads(lines[0])
     assert head["version"] == 1
     assert head["llm_consent"] is False
-    assert "username" in head and head["username"] == emu.username
+    # 2026-09-16 (finding H2): no cleartext username in the export bundle.
+    assert "username" not in head
     parsed_at = datetime.fromisoformat(head["exported_at"])
     assert parsed_at.tzinfo is not None
     assert abs((datetime.now(timezone.utc) - parsed_at).total_seconds()) < 300
@@ -1271,7 +1272,10 @@ def test_llm_prompt_and_payload_shape_are_pinned():
     analyzer.analyze([_entry(0, "a work day", sentiment=-0.25)])
 
     payload = posted[0]
-    assert set(payload) == {"model", "messages"}
+    # 2026-09-16 remediation (D2): generation is bounded.
+    assert set(payload) == {"model", "max_tokens", "temperature", "messages"}
+    assert payload["max_tokens"] == 512
+    assert payload["temperature"] == 0.0
     assert payload["model"] == "mini"
     system, user = payload["messages"]
     assert system["role"] == "system"

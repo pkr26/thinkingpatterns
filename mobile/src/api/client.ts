@@ -152,6 +152,11 @@ function sanitizeDetail(text: string): string {
     // Any other scheme://… (evilapp://pay, ftp://…) — same phishing class;
     // the scheme AND its payload go, like the http case above.
     .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "")
+    // Scheme-less domains ("go to evil.com/support") — the 2026-09-16
+    // red-team corpus showed the scheme regexes alone leave these intact.
+    .replace(/\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|dev|app|co|edu|gov|info|xyz|me|tv|uk)\b(?:\/\S*)?/gi, "")
+    // Phone-like digit runs ("call 555-0134") — separators included.
+    .replace(/\d[\d\s().-]{2,}\d/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return stripped.length > MAX_ERROR_MESSAGE_CHARS
@@ -450,8 +455,20 @@ export const api = {
     return request("DELETE", `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`);
   },
 
-  openProcessingSession: (dataKeyB64: string) =>
-    request("POST", `${API_PREFIX}/processing/sessions`, { data_key: dataKeyB64 }, {}, { sensitive: true }),
+  /** 2026-09-16 (red-team finding F2): the data key is the whole journal.
+   *  Ordinary requests may run over consented plain HTTP (BYO-server), but
+   *  the KEY shipment refuses it outright — https or loopback only, no
+   *  consent dialog can override that. */
+  openProcessingSession: async (dataKeyB64: string) => {
+    const parsed = parseServerUrl(await getBaseUrl());
+    if (parsed && parsed.insecure) {
+      throw new ApiError(
+        0,
+        "the encryption key can only be sent over HTTPS (or localhost) — update the server URL",
+      );
+    }
+    return request("POST", `${API_PREFIX}/processing/sessions`, { data_key: dataKeyB64 }, {}, { sensitive: true });
+  },
   recompute: (processingToken: string) =>
     request("POST", `${API_PREFIX}/insights/recompute`, undefined, { "X-Processing-Token": processingToken }),
   insights: () => request("GET", `${API_PREFIX}/insights`),

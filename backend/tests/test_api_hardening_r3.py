@@ -516,7 +516,7 @@ def test_numeric_upper_bounds_abort_startup():
     with pytest.raises(RuntimeError, match="token_ttl_seconds must be <="):
         Settings(**base, token_ttl_seconds=30 * 86_400 + 1)
     with pytest.raises(RuntimeError, match="processing_session_ttl must be <="):
-        Settings(**base, processing_session_ttl=3601)
+        Settings(**base, processing_session_ttl=301)  # ceiling is 300 (consent copy)
     with pytest.raises(RuntimeError, match="auth_rate_window must be <="):
         Settings(**base, auth_rate_window=3601)
     with pytest.raises(RuntimeError, match="read_rate_limit must be <="):
@@ -525,7 +525,7 @@ def test_numeric_upper_bounds_abort_startup():
     Settings(
         **base,
         token_ttl_seconds=30 * 86_400,
-        processing_session_ttl=3600,
+        processing_session_ttl=300,  # 5 min — matches the mobile consent copy
         export_rate_limit=100_000,
         export_rate_window=3600,
     )

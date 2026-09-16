@@ -1,0 +1,37 @@
+[
+  {
+    "id": "E1.python-suppress-bypass",
+    "status": "FINDING",
+    "summary": "1/35 crisis samples evade the suppress tier (the tier that keeps text off cards/questions). Bypasses by technique \u2014 control-apostrophe: 0/1; control-case: 0/1; control-curly: 0/1; control-plain: 0/1; control-spaces: 0/1; homoglyph: 0/4; leetspeak: 0/4; non-english: 0/10; punct-split: 0/3; soft-hyphen: 0/1; space-split: 1/2; unlisted-phrase: 0/4; zero-width: 0/2. Samples: ['k ill myself']"
+  },
+  {
+    "id": "E1.python-dialog-bypass",
+    "status": "INFO",
+    "summary": "2 samples are suppressed-but-no-dialog BY DESIGN (hopelessness phrasing sits in the suppress_extra tier: never quoted on cards/questions, but the conservative dialog tier stays first-person-ideation only): [\"i don't see any future for me\", 'everyone would be happier if i was gone']"
+  },
+  {
+    "id": "E1.python-false-positives",
+    "status": "INFO",
+    "summary": "benign controls firing the dialog tier (documented, accepted product stance \u2014 see crisisDetect.ts header): ['that movie was suicide squad and i liked it']"
+  },
+  {
+    "id": "E1.bypass-to-question-quote",
+    "status": "FINDING",
+    "summary": "of 1 bypassing labels fed to question generation, 1 are interpolated verbatim into reflective questions (e.g. ['k ill myself']) \u2014 the full chain: disguised crisis text in a journal -> pattern card label -> daily question quoting it back"
+  },
+  {
+    "id": "E3.diagnosis-language",
+    "status": "BLOCKED",
+    "summary": "no diagnosis vocabulary in question templates or the LLM module (the only grep hit is the prompt instruction 'No advice, no diagnosis' itself)"
+  },
+  {
+    "id": "E3.llm-kind-allowlist",
+    "status": "BLOCKED",
+    "summary": "LLM pattern kinds are fixed to ('temporal', 'mood_correlation', 'recurring_phrase', 'mood_shift') \u2014 no diagnosis/flag kind exists for a model output to claim"
+  },
+  {
+    "id": "E3.crisis-screen-copy",
+    "status": "BLOCKED",
+    "summary": "crisis resources screen: {'988 line present': True, 'Crisis Text Line 741741': True, 'emergency guidance': True, 'findahelpline fallback': True, 'no method detail language': True}"
+  }
+]

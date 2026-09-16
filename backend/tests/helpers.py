@@ -8,6 +8,7 @@ so every API test exercises the exact bytes a real device would send.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from datetime import date
@@ -16,7 +17,12 @@ from httpx import AsyncClient
 
 from app.security import crypto, kdf
 
-FAST_ITERATIONS = 1_000  # test-only KDF cost; server never re-derives keys
+# Test-only KDF cost. The shipping library floors iterations at
+# kdf.MIN_ITERATIONS (2026-09-16 remediation), so the emulator derives its
+# fast master key with hashlib DIRECTLY: the floor protects production
+# callers, and this emulator is harness code, not the product. The key
+# schedule below (HKDF auth/data keys) is still the real library.
+FAST_ITERATIONS = 1_000
 
 
 class ClientEmulator:
@@ -24,7 +30,9 @@ class ClientEmulator:
         self.username = username
         self.password = password
         self.salt = salt or os.urandom(16)
-        self.master_key = kdf.derive_master_key(password, self.salt, FAST_ITERATIONS)
+        self.master_key = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), self.salt, FAST_ITERATIONS
+        )
         self.auth_key = kdf.derive_auth_key(self.master_key)
         self.data_key = kdf.derive_data_key(self.master_key)
         self.user_id: str | None = None

@@ -1220,6 +1220,14 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     # weak estimates are indistinguishable from iid and inflating on them
     # would smother real shifts.
     phi = _lag1_autocorr(values)
+    # Clamp before the division: a constant-within-float-noise baseline
+    # computes r == 1.0 exactly and (1+phi)/(1-phi) divides by zero — the
+    # 2026-09-16 red-team corpus (35 near-identical daily entries) bricked
+    # every future recompute for such accounts. phi = 0.99 already
+    # saturates the inflation cap below, so the clamp changes no honest
+    # statistical outcome.
+    if phi is not None:
+        phi = min(phi, 0.99)
     if phi is not None and phi >= 0.35:
         inflation = (1.0 + phi) / (1.0 - phi)
         sigma_ewma *= math.sqrt(min(max(inflation, 1.0), 16.0))

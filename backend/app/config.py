@@ -34,7 +34,11 @@ DEFAULT_INSECURE_SECRET = "dev-insecure-secret-change-me"
 # expires keeps a data key usable in memory; a day-long rate window
 # misleads Retry-After and makes the counter's eviction useless.
 MAX_TOKEN_TTL_SECONDS = 30 * 86_400  # 30 days
-MAX_PROCESSING_SESSION_TTL = 3_600  # 1 hour — sessions are single-use anyway
+# 5 minutes — the mobile consent copy promises "held in memory for up to 5
+# minutes, then destroyed", so the operator-tunable ceiling must match it
+# (the 2026-09-16 audit found a 3600s ceiling silently contradicting the
+# promise an abandoned session could sit on the key for an hour).
+MAX_PROCESSING_SESSION_TTL = 300
 MAX_RATE_WINDOW_SECONDS = 3_600  # 1 hour per window
 MAX_RATE_LIMIT = 100_000  # hits per window
 

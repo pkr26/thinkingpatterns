@@ -44,11 +44,11 @@ def test_fixed_nonce_encrypt_reproduces_blob_byte_for_byte():
     assert len(vectors) >= 2, "expected at least one ASCII and one non-ASCII case"
     for vector in vectors:
         aad = crypto.build_aad(*vector["aad_parts"]) if vector["aad_parts"] else None
-        blob = crypto.encrypt(
+        blob = crypto.encrypt_with_nonce(
             _data_key(vector),
             base64.b64decode(vector["plaintext"]),
             aad,
-            nonce=base64.b64decode(vector["nonce"]),
+            base64.b64decode(vector["nonce"]),
         )
         assert base64.b64encode(blob).decode() == vector["blob"]
 
@@ -65,8 +65,12 @@ def test_backend_decrypts_fixed_nonce_blob():
 
 
 def test_encrypt_nonce_seam_rejects_wrong_size():
+    """2026-09-16: the seam moved OUT of encrypt() into encrypt_with_nonce —
+    production encrypt() has no nonce parameter at all (finding A5)."""
     key = crypto.generate_key()
+    with pytest.raises(TypeError):
+        crypto.encrypt(key, b"data", None, b"short")  # type: ignore[call-arg]
     with pytest.raises(crypto.CryptoError):
-        crypto.encrypt(key, b"data", nonce=b"short")
-    # Omitted nonce keeps the production behavior: fresh random per call.
+        crypto.encrypt_with_nonce(key, b"data", None, b"short")
+    # Production behavior: fresh random nonce per call, always.
     assert crypto.encrypt(key, b"data") != crypto.encrypt(key, b"data")
