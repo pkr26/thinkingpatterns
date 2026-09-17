@@ -719,7 +719,11 @@ class TestGradedSentiment:
 
     def test_kind_of_hedge_is_not_positive(self):
         # "kind" carried +1.9 and flipped hedged negatives positive.
-        assert brain.sentiment_score("kind of hard today".split()) == 0.0
+        # (2026-09-17: with the VADER base merged in, "hard" now carries
+        # its own mild negative valence — the pin is the INTENT: the hedge
+        # stays non-positive, never flipped.)
+        assert brain.sentiment_score("kind of hard today".split()) <= 0.0
+        assert brain._word_valence("kind") == 0.0
         # The genuinely negative tail still reads negative.
         assert brain.sentiment_score("it was kind of awful".split()) < 0
 
@@ -728,8 +732,12 @@ class TestGradedSentiment:
         assert brain.sentiment_score("i fed the cat this morning".split()) == 0.0
 
     def test_present_is_not_valenced(self):
-        # Attendance/gift senses outnumber the mindful one; dropped.
-        assert brain.sentiment_score("everyone present agreed on the plan".split()) == 0.0
+        # Attendance/gift senses outnumber the mindful one; dropped. The
+        # WORD itself carries no valence (2026-09-17: with VADER breadth,
+        # other words in such sentences may score — the curation wins only
+        # where it spoke).
+        assert brain._word_valence("present") == 0.0
+        assert brain.sentiment_score("present".split()) == 0.0
 
     def test_relaxed_is_positive_again(self):
         # v2 valence restored (the v3 lexicon claims v2 superset status).

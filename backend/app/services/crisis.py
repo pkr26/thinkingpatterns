@@ -21,6 +21,18 @@ matched case-insensitively against NORMALIZED text (see
 normalize_crisis_text — added by the 2026-09-16 red-team remediation
 after leetspeak/homoglyph/zero-width/punctuation-split/non-English
 samples bypassed the raw matcher on both engines).
+
+2026-09-17 hardening (both engines, pinned by the shared fixtures):
+  * DUAL-VARIANT MATCHING — the matchers additionally test an
+    orphan-join variant where a run of 1-3 single-letter tokens glues
+    onto the FOLLOWING word ("k ill myself" -> "kill myself"), closing
+    the partial-split bypass the red-team corpus documented. Ordinary
+    prose cannot lose a match: the unjoined variant always runs too.
+  * BENIGN-COMPOUND MASKING — movie/band titles and prevention-campaign
+    phrases (BENIGN_COMPOUNDS) are masked out of both variants before
+    either tier matches, so "that movie was suicide squad" no longer
+    fires the dialog tier. Any first-person ideation phrasing around
+    them still matches on its own words.
 """
 
 from __future__ import annotations
@@ -113,6 +125,20 @@ SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
 # The effective suppression tier: dialog + suppress_extra (per the JSON).
 SUPPRESS_PATTERNS: tuple[str, ...] = DIALOG_PATTERNS + SUPPRESS_EXTRA_PATTERNS
 
+# Multiword titles/causes masked from BOTH tiers before matching: the bare
+# topic word inside them is not first-person ideation ("that movie was
+# suicide squad" must not fire the dialog tier; "we discussed suicide
+# prevention in class" either). Masked on the normalized text, plain
+# lowercase substring, longest-first by the caller. Any genuine crisis
+# phrasing around them ("...makes me want to die") matches on its own.
+BENIGN_COMPOUNDS: tuple[str, ...] = (
+    "suicide squad",
+    "suicide silence",
+    "suicideboys",
+    "suicide prevention",
+    "suicide awareness",
+)
+
 
 def _compile_tier(patterns: tuple[str, ...]) -> re.Pattern[str]:
     # One alternation per tier; each branch keeps its own \b anchors inside
@@ -187,9 +213,8 @@ def _leet_fold(text: str) -> str:
         text = folded
 
 
-def normalize_crisis_text(text: str) -> str:
-    """Canonical matching form — MUST stay byte-compatible with the mobile
-    engine's normalizeCrisisText (the JSON fixtures pin both)."""
+def _normalize_to_tokens(text: str) -> list[str]:
+    """The shared pipeline up to (but not including) single-letter joining."""
     out = text.lower()
     out = out.translate(_INVISIBLE)
     # Homoglyphs BEFORE NFKC: NFKC collapses U+03F2 (lunate sigma, "c"-like)
@@ -202,37 +227,96 @@ def normalize_crisis_text(text: str) -> str:
     out = out.replace("\u2019", "'")
     out = _leet_fold(out)
     out = _PUNCT_TO_SPACE_RE.sub(" ", out)
-    # Join runs of >=4 single-letter tokens: "s u i c i d e" -> "suicide"
-    # (whitespace- AND hyphen-separated; "c-u-t-t-i-n-g" arrives here as
-    # single-letter tokens after punctuation folding).
-    tokens = [t for t in re.split(r"[\s\-]+", out) if t]
-    joined: list[str] = []
-    run: list[str] = []
-    for token in tokens:
-        # ASCII single letters only — the mobile engine's rule; non-Latin
-        # single characters (CJK etc.) never join (parity pinned by tests).
-        if len(token) == 1 and "a" <= token <= "z":
-            run.append(token)
-            continue
-        if len(run) >= _SINGLE_LETTER_JOIN:
-            joined.append("".join(run))
-        else:
-            joined.extend(run)
-        run = []
-        joined.append(token)
+    return [t for t in re.split(r"[\s\-]+", out) if t]
+
+
+def _is_ascii_single(token: str) -> bool:
+    # ASCII single letters only — the mobile engine's rule; non-Latin
+    # single characters (CJK etc.) never join (parity pinned by tests).
+    return len(token) == 1 and "a" <= token <= "z"
+
+
+def _emit_run(run: list[str], joined: list[str]) -> None:
     if len(run) >= _SINGLE_LETTER_JOIN:
         joined.append("".join(run))
     else:
         joined.extend(run)
+
+
+def _primary_join(tokens: list[str]) -> str:
+    """Join runs of >=4 single-letter tokens: "s u i c i d e" ->
+    "suicide" (whitespace- AND hyphen-separated; "c-u-t-t-i-n-g" arrives
+    here as single-letter tokens after punctuation folding)."""
+    joined: list[str] = []
+    run: list[str] = []
+    for token in tokens:
+        if _is_ascii_single(token):
+            run.append(token)
+            continue
+        _emit_run(run, joined)
+        run = []
+        joined.append(token)
+    _emit_run(run, joined)
     return " ".join(joined)
+
+
+def normalize_crisis_text(text: str) -> str:
+    """Canonical matching form — MUST stay byte-compatible with the mobile
+    engine's normalizeCrisisText (the JSON fixtures pin both)."""
+    return _primary_join(_normalize_to_tokens(text))
+
+
+def _orphan_glue(tokens: list[str]) -> str:
+    """Evasion variant: a run of 1-3 single-letter tokens glues onto the
+    FOLLOWING word ("k ill myself" -> "kill myself", "k i ll myself" ->
+    "kill myself"), catching partial splits the >=4 threshold misses.
+    Runs of >=4 join as their own word, exactly like the primary variant.
+    Safe against ordinary prose ("i am so sad" -> "iam so sad") because
+    the result is only ever matched IN ADDITION to the unjoined variant:
+    a real crisis phrase still matches there, and no benign sentence
+    turns into one ("iwant to diet" matches nothing either way).
+    """
+    out: list[str] = []
+    run: list[str] = []
+    for token in tokens:
+        if _is_ascii_single(token):
+            run.append(token)
+            continue
+        if len(run) >= _SINGLE_LETTER_JOIN:
+            out.append("".join(run))
+            out.append(token)
+        elif run:
+            out.append("".join(run) + token)
+        else:
+            out.append(token)
+        run = []
+    out.extend(run)  # a trailing run has nothing to glue onto
+    return " ".join(out)
+
+
+def _mask_benign(variant: str) -> str:
+    for compound in BENIGN_COMPOUNDS:
+        variant = variant.replace(compound, " ")
+    return variant
+
+
+def _match_variants(text: str) -> tuple[str, ...]:
+    """Every normalized form the tiers match against, benign compounds
+    masked. MUST stay behavior-compatible with the mobile engine's
+    matchVariants (the shared fixtures pin both)."""
+    tokens = _normalize_to_tokens(text)
+    return (
+        _mask_benign(_primary_join(tokens)),
+        _mask_benign(_orphan_glue(tokens)),
+    )
 
 
 def matches_dialog(text: str) -> bool:
     """True when the (conservative) client dialog tier fires."""
-    return DIALOG_RE.search(normalize_crisis_text(text)) is not None
+    return any(DIALOG_RE.search(v) for v in _match_variants(text))
 
 
 def matches_suppress(text: str) -> bool:
     """True when the (broader) suppression tier fires: never quote this
     back as a pattern card or reflective question."""
-    return SUPPRESS_RE.search(normalize_crisis_text(text)) is not None
+    return any(SUPPRESS_RE.search(v) for v in _match_variants(text))

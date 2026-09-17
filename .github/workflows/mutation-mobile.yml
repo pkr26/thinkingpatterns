@@ -1,0 +1,63 @@
+name: Mobile mutation gate
+
+# 2026-09-17: the mobile mutation score DECAYED silently once before —
+# 100.0% on 2026-09-04, 82.73% on 2026-09-15 — because Stryker ran only
+# by hand. This weekly scheduled run keeps the number honest: a score
+# below the floor fails the workflow (advisory for triage, not a PR
+# blocker — see mutation.yml for the backend's reasoning).
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stryker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@8f6f2be7f1a373f9fb5b822e72f6f1fe9a01e16d # v7.0.0
+        with:
+          node-version-file: mobile/.nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci
+      - name: Run Stryker
+        working-directory: mobile
+        run: npx stryker run || echo "STRYKER_FAILED=$?" >> "$GITHUB_ENV"
+      - name: Enforce the floor (99.0 — lower only deliberately, with a triaged report)
+        working-directory: mobile
+        run: |
+          SCORE=$(node -e "
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('reports/mutation/mutation.json', 'utf8'));
+            console.log(report.rt.testFiles?.[0]?.testResults ? '' : ''); // shape varies; fall through
+          " 2>/dev/null || true)
+          # Stryker's JSON schema carries the score under .score (0..100) in
+          # recent majors; guard both shapes.
+          SCORE=$(node -e "
+            try {
+              const r = JSON.parse(require('fs').readFileSync('reports/mutation/mutation.json', 'utf8'));
+              const s = typeof r.score === 'number' ? r.score : (r.totals?.score ?? null);
+              if (s === null) { console.error('no score in report'); process.exit(2); }
+              console.log(s);
+            } catch (e) { console.error(e.message); process.exit(2); }
+          ")
+          echo "mutation score: $SCORE"
+          awk -v s="$SCORE" 'BEGIN { exit !(s < 99.0) }' && {
+            echo "::error::mobile mutation score $SCORE is below the 99.0 floor — triage survivors and pin them (see reports/mutation_report_mobile_2026-09-15.md for the discipline)"
+            exit 1
+          }
+      - name: Upload the report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-report
+          path: mobile/reports/mutation/
+          retention-days: 30

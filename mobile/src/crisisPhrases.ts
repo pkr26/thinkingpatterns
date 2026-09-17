@@ -102,3 +102,18 @@ export const CRISIS_SUPPRESS_EXTRA_PATTERNS: readonly string[] = [
   "\\bhappier\\s+without\\s+me\\b",
   "\\beveryone\\s+would\\s+be\\s+happier\\b",
 ];
+
+/**
+ * Multiword titles/causes masked from BOTH tiers before matching
+ * (2026-09-17): the bare topic word inside them is not first-person
+ * ideation — "that movie was suicide squad" must not fire the dialog
+ * tier, and "we discussed suicide prevention in class" neither. Any
+ * genuine crisis phrasing around them still matches on its own words.
+ */
+export const CRISIS_BENIGN_COMPOUNDS: readonly string[] = [
+  "suicide squad",
+  "suicide silence",
+  "suicideboys",
+  "suicide prevention",
+  "suicide awareness",
+];

@@ -25,9 +25,12 @@
  *    positive there only means a pattern is not quoted.
  *
  * Accepted false positives of the dialog tier (documented, not shipped as
- * sloppy regexes):
- *  - Any use of the word "suicide"/"suicidal", even in a prevention or
- *    academic context ("we discussed suicide prevention in class").
+ *  sloppy regexes):
+ *  - Any use of the word "suicide"/"suicidal" in first-person or bare
+ *    context. Multiword benign compounds are masked first (see
+ *    CRISIS_BENIGN_COMPOUNDS: "suicide squad", "suicide prevention",
+ *    ...), so everyday pop-culture and classroom mentions stay silent;
+ *    every other mention still fires.
  *  - "cut myself" / "cutting myself" fires even in benign grooming or
  *    kitchen contexts ("I cut myself shaving"). Enumerating benign
  *    follow-up contexts with a lookahead would be an incomplete blocklist
@@ -44,7 +47,7 @@
  * list) — otherwise "I can't go on" typed on an iPhone silently missed
  * detection.
  */
-import { CRISIS_DIALOG_PATTERNS, CRISIS_SUPPRESS_EXTRA_PATTERNS } from "./crisisPhrases";
+import { CRISIS_BENIGN_COMPOUNDS, CRISIS_DIALOG_PATTERNS, CRISIS_SUPPRESS_EXTRA_PATTERNS } from "./crisisPhrases";
 
 /** Compiled once at module load; every pattern in the shared contract is
  *  guaranteed lookahead-free and dual-engine (Python re + ECMAScript). */
@@ -117,6 +120,11 @@ function leetFold(text: string): string {
  *  normalize_crisis_text (the JSON fixtures pin both engines). Exported for
  *  tests and for the phrase-contract parity suite. */
 export function normalizeCrisisText(text: string): string {
+  return primaryJoin(normalizeToTokens(text));
+}
+
+/** The shared pipeline up to (but not including) single-letter joining. */
+function normalizeToTokens(text: string): string[] {
   let out = text
     .toLowerCase()
     .replace(INVISIBLE, "")
@@ -125,10 +133,17 @@ export function normalizeCrisisText(text: string): string {
     .replace(/\u2019/g, "'");
   out = leetFold(out);
   out = out.replace(PUNCT_TO_SPACE, " ");
-  // Join runs of >=4 single-letter tokens: "s u i c i d e" -> "suicide"
-  // (whitespace- AND hyphen-separated; "c-u-t-t-i-n-g" arrives here as
-  // single-letter tokens after punctuation folding).
-  const tokens = out.split(/[\s-]+/).filter((t) => t.length > 0);
+  return out.split(/[\s-]+/).filter((t) => t.length > 0);
+}
+
+/** ASCII single letters only — the backend engine's rule; non-Latin
+ *  single characters (CJK etc.) never join (parity pinned by tests). */
+function isAsciiSingle(token: string): boolean {
+  return token.length === 1 && token >= "a" && token <= "z";
+}
+
+/** Join runs of >=4 single-letter tokens: "s u i c i d e" -> "suicide". */
+function primaryJoin(tokens: string[]): string {
   const joined: string[] = [];
   let run: string[] = [];
   const flush = () => {
@@ -137,7 +152,7 @@ export function normalizeCrisisText(text: string): string {
     run = [];
   };
   for (const token of tokens) {
-    if (token.length === 1 && /[a-z]/.test(token)) {
+    if (isAsciiSingle(token)) {
       run.push(token);
       continue;
     }
@@ -148,17 +163,61 @@ export function normalizeCrisisText(text: string): string {
   return joined.join(" ").trim();
 }
 
+/** Evasion variant: a run of 1-3 single-letter tokens glues onto the
+ *  FOLLOWING word ("k ill myself" -> "kill myself", "k i ll myself" ->
+ *  "kill myself"), catching partial splits the >=4 threshold misses.
+ *  Runs of >=4 join as their own word, exactly like the primary variant.
+ *  Safe against ordinary prose ("i am so sad" -> "iam so sad") because
+ *  the result is only ever matched IN ADDITION to the unjoined variant:
+ *  a real crisis phrase still matches there, and no benign sentence
+ *  turns into one ("iwant to diet" matches nothing either way). */
+function orphanGlue(tokens: string[]): string {
+  const out: string[] = [];
+  let run: string[] = [];
+  for (const token of tokens) {
+    if (isAsciiSingle(token)) {
+      run.push(token);
+      continue;
+    }
+    if (run.length >= SINGLE_LETTER_JOIN) {
+      out.push(run.join(""), token);
+    } else if (run.length > 0) {
+      out.push(run.join("") + token);
+    } else {
+      out.push(token);
+    }
+    run = [];
+  }
+  out.push(...run); // a trailing run has nothing to glue onto
+  return out.join(" ").trim();
+}
+
+/** Benign compounds (movie/band titles, prevention campaigns) masked out
+ *  of both variants before either tier matches. */
+function maskBenign(variant: string): string {
+  for (const compound of CRISIS_BENIGN_COMPOUNDS) {
+    variant = variant.split(compound).join(" ");
+  }
+  return variant;
+}
+
+/** Every normalized form the tiers match against — MUST stay
+ *  behavior-compatible with the backend's _match_variants (the shared
+ *  fixtures pin both engines). Exported for the parity suite. */
+export function matchVariants(text: string): [string, string] {
+  const tokens = normalizeToTokens(text);
+  return [maskBenign(primaryJoin(tokens)), maskBenign(orphanGlue(tokens))];
+}
+
 /** True when `text` contains crisis language (dialog tier — fire the
  *  gentle support dialog). Pure: no I/O, no state. */
 export function detectCrisisLanguage(text: string): boolean {
-  const normalized = normalizeCrisisText(text);
-  return DIALOG_PATTERNS.some((pattern) => pattern.test(normalized));
+  return matchVariants(text).some((v) => DIALOG_PATTERNS.some((p) => p.test(v)));
 }
 
 /** True when `text` belongs to the broader suppression tier — the caller
  *  renders a NON-QUOTING card (or suppresses a generated question) for
  *  crisis-adjacent patterns. Pure: no I/O, no state. */
 export function matchesCrisisSuppress(text: string): boolean {
-  const normalized = normalizeCrisisText(text);
-  return SUPPRESS_PATTERNS.some((pattern) => pattern.test(normalized));
+  return matchVariants(text).some((v) => SUPPRESS_PATTERNS.some((p) => p.test(v)));
 }

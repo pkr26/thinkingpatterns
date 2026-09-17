@@ -74,3 +74,37 @@ def test_encrypt_nonce_seam_rejects_wrong_size():
         crypto.encrypt_with_nonce(key, b"data", None, b"short")
     # Production behavior: fresh random nonce per call, always.
     assert crypto.encrypt(key, b"data") != crypto.encrypt(key, b"data")
+
+
+class TestAadEdgeCases:
+    """The 16 edge-case AAD vectors promoted from redteam/a_crypto.py's
+    A6 corpus (2026-09-17): surrogates, DEL/control chars, CJK, RTL,
+    combining marks, empty parts. Pinned byte-for-byte here, in the mobile
+    suite, in the portal suite, and by tools/verify_vectors.mjs — one
+    canonicalization bug on any platform breaks all four."""
+
+    def _aad_edge_cases(self) -> list[dict]:
+        data = json.loads(VECTORS_PATH.read_text())
+        cases = data.get("aad_edge_cases")
+        assert cases and len(cases) >= 16, "aad_edge_cases section missing/truncated"
+        return cases
+
+    def test_backend_matches_every_vector(self):
+        for case in self._aad_edge_cases():
+            got = crypto.build_aad(*case["parts"])
+            want = base64.b64decode(case["aad_b64"])
+            assert got == want, f"AAD diverged on {case['name']}: {got!r} != {want!r}"
+
+    def test_output_is_pure_ascii_regardless_of_input(self):
+        # ensure_ascii is the cross-platform contract: no input script can
+        # push a non-ASCII byte into the AAD.
+        for case in self._aad_edge_cases():
+            assert crypto.build_aad(*case["parts"]).isascii(), case["name"]
+
+    def test_surrogate_vectors_are_escaped_not_raw(self):
+        by_name = {c["name"]: c for c in self._aad_edge_cases()}
+        for name in ("lone-high-surrogate", "lone-low-surrogate", "surrogate-pair"):
+            raw = crypto.build_aad(*by_name[name]["parts"])
+            # The escape text itself is in the bytes, never the raw codepoint.
+            assert b"\\u" in raw, name
+            assert raw.decode("utf-8").isascii(), name

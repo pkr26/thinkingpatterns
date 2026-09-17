@@ -8,6 +8,7 @@ Philosophy invariants, enforced by tests:
 
 from __future__ import annotations
 
+import math
 import zlib
 from datetime import date
 from typing import Sequence
@@ -33,6 +34,58 @@ GENERIC_QUESTIONS: tuple[str, ...] = (
     "If today had a title, what would it be?",
     "What are you carrying into tomorrow?",
     "What did you notice today that you usually overlook?",
+    "What did your body notice before your mind did today?",
+    "What was the quietest moment of your day?",
+    "What sound do you remember from today?",
+    "What did you see today that you'd want to see again?",
+    "What would you say to a friend who had your day?",
+    "What's something you did today that took effort?",
+    "What did you forgive yourself for today?",
+    "What would make tomorrow 1% kinder to you?",
+    "What are three things that went okay today?",
+    "Who made your day a little lighter today?",
+    "What's something you're looking forward to?",
+    "What comforted you today?",
+    "What's one thing worth keeping from today?",
+    "What mattered most to you today?",
+    "When did today feel meaningful?",
+    "What value showed up in something you did today?",
+    "What would you like more of in your life?",
+    "If your mood today had a texture, what would it feel like?",
+    "What emotion visited you most today?",
+    "What emotion surprised you today?",
+    "Where in your body did today's strongest feeling live?",
+    "Who did you think about today?",
+    "What conversation stayed with you today?",
+    "When did you feel understood today?",
+    "When did you feel alone today, and what was that like?",
+    "What gave you energy today?",
+    "What drained you today?",
+    "What did you say no to today?",
+    "What did you let go of today?",
+    "What part of the day felt longest?",
+    "When were you most absorbed in something today?",
+    "What did today's pace feel like?",
+    "What was the hardest part of today?",
+    "What did you get through today that felt heavy?",
+    "What are you avoiding, gently speaking?",
+    "What worry got smaller once you wrote it down?",
+    "What are you curious about right now?",
+    "What's a question you're sitting with lately?",
+    "What would you like to remember about this time?",
+    "What's one small thing you're curious to attempt tomorrow?",
+    "What did you taste today that you remember?",
+    "Where did you feel most at ease today?",
+    "What's a place you'd rather have been today?",
+    "What feels most like 'you' these days?",
+    "What's changing in you lately, slowly?",
+    "What has stayed steady in you lately?",
+    "If today were weather, what was it?",
+    "What would tomorrow look like in an ideal world?",
+    "If you could send yourself a note this morning, what would it say?",
+    "What did you do today purely because you wanted to?",
+    "What did today ask of you?",
+    "What are you grateful to past-you for today?",
 )
 
 TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
@@ -52,6 +105,14 @@ TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
         'The phrase "{label}" keeps returning in your writing — what does it mean to you?',
         'You\'ve written "{label}" several times now. When did you first notice it?',
         'When "{label}" shows up in an entry, what usually preceded it?',
+    ),
+    "avoidance": (
+        "The day after '{label}' comes up, you often don't write — what do those quieter days hold?",
+        "You tend to go quiet after '{label}' days ({share}% of them). What is the day after like when it happens?",
+    ),
+    "cadence": (
+        "Your writing rhythm has been less regular than it used to be — what has been shaping the gaps?",
+        "There have been longer silences between writing days lately. What happens in those stretches?",
     ),
     "mood_shift": (
         "Your entries have read {direction} than your usual baseline lately — what has been going on around that?",
@@ -92,6 +153,13 @@ TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
 MAX_PATTERN_QUESTIONS = 5
 
 
+def _percent(value: object) -> str:
+    """0.31 -> "31"; "—" for anything non-numeric (templates render it)."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return str(int(round(float(value) * 100)))
+    return "—"
+
+
 def render_pattern_questions(pattern: Pattern) -> list[str]:
     templates = TEMPLATE_BY_KIND.get(pattern.kind)
     if not templates:
@@ -104,11 +172,17 @@ def render_pattern_questions(pattern: Pattern) -> list[str]:
             label=pattern.label,
             day=pattern.detail.get("day", "that day"),
             direction=pattern.detail.get("direction", "lower"),
+            # Evidence anchoring (2026-09-17): percentages computed from the
+            # pattern's own numbers, so questions feel grounded ("31% of
+            # them") instead of templated. Ints only — no p-values, no
+            # statistics lecture in a daily question.
+            share=_percent(pattern.detail.get("share")),
+            mentions=pattern.occurrences,
         ))
     return rendered
 
 
-def _pattern_is_sensitive(pattern: Pattern) -> bool:
+def pattern_is_sensitive(pattern: Pattern) -> bool:
     """True when a pattern must never be quoted back as a question.
 
     Three independent tripwires, cheapest last:
@@ -130,6 +204,19 @@ def _pattern_is_sensitive(pattern: Pattern) -> bool:
     return False
 
 
+def feedback_rank(p: Pattern) -> tuple[int, int, int, str]:
+    """Feedback-aware ordering (2026-09-17): patterns the user said "this
+    resonated" about float up, "not me" sinks — the question learns from
+    its reader without ever tracking WHAT was answered (only the taps on
+    the pattern itself, stored encrypted in the brain state). Module-level
+    so the insights API re-derives the SAME ordering when routing feedback
+    taps back to pattern ids."""
+    fb = p.detail.get("feedback") if isinstance(p.detail, dict) else None
+    resonated = fb.get("resonated", 0) if isinstance(fb, dict) else 0
+    not_me = fb.get("not_me", 0) if isinstance(fb, dict) else 0
+    return (min(not_me, 3), -min(resonated, 3), -p.occurrences, p.label)
+
+
 def build_pool(patterns: Sequence[Pattern]) -> list[str]:
     """Question pool: rendered variants for top patterns first, then generic.
 
@@ -138,8 +225,8 @@ def build_pool(patterns: Sequence[Pattern]) -> list[str]:
     neutral generic pool serves instead.
     """
     pool: list[str] = []
-    for pattern in sorted(patterns, key=lambda p: (-p.confidence, -p.occurrences, p.label))[:MAX_PATTERN_QUESTIONS]:
-        if _pattern_is_sensitive(pattern):
+    for pattern in sorted(patterns, key=feedback_rank)[:MAX_PATTERN_QUESTIONS]:
+        if pattern_is_sensitive(pattern):
             continue
         pool.extend(render_pattern_questions(pattern))
     pool.extend(GENERIC_QUESTIONS)

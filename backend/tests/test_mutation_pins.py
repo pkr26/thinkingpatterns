@@ -42,7 +42,7 @@ from app.security import tokens as tokens_module
 from app.security.tokens import TokenError, issue_token, verify_token
 from app.services import patterns as patterns_module
 from app.services import questions as questions_module
-from app.services.llm import LLMAnalyzer, RuleBasedAnalyzer, get_analyzer, sanitize_pattern
+from app.services.llm import LLMAnalyzer, get_enricher, sanitize_pattern
 from tests.helpers import ClientEmulator, daterange
 
 TODAY = date.today()
@@ -121,6 +121,8 @@ def test_settings_defaults_are_pinned(clean_env):
         "max_entries_per_user": 10_000,
         "max_user_blob_bytes": 256 * 1024 * 1024,
         "recompute_entry_limit": 2_000,
+        "analysis_blob_budget": 8 * 1024 * 1024,
+        "metrics_token": "",
         # Added 2026-09-07: dedicated export bucket + env-sized PG pool.
         "export_rate_limit": 5,
         "export_rate_window": 60,
@@ -1222,11 +1224,12 @@ def test_llm_analyzer_defaults_and_url_normalization():
     assert LLMAnalyzer("https://llm.example.com/v1X", "k").url == "https://llm.example.com/v1X"
 
 
-def test_get_analyzer_requires_explicit_consent_argument():
+def test_get_enricher_requires_explicit_consent_argument():
     settings = Settings(environment="development")
     settings.llm_url = "https://llm.example.com/v1"
-    # Default parameter: no consent argument -> rule-based, never the LLM.
-    assert isinstance(get_analyzer(settings), RuleBasedAnalyzer)
+    # Default parameter: no consent argument -> None (deterministic-only),
+    # never the LLM. There is no rule-based analyzer to fall back to.
+    assert get_enricher(settings) is None
 
 
 def test_mood_correlation_kind_is_accepted():
@@ -1270,7 +1273,7 @@ def test_llm_prompt_and_payload_shape_are_pinned():
     analyzer._post = lambda payload: posted.append(payload) or {
         "choices": [{"message": {"content": json.dumps({"patterns": []})}}]
     }
-    analyzer.analyze([_entry(0, "a work day", sentiment=-0.25)])
+    analyzer.extract_patterns([_entry(0, "a work day", sentiment=-0.25)])
 
     payload = posted[0]
     # 2026-09-16 remediation (D2): generation is bounded.
@@ -1283,14 +1286,14 @@ def test_llm_prompt_and_payload_shape_are_pinned():
     # Tracks the engine round's llm.py: the kind list grew "mood_shift"
     # (2026-09-08, engine agent's _ALLOWED_KINDS). The pin stays an exact
     # string so a prompt mutation still kills a mutant.
-    assert system["content"] == (
-        "You extract behavioral patterns from journal entries. Return strict "
-        'JSON: {"patterns": [{"kind": "temporal|mood_correlation|recurring_phrase|mood_shift", '
-        '"label": str, "occurrences": int, "confidence": 0..1, "detail": {}}]}. '
-        "No advice, no diagnosis."
-    )
+    # 2026-09-17 inversion: the prompt now forbids discovery (label-
+    # restricted narration of the brain's findings only).
+    assert system["content"].startswith("You REFINE deterministic statistical findings")
+    assert "never discover new ones" in system["content"]
     assert user["role"] == "user"
-    assert json.loads(user["content"]) == [
+    wire = json.loads(user["content"])
+    assert wire["findings"] == []
+    assert wire["recent_entries"] == [
         {"date": "2026-07-01", "sentiment": -0.25, "text": "a work day"}
     ]
 
@@ -1306,9 +1309,9 @@ def test_llm_budget_boundary_is_exact():
     analyzer._post = lambda payload: posted.append(payload) or {
         "choices": [{"message": {"content": '{"patterns": []}'}}]
     }
-    analyzer.analyze(corpus)
+    analyzer.extract_patterns(corpus)
 
-    sent_entries = json.loads(posted[0]["messages"][1]["content"])
+    sent_entries = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(sent_entries) == 2
     assert all(item["text"] for item in sent_entries)
     assert sum(len(item["text"]) for item in sent_entries) == 150_000
@@ -1321,8 +1324,8 @@ def test_llm_sends_the_last_entries_within_the_slice_and_budget():
         "choices": [{"message": {"content": '{"patterns": []}'}}]
     }
     corpus = [_entry(i, f"entry {i} " + "x" * 700) for i in range(250)]
-    analyzer.analyze(corpus)
-    sent_entries = json.loads(posted[0]["messages"][1]["content"])
+    analyzer.extract_patterns(corpus)
+    sent_entries = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(sent_entries) == 200  # the MAX_ENTRIES slice
     total = sum(len(item["text"]) for item in sent_entries)
     assert total <= 150_000
@@ -1771,8 +1774,8 @@ def test_llm_budget_exhausts_mid_entry_with_one_char_left():
         _entry(2, "cccccccccc"),
         _entry(3, "dddddddddd"),
     ]
-    analyzer.analyze(corpus)
-    sent = json.loads(posted[0]["messages"][1]["content"])
+    analyzer.extract_patterns(corpus)
+    sent = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(sent) == 3
     assert len(sent[2]["text"]) == 1  # exactly the remaining budget
     assert sent[2]["text"] == "c"

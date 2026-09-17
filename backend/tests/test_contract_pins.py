@@ -258,11 +258,14 @@ def test_question_for_known_dates_pinned():
     # "want to disappear" is crisis-adjacent: its recurring-phrase questions
     # are excluded from the pool (crisis interlock), so the rotation lands
     # on generic questions for these dates.
+    # 2026-09-17: the generic pool grew 8 -> 60, so the rotation lands on
+    # new slots (the pool itself is pinned array-for-array by the shared
+    # contract tests).
     assert questions.question_for_today("user-a", PIN_PATTERNS, date(2026, 9, 3)) == (
-        "What are you carrying into tomorrow?"
+        "What's one thing worth keeping from today?"
     )
     assert questions.question_for_today("user-a", PIN_PATTERNS, date(2026, 9, 4)) == (
-        "What did you notice today that you usually overlook?"
+        "What mattered most to you today?"
     )
 
 

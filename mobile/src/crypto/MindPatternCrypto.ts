@@ -13,10 +13,14 @@ export interface Keys {
 }
 
 export interface EntryPayload {
-  v: 1;
+  v: 1 | 2;
   text: string;
   sentiment: number | null; // computed on-device before encryption
   created_at: string; // ISO date
+  /** v2 structured channels (all optional, all user-supplied ratings/tags). */
+  energy?: number;
+  sleep?: number; // 1..5 quality rating
+  tags?: string[];
 }
 
 export function deriveKeys(password: string, salt: Buffer): Keys {
@@ -38,8 +42,23 @@ export function encryptEntry(
   text: string,
   createdAt: string,
   sentiment: number | null,
+  structured?: { energy?: number | null; sleep?: number | null; tags?: string[] },
 ): { blobB64: string } {
-  const payload: EntryPayload = { v: 1, text, sentiment, created_at: createdAt };
+  // Payload v2 (2026-09-17): optional structured channels ride alongside
+  // the text. A caller passing none emits the v1 shape byte-for-byte, so
+  // older servers and exports behave identically.
+  const payload: EntryPayload =
+    structured && (structured.energy != null || structured.sleep != null || (structured.tags ?? []).length > 0)
+      ? {
+          v: 2,
+          text,
+          sentiment,
+          created_at: createdAt,
+          ...(structured.energy != null ? { energy: structured.energy } : {}),
+          ...(structured.sleep != null ? { sleep: structured.sleep } : {}),
+          ...((structured.tags ?? []).length > 0 ? { tags: structured.tags } : {}),
+        }
+      : { v: 1, text, sentiment, created_at: createdAt };
   // Stryker disable StringLiteral
 const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
   // Stryker restore StringLiteral
@@ -80,7 +99,13 @@ export function decryptInsights(keys: Pick<Keys, "dataKey">, userId: string, blo
 
 export function decryptQuestion(keys: Pick<Keys, "dataKey">, userId: string, forDate: string, blobB64: string) {
   const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("question", userId, forDate));
-  return JSON.parse(plaintext.toString("utf8")) as { for_date: string; question: string };
+  return JSON.parse(plaintext.toString("utf8")) as {
+    for_date: string;
+    question: string;
+    /** The pattern behind the question, when it came from one (routing
+     *  for the "did this land?" feedback taps). */
+    pattern_pid?: string;
+  };
 }
 
 export { zeroize };

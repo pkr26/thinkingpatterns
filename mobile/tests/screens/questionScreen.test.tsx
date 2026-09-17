@@ -269,7 +269,7 @@ describe("QuestionScreen", () => {
     await flush();
 
     expect(api.openProcessingSession).toHaveBeenCalledWith(dataKey.toString("base64"));
-    expect(api.recompute).toHaveBeenCalledWith("st");
+    expect(api.recompute).toHaveBeenCalledWith("st", undefined); // no pending feedback taps
     expect(textOf(root)).toContain("What repeats?");
   });
 

@@ -205,6 +205,52 @@ def effective_sample_size(n: int, lag1: float | None) -> float:
     return max(3.0, min(float(n), n * (1.0 - r) / (1.0 + r)))
 
 
+def brown_forsythe_two_sided_p(xs: list[float], ys: list[float],
+                               n_eff_x: float | None = None,
+                               n_eff_y: float | None = None) -> float:
+    """Two-sided Brown-Forsythe (median-centered Levene) p for H0: equal spread.
+
+    The instability detector replaced its variance-ratio F-test with this
+    (2026-09-17): the F-test assumes iid normal observations and is
+    notoriously kurtosis-sensitive — the input is bounded, platykurtic
+    residual sentiment, often literally discrete 5-point mood tags.
+    Brown-Forsythe tests spread via an ANOVA of median-absolute deviations,
+    which is robust to exactly that. ``n_eff_x``/``n_eff_y`` are the
+    Bartlett-deflated effective sample sizes (the residual series carries
+    the day-to-day mood autocorrelation the inertia detector measures);
+    they shrink df2 so autocorrelated evidence cannot buy significance —
+    the same honesty Welch already applies. Degenerate inputs (a side
+    shorter than 2, or zero within-group deviation spread) fail closed to
+    p = 1: "no evidence", never a crash or a fake claim.
+    """
+    if len(xs) < 2 or len(ys) < 2:
+        return 1.0
+
+    def abs_devs(vals: list[float]) -> list[float]:
+        ordered = sorted(vals)
+        n = len(ordered)
+        mid = n // 2
+        med = ordered[mid] if n % 2 == 1 else (ordered[mid - 1] + ordered[mid]) / 2.0
+        return [abs(v - med) for v in vals]
+
+    dx, dy = abs_devs(xs), abs_devs(ys)
+    nx, ny = float(len(xs)), float(len(ys))
+    mean_dx, mean_dy = _mean(dx), _mean(dy)
+    grand = (nx * mean_dx + ny * mean_dy) / (nx + ny)
+    within = sum((v - mean_dx) ** 2 for v in dx) + sum((v - mean_dy) ** 2 for v in dy)
+    if within <= 0.0:
+        return 1.0
+    between = nx * (mean_dx - grand) ** 2 + ny * (mean_dy - grand) ** 2
+    bf = between / (within / (nx + ny - 2.0))
+    if bf <= 0.0:
+        return 1.0
+    eff_x = n_eff_x if n_eff_x is not None else nx
+    eff_y = n_eff_y if n_eff_y is not None else ny
+    df2 = max(2, int(min(eff_x, nx) + min(eff_y, ny) - 2))
+    upper = f_sf(bf, 1, df2)
+    return min(1.0, 2.0 * min(upper, 1.0 - upper))
+
+
 def fisher_z_difference_p(r_recent: float, n_recent: int, r_earlier: float, n_earlier: int) -> float:
     """One-sided p for H0: rho_recent <= rho_earlier, Fisher z transform.
 

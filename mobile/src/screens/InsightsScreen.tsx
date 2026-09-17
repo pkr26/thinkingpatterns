@@ -69,6 +69,19 @@ interface PatternDetail {
   /** Link-card spacing metadata (available for future rendering). */
   gap1_days?: number;
   gap2_days?: number;
+  /** Avoidance (silence-after) detector. */
+  silences?: number;
+  observed?: number;
+  /** Cadence (rhythm) detector. */
+  gap_spread_recent?: number;
+  gap_spread_earlier?: number;
+  median_gap_recent?: number;
+  /** Structured-channel origin (2026-09-17): user tags / sleep ratings. */
+  source?: string;
+  channel?: string;
+  /** Consent-gated LLM narrative (2026-09-17): one calm sentence the model
+   *  reframed for a deterministic finding — sanitized server-side. */
+  narrative?: string;
 }
 
 interface PatternCard {
@@ -96,6 +109,10 @@ const METHOD_NOTES: Record<string, string> = {
     "A returning negative thought. Repetitive negative thinking is a well-studied pattern; this clusters near-identical negative sentences.",
   topic:
     "A recurring theme discovered from your own words — not from any fixed list. Rising topics are tested against your own earlier entries (exact binomial).",
+  avoidance:
+    "Days with this theme are more often followed by a silent day than your own usual pattern (exact binomial against your base rate, corrected for multiple comparisons).",
+  cadence:
+    "The regularity of your writing rhythm compared with your own earlier norm (spread of gaps between writing days).",
 };
 
 /** Lifecycle states rendered as evidence labels. "Seen consistently" is
@@ -116,6 +133,8 @@ function kindLabel(kind: string): string {
   if (kind === "rumination") return "REPEATED WORRY";
   if (kind === "topic") return "THEME";
   if (kind === "mood_shift") return "MOOD TREND";
+  if (kind === "avoidance") return "SILENCE AFTER";
+  if (kind === "cadence") return "RHYTHM";
   return "PATTERN";
 }
 
@@ -177,6 +196,12 @@ function evidenceRows(p: PatternCard): [string, string][] {
   if (typeof d.shift === "number") {
     rows.push(["Shift", `${d.direction === "lower" ? "−" : "+"}${fmt(Math.abs(d.shift))} against your baseline of ${fmt(d.baseline)}`]);
   }
+  if (typeof d.silences === "number") {
+    rows.push(["Silent days after", `${d.silences} of ${d.observed ?? "?"} such days (your usual silent-day rate is ${fmt((d.base_rate ?? 0) * 100, 0)}%)`]);
+  }
+  if (typeof d.gap_spread_recent === "number") {
+    rows.push(["Rhythm", `gap spread ${fmt(d.gap_spread_recent, 1)} vs your earlier ${fmt(d.gap_spread_earlier, 1)} days`]);
+  }
   const note = METHOD_NOTES[p.kind];
   if (note) rows.push(["Method", note]);
   return rows;
@@ -235,6 +260,38 @@ function describe(p: PatternCard): string {
     const direction = p.detail?.direction === "higher" ? "higher" : "lower";
     const shift = Math.abs(p.detail?.shift ?? 0);
     return `Your entries have read ${direction} than your usual baseline lately (a shift of ${shift.toFixed(1)}).`;
+  }
+  if (p.detail?.channel === "sleep_quality") {
+    if (p.kind === "link") {
+      const direction = p.detail?.direction === "higher" ? "higher" : "lower";
+      return `The day after a night you rated as rougher than your own usual, your entries read ${direction} than usual for you.`;
+    }
+    if (p.kind === "mood_correlation") {
+      return "On nights you rated as rougher than your own usual, your entries read lower the same day.";
+    }
+    if (p.kind === "temporal") {
+      return `Your rougher nights (by your own ratings) fall most often on ${p.detail?.day ?? "certain"}s.`;
+    }
+  }
+  if (p.kind === "avoidance") {
+    const silences = p.detail?.silences ?? p.occurrences;
+    const share = typeof p.detail?.share === "number" ? Math.round(p.detail.share * 100) : null;
+    return `The day after '${p.label}' comes up, you tend not to write${share !== null ? ` (${share}% of such days)` : ""}.`;
+  }
+  if (p.kind === "cadence") {
+    return "Your writing rhythm has been less regular than it used to be for you — longer stretches of silence between writing days.";
+  }
+  if (p.detail?.source === "tag") {
+    if (p.kind === "mood_correlation") {
+      return `Your entries read ${p.detail?.direction === "higher" ? "higher" : "lower"} on days you tag '${p.label}'.`;
+    }
+    if (p.kind === "link") {
+      const direction = p.detail?.direction === "higher" ? "higher" : "lower";
+      return `The day after you tag '${p.label}', your entries read ${direction} than usual for you.`;
+    }
+    if (p.kind === "temporal") {
+      return `You tag '${p.label}' most often on ${p.detail?.day ?? "certain"}s.`;
+    }
   }
   return `'${p.label}' appeared ${p.occurrences} times.`;
 }
@@ -443,6 +500,16 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
           <Text style={cardStyles.cardBody}>No recurring pattern has enough evidence. Keep writing.</Text>
         </View>
       )}
+      {phase === "insight" && moods.length > 2 && (
+        // The mood check-in keeps paying off after the threshold: the
+        // trend it fed during baseline stays visible beside the pattern
+        // cards (device-local, never synced — same data, same rules).
+        <View style={cardStyles.card}>
+          <Text style={cardStyles.cardTitle}>Your mood, this month</Text>
+          <MoodSparkline days={moods} />
+          <Text style={cardStyles.meta}>Recorded on this device with your daily check-in.</Text>
+        </View>
+      )}
       {patterns.map((p, i) => {
         const key = `${p.kind}-${p.label}-${i}`;
         if (isSensitive(p)) {
@@ -479,6 +546,9 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
               </Text>
             </View>
             <Text style={[cardStyles.cardBody, presence && { color: t.colors.muted }]}>{p.describe}</Text>
+            {typeof p.detail?.narrative === "string" && p.detail.narrative.length > 0 && (
+              <Text style={[styles.narrative, { color: t.colors.muted }]}>{p.detail.narrative}</Text>
+            )}
             <Text style={cardStyles.meta}>
               {p.occurrences} mentions · evidence density {(p.confidence * 100).toFixed(0)}%
             </Text>
@@ -568,6 +638,7 @@ const styles = StyleSheet.create({
   evidenceKey: { fontSize: 12, width: 128, flexShrink: 0 },
   evidenceValue: { fontSize: 12, flex: 1, lineHeight: 16 },
   evidenceFootnote: { fontSize: 11, marginTop: 2, lineHeight: 15 },
+  narrative: { fontSize: 13, lineHeight: 18, fontStyle: "italic" },
   footnote: { fontSize: 12, textAlign: "center", marginTop: 8 },
   sparkRow: { flexDirection: "row", alignItems: "flex-end", height: 48, gap: 2, marginTop: 4 },
   sparkCol: { flex: 1, height: 48 },

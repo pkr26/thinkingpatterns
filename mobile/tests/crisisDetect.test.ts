@@ -5,7 +5,7 @@
  * important — that everyday journal text does NOT trip it.
  */
 import { describe, expect, it } from "vitest";
-import { detectCrisisLanguage } from "../src/crisisDetect";
+import { detectCrisisLanguage, matchVariants, normalizeCrisisText } from "../src/crisisDetect";
 
 describe("detectCrisisLanguage — true positives", () => {
   it.each([
@@ -129,10 +129,18 @@ describe("detectCrisisLanguage — true negatives", () => {
     expect(detectCrisisLanguage(text)).toBe(false);
   });
 
-  it("accepts the deliberate false positive: even 'suicide prevention' context", () => {
-    // "suicide" is high-signal enough that the matcher fires on any use of
-    // the word — the cost is one gentle dialog, the benefit is no misses.
-    expect(detectCrisisLanguage("We discussed suicide prevention policy in class today.")).toBe(true);
+  it("stays silent on benign compounds (masked since 2026-09-17): titles and campaigns", () => {
+    // "suicide squad"/"suicide prevention"/... are masked from both tiers —
+    // the bare topic word inside them is not first-person ideation. Every
+    // OTHER use of the word still fires (see the true-positive block).
+    expect(detectCrisisLanguage("We discussed suicide prevention policy in class today.")).toBe(false);
+    expect(detectCrisisLanguage("that movie was suicide squad and i liked it")).toBe(false);
+    expect(detectCrisisLanguage("listening to suicide silence again")).toBe(false);
+  });
+
+  it("still fires on the word 'suicide' outside the benign compounds", () => {
+    expect(detectCrisisLanguage("thinking about suicide again")).toBe(true);
+    expect(detectCrisisLanguage("the suicide prevention lecture left me suicidal")).toBe(true);
   });
 
   it("accepts the documented false positives: benign 'cut myself' / 'feel like dying' contexts", () => {
@@ -153,5 +161,33 @@ describe("detectCrisisLanguage — true negatives", () => {
     expect(detectCrisisLanguage("the assessment was nothing relevant")).toBe(false);
     expect(detectCrisisLanguage("a dying breed of craftsman")).toBe(false);
     expect(detectCrisisLanguage("the suicidology textbook")).toBe(false);
+  });
+});
+
+describe("dual-variant matching + benign masking (2026-09-17)", () => {
+  it("fires on partial-split evasion: orphan single letters glue onto the next word", () => {
+    // The documented "k ill myself" residual bypass, now closed on both engines.
+    expect(detectCrisisLanguage("k ill myself")).toBe(true);
+    expect(detectCrisisLanguage("o ff myself tonight")).toBe(true);
+    expect(detectCrisisLanguage("k i ll myself")).toBe(true);
+    expect(detectCrisisLanguage("s uicide is on my mind")).toBe(true);
+  });
+
+  it("the orphan variant never manufactures matches from ordinary prose", () => {
+    expect(detectCrisisLanguage("i am so sad today")).toBe(false);
+    expect(detectCrisisLanguage("i want to diet")).toBe(false);
+    expect(detectCrisisLanguage("u s a won gold")).toBe(false);
+    expect(detectCrisisLanguage("a way out of the city")).toBe(false);
+  });
+
+  it("matchVariants returns the primary and orphan forms, benign compounds masked in both", () => {
+    const [primary, orphan] = matchVariants("k ill myself after that suicide squad movie");
+    expect(primary).toBe("k ill myself after that   movie");
+    expect(orphan).toBe("kill myself after that   movie"); // glued AND masked
+  });
+
+  it("the primary variant equals normalizeCrisisText on compound-free text", () => {
+    const text = "s u i c i d e notes everywhere";
+    expect(matchVariants(text)[0]).toBe(normalizeCrisisText(text));
   });
 });

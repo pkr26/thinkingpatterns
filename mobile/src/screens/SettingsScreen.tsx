@@ -18,8 +18,12 @@
  * row appears when any exist and requeues them in one tap.
  */
 import React, { useEffect, useState } from "react";
-import { Alert, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Alert, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, getBaseUrl, getInsecureConsentUrl, parseServerUrl, setBaseUrl } from "../api/client";
+import { buildReadableExport, MAX_READABLE_CHARS } from "../readableExport";
+import { ThemeMode, themeStorageKey, useSetThemeMode, useTheme as useThemeForMode } from "../theme";
+import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
+import { reminderCapability, biometricCapability } from "../nativeFeatures";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
@@ -273,6 +277,48 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }
   };
 
+  /** Readable Markdown export (2026-09-17): decrypted ON-DEVICE, shared as
+   *  plain text — the human-readable copy next to the encrypted backup. */
+  const exportReadable = async () => {
+    setBusy(true);
+    try {
+      const userId = await api.getUserId();
+      if (userId) {
+        await flushQueue(userId).catch(() => {});
+      }
+      const { markdown, entryCount, skippedCount } = await buildReadableExport();
+      if (markdown.length > MAX_READABLE_CHARS) {
+        Alert.alert(
+          "Export too large",
+          `Your journal is ${(markdown.length / 1_000_000).toFixed(1)}M characters — too large for the device share sheet. Use the encrypted export for a full backup.`,
+        );
+        return;
+      }
+      try {
+        const result = (await Share.share({
+          title: "MindPattern journal (readable)",
+          message: markdown,
+        })) as { action?: string } | undefined;
+        if (result?.action === "dismissedAction") return; // user cancelled — quiet
+        Alert.alert(
+          "Exported",
+          `${entryCount} entries as readable text` +
+            (skippedCount > 0 ? ` (${skippedCount} could not be decrypted and were skipped)` : "") +
+            ". Keep it safe — this copy is NOT encrypted.",
+        );
+      } catch {
+        Alert.alert(
+          "Export did not complete",
+          "The share sheet failed or closed before anything was shared. Nothing left the device.",
+        );
+      }
+    } catch (err) {
+      Alert.alert("Export failed", calmFallbackCopy(err, "Something went wrong — try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deleteEverything = () => {
     Alert.alert(
       "Delete everything?",
@@ -293,6 +339,38 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       ],
     );
   };
+
+  // Appearance state (2026-09-17).
+  const setThemeMode = useSetThemeMode();
+  const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
+  const [haptics, setHaptics] = useState(true);
+  const [reminders] = useState(reminderCapability());
+  const [biometrics] = useState(biometricCapability());
+  const modeFromContext = useThemeForMode();
+  React.useEffect(() => {
+    setThemeModeState(modeFromContext.dark ? (modeFromContext === undefined ? "system" : "dark") : "light");
+    void loadHapticsSetting().then(setHaptics);
+    // The mode is derived from the active theme (the context does not
+    // expose "system" directly; re-derived below from the stored pref).
+  }, // eslint-disable-next-line react-hooks/exhaustive-deps
+  []);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+        const stored = await AsyncStorage.getItem(themeStorageKey());
+        if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
+          setThemeModeState(stored);
+        }
+      } catch {
+        /* non-sensitive preference; default stands */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const themed = {
     label: { color: t.colors.muted, fontSize: 12, fontWeight: "700" as const, letterSpacing: 1, marginTop: 8 },
@@ -388,6 +466,61 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         </View>
       )}
 
+      {/* Appearance & feel (2026-09-17): theme override, haptics, and the
+          native-feature seams (reminders/biometrics light up when their
+          native modules are linked — see src/nativeFeatures.ts). */}
+      <Text style={themed.label}>APPEARANCE</Text>
+      <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {(["system", "dark", "light"] as ThemeMode[]).map((mode) => (
+            <TouchableOpacity
+              key={mode}
+              style={[
+                styles.moodOptionLike,
+                {
+                  backgroundColor: themeMode === mode ? t.colors.primary : t.colors.cardDeep,
+                  borderRadius: t.radius.md,
+                  minHeight: 40,
+                },
+              ]}
+              onPress={() => {
+                touchActivity();
+                setThemeMode(mode);
+              }}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: themeMode === mode }}
+              accessibilityLabel={`Theme: ${mode}`}
+            >
+              <Text style={{ color: themeMode === mode ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
+                {mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light"}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
+          <Text style={themed.rowText}>Quiet haptics on taps and saves</Text>
+          <Switch
+            value={haptics}
+            onValueChange={(on) => {
+              touchActivity();
+              setHaptics(on);
+              void setHapticsEnabled(on);
+            }}
+            accessibilityLabel="Haptics"
+          />
+        </View>
+        {!reminders.available && (
+          <Text style={themed.footnote}>
+            Daily reminders will appear here once the notification module is linked in the app build.
+          </Text>
+        )}
+        {!biometrics.available && (
+          <Text style={themed.footnote}>
+            Face/fingerprint unlock will appear here once the biometric module is linked in the app build.
+          </Text>
+        )}
+      </View>
+
       <GhostButton
         label="Share with my therapist"
         center={false}
@@ -395,17 +528,17 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         accessibilityLabel="Share your entries and patterns with a therapist"
       />
       <PrimaryButton label="Export my data (encrypted)" onPress={exportData} disabled={busy} />
+      <GhostButton
+        label="Export as readable text"
+        onPress={exportReadable}
+        disabled={busy}
+        accessibilityLabel="Export your journal as readable text, decrypted on this device"
+      />
       <PrimaryButton label="Delete my account and data" onPress={deleteEverything} disabled={busy} danger />
       <GhostButton
         label="Sign out"
         onPress={async () => { vault.lock(); await signOut(); navigation.popToTop(); }}
       />
-
-      <Text style={themed.label}>Daily reminder</Text>
-      <Text style={themed.footnote}>
-        Reminders aren't in this version. A gentle daily nudge is planned for a future update — it
-        will be optional, local to this device, and never sent anywhere.
-      </Text>
 
       <Text style={themed.label}>About</Text>
       <Text style={themed.footnote}>
@@ -442,6 +575,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
 const styles = StyleSheet.create({
   container: { flex: 1 },
   card: { padding: 16, gap: 8 },
+  moodOptionLike: { flex: 1, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
   reauthCard: { padding: 16, gap: 12 },
   reauthTitle: { fontSize: 15, fontWeight: "600", lineHeight: 20 },

@@ -38,12 +38,13 @@ import base64
 import binascii
 import json
 import math
+import time
 from dataclasses import replace
 from datetime import date as date_type, timedelta
 
 import anyio.to_thread
-from fastapi import APIRouter, Depends, Header, Request
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, Header, Request, Body
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -215,11 +216,40 @@ def _parse_entries(
         inner = date_type.fromisoformat(payload["created_at"])
         if abs((inner - outer).days) > INNER_DATE_TOLERANCE_DAYS:
             raise ValueError("created_at does not match entry_date")
+        # --- structured channels (payload v2, 2026-09-17). All optional;
+        # every field is validated as hostile input exactly like sentiment:
+        # malformed values are a 400 (entry_payload_malformed), never a
+        # silent default that would quietly mislabel the analysis.
+        energy = payload.get("energy")
+        if energy is not None:
+            if isinstance(energy, bool) or not isinstance(energy, (int, float)) or not math.isfinite(energy):
+                raise ValueError("energy must be a finite number")
+            energy = max(-1.0, min(1.0, float(energy)))
+        sleep_raw = payload.get("sleep")
+        if sleep_raw is not None:
+            if isinstance(sleep_raw, bool) or not isinstance(sleep_raw, int) or not 1 <= sleep_raw <= 5:
+                raise ValueError("sleep must be an integer 1..5")
+        tags_raw = payload.get("tags")
+        tags: tuple[str, ...] = ()
+        if tags_raw is not None:
+            if not isinstance(tags_raw, list) or len(tags_raw) > 8:
+                raise ValueError("tags must be a list of at most 8 strings")
+            cleaned = []
+            for tag in tags_raw:
+                if not isinstance(tag, str):
+                    raise ValueError("tags must be strings")
+                cleaned_tag = tag.strip().lower()[:24]
+                if cleaned_tag and cleaned_tag not in cleaned:
+                    cleaned.append(cleaned_tag)
+            tags = tuple(cleaned)
         entries.append(
             JournalEntry(
                 text=text,
                 entry_date=outer,
                 sentiment=sentiment,
+                energy=energy,
+                sleep_quality=sleep_raw,
+                tags=tags,
             )
         )
     # Total-corpus budget: keep the most recent text (entries arrive in
@@ -234,27 +264,126 @@ def _parse_entries(
     return entries
 
 
-async def _load_rows(session: AsyncSession, user_id: str, limit: int) -> list[Entry]:
-    """The most recent ``limit`` entries, in chronological order.
+def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str | None:
+    """The pid of the pattern whose question was selected for today.
+
+    Deterministic re-derivation of the same choice questions.question_for_today
+    made (same pool, same rotation): build_pool's ordering is stable, so the
+    pool index maps back to its pattern. Falls back to None when the day's
+    question is generic.
+    """
+    from ..services import questions as question_engine
+
+    pool_patterns = [p for p in patterns if not question_engine.pattern_is_sensitive(p)]
+    pool_patterns = sorted(
+        pool_patterns,
+        key=question_engine.feedback_rank,
+    )[:question_engine.MAX_PATTERN_QUESTIONS]
+    rendered: list[str | None] = []
+    owners: list[str | None] = []
+    for p in pool_patterns:
+        for q in question_engine.render_pattern_questions(p):
+            rendered.append(q)
+            owners.append(p.detail.get("pattern_pid") if isinstance(p.detail, dict) else None)
+    generic = list(question_engine.GENERIC_QUESTIONS)
+    rendered.extend(generic)
+    owners.extend([None] * len(generic))
+    # Mirror build_pool's dedupe + suppression filters.
+    filtered: list[tuple[str | None, str]] = []
+    seen: set[str] = set()
+    for owner, q in zip(owners, rendered):
+        if q in seen or question_engine.crisis.matches_suppress(q):
+            continue
+        seen.add(q)
+        filtered.append((owner, q))
+    pool = [q for _, q in filtered] or list(generic)
+    index = (today.toordinal() + question_engine.user_rotation_offset(user_id)) % len(pool)
+    chosen_owner = filtered[index][0] if index < len(filtered) else None
+    return chosen_owner if isinstance(chosen_owner, str) else None
+
+
+def _parse_feedback(raw: bytes) -> list[tuple[str, bool]]:
+    """Decoded question-feedback taps: [{"pid": str, "resonated": bool}].
+    Hostile-shape rules like every payload: malformed input is a 400
+    (entry_payload_malformed), never a silent skip or a crash."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ApiError(
+            status_code=400,
+            detail="feedback blob is malformed",
+            code="entry_payload_malformed",
+        ) from exc
+    events = payload.get("feedback") if isinstance(payload, dict) else None
+    if not isinstance(events, list):
+        raise ApiError(
+            status_code=400,
+            detail="feedback blob is malformed",
+            code="entry_payload_malformed",
+        )
+    out: list[tuple[str, bool]] = []
+    for item in events[:100]:
+        if not isinstance(item, dict):
+            continue
+        pid = item.get("pid")
+        resonated = item.get("resonated")
+        if isinstance(pid, str) and 1 <= len(pid) <= 128 and isinstance(resonated, bool):
+            out.append((pid, resonated))
+    return out
+
+
+async def _load_rows(
+    session: AsyncSession, user_id: str, limit: int, blob_budget: int
+) -> list[Entry]:
+    """The most recent ``limit`` entries, in chronological order, within a
+    cumulative ciphertext byte budget.
 
     Bounded in SQL — ORDER BY recency DESC, LIMIT, then reversed in Python
     — instead of fetching EVERY blob the account holds and slicing
     rows[-limit:]: at the 10k-entry / 256 MiB quota the old shape pulled
     hundreds of MiB over the wire to keep the newest 2000 rows.
+
+    The byte budget (2026-09-17) is the second bound: rows are fetched in
+    two phases — ids + sizes first, then only the NEWEST rows whose
+    running ciphertext total stays within ``blob_budget`` — so peak
+    recompute memory is bounded by the ANALYSIS budget, never by the
+    account's storage quota. A quota-maxed account can no longer make one
+    process transiently hold ~256 MiB ciphertext + plaintext + zeroized
+    copies (x4 concurrent analyze slots) for the sake of a 2M-char
+    analysis. Rows beyond the budget are dropped oldest-first, exactly
+    like the per-recompute text truncation they sit beneath.
     """
+    recency = (
+        Entry.entry_date.desc(), Entry.received_at.desc(), Entry.id.desc()
+    )
+    id_rows = (
+        await session.execute(
+            select(Entry.id, func.length(Entry.blob).label("size"))
+            .where(Entry.user_id == user_id)
+            .order_by(*recency)
+            .limit(limit)
+        )
+    ).all()
+    kept: list[str] = []
+    budget = blob_budget
+    for row_id, size in id_rows:
+        if size is None or size > budget:
+            break  # oldest rows are beyond the analysis budget: not fetched
+        kept.append(row_id)
+        budget -= size
+    if not kept:
+        return []
     rows = list(
         (
             await session.execute(
                 select(Entry)
-                .where(Entry.user_id == user_id)
-                .order_by(Entry.entry_date.desc(), Entry.received_at.desc(), Entry.id.desc())
-                .limit(limit)
+                .where(Entry.id.in_(kept))
+                .order_by(Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc())
             )
         )
         .scalars()
         .all()
     )
-    rows.reverse()
     return rows
 
 
@@ -299,7 +428,13 @@ async def recompute(
     request: Request,
     user: User = Depends(require_regular_user),
     x_processing_token: str | None = Header(default=None),
+    feedback_blob: str | None = Body(default=None),
 ):
+    """``feedback_blob`` (2026-09-17): optional base64 AES-GCM blob holding
+    the user's question-feedback taps ({"feedback": [{pid, resonated}]}),
+    AAD-bound to ("feedback", user id) — opaque like every other payload,
+    decrypted only inside the secure processing context, consumed by the
+    brain's feedback-aware question ranking."""
     settings = request.app.state.settings
     key_store = request.app.state.key_store
     sessionmaker = request.app.state.sessionmaker
@@ -363,7 +498,10 @@ async def recompute(
             # manager BEFORE any analysis runs. Only plain values (blobs as
             # immutable bytes, dates, ids) leave the session.
             async with sessionmaker() as session:
-                rows = await _load_rows(session, user.id, settings.recompute_entry_limit)
+                rows = await _load_rows(
+                    session, user.id, settings.recompute_entry_limit,
+                    settings.analysis_blob_budget,
+                )
                 # The SERVER-validated outer dates drive the brain's calendar;
                 # the client-controlled created_at inside each blob is only
                 # sanity-checked.
@@ -381,35 +519,48 @@ async def recompute(
                     if prior
                     else None
                 )
-            analyzer = llm.get_analyzer(settings, llm_consent=user.llm_consent)
+            enricher = llm.get_enricher(settings, llm_consent=user.llm_consent)
 
             def make_analyze_fn(with_state: bool):
                 # A factory, not a plain closure: the tamper-retry below passes the
                 # entry items WITHOUT the state blob, and a closure over a truthy
                 # state_item would strip the newest ENTRY as "state" on that path.
                 def analyze_fn(plains: list[bytearray]):
-                    state_plain, entry_plains = (
-                        (bytes(plains[-1]), plains[:-1]) if with_state else (None, plains)
-                    )
+                    tail = (1 if with_state else 0) + (1 if feedback_item else 0)
+                    entry_plains = plains[:-tail] if tail else plains
+                    state_plain = bytes(plains[-tail]) if with_state and tail else None
+                    fb_plain = bytes(plains[-1]) if feedback_item else None
                     entries = _parse_entries(entry_plains, analysis_dates)
-                    result = brain.update(brain.load_state(state_plain), entries, today)
+                    feedback_events = _parse_feedback(fb_plain) if fb_plain is not None else []
+                    result = brain.update(brain.load_state(state_plain), entries, today,
+                                          feedback=feedback_events or None)
                     merged = list(result.surfaced)
-                    if isinstance(analyzer, llm.LLMAnalyzer):
-                        seen = {(p.kind, p.label) for p in merged}
-                        for extra in analyzer.extract_patterns(entries):
-                            if (extra.kind, extra.label) not in seen:
-                                merged.append(extra)
+                    if enricher is not None:
+                        # Brain-first inversion (2026-09-17): the model
+                        # receives the deterministic findings and can only
+                        # attach a sanitized narrative to them — its output
+                        # replaces a finding's detail (narrative added),
+                        # never mints a new claim.
+                        narrated = {(p.kind, p.label): p for p in enricher.extract_patterns(entries, findings=merged)}
+                        merged = [narrated.get((p.kind, p.label), p) for p in merged]
                         merged = merged[: brain.MAX_SURFACED]
                     return result, merged
 
                 return analyze_fn
 
-            encrypted = entry_items + ([state_item] if state_item else [])
+            feedback_item = (
+                (crypto.build_aad("feedback", user.id), base64.b64decode(feedback_blob))
+                if feedback_blob
+                else None
+            )
+            encrypted = entry_items + ([state_item] if state_item else []) + ([feedback_item] if feedback_item else [])
             # Analysis runs on a DEDICATED capacity limiter, not the shared anyio
             # thread pool: recomputes are attacker-sized multi-second CPU work and
             # must never queue in front of login scrypt (or any other request's
             # worker) in the same FIFO pool. No DB session is open here.
             analyze_limiter = getattr(request.app.state, "analyze_limiter", None)
+            metrics = getattr(request.app.state, "metrics", None)
+            started = time.monotonic()
             try:
                 # Decryption + analysis is synchronous, potentially slow CPU (or an
                 # LLM round-trip); run it in a worker thread so the event loop that
@@ -474,7 +625,14 @@ async def recompute(
             question_blob = None
             if merged:
                 question = questions.question_for_today(user.id, merged, today)
-                question_payload = {"for_date": today.isoformat(), "question": question}
+                question_payload = {
+                    "for_date": today.isoformat(),
+                    "question": question,
+                    # The chosen pattern's stable id (when the question came
+                    # from a pattern): routes the "did this land?" taps back
+                    # to the right brain record. Absent for generic days.
+                    "pattern_pid": _chosen_pattern_pid(today, merged, user.id),
+                }
                 question_blob = crypto.encrypt(
                     data_key,
                     json.dumps(question_payload).encode("utf-8"),
@@ -512,6 +670,10 @@ async def recompute(
                             code="account_deleted",
                         ) from None
                     raise
+            if metrics is not None:
+                metrics.observe_recompute(time.monotonic() - started)
+                if enricher is not None:
+                    metrics.observe_llm(failed=enricher.last_error is not None)
             return RecomputeResponse(
                 phase=state.phase.value,
                 active_days=state.active_days,
@@ -519,7 +681,15 @@ async def recompute(
                 days_remaining=state.days_remaining,
                 patterns_stored=len(merged),
                 question_stored=question_stored,
-                analyzer="llm" if isinstance(analyzer, llm.LLMAnalyzer) else "brain",
+                # Honest analyzer reporting: "llm" only when the enricher
+                # exists AND its last call actually succeeded (a failed
+                # endpoint contributed nothing — the response must not
+                # claim it ran).
+                analyzer=(
+                    "llm"
+                    if enricher is not None and enricher.last_error is None
+                    else "brain"
+                ),
                 patterns_new=result.patterns_new,
                 patterns_fading=result.patterns_fading,
             )

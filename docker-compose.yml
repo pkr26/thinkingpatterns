@@ -20,6 +20,16 @@ services:
       # a network. Change to "8000:8000" only for trusted local device testing.
       - "127.0.0.1:8000:8000"
     restart: unless-stopped
+    # Resource limits (2026-09-17): recomputes transiently hold the
+    # analysis corpus (bounded by the blob budget, but the ceiling still
+    # matters on shared hosts) and scrypt login bursts are 64 MiB each.
+    # The ceiling is generous headroom over the measured working set; an
+    # OOM-kill here is a DoS against every account on the instance.
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+    mem_limit: 1500M
     healthcheck:
       # Same probe as the Dockerfile HEALTHCHECK.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"]
@@ -48,6 +58,11 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    mem_limit: 1G
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mindpattern}"]
       interval: 5s

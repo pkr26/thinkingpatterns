@@ -24,6 +24,35 @@ export const MOOD_OPTIONS: readonly MoodOption[] = [
   { value: 1, label: "Light" },
 ];
 
+/** The optional energy dimension (2026-09-17): a second, orthogonal
+ *  check-in — mood and energy dissociate (low mood with high energy,
+ *  flat mood with drain), and the structured-channel analysis reads the
+ *  same [-1, 1] range. Three picks keep it one-tap light. */
+export const ENERGY_OPTIONS: readonly MoodOption[] = [
+  { value: -1, label: "Drained" },
+  { value: 0, label: "Steady" },
+  { value: 1, label: "Energized" },
+];
+
+/** The optional sleep-quality picks (2026-09-17, payload v2): 1..5 as the
+ *  server channel expects. Five words keep it one-tap; the labels describe
+ *  the NIGHT, not the person. */
+export const SLEEP_OPTIONS: readonly { value: number; label: string }[] = [
+  { value: 1, label: "Rough" },
+  { value: 2, label: "Poor" },
+  { value: 3, label: "Okay" },
+  { value: 4, label: "Good" },
+  { value: 5, label: "Rested" },
+];
+
+/** The day-shaping activity tags (2026-09-17, payload v2): deliberately
+ *  few, plain, and non-clinical — the engine correlates them with mood as
+ *  within-person binary day channels. Users can also skip them entirely. */
+export const ACTIVITY_TAGS: readonly string[] = [
+  "work", "family", "friends", "exercise", "outdoors", "rest",
+  "creative", "health", "money", "travel",
+];
+
 /** The closest scale label for any value in [-1, 1] — badges render the
  *  stored quick score, which is rarely one of the five exact picks. */
 export function moodLabel(value: number): string {

@@ -64,6 +64,9 @@ PAIRING_TTL_SECONDS = sharing.PAIRING_TTL_SECONDS
 # are deleted lazily once they are past this age (the digest row itself is
 # worthless, but rows should not accumulate forever).
 PAIRING_RETENTION = timedelta(days=1)
+# 2026-09-17: audit rows age out after two years (time-based; account
+# deletion still never touches them — they simply live out their window).
+ACCESS_LOG_RETENTION = timedelta(days=730)
 
 MAX_WRAP_KEY_BLOB_BYTES = 1024  # b64 cap mirrors schemas; decoded bound
 
@@ -248,6 +251,14 @@ async def create_pairing_code(
     now = utcnow()
     await session.execute(
         delete(PairingCode).where(PairingCode.expires_at < now - PAIRING_RETENTION)
+    )
+    # access_log retention (2026-09-17): every therapist read appends a row
+    # forever before this — the table grew unbounded. Two years is the
+    # records-process window; time-based only (account deletion NEVER
+    # cascade-deletes audit rows — that property is what lets a trail
+    # outlive the account for its full retention period).
+    await session.execute(
+        delete(AccessLog).where(AccessLog.at < now - ACCESS_LOG_RETENTION)
     )
     code = sharing.generate_pairing_code()
     row = PairingCode(

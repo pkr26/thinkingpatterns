@@ -112,6 +112,17 @@ class Settings:
     # decrypts. The 30-day threshold still counts ALL entry dates (from DB
     # metadata, no decryption needed), so the cap cannot un-lock a phase.
     recompute_entry_limit: int = 2_000
+    # Ciphertext byte budget per recompute, enforced in SQL BEFORE decrypt
+    # (2026-09-17): peak recompute memory is bounded by the ANALYSIS budget,
+    # not by the account's storage quota — a max-quota account can no longer
+    # make the server hold ~quota-sized ciphertext + plaintext + zeroized
+    # copies at once. 8 MiB comfortably covers the 2M-char analysis corpus.
+    analysis_blob_budget: int = 8 * 1024 * 1024
+
+    # Bearer token for GET /metrics. Empty: the endpoint is open in
+    # development and DISABLED (404) in every other environment — privacy
+    # fail-closed. Set it to scrape from Prometheus &c.
+    metrics_token: str = ""
 
     # Connection pool for the (Postgres) production engine. SQLite ignores
     # these — its StaticPool single shared connection is what keeps
@@ -206,9 +217,14 @@ class Settings:
         ):
             if getattr(self, name) > MAX_RATE_LIMIT:
                 raise RuntimeError(f"{name} must be <= {MAX_RATE_LIMIT}")
-        for name in ("max_body_bytes", "max_user_blob_bytes"):
+        for name in ("max_body_bytes", "max_user_blob_bytes", "analysis_blob_budget"):
             if getattr(self, name) < 1024:
                 raise RuntimeError(f"{name} must be >= 1024")
+        # An analysis budget above the storage quota is misconfiguration
+        # (it must BOUND recompute memory below the quota), and 64 MiB of
+        # ciphertext is already 8x the 2M-char text analysis budget.
+        if self.analysis_blob_budget > 64 * 1024 * 1024:
+            raise RuntimeError("analysis_blob_budget must be <= 64 MiB")
         if self.environment != "development":
             # SQLite is dev/test only — rejected for ANY non-development
             # value ("prod", "staging", a typo), not just the exact string
@@ -267,6 +283,8 @@ class Settings:
             max_entries_per_user=_int_env("MINDPATTERN_MAX_ENTRIES_PER_USER", 10_000),
             max_user_blob_bytes=_int_env("MINDPATTERN_MAX_USER_BLOB_BYTES", 256 * 1024 * 1024),
             recompute_entry_limit=_int_env("MINDPATTERN_RECOMPUTE_ENTRY_LIMIT", 2_000),
+            analysis_blob_budget=_int_env("MINDPATTERN_ANALYSIS_BLOB_BUDGET", 8 * 1024 * 1024),
+            metrics_token=os.getenv("MINDPATTERN_METRICS_TOKEN", "").strip(),
             db_pool_size=_int_env("MINDPATTERN_DB_POOL_SIZE", 5),
             db_max_overflow=_int_env("MINDPATTERN_DB_MAX_OVERFLOW", 10),
             db_pool_timeout=_int_env("MINDPATTERN_DB_POOL_TIMEOUT", 30),

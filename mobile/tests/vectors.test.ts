@@ -117,3 +117,25 @@ describe("AAD canonicalization (ensure_ascii contract)", () => {
     expect(buildAad("1", "23").toString("utf8")).not.toBe(buildAad("12", "3").toString("utf8"));
   });
 });
+
+describe("AAD edge-case vectors (promoted 2026-09-17 from redteam/a_crypto.py A6)", () => {
+  // Surrogates, DEL/control chars, CJK, RTL, combining marks, empty parts —
+  // pinned byte-for-byte on backend, mobile, portal and by verify_vectors.mjs.
+  const edge = (JSON.parse(readFileSync(vectorsPath, "utf8")) as { aad_edge_cases: { name: string; parts: string[]; aad_b64: string }[] }).aad_edge_cases;
+
+  it("has the full 16-vector corpus", () => {
+    expect(edge.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it.each(edge)("buildAad matches the pinned bytes for %s", (v) => {
+    expect(buildAad(...v.parts).toString("base64")).toBe(v.aad_b64);
+  });
+
+  it("lone surrogates escape identically to Python (never raw UTF-8)", () => {
+    const lone = edge.find((v) => v.name === "lone-high-surrogate");
+    expect(lone).toBeDefined();
+    const raw = buildAad(...(lone!.parts)).toString("utf8");
+    expect(raw).toContain("\\u");
+    expect(raw).toBe(Buffer.from(lone!.aad_b64, "base64").toString("utf8"));
+  });
+});

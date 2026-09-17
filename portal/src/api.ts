@@ -44,6 +44,16 @@ function message(detail: unknown, status: number): string {
   return `request failed (${status})`;
 }
 
+/** Session-expiry hook (2026-09-17): any 401 fires this ONCE — App swaps
+ *  the whole UI to an explicit "session expired" sign-in instead of a
+ *  cryptic banner while keys sit in memory. */
+let unauthorizedHandler: (() => void) | null = null;
+let unauthorizedFired = false;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  unauthorizedHandler = fn;
+  unauthorizedFired = false;
+}
+
 async function request<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
   if (!session) throw new ApiError(0, "not signed in");
   const headers: Record<string, string> = {
@@ -60,6 +70,10 @@ async function request<T>(method: string, path: string, body?: unknown, extraHea
     });
   } catch {
     throw new ApiError(0, "server unreachable — check the server URL or your connection");
+  }
+  if (response.status === 401 && !unauthorizedFired) {
+    unauthorizedFired = true;
+    unauthorizedHandler?.();
   }
   if (response.status === 204) return null as T;
   const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };

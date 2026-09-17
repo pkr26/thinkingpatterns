@@ -98,8 +98,12 @@ export function Field(props: {
   );
 }
 
-export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" }): React.JSX.Element {
-  const color = props.tone === "ok" ? theme.ok : props.tone === "danger" ? theme.danger : theme.muted;
+export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn" }): React.JSX.Element {
+  const color =
+    props.tone === "ok" ? theme.ok
+      : props.tone === "danger" ? theme.danger
+        : props.tone === "warn" ? theme.accentBright
+          : theme.muted;
   return <p style={{ margin: 0, color, fontSize: 13, lineHeight: 1.5 }}>{props.children}</p>;
 }
 

@@ -118,8 +118,10 @@ describe("SettingsScreen chrome", () => {
     expect((inputByPlaceholder(root, "https://your-server:8000").props as { value: string }).value).toBe(
       "https://sync.example.com",
     );
-    expect(root.root.findAllByType(Switch)).toHaveLength(1);
-    const sw = root.root.findAllByType(Switch)[0];
+    const sw = root.root
+      .findAllByType(Switch)
+      .find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis");
+    expect(sw).toBeDefined();
     expect(sw.props.value).toBe(true);
     expect(sw.props.trackColor).toEqual({ true: "#4f7cff", false: "#141821" });
   });
@@ -195,13 +197,13 @@ describe("SettingsScreen chrome", () => {
     );
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(root.root.findAllByType(Switch)[0].props.value).toBe(false);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(false);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
       resolveConsent({ enabled: true });
     });
     await flush();
-    expect(root.root.findAllByType(Switch)[0].props.value).toBe(true);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(true);
   });
 
   it("disables the switch and buttons while the verified consent save is busy, and resets after", async () => {
@@ -213,7 +215,7 @@ describe("SettingsScreen chrome", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const { act, firePress } = await import("../helpers/rtr");
-    const sw0 = root.root.findAllByType(Switch)[0];
+    const sw0 = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!;
     await act(async () => {
       (sw0.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
@@ -242,7 +244,9 @@ describe("SettingsScreen chrome", () => {
   it("hides the third-party section when the server has no LLM configured", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(root.root.findAllByType(Switch)).toHaveLength(0);
+    expect(
+      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party AI analysis"),
+    ).toHaveLength(0);
     expect(textOf(root)).not.toContain("Third-party AI analysis");
   });
 
@@ -251,7 +255,9 @@ describe("SettingsScreen chrome", () => {
     vi.mocked(api.getLlmConsent).mockRejectedValue(new Error("offline"));
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(root.root.findAllByType(Switch)).toHaveLength(0);
+    expect(
+      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party AI analysis"),
+    ).toHaveLength(0);
     expect(textOf(root)).toContain("Save server URL");
   });
 });
@@ -334,7 +340,9 @@ describe("server URL policy", () => {
     vi.mocked(api.getLlmConsent).mockResolvedValue(undefined as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(root.root.findAllByType(Switch)).toHaveLength(0);
+    expect(
+      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party AI analysis"),
+    ).toHaveLength(0);
   });
 });
 
@@ -366,7 +374,7 @@ describe("LLM consent toggle", () => {
 
     expect(verifyPasswordForVault).toHaveBeenCalledWith("correct horse");
     expect(api.setLlmConsent).toHaveBeenCalledWith(true, authKey.toString("base64"));
-    expect(root.root.findAllByType(Switch)[0].props.value).toBe(true);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(true);
   });
 
   it("a wrong password never reaches the server", async () => {
@@ -381,7 +389,7 @@ describe("LLM consent toggle", () => {
     await reauth(root, "wrong guess");
     expect(api.setLlmConsent).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalledWith("Could not verify", "Wrong password.");
-    expect(root.root.findAllByType(Switch)[0].props.value).toBe(false);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(false);
   });
 
   it("reports failures and keeps the old state", async () => {
@@ -396,7 +404,7 @@ describe("LLM consent toggle", () => {
     await reauth(root);
     // Calm fallback copy — no raw error text in the dialog (audit fix).
     expect(Alert.alert).toHaveBeenCalledWith("Could not complete", "Something went wrong — try again.");
-    expect(root.root.findAllByType(Switch)[0].props.value).toBe(false);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(false);
   });
 
   it("falls back to calm copy for non-Error consent failures", async () => {
@@ -860,15 +868,18 @@ describe("About and Advanced sections", () => {
     expect(nav.navigate).toHaveBeenCalledWith("Privacy");
   });
 
-  it("the daily-reminder row is honest: not in this version, and never a fake control", async () => {
+  it("the daily-reminder row is honest: no fake control until the native module is linked", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(textOf(root)).toContain("Daily reminder");
-    expect(textOf(root)).toContain("Reminders aren't in this version");
-    expect(textOf(root)).toContain("planned for a future update");
-    expect(textOf(root)).toContain("never sent anywhere");
-    // No switch, no button: an honest note, not a pretend feature.
-    expect(root.root.findAllByType(Switch)).toHaveLength(0);
+    // 2026-09-17: the native seam copy replaces the old static note; the
+    // promise is the same — local-only, optional, honest.
+    expect(textOf(root)).toContain("notification module is linked");
+    // No reminder switch/button exists (only the haptics + LLM switches).
+    const labels = root.root
+      .findAllByType(Switch)
+      .map((n) => n.props.accessibilityLabel as string);
+    expect(labels).not.toContain("Daily reminder");
+    expect(labels).toContain("Haptics");
   });
 
   it("renders the version without the server part when meta has none", async () => {

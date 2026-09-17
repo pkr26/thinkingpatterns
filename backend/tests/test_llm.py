@@ -1,9 +1,10 @@
-"""The optional LLM analyzer shim: guardrails over hostile model output.
+"""The optional LLM enrichment shim: guardrails over hostile model output.
 
 Everything here treats the third-party endpoint as adversarial — labels are
-capped, recurring phrases must exist in the corpus, numerics are clamped,
-and ANY failure falls back to the deterministic rule-based analyzer with a
-single corpus pass.
+capped, recurring phrases must exist in the corpus, numerics are clamped.
+A failed call contributes NOTHING (no v1 rule-based fallback exists since
+2026-09-17): the deterministic brain's patterns stand, the failure is
+logged, and ``last_error`` lets the recompute response report honestly.
 """
 
 from __future__ import annotations
@@ -14,16 +15,14 @@ from datetime import date, timedelta
 import pytest
 
 from app.config import Settings
-from app.services import patterns
 from app.services.llm import (
     LLMAnalyzer,
-    RuleBasedAnalyzer,
-    get_analyzer,
+    get_enricher,
     sanitize_pattern,
     MAX_LABEL_CHARS,
     MAX_OCCURRENCES,
 )
-from app.services.patterns import JournalEntry, MAX_PATTERNS
+from app.services.patterns import JournalEntry
 
 DAY0 = date(2026, 7, 1)
 
@@ -32,23 +31,46 @@ def entry(n: int, text: str = "a calm day at work", sentiment: float | None = 0.
     return JournalEntry(text=text, entry_date=DAY0 + timedelta(days=n), sentiment=sentiment)
 
 
-def test_get_analyzer_requires_both_url_and_consent():
+def test_get_enricher_requires_both_url_and_consent():
     settings = Settings(environment="development")
     settings.llm_url = ""
-    assert isinstance(get_analyzer(settings, llm_consent=True), RuleBasedAnalyzer)
+    assert get_enricher(settings, llm_consent=True) is None
 
     settings.llm_url = "https://llm.example.com/v1"
-    assert isinstance(get_analyzer(settings, llm_consent=False), RuleBasedAnalyzer)
-    analyzer = get_analyzer(settings, llm_consent=True)
-    assert isinstance(analyzer, LLMAnalyzer)
-    assert analyzer.url == "https://llm.example.com/v1"
-    assert analyzer.model == settings.llm_model
+    assert get_enricher(settings, llm_consent=False) is None
+    enricher = get_enricher(settings, llm_consent=True)
+    assert isinstance(enricher, LLMAnalyzer)
+    assert enricher.url == "https://llm.example.com/v1"
+    assert enricher.model == settings.llm_model
+    assert enricher.last_error is None
 
 
-def test_rule_based_analyzer_delegates_to_patterns():
-    analysis = RuleBasedAnalyzer().analyze([entry(0, "great calm day")])
-    assert analysis.total_entries == 1
-    assert RuleBasedAnalyzer.name == "rules"
+def test_the_v1_analyzer_interface_is_gone():
+    # 2026-09-17 audit remediation: RuleBasedAnalyzer/LLMAnalyzer.analyze
+    # surfaced the pre-brain pooled statistics (the documented
+    # false-positive failure mode) whenever the endpoint failed for a
+    # consented user. Nothing may resurrect that interface.
+    import inspect
+
+    from app.services import llm
+
+    assert not hasattr(llm, "RuleBasedAnalyzer"), "v1 rule-based analyzer resurrected"
+    assert not hasattr(llm, "get_analyzer"), "get_analyzer resurrected"
+    assert "analyze" not in inspect.signature(LLMAnalyzer.extract_patterns).parameters
+
+
+def test_production_code_never_calls_the_v1_patterns_analyzer():
+    # patterns.analyze stays as a test-only reference implementation; a
+    # single grep-shaped gate keeps it out of the production import graph.
+    from pathlib import Path
+
+    app_dir = Path(__file__).resolve().parents[1] / "app"
+    offenders = []
+    for py in app_dir.rglob("*.py"):
+        for lineno, line in enumerate(py.read_text().splitlines(), 1):
+            if "patterns.analyze(" in line or (".analyze(" in line and "analyze_fn" not in line):
+                offenders.append(f"{py.name}:{lineno}: {line.strip()}")
+    assert offenders == [], f"v1 analyzer called in production code: {offenders}"
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +188,14 @@ def _make_analyzer() -> LLMAnalyzer:
     return LLMAnalyzer("https://llm.example.com/v1/", "test-key", model="mini")
 
 
-def test_analyze_returns_sanitized_patterns_and_envelope():
+def test_extract_returns_sanitized_patterns():
     analyzer = _make_analyzer()
     corpus = [entry(i, f"day {i}: work stress and more work words") for i in range(35)]
+    from app.services.patterns import Pattern
+    findings = [
+        Pattern("temporal", "work", 7, 0.6, {"day": "Sunday"}),
+        Pattern("recurring_phrase", "work stress", 3, 0.4, {}),
+    ]
     posted: list[dict] = []
     analyzer._post = lambda payload: posted.append(payload) or _llm_response([
         {"kind": "temporal", "label": "work", "occurrences": 7, "confidence": 0.6,
@@ -177,39 +204,44 @@ def test_analyze_returns_sanitized_patterns_and_envelope():
         {"kind": "diagnosis", "label": "should be dropped", "occurrences": 1, "confidence": 1},
     ])
 
-    analysis = analyzer.analyze(corpus)
+    found = analyzer.extract_patterns(corpus, findings=findings)
 
     assert analyzer.name == "llm"
-    kinds = [p.kind for p in analysis.patterns]
+    kinds = [p.kind for p in found]
     assert kinds == ["temporal", "recurring_phrase"]  # hostile kind dropped
-    assert analysis.total_entries == 35
-    assert analysis.active_days == 35
-    # The wire payload mirrors the corpus in order, budget permitting.
-    payload = json.loads(posted[0]["messages"][1]["content"])
+    assert analyzer.last_error is None
+    # The wire payload carries the brain's findings (inversion) plus the
+    # corpus, budget permitting.
+    user_content = json.loads(posted[0]["messages"][1]["content"])
+    assert user_content["findings"] == [
+        {"kind": "temporal", "label": "work"},
+        {"kind": "recurring_phrase", "label": "work stress"},
+    ]
+    payload = user_content["recent_entries"]
     assert len(payload) == 35
     assert payload[0]["date"] == corpus[0].entry_date.isoformat()
     assert payload[0]["text"] == corpus[0].text
 
 
-def test_analyze_slices_to_the_most_recent_max_entries():
+def test_extract_slices_to_the_most_recent_max_entries():
     analyzer = _make_analyzer()
     corpus = [entry(i, f"day {i}") for i in range(LLMAnalyzer.MAX_ENTRIES + 40)]
     posted: list[dict] = []
     analyzer._post = lambda payload: posted.append(payload) or _llm_response([])
 
-    analysis = analyzer.analyze(corpus)
+    found = analyzer.extract_patterns(corpus)
 
-    payload = json.loads(posted[0]["messages"][1]["content"])
+    payload = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(payload) == LLMAnalyzer.MAX_ENTRIES
     assert payload[0]["date"] == corpus[-LLMAnalyzer.MAX_ENTRIES].entry_date.isoformat()
-    assert analysis.total_entries == LLMAnalyzer.MAX_ENTRIES + 40
+    assert found == []  # nothing hostile in an empty model result
 
 
-def test_analyze_caps_pattern_count_at_max_patterns():
+def test_the_model_cannot_mint_findings():
+    # 2026-09-17 inversion: a flooded response whose (kind, label) pairs
+    # are not the brain's findings is dropped ENTIRELY — model discovery
+    # bypassed every statistical safeguard, so it no longer exists.
     analyzer = _make_analyzer()
-    # Distinct alphabetic tokens: grounding is word-TOKEN based, so labels
-    # must be real corpus words (digit-suffixed labels like "work0" are no
-    # longer corpus tokens — that was the substring-grounding loophole).
     words = [f"word{c}" for c in "abcdefghijklmnopqrstuvwxyz"]
     corpus = [entry(i, "work " + " ".join(words)) for i in range(35)]
     flood = [
@@ -217,11 +249,21 @@ def test_analyze_caps_pattern_count_at_max_patterns():
         for w in words
     ]
     analyzer._post = lambda payload: _llm_response(flood)
-    analysis = analyzer.analyze(corpus)
-    assert len(analysis.patterns) == MAX_PATTERNS
+    assert analyzer.extract_patterns(corpus) == []
+
+    # With the findings provided, the SAME flood still yields only
+    # narrated versions of those findings.
+    from app.services.patterns import Pattern
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    analyzer._post = lambda payload: _llm_response(flood + [
+        {"kind": "temporal", "label": "work", "narrative": "Sunday work weeks read as one shape."},
+    ])
+    kept = analyzer.extract_patterns(corpus, findings=findings)
+    assert [(p.kind, p.label) for p in kept] == [("temporal", "work")]
+    assert kept[0].detail["narrative"] == "Sunday work weeks read as one shape."
 
 
-def test_analyze_respects_the_character_budget_and_slicing():
+def test_extract_respects_the_character_budget_and_slicing():
     analyzer = _make_analyzer()
     # 250 entries x 900 chars = 225k chars > MAX_TOTAL_CHARS: the loop must
     # stop adding entries once the budget is spent, and never send more than
@@ -230,17 +272,17 @@ def test_analyze_respects_the_character_budget_and_slicing():
     posted: list[dict] = []
     analyzer._post = lambda payload: posted.append(payload) or _llm_response([])
 
-    analysis = analyzer.analyze(corpus)
+    analyzer.extract_patterns(corpus)
 
-    payload = json.loads(posted[0]["messages"][1]["content"])
+    user_content = json.loads(posted[0]["messages"][1]["content"])
+    assert isinstance(user_content, dict)  # {findings, recent_entries} (inversion)
+    payload = user_content["recent_entries"]
     assert len(payload) <= LLMAnalyzer.MAX_ENTRIES
     total_chars = sum(len(item["text"]) for item in payload)
     assert total_chars <= LLMAnalyzer.MAX_TOTAL_CHARS
-    # The fallback (empty patterns list) still yields a full rule envelope.
-    assert analysis.total_entries == 250
 
 
-def test_analyze_falls_back_to_rules_on_any_failure():
+def test_extract_failure_contributes_nothing_and_is_recorded():
     analyzer = _make_analyzer()
     corpus = [entry(i, "work was stressful and sad") for i in range(10)]
 
@@ -248,32 +290,35 @@ def test_analyze_falls_back_to_rules_on_any_failure():
         raise RuntimeError("endpoint down")
 
     analyzer._post = raising_post
-    fallback = analyzer.analyze(corpus)
-    rules = RuleBasedAnalyzer().analyze(corpus)
-    assert fallback.total_entries == rules.total_entries
-    assert fallback.active_days == rules.active_days
-    assert fallback.first_date == rules.first_date
-    assert fallback.last_date == rules.last_date
-    assert fallback.avg_sentiment == rules.avg_sentiment
-    assert [p.kind for p in fallback.patterns] == [p.kind for p in rules.patterns]
+    assert analyzer.extract_patterns(corpus) == []
+    assert analyzer.last_error == "RuntimeError"
+    # A later success clears the failure state (the response reports the
+    # LAST call honestly).
+    analyzer._post = lambda payload: _llm_response([])
+    assert analyzer.extract_patterns(corpus) == []
+    assert analyzer.last_error is None
 
 
-def test_analyze_falls_back_when_model_output_is_not_json():
+def test_extract_failure_when_model_output_is_not_json():
     analyzer = _make_analyzer()
     analyzer._post = lambda payload: {"choices": [{"message": {"content": "sure thing!"}}]}
-    analysis = analyzer.analyze([entry(0, "calm")])
-    assert analysis.total_entries == 1  # rule-based envelope
+    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    assert analyzer.last_error == "JSONDecodeError"
 
 
-def test_analyze_handles_missing_choices_and_patterns_keys():
+def test_extract_handles_missing_choices_and_patterns_keys():
     analyzer = _make_analyzer()
     analyzer._post = lambda payload: {}
-    analysis = analyzer.analyze([entry(0, "calm")])
-    assert analysis.total_entries == 1
-    # patterns key absent -> treated as empty
+    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    assert analyzer.last_error == "KeyError"
+    # A JSON-null body is a failure (TypeError), not an empty success —
+    # but an EMPTY patterns list is a clean success.
     analyzer._post = lambda payload: _llm_response(None)  # type: ignore[arg-type]
-    analysis2 = analyzer.analyze([entry(0, "calm")])
-    assert analysis2.total_entries == 1
+    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    assert analyzer.last_error == "TypeError"
+    analyzer._post = lambda payload: _llm_response([])
+    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    assert analyzer.last_error is None
 
 
 def test_post_hits_the_configured_endpoint_with_auth(monkeypatch):

@@ -219,7 +219,18 @@ export async function decryptInsights(
   dataKey: Bytes,
   userId: string,
   blobB64: string,
-): Promise<{ stats: { patterns: PatternPayload[] } & Record<string, unknown> }> {
+): Promise<{
+  stats: {
+    patterns: PatternPayload[];
+    /** Aggregate account stats the backend already packs into the same
+     *  blob (2026-09-17: the portal stopped discarding them). */
+    avg_sentiment?: number;
+    total_entries?: number;
+    active_days?: number;
+    first_date?: string;
+    last_date?: string;
+  };
+}> {
   const { buildAad } = await import("./aad");
   const plain = await decrypt(dataKey, unb64(blobB64), buildAad("insights", userId, "patterns"));
   return decodeJson(plain) as { stats: { patterns: PatternPayload[] } };

@@ -15,6 +15,27 @@ import { TherapistShareScreen } from "./screens/TherapistShareScreen";
 import { PrivacyScreen } from "./screens/PrivacyScreen";
 import { CrisisScreen } from "./screens/CrisisScreen";
 import { takePendingOnboarding } from "./onboarding";
+import { MainShell, NavDestination } from "./components/BottomNav";
+
+/** Wrap a main screen with the persistent bottom navigation (2026-09-17):
+ *  reaching History after typing a long entry must not require scrolling
+ *  past the text. EntryScreen hosts its own shell (keyboard behavior). */
+function withShell(current: NavDestination) {
+  // ComponentType<any>: the wrapped screens declare navigation as required
+  // (they are only ever mounted by this navigator, which always provides it).
+  return (Screen: React.ComponentType<any>) => {
+    function Wrapped(props: { navigation?: any }): React.JSX.Element {
+      const navigation = props.navigation as { navigate: (screen: string) => void } | undefined;
+      return (
+        <MainShell current={current} navigation={navigation}>
+          <Screen navigation={navigation} />
+        </MainShell>
+      );
+    }
+    Wrapped.displayName = `MainShell(${current})`;
+    return Wrapped;
+  };
+}
 
 export type RootStackParamList = {
   Booting: undefined; // transient splash while a saved session resolves
@@ -104,10 +125,10 @@ export function AppNavigator(): React.JSX.Element {
             <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
           )}
           <Stack.Screen name="Entry" component={EntryScreen} options={{ title: "Today" }} />
-          <Stack.Screen name="History" component={HistoryScreen} options={{ title: "History" }} />
-          <Stack.Screen name="Insights" component={InsightsScreen} options={{ title: "Patterns" }} />
-          <Stack.Screen name="Question" component={QuestionScreen} options={{ title: "One question" }} />
-          <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "Settings" }} />
+          <Stack.Screen name="History" component={withShell("History")(HistoryScreen)} options={{ title: "History" }} />
+          <Stack.Screen name="Insights" component={withShell("Insights")(InsightsScreen)} options={{ title: "Patterns" }} />
+          <Stack.Screen name="Question" component={withShell("Question")(QuestionScreen)} options={{ title: "One question" }} />
+          <Stack.Screen name="Settings" component={withShell("Settings")(SettingsScreen)} options={{ title: "Settings" }} />
           <Stack.Screen name="TherapistShare" component={TherapistShareScreen} options={{ title: "My therapist" }} />
           {/* The privacy policy is static, offline content (like Crisis). */}
           <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: "Privacy" }} />

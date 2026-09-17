@@ -499,8 +499,13 @@ export const api = {
     }
     return request("POST", `${API_PREFIX}/processing/sessions`, { data_key: dataKeyB64 }, {}, { sensitive: true });
   },
-  recompute: (processingToken: string) =>
-    request("POST", `${API_PREFIX}/insights/recompute`, undefined, { "X-Processing-Token": processingToken }),
+  recompute: (processingToken: string, feedbackBlob?: string) =>
+    request(
+      "POST",
+      `${API_PREFIX}/insights/recompute`,
+      feedbackBlob ? ({ feedback_blob: feedbackBlob } as Record<string, unknown>) : undefined,
+      { "X-Processing-Token": processingToken },
+    ),
   insights: () => request("GET", `${API_PREFIX}/insights`),
   questionToday: () => request("GET", `${API_PREFIX}/questions/today`),
 

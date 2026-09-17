@@ -212,3 +212,23 @@ describe("payload decryption helpers", () => {
     ).rejects.toThrow(/malformed/);
   });
 });
+
+// AAD edge-case vectors (promoted 2026-09-17 from redteam/a_crypto.py A6):
+// the portal's buildAad must agree with backend + mobile on surrogates,
+// DEL/control chars, CJK, RTL, combining marks and empty parts.
+describe("AAD edge-case vectors", () => {
+  const edgeCases = JSON.parse(readFileSync(vectorsPath, "utf8")) as {
+  aad_edge_cases: { name: string; parts: string[]; aad_b64: string }[];
+};
+const edge = edgeCases.aad_edge_cases ?? [];
+
+  it("the contract file carries the corpus", () => {
+    expect(edge.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it.each(edge)("buildAad matches pinned bytes for %s", (v) => {
+    const got = buildAad(...v.parts);
+    const want = Buffer.from(v.aad_b64, "base64");
+    expect(Buffer.compare(Buffer.from(got), want)).toBe(0);
+  });
+});

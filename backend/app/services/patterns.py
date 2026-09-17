@@ -72,6 +72,14 @@ class JournalEntry:
     text: str
     entry_date: date
     sentiment: float | None = None  # optional client-computed override
+    # --- structured channels (entry payload v2, 2026-09-17) ------------------
+    # Optional, client-supplied, within-person by construction: the user's
+    # own ratings/tags for the day, never a model inference. All optional —
+    # a v1 payload simply leaves them None/empty and the engine behaves
+    # exactly as before.
+    energy: float | None = None        # [-1, 1]: drained → energized
+    sleep_quality: int | None = None   # 1..5: rough → rested
+    tags: tuple[str, ...] = ()         # short activity tags ("family", "run")
 
 
 @dataclass(frozen=True)
@@ -92,14 +100,44 @@ class Pattern:
         }
 
     def describe(self) -> str:
+        # Structured-channel copy (2026-09-17): sleep-quality patterns are
+        # about the user's own RATING, not a word they wrote — quoting it as
+        # a phrase would read wrong.
+        if self.detail.get("channel") == "sleep_quality":
+            if self.kind == "link":
+                direction = self.detail.get("direction", "lower")
+                return ("The day after a night you rated as rougher than your own "
+                        f"usual, your entries read {direction} than usual for you.")
+            if self.kind == "mood_correlation":
+                return ("On nights you rated as rougher than your own usual, "
+                        "your entries read lower the same day.")
+            if self.kind == "temporal":
+                day = self.detail.get("day", "the same day")
+                return (f"Your rougher nights (by your own ratings) fall most often on {day}s.")
         if self.kind == "temporal":
             day = self.detail.get("day", "the same day")
+            if self.detail.get("source") == "tag":
+                return (f"You tagged '{self.label}' {self.occurrences} times, "
+                        f"most often on {day}s.")
             return (f"You've mentioned '{self.label}' {self.occurrences} times, "
                     f"most often on {day}s.")
         if self.kind == "mood_correlation":
             delta = self.detail.get("mood_delta", 0.0)
+            if self.detail.get("source") == "tag":
+                return (f"Your entries read lower on days you tag '{self.label}' "
+                        f"(mood drop of {delta:.1f}).")
             return (f"Your entries read lower on days when '{self.label}' comes up "
                     f"(mood drop of {delta:.1f}).")
+        if self.kind == "avoidance":
+            silences = self.detail.get("silences", self.occurrences)
+            share = self.detail.get("share", 0.0)
+            base = self.detail.get("base_rate", 0.0)
+            return (f"The day after '{self.label}' comes up, you tend not to write "
+                    f"({silences} of the observable such days, versus your usual "
+                    f"{base * 100:.0f}% silent days overall — {share * 100:.0f}% here).")
+        if self.kind == "cadence":
+            return ("Your writing rhythm has been less regular than it used to be "
+                    "for you — longer stretches of silence between writing days.")
         if self.kind == "recurring_phrase":
             return (f'The phrase "{self.label}" keeps returning — '
                     f"{self.occurrences} times so far.")
@@ -109,6 +147,10 @@ class Pattern:
             return (f"Your entries have read {direction} than your usual "
                     f"baseline lately (a shift of {shift:.1f}).")
         if self.kind == "link":
+            if self.detail.get("source") == "tag":
+                direction = self.detail.get("direction", "lower")
+                return (f"The day after you tag '{self.label}', your entries read "
+                        f"{direction} than usual for you.")
             direction = self.detail.get("direction", "lower")
             lag = self.detail.get("lag_days", 1)
             # The lag reported is the MODAL exposed gap (see brain._detect_links);
@@ -238,7 +280,16 @@ def recurring_phrases(
 
 
 def analyze(entries: list[JournalEntry]) -> Analysis:
-    """Extract every supported pattern type from the decrypted corpus."""
+    """TEST-ONLY v1 reference implementation — never call from production.
+
+    The v1 statistics (pooled moods, no within-person residuals, no
+    multiple-comparison control) are the documented false-positive failure
+    mode the deterministic brain (services/brain.py) replaced. This
+    function survives for test comparison and historical reference only;
+    tests/test_llm.py greps app/ to keep it out of the production import
+    graph, and llm.py has had its analyzer interface (which fell back to
+    this) removed for the same reason (2026-09-17).
+    """
     per_entry: list[tuple[JournalEntry, float, set[str]]] = []
     for entry in entries:
         sentiment = entry.sentiment if entry.sentiment is not None else sentiment_score(entry.text)

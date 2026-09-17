@@ -9,7 +9,7 @@ import anyio
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -18,8 +18,62 @@ from .api import api_router, api_v1_router
 from .cache import FixedWindowCounter
 from .db import build_engine, build_sessionmaker, init_models
 from .deps import DEFAULT_ERROR_CODES
+from .metrics import MetricsMiddleware, MetricsRegistry
 from .middleware import HardeningMiddleware
 from .security.enclave import InMemoryKeyStore
+
+# Distinct from alembic/env.py's migration lock (727272): this one is held
+# for the app's LIFETIME, serializing deployments of the same database.
+CROSS_HOST_ADVISORY_LOCK_ID = 727273
+
+
+async def _acquire_cross_host_guard(engine) -> object | None:
+    """Postgres-only: hold a session-scoped advisory lock for the app
+    lifetime so a SECOND HOST on the same database refuses to boot.
+
+    The 2026-09-16 single-process guard is an flock — per-HOST. A second
+    host booted cleanly and silently fragmented every in-process
+    guarantee (single-use sessions, rate limits, quota locks), returning
+    without an error. The advisory lock makes the multi-host topology
+    fail loudly at boot instead. SQLite (dev/test) has no advisory locks
+    and no such topology: returns None. The held connection deliberately
+    stays out of the pool for the app's lifetime (pool sizing accounts
+    for one connection).
+    """
+    # getattr: test doubles may not carry a dialect; no dialect, no guard.
+    dialect = getattr(engine, "dialect", None)
+    if getattr(dialect, "name", "") != "postgresql":
+        return None
+    conn = await engine.connect()
+    try:
+        acquired = (await conn.exec_driver_sql(
+            f"SELECT pg_try_advisory_lock({CROSS_HOST_ADVISORY_LOCK_ID})"
+        )).scalar()
+    except Exception:
+        await conn.close()
+        raise
+    if not acquired:
+        await conn.close()
+        raise RuntimeError(
+            "another host is already serving this database: the rate "
+            "limiter, per-user locks, and processing-session keystore are "
+            "all in-process (see singleprocess.py). One host per database; "
+            "move shared counters/locks to Redis &c. before scaling out."
+        )
+    return conn
+
+
+async def _release_cross_host_guard(conn: object | None) -> None:
+    if conn is None:
+        return
+    try:
+        await conn.exec_driver_sql(
+            f"SELECT pg_advisory_unlock({CROSS_HOST_ADVISORY_LOCK_ID})"
+        )
+    except Exception:
+        logger.warning("pg_advisory_unlock failed; disconnect releases the lock", exc_info=True)
+    finally:
+        await conn.close()
 
 logger = logging.getLogger("mindpattern")
 
@@ -58,15 +112,22 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                     "direct client access with a spoofable header defeats per-IP "
                     "limits entirely (2026-09-16 red-team finding B2)."
                 )
-            # create_all is a dev/test convenience only. Outside development the
-            # schema comes from `alembic upgrade head` (run by the image
-            # entrypoint before uvicorn starts) — silently pre-creating the schema
-            # here would leave the database without an alembic_version stamp and
-            # break the first real migration with CREATE TABLE conflicts.
-            if is_development:
-                await init_models(app.state.engine)
-            yield
-            await app.state.engine.dispose()
+            # Cross-host guard (2026-09-17): the flock above is per-host;
+            # on Postgres a session advisory lock closes the multi-HOST hole.
+            boot_guard_conn = await _acquire_cross_host_guard(app.state.engine)
+            try:
+                # create_all is a dev/test convenience only. Outside development
+                # the schema comes from `alembic upgrade head` (run by the image
+                # entrypoint before uvicorn starts) — silently pre-creating the
+                # schema here would leave the database without an alembic_version
+                # stamp and break the first real migration with CREATE TABLE
+                # conflicts.
+                if is_development:
+                    await init_models(app.state.engine)
+                yield
+            finally:
+                await _release_cross_host_guard(boot_guard_conn)
+                await app.state.engine.dispose()
 
     app = FastAPI(
         title="MindPattern API",
@@ -91,6 +152,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     app.state.sessionmaker = build_sessionmaker(app.state.engine)
     app.state.key_store = InMemoryKeyStore()
     app.state.rate_counter = FixedWindowCounter()
+    app.state.metrics = MetricsRegistry()
     # Analysis (brain recomputes) is attacker-sized CPU work; a dedicated
     # limiter keeps it from occupying every worker thread that auth scrypt
     # and ordinary requests also need.
@@ -112,6 +174,10 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # could not send either in a cross-origin request without this.
         allow_headers=["Authorization", "Content-Type", "X-Processing-Token", "X-Account-Verifier"],
     )
+    # Inside the hardening layer: aggregate status counters (no paths, no
+    # user data — see app/metrics.py). Added BEFORE HardeningMiddleware so
+    # Hardening stays outermost (security headers on every response).
+    app.add_middleware(MetricsMiddleware, registry=app.state.metrics)
     # Outermost: body-size cap + security headers on EVERY response (413s,
     # 500s included) + last-ditch exception handling.
     app.add_middleware(
@@ -159,6 +225,29 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # Liveness only: no DB touch, so a wedged pool still reports the
         # process as alive (that's what /readyz is for).
         return {"status": "ok", "version": APP_VERSION}
+
+    @app.get("/metrics", tags=["ops"])
+    async def metrics_endpoint(request: Request):
+        # Fail closed: without an explicitly configured token the endpoint
+        # exists only in development; every other environment 404s. The
+        # environment is read from app.state at request time (tests flip it
+        # without rebuilding the app; the value changes nothing else here).
+        live_settings: config.Settings = request.app.state.settings
+        if not live_settings.metrics_token:
+            if live_settings.environment != "development":
+                raise StarletteHTTPException(status_code=404, detail="not found")
+        else:
+            provided = request.headers.get("authorization", "")
+            expected = f"Bearer {settings.metrics_token}"
+            if provided != expected:
+                raise StarletteHTTPException(
+                    status_code=401, detail="metrics token required"
+                )
+        keystore_len = len(request.app.state.key_store)
+        return PlainTextResponse(
+            request.app.state.metrics.render(keystore_len),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @app.get("/readyz", tags=["ops"])
     async def readyz(request: Request):

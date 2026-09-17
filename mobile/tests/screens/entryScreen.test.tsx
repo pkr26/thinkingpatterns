@@ -195,13 +195,11 @@ describe("EntryScreen progress display", () => {
     expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // PrimaryButton themed (AA fix)
     expectStyle(root, { fontWeight: "600" }); // buttonText base
     expectStyle(root, { color: "#ffffff", fontSize: 16 }); // buttonText themed
-    expectStyle(root, { flexDirection: "row", gap: 10 }); // navRow
-    expectStyle(root, { flex: 1, padding: 14, alignItems: "center", justifyContent: "center" }); // navButton base
-    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 10, minHeight: 44 }); // navButton themed
-    expectStyle(root, { color: "#7f9bff", fontSize: 14, fontWeight: "600", textAlign: "center" }); // navText
-    // The help action is unmistakable: help surface + heavier label.
-    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 });
-    expectStyle(root, { color: "#e8eaf0", fontSize: 14, fontWeight: "700", textAlign: "center" });
+    // 2026-09-17: navigation is the PERSISTENT bottom bar (MainShell), no
+    // longer an in-scroll NavRow. Its styles are pinned in
+    // components.bottomNav.test.tsx; this screen keeps the chips row.
+    expectStyle(root, { backgroundColor: "#141821", borderRadius: 10 }); // prompt chip themed
+    expectStyle(root, { paddingHorizontal: 12, paddingVertical: 8 }); // prompt chip base
   });
 
   it("flushes the offline queue on mount once the user id resolves", async () => {
@@ -251,6 +249,7 @@ describe("EntryScreen save pipeline", () => {
       "good day, calm evening",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       null,  // v3: no client sentiment — the server engine re-scores at analysis time
+      { energy: null, sleep: null, tags: [] },
     );
     expect(api.createEntry).toHaveBeenCalledTimes(1);
     expect(Alert.alert).not.toHaveBeenCalled();
@@ -282,7 +281,8 @@ describe("EntryScreen save pipeline", () => {
         "user-1",
         expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
         sentiment,
-      );
+        undefined,
+);
     }
   });
 
@@ -1016,6 +1016,14 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
       "Mood: Okay",
       "Mood: Good",
       "Mood: Light",
+      "Energy: Drained",
+      "Energy: Steady",
+      "Energy: Energized",
+      "Sleep: Rough",
+      "Sleep: Poor",
+      "Sleep: Okay",
+      "Sleep: Good",
+      "Sleep: Rested",
     ]);
     expect(radios.every((r) => r.props.accessibilityState?.selected === false)).toBe(true);
     // The group itself is labeled, and picking one flips only its state.
@@ -1047,7 +1055,8 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
       "user-1",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       -1,
-    );
+        undefined,
+);
     expect(textOf(root)).toContain("Saved ✓");
   });
 
@@ -1058,7 +1067,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
     await pressLabel(root, "Save entry");
     await flush();
     expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
-    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), 1);
+    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), 1, undefined);
   });
 
   it("tapping the pick again clears it — saving falls back to the estimate", async () => {
@@ -1074,7 +1083,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
     await pressLabel(root, "Save entry");
     await flush();
     expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
-    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), -1);
+    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), -1, undefined);
   });
 
   it("a successful save clears the pick — the check-in is per entry", async () => {

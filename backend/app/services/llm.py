@@ -1,10 +1,16 @@
-"""Analyzer interface: deterministic rule-based default, optional LLM backend.
+"""Optional consent-gated LLM ENRICHMENT layer on top of the deterministic brain.
 
-The product brief calls the analyzer the "mini-brain". v1 ships
-RuleBasedAnalyzer (deterministic, offline, testable). If MINDPATTERN_LLM_URL
-is configured AND the user has explicitly opted in (account-level consent,
-re-authenticated), LLMAnalyzer sends decrypted entries to an OpenAI-compatible
-endpoint and falls back to the rule-based analyzer on failure.
+2026-09-17 rework (audit finding): this module previously also carried the
+v1 analyzer interface (``RuleBasedAnalyzer``/``LLMAnalyzer.analyze``, whose
+failure fallback ran the v1 ``patterns.analyze`` statistics — the pooled,
+uncorrected pre-brain engine). That path was dead in production (recompute
+calls ``brain.update`` + ``extract_patterns``) but remained importable and
+one wiring mistake away from surfacing v1's demonstrated false-positive-
+prone correlations to a consented user. It is gone: the only production
+surface is ``get_enricher()`` → ``LLMAnalyzer.extract_patterns``, and an
+endpoint failure now means "no model additions" — logged, and reported to
+the caller via ``last_error`` so the recompute response never claims the
+LLM ran when it did not.
 
 Guardrails (this is the module that can ship journal plaintext off-server,
 so it gets no benefit of the doubt):
@@ -18,13 +24,15 @@ so it gets no benefit of the doubt):
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
-from typing import Protocol
 
 from ..config import Settings
 from . import patterns
-from .patterns import Analysis, JournalEntry, Pattern
+from .patterns import JournalEntry, Pattern
+
+logger = logging.getLogger("mindpattern.llm")
 
 MAX_LABEL_CHARS = 80
 MAX_OCCURRENCES = 100_000
@@ -32,11 +40,14 @@ MAX_OCCURRENCES = 100_000
 # BUILT from this tuple, so the endpoint can never be asked for (or
 # rewarded for) a kind the sanitizer would drop.
 _ALLOWED_KINDS = ("temporal", "mood_correlation", "recurring_phrase", "mood_shift")
-_PATTERNS_PROMPT = (
-    "You extract behavioral patterns from journal entries. Return strict "
-    "JSON: {\"patterns\": [{\"kind\": \"" + "|".join(_ALLOWED_KINDS) + "\", "
-    "\"label\": str, \"occurrences\": int, \"confidence\": 0..1, \"detail\": {}}]}. "
-    "No advice, no diagnosis."
+_BASE_PROMPT = (
+    "You REFINE deterministic statistical findings about a journal, never "
+    "discover new ones. Return strict JSON: {\"patterns\": [{\"kind\": "
+    "\"" + "|".join(_ALLOWED_KINDS) + "\", \"label\": str (EXACTLY one of the "
+    "provided findings' labels), \"narrative\": str (<= 240 chars)}]}. The "
+    "narrative is one calm, plain sentence reframing the finding for its "
+    "author: observational, no advice, no diagnosis, no questions. "
+    "Findings you cannot improve, omit."
 )
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _URL_OR_PHONE = re.compile(r"https?://|www\.|\d{5,}", re.IGNORECASE)
@@ -125,19 +136,6 @@ def _label_grounded(label: str, corpus_vocab: set[str]) -> bool:
     return True
 
 
-class Analyzer(Protocol):
-    name: str
-
-    def analyze(self, entries: list[JournalEntry]) -> Analysis: ...
-
-
-class RuleBasedAnalyzer:
-    name = "rules"
-
-    def analyze(self, entries: list[JournalEntry]) -> Analysis:
-        return patterns.analyze(entries)
-
-
 def sanitize_pattern(item: object, corpus_texts: list[str]) -> Pattern | None:
     """Coerce one untrusted model output into a Pattern, or drop it."""
     if not isinstance(item, dict):
@@ -200,6 +198,23 @@ def sanitize_pattern(item: object, corpus_texts: list[str]) -> Pattern | None:
     )
 
 
+MAX_NARRATIVE_CHARS = 240
+
+
+def _clean_narrative(raw: object) -> str | None:
+    """One calm sentence, or None. Hostile-input rules: control characters
+    stripped, length capped, URLs/phones/spelled contacts rejected — the
+    narrative renders under pattern cards, so it gets label treatment."""
+    if not isinstance(raw, str):
+        return None
+    text = _CONTROL_CHARS.sub(" ", raw).strip()
+    if not text or len(text) > MAX_NARRATIVE_CHARS:
+        return None if not text else text[:MAX_NARRATIVE_CHARS].rstrip()
+    if _URL_OR_PHONE.search(text) or _SPELLED_CONTACT.search(text):
+        return None
+    return text
+
+
 class LLMAnalyzer:
     # The rule-based analyzer sees the full corpus; the LLM path sends the
     # most recent entries within a character budget so prompt size (and cost)
@@ -213,6 +228,11 @@ class LLMAnalyzer:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        # Honest-failure state (2026-09-17): the exception CLASS of the
+        # last failed call, or None. Consumed by the recompute response so
+        # `analyzer: "llm"` is only ever reported for a call that actually
+        # succeeded. Never carries entry content — class name only.
+        self.last_error: str | None = None
 
     def _post(self, payload: dict) -> dict:
         """HTTP call isolated for testability (tests monkeypatch this)."""
@@ -236,12 +256,24 @@ class LLMAnalyzer:
             )
         return user_payload
 
-    def _fetch_patterns(self, entries: list[JournalEntry]) -> list[Pattern]:
+    def _fetch_patterns(self, entries: list[JournalEntry],
+                        findings: list[Pattern] | None = None) -> list[Pattern]:
         """One endpoint round-trip + sanitize; raises on ANY failure.
 
-        The single shared path behind extract_patterns() and analyze() —
-        the two used to carry their own (drifting) prompt copies.
+        2026-09-17 INVERSION: the model no longer discovers patterns (its
+        output bypassed every statistical safeguard — no p-value, no BH
+        correction, no replication gate). It receives the deterministic
+        brain's findings and may only NARRATE them: any returned
+        (kind, label) outside the provided findings is dropped by
+        construction, and the only new field is a short reframing
+        sentence, sanitized like everything else.
         """
+        findings = findings or []
+        findings_summary = [
+            {"kind": f.kind, "label": f.label,
+             **({"direction": f.detail["direction"]} if isinstance(f.detail, dict) and "direction" in f.detail else {})}
+            for f in findings
+        ]
         body = self._post({
             "model": self.model,
             # Bounded generation (2026-09-16 remediation): without these the
@@ -250,54 +282,70 @@ class LLMAnalyzer:
             "max_tokens": 512,
             "temperature": 0.0,
             "messages": [
-                {"role": "system", "content": _PATTERNS_PROMPT},
-                {"role": "user", "content": json.dumps(self._recent_payload(entries))},
+                {"role": "system", "content": _BASE_PROMPT},
+                {"role": "user", "content": json.dumps({
+                    "findings": findings_summary,
+                    "recent_entries": self._recent_payload(entries),
+                })},
             ],
         })
         content = body["choices"][0]["message"]["content"]
         parsed = json.loads(content)
         corpus = [entry.text for entry in entries]
-        return [
-            pattern
-            for item in parsed.get("patterns", [])
-            if (pattern := sanitize_pattern(item, corpus)) is not None
-        ]
+        allowed = {(f.kind, f.label): f for f in findings}
+        refined: list[Pattern] = []
+        for item in parsed.get("patterns", []):
+            pattern = sanitize_pattern(item, corpus)
+            if pattern is None:
+                continue
+            original = allowed.get((pattern.kind, pattern.label))
+            if original is None:
+                continue  # not a brain finding: model discovery is dropped
+            narrative = _clean_narrative(item.get("narrative"))
+            if narrative is not None:
+                detail = dict(original.detail)
+                detail["narrative"] = narrative
+                refined.append(Pattern(pattern.kind, pattern.label,
+                                       original.occurrences, original.confidence, detail))
+            else:
+                refined.append(original)
+        return refined
 
-    def extract_patterns(self, entries: list[JournalEntry]) -> list[Pattern]:
-        """Sanitized patterns from the model ([] on ANY failure).
+    def extract_patterns(self, entries: list[JournalEntry],
+                          findings: list[Pattern] | None = None) -> list[Pattern]:
+        """Sanitized pattern NARRATIVES from the model ([] on ANY failure).
 
-        The v2 brain calls this inside the secure processing context as
-        an enrichment layer on top of its deterministic core: the model
-        may add patterns it can defend, and every field is coerced as
-        hostile before it is trusted. Empty result simply means "no
-        model additions" — the brain's own patterns stand.
+        The brain calls this inside the secure processing context with its
+        own deterministic findings: the model may only reframe those
+        (label-restricted by construction — see _fetch_patterns). Empty
+        result means "no model additions" — the brain's own patterns
+        stand. A FAILED call (network, status, unparseable output) is
+        logged and recorded in ``last_error`` so operators can tell "the
+        model had nothing" from "the endpoint is down" and the recompute
+        response never claims the LLM ran.
         """
+        self.last_error = None
         try:
-            return self._fetch_patterns(entries)
-        except Exception:
+            return self._fetch_patterns(entries, findings=findings)
+        except Exception as exc:  # noqa: BLE001 — every failure mode is one outcome
+            self.last_error = type(exc).__name__
+            logger.warning(
+                "llm enrichment failed (%s); continuing with deterministic patterns only",
+                type(exc).__name__,
+            )
             return []
 
-    def analyze(self, entries: list[JournalEntry]) -> Analysis:
-        try:
-            found = self._fetch_patterns(entries)
-        except Exception:
-            # One rule-based pass, computed once, used for both the fallback
-            # and the envelope fields below — never two full corpus passes.
-            return RuleBasedAnalyzer().analyze(entries)
-        base = RuleBasedAnalyzer().analyze(entries)
-        return Analysis(
-            total_entries=base.total_entries,
-            active_days=base.active_days,
-            avg_sentiment=base.avg_sentiment,
-            first_date=base.first_date,
-            last_date=base.last_date,
-            patterns=found[: patterns.MAX_PATTERNS],
-        )
 
+def get_enricher(settings: Settings, llm_consent: bool = False) -> LLMAnalyzer | None:
+    """The optional consent-gated enrichment extractor, or None.
 
-def get_analyzer(settings: Settings, llm_consent: bool = False) -> Analyzer:
-    # Consent is decided per-user at the account level; without it the LLM
-    # endpoint being configured changes nothing for that user.
+    Consent is decided per-user at the account level; without it the LLM
+    endpoint being configured changes nothing for that user. None means
+    deterministic-only — there is no analyzer fallback to select instead
+    (the v1 rule-based fallback was removed 2026-09-17: it surfaced the
+    pre-brain pooled statistics, the exact false-positive failure mode
+    the deterministic engine was built to eliminate).
+    """
     if settings.llm_url and llm_consent:
         return LLMAnalyzer(settings.llm_url, settings.llm_api_key, settings.llm_model)
-    return RuleBasedAnalyzer()
+    return None

@@ -6,6 +6,11 @@ Object.defineProperty(globalThis, "window", {
   configurable: true,
   value: {
     location: { origin: "http://localhost:5173" },
+    // 2026-09-17: App's idle auto-lock + session-expiry hook need
+    // add/removeEventListener and print.
+    addEventListener: (_type: string, _listener: () => void) => undefined,
+    removeEventListener: (_type: string, _listener: () => void) => undefined,
+    print: () => undefined,
     localStorage: {
       getItem: (k: string) => mem.get(k) ?? null,
       setItem: (k: string, v: string) => void mem.set(k, v),

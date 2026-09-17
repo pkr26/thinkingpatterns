@@ -54,12 +54,20 @@ async def test_load_rows_emits_a_sql_limit(client, app):
     from app.api.insights import _load_rows
 
     async with app.state.sessionmaker() as s:
-        rows = await _load_rows(s, emu.user_id, limit=2)
+        rows = await _load_rows(s, emu.user_id, limit=2, blob_budget=8 * 1024 * 1024)
     assert len(rows) == 2
     entry_selects = [s for s in statements if "FROM entries" in s]
     assert entry_selects, statements
-    assert any("LIMIT" in s.upper() for s in entry_selects), entry_selects
-    assert "DESC" in entry_selects[-1].upper()  # recency ordering, reversed in Python
+    # Two-phase load (2026-09-17): the id+size phase carries the LIMIT and
+    # recency-DESC ordering (and measures the byte budget with LENGTH in
+    # SQL); the blob-fetch phase selects only the kept ids in ascending
+    # order for the analyzer.
+    limited = [s for s in entry_selects if "LIMIT" in s.upper()]
+    assert limited, entry_selects
+    assert "DESC" in limited[-1].upper()
+    assert "LENGTH" in limited[-1].upper()
+    fetch = entry_selects[-1]
+    assert "IN (" in fetch.upper() and "ASC" in fetch.upper()
 
 
 async def test_recompute_holds_no_transaction_across_analysis(client, app, settings, monkeypatch):

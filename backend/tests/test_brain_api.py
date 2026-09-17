@@ -247,7 +247,11 @@ async def test_malformed_entry_during_amnesia_retry_is_a_400(client):
     assert response.json()["code"] == "entry_payload_malformed"
 
 
-async def test_llm_enrichment_merges_into_surfaced_patterns(client, settings, monkeypatch):
+async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(client, settings, monkeypatch):
+    # 2026-09-17 inversion: the model receives the brain's findings and may
+    # only attach a sanitized NARRATIVE to them. A corpus-anchored phrase
+    # the BRAIN did not surface is still model minting — dropped. The
+    # narrative appears on a finding the brain DID surface.
     from app.services.llm import LLMAnalyzer
 
     settings.llm_url = "https://llm.example/v1"
@@ -256,16 +260,17 @@ async def test_llm_enrichment_merges_into_surfaced_patterns(client, settings, mo
 
     def fake_post(self, payload):
         posted.append(payload)
-        model_output = {
-            "patterns": [
-                # A valid phrase the user actually wrote (corpus-anchored).
-                {"kind": "recurring_phrase", "label": "slept deeply",
-                 "occurrences": 5, "confidence": 0.9, "detail": {}},
-                # Model fiction: a phrase nowhere in the corpus — must drop.
-                {"kind": "recurring_phrase", "label": "never wrote this at all",
-                 "occurrences": 5, "confidence": 0.9, "detail": {}},
-            ]
-        }
+        user = json.loads(payload["messages"][1]["content"])
+        findings = user.get("findings", [])
+        model_output = {"patterns": [
+            # Narrate the brain's top finding (whatever it is).
+            {"kind": findings[0]["kind"] if findings else "recurring_phrase",
+             "label": findings[0]["label"] if findings else "nothing",
+             "narrative": "One steady shape in your weeks, in your own words."},
+            # Model fiction: a phrase nowhere in the corpus — must drop.
+            {"kind": "recurring_phrase", "label": "never wrote this at all",
+             "occurrences": 5, "confidence": 0.9, "detail": {}},
+        ]}
         return {"choices": [{"message": {"content": json.dumps(model_output)}}]}
 
     monkeypatch.setattr(LLMAnalyzer, "_post", fake_post)
@@ -278,14 +283,38 @@ async def test_llm_enrichment_merges_into_surfaced_patterns(client, settings, mo
                      json={"enabled": True, "verifier": emu.auth_key_b64})
 
     await seed(client, emu, days=70)
+    # Two recomputes at the replication cadence: statistical kinds surface
+    # only on the second observation, so the model's SECOND call receives
+    # non-empty findings to narrate.
+    first = await emu.recompute(client)
+    assert first["analyzer"] == "llm"
+    await seed_extra_day(client, emu)
     body = await emu.recompute(client)
     assert body["analyzer"] == "llm"
     assert posted, "the consented LLM path must actually run"
 
     insights = await emu.decrypt_insights(client)
-    labels = [p["label"] for p in insights["stats"]["patterns"]]
-    assert "slept deeply" in labels
+    patterns = insights["stats"]["patterns"]
+    labels = [p["label"] for p in patterns]
     assert "never wrote this at all" not in labels
+    assert any(p.get("detail", {}).get("narrative") == "One steady shape in your weeks, in your own words."
+               for p in patterns), labels
+
+
+async def seed_extra_day(client, emu):
+    """One more dated entry: gives evidence-date kinds their NEW evidence
+    day on the second recompute (the replication gate)."""
+    from datetime import date as date_type, timedelta
+    last = date_type.today()
+    text = "cooked ate well slept deeply long walk by the river felt calm and grateful"
+    blob = emu.encrypt_entry(text, last, f"e-extra-{last.isoformat()}", None)
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={"client_entry_id": f"e-extra-{last.isoformat()}", "blob": blob,
+              "entry_date": last.isoformat()},
+    )
+    assert response.status_code in (201, 409), response.text
 
 
 async def test_baseline_still_stores_no_brain_state(client):

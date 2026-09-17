@@ -143,3 +143,33 @@ describe("auth requests (no token)", () => {
     expect(err).toBeInstanceOf(ApiError);
   });
 });
+
+describe("session-expiry hook (2026-09-17)", () => {
+  it("a 401 fires the unauthorized handler exactly once (latched)", async () => {
+    const { setSession, clearSession, setUnauthorizedHandler, api, ApiError } = await import("../src/api");
+    setSession("tok", "http://localhost:5173");
+    const fired: number[] = [];
+    setUnauthorizedHandler(() => fired.push(1));
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ detail: "unauthorized", code: "unauthorized" }), { status: 401 })));
+    for (let i = 0; i < 2; i++) {
+      await expect(api.me()).rejects.toBeInstanceOf(ApiError);
+    }
+    setUnauthorizedHandler(null);
+    clearSession();
+    expect(fired).toHaveLength(1);
+  });
+
+  it("non-401 errors never fire the handler", async () => {
+    const { setSession, clearSession, setUnauthorizedHandler, api } = await import("../src/api");
+    setSession("tok", "http://localhost:5173");
+    const fired: number[] = [];
+    setUnauthorizedHandler(() => fired.push(1));
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ detail: "boom", code: "internal_error" }), { status: 500 })));
+    await expect(api.me()).rejects.toThrow();
+    setUnauthorizedHandler(null);
+    clearSession();
+    expect(fired).toHaveLength(0);
+  });
+});

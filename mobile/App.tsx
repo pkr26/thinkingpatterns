@@ -4,7 +4,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { SessionProvider } from "./src/store";
 import { AppNavigator } from "./src/navigation";
-import { useTheme } from "./src/theme";
+import { ThemeProvider, useTheme } from "./src/theme";
 
 /**
  * Privacy shield: while the app is backgrounded, the iOS app-switcher
@@ -24,12 +24,14 @@ export default function App(): React.JSX.Element {
 
   return (
     <SafeAreaProvider>
+      <ThemeProvider>
       <SessionProvider>
         <NavigationContainer>
           <AppNavigator />
           {shielded && <View style={[styles.shield, { backgroundColor: t.colors.bg }]} pointerEvents="none" />}
         </NavigationContainer>
       </SessionProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

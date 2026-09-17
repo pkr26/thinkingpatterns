@@ -21,7 +21,22 @@
  * Tone: the palette stays flat and calm on purpose — no gradients, no
  * celebration colors; the one loud accent is reserved for crisis help.
  */
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { useColorScheme } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+/** User theme preference (2026-09-17): "system" follows the OS, "dark" and
+ *  "light" pin the palette. Persisted per device (non-sensitive), loaded
+ *  once by the provider in App.tsx. */
+export type ThemeMode = "system" | "dark" | "light";
+
+const THEME_STORAGE_KEY = "@mindpattern/theme.mode";
+
+const ThemeModeContext = createContext<ThemeMode>("system");
+
+export function themeStorageKey(): string {
+  return THEME_STORAGE_KEY;
+}
 
 export interface ThemeColors {
   /** App background. */
@@ -153,8 +168,54 @@ export const lightTheme: Theme = {
   ...scales,
 };
 
-/** The active theme: follows the OS color scheme, dark by default (and for
- *  any unrecognized scheme value). */
+/** The active theme: the user's explicit override when set, otherwise the
+ *  OS color scheme — dark by default (and for any unrecognized scheme
+ *  value). Screens render WITHOUT a provider in tests: the context default
+ *  ("system") reproduces the old behavior exactly. */
 export function useTheme(): Theme {
-  return useColorScheme() === "light" ? lightTheme : darkTheme;
+  const scheme = useColorScheme();
+  const mode = useContext(ThemeModeContext);
+  if (mode === "dark") return darkTheme;
+  if (mode === "light") return lightTheme;
+  return scheme === "light" ? lightTheme : darkTheme;
 }
+
+/** App-level provider: loads the persisted override once, exposes the
+ *  setter that re-renders the tree, and persists every change. */
+export function ThemeProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const [mode, setModeState] = useState<ThemeMode>("system");
+
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(THEME_STORAGE_KEY)
+      .then((stored: string | null) => {
+        if (cancelled) return;
+        if (stored === "dark" || stored === "light" || stored === "system") {
+          setModeState(stored);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setMode = (next: ThemeMode) => {
+    setModeState(next);
+    AsyncStorage.setItem(THEME_STORAGE_KEY, next).catch(() => {});
+  };
+
+  return (
+    <ThemeSetterContext.Provider value={setMode}>
+      <ThemeModeContext.Provider value={mode}>{children}</ThemeModeContext.Provider>
+    </ThemeSetterContext.Provider>
+  );
+}
+
+/** The setter Settings consumes (changing the override re-renders the
+ *  tree through the provider's state). */
+export function useSetThemeMode(): (mode: ThemeMode) => void {
+  return useContext(ThemeSetterContext);
+}
+
+const ThemeSetterContext = createContext<(mode: ThemeMode) => void>(() => {});

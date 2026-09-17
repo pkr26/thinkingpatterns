@@ -82,9 +82,18 @@ const { LoginView } = await import("../src/views/LoginView");
 const { PatientsView } = await import("../src/views/PatientsView");
 const { PatientView } = await import("../src/views/PatientView");
 const mockedCrypto = vi.mocked(await import("../src/crypto"));
-const { render, flush, textOf, press, buttonByLabel, typeInto, typeTextarea } = await import(
-  "./helpers/rtr"
-);
+const rtr = await import("./helpers/rtr");
+const { render, flush, textOf, press, buttonByLabel, typeInto, typeTextarea } = rtr;
+const { act } = await import("react-test-renderer");
+const joinedLabel = (n: { props: { children?: unknown } }): string => {
+  const parts: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") parts.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+  };
+  walk(n.props.children);
+  return parts.join("");
+};
 
 const patient = {
   user_id: "user-1",
@@ -276,9 +285,33 @@ describe("PatientsView", () => {
   });
 });
 
+/** 2026-09-17: cards render in REVIEW ORDER (sensitive/down-shifts lead),
+ *  so tests open a specific card by title fragment instead of position. */
+async function openCard(root: Awaited<ReturnType<typeof render>>, titlePart: string): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const titles = root.root.findAllByType("h3").map((n) => String(n.props.children)).join("|");
+    if (titles.includes(titlePart)) return;
+    const buttons = root.root.findAllByType("button").filter((n) => joinedLabel(n) === "See the evidence");
+    const target = buttons[attempt];
+    if (!target) break;
+    await act(async () => { target.props.onClick(); });
+    await flush();
+    const nowTitles = root.root.findAllByType("h3").map((n) => String(n.props.children)).join("|");
+    if (!nowTitles.includes(titlePart)) {
+      const back = root.root.findAllByType("button").find((n) => joinedLabel(n) === "Back to all patterns");
+      if (back) {
+        await act(async () => { back.props.onClick(); });
+        await flush();
+      }
+    }
+  }
+}
+
 describe("PatientView", () => {
   it("renders pattern cards, the sensitive card non-quoting, and the drill-down", async () => {
-    mockedApi.patientEntries.mockResolvedValueOnce([
+    // Persistent (not Once): review-ordered cards mean openCard may open a
+    // leading card before the temporal:work one — every drill-down sees rows.
+    mockedApi.patientEntries.mockResolvedValue([
       { id: "1", client_entry_id: "e-1", blob: "b", entry_date: "2026-09-01", received_at: "x" },
       { id: "2", client_entry_id: "e-2", blob: "b", entry_date: "2026-09-08", received_at: "x" },
       { id: "3", client_entry_id: "e-3", blob: "b", entry_date: "2026-09-09", received_at: "x" }, // outside evidence
@@ -296,7 +329,7 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("concentrates on certain days");
     expect(textOf(root)).toContain("read lower than the patient's own baseline");
 
-    await press(root, "See the evidence");
+    await openCard(root, "temporal — work");
     await flush();
     expect(mockedApi.patientEntries).toHaveBeenCalledWith(
       "user-1",
@@ -338,7 +371,10 @@ describe("PatientView", () => {
     });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
-    await press(root, "See the evidence"); // open the pattern so notes bind to it
+    // 2026-09-17: cards are review-ordered (sensitive/down-shifts lead),
+    // so open the temporal:work card specifically — find its drill-down
+    // button among the "See the evidence" buttons by card position.
+    await openCard(root, "temporal — work");
     await flush();
     await typeTextarea(root, "Note about this pattern…", "Discuss Sunday dread next session.");
     await press(root, "Save note");
@@ -462,7 +498,86 @@ describe("PatientView", () => {
     window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-08-01T00:00:00.000Z");
     const root2 = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
-    expect(textOf(root2)).toContain("1 pattern new since your last visit");
-    expect(textOf(root)).not.toContain("new since your last visit");
+    // 2026-09-17: the delta anchor is explicit — the copy names the anchor
+    // date instead of implying a per-open reset.
+    expect(textOf(root2)).toContain("1 pattern new since you marked reviewed 2026-08-01");
+    expect(textOf(root)).not.toContain("pattern new since");
+  });
+});
+
+describe("PatientView 2026-09-17 wave", () => {
+  it("the visit delta anchors only on the explicit Mark reviewed action", async () => {
+    // Load with a stamp of 2026-08-01: one new pattern shows, and the
+    // stamp itself is NOT rewritten by opening the chart.
+    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-08-01T00:00:00.000Z");
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("since you marked reviewed 2026-08-01");
+    expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBe("2026-08-01T00:00:00.000Z");
+
+    await press(root, "Mark reviewed (update the delta anchor)");
+    await flush();
+    expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).not.toBe("2026-08-01T00:00:00.000Z");
+    expect(textOf(root)).not.toContain("pattern new since");
+  });
+
+  it("review ordering puts the sensitive card first", async () => {
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    const titles = root.root.findAllByType("h3").map((n) => String(n.props.children));
+    const sensitiveIdx = titles.findIndex((t) => t.includes("A difficult thought"));
+    expect(sensitiveIdx).toBeGreaterThanOrEqual(0);
+    // The first pattern-titled card in the list is the sensitive one.
+    const patternTitles = titles.filter((t) => !t.includes("Account summary"));
+    expect(String(patternTitles[0])).toContain("A difficult thought");
+  });
+
+  it("renders a print-only session summary and the print trigger", async () => {
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(buttonByLabel(root, "Print session summary")).toBe(true);
+    expect(textOf(root)).toContain("MindPattern session summary — patienta");
+  });
+
+  it("note editing round-trips through the PATCH endpoint", async () => {
+    mockedApi.notes.mockResolvedValueOnce([
+      { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+    ]);
+    mockedApi.updateNote.mockResolvedValueOnce({
+      id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b",
+      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-17T00:00:00Z",
+    });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("existing note text");
+    await press(root, "Edit");
+    await typeTextarea(root, "Editing note…", "Edited session note.");
+    await press(root, "Save edit");
+    await flush();
+    expect(mockedApi.updateNote).toHaveBeenCalledWith("n0", "SEALEDNOTE==");
+    expect(textOf(root)).toContain("Edited session note.");
+  });
+
+  it("note templates and copy-forward seed the draft", async () => {
+    mockedApi.notes.mockResolvedValueOnce([
+      { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+    ]);
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(buttonByLabel(root, "Copy forward last note")).toBe(true);
+    expect(buttonByLabel(root, "Session focus")).toBe(true);
+  });
+
+  it("the drill-down renders the mood sparkline over decrypted sentiments", async () => {
+    mockedApi.patientEntries.mockResolvedValue([
+      { id: "1", client_entry_id: "e-1", blob: "b", entry_date: "2026-09-01", received_at: "x" },
+      { id: "2", client_entry_id: "e-2", blob: "b", entry_date: "2026-09-08", received_at: "x" },
+    ]);
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await openCard(root, "temporal — work");
+    await flush();
+    const svg = root.root.findAllByType("svg");
+    expect(svg.length).toBeGreaterThan(0);
   });
 });

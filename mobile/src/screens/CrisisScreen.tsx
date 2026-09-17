@@ -17,6 +17,7 @@
 import React from "react";
 import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../theme";
+import { t as tr } from "../strings";
 
 /** Texting a crisis line uses a different query separator per platform:
  *  Android's "?body=" is silently dropped by iOS (which wants "&body="),
@@ -94,14 +95,14 @@ export function CrisisScreen({ region }: { region?: string }): React.JSX.Element
   const usServices = (
     <>
       <ActionButton
-        label="Call or text 988"
-        detail="988 Suicide & Crisis Lifeline — call 988 or text it, any time"
-        onPress={() => openExternal("tel:988", "You can still dial or text 988 from your phone — it is free and answers 24/7.")}
+        label={tr("crisis.call988")}
+        detail={tr("crisis.call988.detail")}
+        onPress={() => openExternal("tel:988", tr("crisis.call988.fallback"))}
         theme={t}
       />
       <ActionButton
-        label="Text HOME to 741741"
-        detail="Crisis Text Line — text conversation with a trained counselor"
+        label={tr("crisis.text741741")}
+        detail={tr("crisis.text741741.detail")}
         onPress={() => openExternal(crisisTextUrl(), "You can still text HOME to 741741 from your messages app.")}
         theme={t}
       />

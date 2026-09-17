@@ -163,5 +163,151 @@
    "nonce": "GBkaGxwdHh8gISIj",
    "wrapped": "GBkaGxwdHh8gISIjrF2WzZCZpbrW81Hub/VBNiJ3giwVJtDbGEf86AUp0WIlFcxtZJ/F5bSE+TJw/VB/"
   }
+ ],
+ "aad_edge_cases": [
+  {
+   "name": "ascii",
+   "parts": [
+    "entry",
+    "user-1",
+    "e-2026-01-01-abc"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXItMSIsImUtMjAyNi0wMS0wMS1hYmMiXQ=="
+  },
+  {
+   "name": "latin1",
+   "parts": [
+    "entry",
+    "\u00fcn\u00efcode-user",
+    "entr\u00e9e-1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsIlx1MDBmY25cdTAwZWZjb2RlLXVzZXIiLCJlbnRyXHUwMGU5ZS0xIl0="
+  },
+  {
+   "name": "astral",
+   "parts": [
+    "insights",
+    "user-\ud83e\udde0-brain",
+    "patterns"
+   ],
+   "aad_b64": "WyJpbnNpZ2h0cyIsInVzZXItXHVkODNlXHVkZGUwLWJyYWluIiwicGF0dGVybnMiXQ=="
+  },
+  {
+   "name": "lone-high-surrogate",
+   "parts": [
+    "entry",
+    "user-\ud800",
+    "id1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXItXHVkODAwIiwiaWQxIl0="
+  },
+  {
+   "name": "lone-low-surrogate",
+   "parts": [
+    "entry",
+    "user-\udfff",
+    "id1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXItXHVkZmZmIiwiaWQxIl0="
+  },
+  {
+   "name": "surrogate-pair",
+   "parts": [
+    "entry",
+    "user-\ud83e\udde0",
+    "id1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXItXHVkODNlXHVkZGUwIiwiaWQxIl0="
+  },
+  {
+   "name": "tab-newline",
+   "parts": [
+    "entry",
+    "user\t1",
+    "id\n1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXJcdDEiLCJpZFxuMSJd"
+  },
+  {
+   "name": "quote-backslash",
+   "parts": [
+    "entry",
+    "he said \"hi\"",
+    "C:\\path\\entry"
+   ],
+   "aad_b64": "WyJlbnRyeSIsImhlIHNhaWQgXCJoaVwiIiwiQzpcXHBhdGhcXGVudHJ5Il0="
+  },
+  {
+   "name": "del-char",
+   "parts": [
+    "entry",
+    "user\u007f1",
+    "id1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXJcdTAwN2YxIiwiaWQxIl0="
+  },
+  {
+   "name": "nul-ish",
+   "parts": [
+    "entry",
+    "user\u0001",
+    "id1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsInVzZXJcdTAwMDEiLCJpZDEiXQ=="
+  },
+  {
+   "name": "combining",
+   "parts": [
+    "entry",
+    "caf\u00e9",
+    "\u00e9clair-1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsImNhZlx1MDBlOSIsIlx1MDBlOWNsYWlyLTEiXQ=="
+  },
+  {
+   "name": "numeric-strings",
+   "parts": [
+    "123",
+    "456",
+    "789"
+   ],
+   "aad_b64": "WyIxMjMiLCI0NTYiLCI3ODkiXQ=="
+  },
+  {
+   "name": "empty-part",
+   "parts": [
+    "entry",
+    "",
+    "id1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsIiIsImlkMSJd"
+  },
+  {
+   "name": "mixed-bag",
+   "parts": [
+    "moodlog",
+    "us\u00e9r-\ud83e\udde0-\t\"x\"",
+    "id\\1"
+   ],
+   "aad_b64": "WyJtb29kbG9nIiwidXNcdTAwZTlyLVx1ZDgzZVx1ZGRlMC1cdFwieFwiIiwiaWRcXDEiXQ=="
+  },
+  {
+   "name": "cjk",
+   "parts": [
+    "entry",
+    "\u7528\u6237-\u4e00\u53f7",
+    "\u6761\u76ee-1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsIlx1NzUyOFx1NjIzNy1cdTRlMDBcdTUzZjciLCJcdTY3NjFcdTc2ZWUtMSJd"
+  },
+  {
+   "name": "rtl",
+   "parts": [
+    "entry",
+    "\u0645\u0633\u062a\u062e\u062f\u0645-\u0661",
+    "\u0645\u062f\u062e\u0644-1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsIlx1MDY0NVx1MDYzM1x1MDYyYVx1MDYyZVx1MDYyZlx1MDY0NS1cdTA2NjEiLCJcdTA2NDVcdTA2MmZcdTA2MmVcdTA2NDQtMSJd"
+  }
  ]
 }

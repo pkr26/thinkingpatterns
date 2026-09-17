@@ -46,14 +46,16 @@ import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
 import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
-import { MOOD_OPTIONS, localSentiment } from "../mood";
+import { ACTIVITY_TAGS, ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, localSentiment } from "../mood";
 import { detectCrisisLanguage } from "../crisisDetect";
+import { lightHaptic } from "../haptics";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { newClientEntryId } from "../entryId";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton } from "../components/buttons";
 import { InlineStatus, InlineStatusTone, NoticeChip } from "../components/InlineStatus";
-import { NavRow } from "../components/NavRow";
+import { MainShell } from "../components/BottomNav";
+import { PROMPT_CHIPS, promptChipsFor } from "../promptChips";
 import { requestFailureCopy } from "../components/errors";
 
 /** Keeps the encrypted payload comfortably under the server's ~1 MiB cap. */
@@ -78,9 +80,17 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [wroteToday, setWroteToday] = useState(false);
   /** The explicit mood check-in pick, or null (never required to save). */
   const [selectedMood, setSelectedMood] = useState<number | null>(null);
+  /** Optional energy pick (2026-09-17): mood and energy are different
+   *  axes; never required, cleared with the check-in after each save. */
+  const [selectedEnergy, setSelectedEnergy] = useState<number | null>(null);
+  /** Optional sleep-quality rating 1..5 and activity tags (payload v2). */
+  const [sleepQuality, setSleepQuality] = useState<number | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   /** Current writing streak from the device-local mood log; hidden at 0
    *  (no guilt — a streak you don't have is not a debt). */
   const [streak, setStreak] = useState(0);
+  /** Rotating gentle starters for blank-page days (never required). */
+  const [chips] = useState<string[]>(() => promptChipsFor(new Date()));
   // Refs mirror what the unmount cleanup and the double-tap guard need —
   // state alone arrives a frame too late for both.
   const textRef = useRef(text);
@@ -212,13 +222,17 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // payload when the user made one. Without a pick it stays null — the
       // server's graded engine re-scores the text at recompute time either
       // way; the quick score below never rides in the payload.
-      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, today, selectedMood);
+      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, today, selectedMood, {
+        energy: selectedEnergy,
+        sleep: sleepQuality,
+        tags: selectedTags,
+      });
       // The local mood log powers the baseline-phase trend view; it is
       // device-only metadata, encrypted under the data key, and never
       // leaves the phone. The explicit check-in wins when there is one;
       // otherwise the quick text estimate fills in, as before. The streak
       // line refreshes once the write lands.
-      void recordMood(keys.dataKey, userId, today, selectedMood ?? localSentiment(trimmed))
+      void recordMood(keys.dataKey, userId, today, selectedMood ?? localSentiment(trimmed), selectedEnergy ?? undefined)
         .then(() => localStreak(keys.dataKey, userId))
         .then(setStreak)
         .catch(() => {});
@@ -305,6 +319,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       setText("");
       setDraftRestored(false);
       setSelectedMood(null); // the check-in is per entry — never carry it over
+      setSelectedEnergy(null);
+      setSleepQuality(null);
+      setSelectedTags([]);
+      lightHaptic(); // quiet success pulse (respects the haptics setting)
       setWroteToday(true); // this save just wrote today
       // The save-feedback fix: BOTH outcomes are a quiet inline line now.
       // (Hoisted so the "neutral" literal sits alone on its own line:
@@ -328,7 +346,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const progress = unlockDays > 0 ? Math.min(1, activeDays / unlockDays) : 1;
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <MainShell current="Entry" navigation={navigation} keyboard keyboardBehavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView
         style={[styles.container, { backgroundColor: t.colors.bg }]}
         contentContainerStyle={{ padding: t.spacing.xl, gap: t.spacing.lg }}
@@ -360,6 +378,26 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         </View>
         {wroteToday && <NoticeChip text="Already wrote today" accessibilityLabel="Already wrote today" />}
         {draftRestored && <NoticeChip text="Draft restored" />}
+        {text.trim() === "" && chips.length > 0 && (
+          // Blank-page help: three gentle starters, deterministic per day.
+          // Tapping one only seeds the editor — nothing is auto-written.
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {chips.map((chip) => (
+              <TouchableOpacity
+                key={chip}
+                style={[styles.chip, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.md }]}
+                onPress={() => {
+                  touchActivity();
+                  setText(`${chip} `);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Start with: ${chip}`}
+              >
+                <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize }}>{chip}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
         <TextInput
           style={[
             styles.input,
@@ -416,11 +454,52 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   ]}
                   onPress={() => {
                     touchActivity();
+                    lightHaptic();
                     setSelectedMood(selected ? null : option.value);
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
                   accessibilityLabel={`Mood: ${option.label}`}
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={{
+                      color: selected ? t.colors.onPrimary : t.colors.body,
+                      fontSize: t.type.bodySmall.fontSize,
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+        <View style={{ gap: t.spacing.sm }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            And your energy? Optional.
+          </Text>
+          <View style={styles.moodRow} accessibilityLabel="Energy check-in">
+            {ENERGY_OPTIONS.map((option) => {
+              const selected = selectedEnergy === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.label}
+                  style={[
+                    styles.moodOption,
+                    {
+                      backgroundColor: selected ? t.colors.primary : t.colors.card,
+                      borderRadius: t.radius.md,
+                      minHeight: t.minTouch,
+                    },
+                  ]}
+                  onPress={() => {
+                    touchActivity();
+                    setSelectedEnergy(selected ? null : option.value);
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`Energy: ${option.label}`}
                 >
                   <Text
                     style={{
@@ -435,27 +514,84 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             })}
           </View>
         </View>
+        <View style={{ gap: t.spacing.sm }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            How did you sleep? Optional.
+          </Text>
+          <View style={styles.moodRow} accessibilityLabel="Sleep quality">
+            {SLEEP_OPTIONS.map((option) => {
+              const selected = sleepQuality === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.label}
+                  style={[
+                    styles.moodOption,
+                    {
+                      backgroundColor: selected ? t.colors.primary : t.colors.card,
+                      borderRadius: t.radius.md,
+                      minHeight: 40,
+                    },
+                  ]}
+                  onPress={() => {
+                    touchActivity();
+                    lightHaptic();
+                    setSleepQuality(selected ? null : option.value);
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`Sleep: ${option.label}`}
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={{
+                      color: selected ? t.colors.onPrimary : t.colors.body,
+                      fontSize: t.type.bodySmall.fontSize,
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+        <View style={{ gap: t.spacing.sm }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            What shaped today? Optional — tap any.
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }} accessibilityLabel="Day tags">
+            {ACTIVITY_TAGS.map((tag) => {
+              const selected = selectedTags.includes(tag);
+              return (
+                <TouchableOpacity
+                  key={tag}
+                  style={[styles.chip, { backgroundColor: selected ? t.colors.primary : t.colors.cardDeep, borderRadius: t.radius.md }]}
+                  onPress={() => {
+                    touchActivity();
+                    setSelectedTags(selected ? selectedTags.filter((x) => x !== tag) : [...selectedTags, tag]);
+                  }}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: selected }}
+                  accessibilityLabel={`Tag: ${tag}`}
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={{ color: selected ? t.colors.onPrimary : t.colors.body, fontSize: t.type.bodySmall.fontSize }}
+                  >
+                    {tag}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
         {text.length > 0 && (
           <GhostButton label="Hide keyboard" onPress={() => Keyboard.dismiss()} center={false} />
         )}
         <PrimaryButton label="Save entry" onPress={save} disabled={!text.trim()} busy={busy} />
         <InlineStatus message={status} tone={statusTone} />
-        <NavRow
-          items={[
-            { label: "History", onPress: () => navigation.navigate("History") },
-            { label: "Patterns", onPress: () => navigation.navigate("Insights") },
-            { label: "Question", onPress: () => navigation.navigate("Question") },
-            { label: "Settings", onPress: () => navigation.navigate("Settings") },
-            {
-              label: "Get help",
-              onPress: () => navigation.navigate("Crisis"),
-              tone: "help",
-              accessibilityLabel: "Get help — crisis resources",
-            },
-          ]}
-        />
       </ScrollView>
-    </KeyboardAvoidingView>
+    </MainShell>
   );
 }
 
@@ -469,4 +605,5 @@ const styles = StyleSheet.create({
   input: { minHeight: 140, textAlignVertical: "top" },
   moodRow: { flexDirection: "row", gap: 8 },
   moodOption: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
+  chip: { paddingHorizontal: 12, paddingVertical: 8 },
 });

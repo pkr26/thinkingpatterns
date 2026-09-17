@@ -6,6 +6,134 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-17 — Full-stack improvement wave (audit-driven, five waves)
+
+A complete audit (six parallel deep-dives: backend architecture, the
+pattern engine, mobile UX, the therapist portal, testing/ops posture, and
+the 2026 clinical/competitive landscape) produced a prioritized roadmap;
+this wave implements it end to end. Verification after every wave:
+backend 877 passed (+1 Postgres-gated skip), mobile 1,169 tests across 60
+files, portal 87 tests + build, probe 9/9, cross-platform vectors all
+green (including the new AAD edge-case corpus).
+
+**Wave 0 — safety & correctness**
+
+- The red-team crisis corpus is now a CI GATE on both platforms
+  (`shared/crisis_phrases.json` `redteam_corpus`: every row is the
+  REQUIRED contract; backend + mobile suites replay it). The two
+  documented residuals are closed: "k ill myself" (orphan-letter
+  dual-variant matching) and the "suicide squad" false positive
+  (benign-compound masking, both engines).
+- The 16-vector AAD edge-case corpus (surrogates, CJK, RTL, DEL/controls)
+  promoted from `redteam/a_crypto.py` into `shared/vectors.json`, verified
+  on backend, mobile, portal AND `tools/verify_vectors.mjs`.
+- v1 legacy analyzer RETIRED: `RuleBasedAnalyzer`/`LLMAnalyzer.analyze`
+  (the pooled, uncorrected pre-brain statistics) are gone from the
+  production graph; an LLM endpoint failure now contributes nothing,
+  logs a warning, and the recompute response reports `analyzer: "llm"`
+  only for calls that actually succeeded (`last_error` honesty).
+- Language gate: Latin-script non-English journals (German/French/Spanish)
+  no longer produce garbage topic cards or lexicon-collision mood claims —
+  the recognized-token share gates topic mining and text-derived sentiment;
+  client mood TAGS stay trusted; rumination's English classifier steps
+  aside for non-English clusters.
+- Instability detector: variance-ratio F-test → Brown-Forsythe
+  (median-centered Levene) with Bartlett-deflated df — robust to discrete
+  5-point mood tags, autocorrelation-honest.
+- Temporal weekday test: one calendar day, one Bernoulli (k, n AND the
+  base rate are day-level; clustered journals can't inflate their own
+  reference rate).
+- EWMA baseline re-anchors past an established shift (`first_seen` ≥21
+  days): a months-old stable improvement stops re-qualifying under copy
+  that says "lately".
+- Recompute memory bounded by the ANALYSIS budget, not the storage quota:
+  `_load_rows` fetches ids+sizes first and only the newest rows within
+  `MINDPATTERN_ANALYSIS_BLOB_BUDGET` (8 MiB default) — a max-quota account
+  can no longer spike ~750 MB per recompute.
+- Cross-host boot guard: on Postgres the app holds a lifetime session
+  advisory lock (727273) — a second HOST on the same database refuses to
+  boot instead of silently fragmenting every in-process guarantee.
+- `/metrics`: privacy-safe aggregate counters (status families, recompute
+  histogram, LLM failure counts, keystore length) behind
+  `MINDPATTERN_METRICS_TOKEN` (fail-closed: 404 in production without it).
+
+**Wave 1 — the daily-use mobile experience**
+
+- Persistent bottom navigation on every main screen (`MainShell` +
+  `BottomNav`; navigation no longer lives inside the entry's scroll
+  content), with "Get help" always present.
+- The mood sparkline stays visible AFTER the 30-day threshold.
+- Readable Markdown export (decrypted on-device, shared as plain text)
+  next to the encrypted backup.
+- History: plaintext search + month calendar with mood dots + day filter;
+  Android hardware-back returns to the list in detail/edit modes.
+- Question pool 8 → 60 (evidence-informed families; invariants re-pinned
+  on both platforms).
+- Multi-dimension check-in: optional energy row; payload v2 structured
+  channels (sleep quality, activity tags) in the entry editor.
+- Theme override (System/Dark/Light), quiet haptics (10 ms, setting-gated),
+  writing prompt chips for blank-page days, native-feature seams for
+  reminders/biometrics (`src/nativeFeatures.ts`), and the i18n seam for
+  safety-critical crisis copy (`src/strings.ts`).
+
+**Wave 2 — engine depth**
+
+- Structured channels (entry payload v2): sleep quality (1-5), energy,
+  activity tags. Poor-sleep nights (strictly below the user's OWN median)
+  ride the full theme machinery — weekday concentration, same-day mood
+  ties, day-after links — with rating-aware copy; tags feed
+  mood-correlation cards marked `source: "tag"`.
+- Cadence signals: the `avoidance` detector (theme-days followed by
+  journaling silence vs the user's base skip rate; censoring-honest,
+  exact binomial into the BH family) and `cadence` (writing-rhythm
+  regularity, recent vs the user's earlier norm).
+- VADER base lexicon merged (7,208 words; curated values win word-for-
+  word; context-dependent removals stay removed) + emoji valence — the
+  graded engine sees slang/profanity/emoji now.
+- Question feedback loop: "This resonated / Not me" taps (encrypted
+  on-device, riding the next recompute as an opaque blob) land in the
+  pattern's stored memory and reorder question selection; evidence-
+  anchored templates (`{share}% of such days`).
+- LLM INVERSION: the model no longer discovers patterns (its output
+  bypassed every statistical safeguard). It receives the deterministic
+  findings and may only attach one sanitized 240-char narrative —
+  label-restricted by construction.
+- Person anchoring: recurring mid-sentence proper names ("Maria") become
+  theme candidates under strict bars, riding the same gating.
+
+**Wave 3 — the portal becomes a daily driver**
+
+- The visit delta anchors ONLY on the explicit "Mark reviewed" action
+  (a 30-second glance no longer resets it; the copy names the anchor).
+- Printable session summary (print-CSS; patterns + evidence rows + notes;
+  `window.print()`).
+- Notes: editable (the PATCH endpoint finally has a UI), searchable,
+  template starters, copy-forward.
+- Caseload triage scan: per-patient pattern counts, sensitive presence,
+  new-since-reviewed badges (sequential, nothing stored).
+- Mood sparkline (inline SVG) over drill-down entries + account summary
+  stats; review ordering puts sensitive and down-shift cards first.
+- Session lifecycle: any 401 swaps to an explicit expired state (latched
+  handler); 10-minute idle auto-lock drops all keys from memory.
+
+**Wave 4 — launch & operations**
+
+- `release.yml`: tag-driven delivery — verification spine, multi-arch
+  image to GHCR, GitHub release seeded from the matching CHANGELOG
+  section (missing section = release blocker).
+- `mutation-mobile.yml`: weekly Stryker gate with a 99.0 floor (the score
+  silently decayed once before: 100% → 82.7% in 11 days).
+- `backend/scripts/rehearse_restore.sh` (the scripted backup-restore
+  rehearsal) and `backend/scripts/loadtest.py` (latency percentiles for
+  register/entry/recompute against the deployment contract).
+- `access_log` retention (2 years, time-based; deletion still never
+  cascades audit rows) + compose memory limits (api 1500M, db 1G).
+- `docs/`: incident-response runbook, DPIA skeleton (GDPR Art. 9 + EU AI
+  Act notes), and a PsyberGuide self-assessment mapped to the repo's
+  testable claims.
+
+
+
 ### Added — Therapist sharing (zero-knowledge patient→clinician sharing)
 
 The feature this app was building toward: a patient can let their therapist

@@ -24,6 +24,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -36,6 +37,8 @@ import {
 } from "react-native";
 import { api, ApiError } from "../api/client";
 import { decryptEntry, encryptEntry } from "../crypto/MindPatternCrypto";
+import { MoodCalendar } from "../components/MoodCalendar";
+import { filterEntries } from "../historyFind";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { recordMood, recentMoods } from "../moodLog";
@@ -105,6 +108,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const [unreadable, setUnreadable] = useState(0);
   const [shown, setShown] = useState(PAGE_SIZE);
   const [logMoods, setLogMoods] = useState<Record<string, number>>({});
+  /** Search + calendar filter (2026-09-17): plain-text query and a tapped
+   *  calendar day narrow the DECRYPTED on-device list — neither leaves the
+   *  phone. Both reset on reload. */
+  const [query, setQuery] = useState("");
+  const [dayFilter, setDayFilter] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   // Stryker disable next-line StringLiteral: status starts null (InlineStatus renders nothing) and every setStatus(message) in showStatus is batched with setStatusTone, so the initial tone value is never rendered
@@ -155,6 +163,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       setEntries(decrypted);
       setUnreadable(failed);
       setShown(PAGE_SIZE);
+      setQuery("");
+      setDayFilter(null);
       // Badge fallback: entries saved before the check-in existed carry no
       // payload mood, but the device-local log usually has the day's value.
       try {
@@ -200,6 +210,18 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     };
     }, // Stryker disable next-line ArrayDeclaration: load is stable (useCallback over constant deps) and the navigation object identity is stable for the screen's lifetime, so the effect body runs exactly once either way
      [load, navigation]);
+
+  // Android hardware back (2026-09-17): in detail/edit mode it must return
+  // to the list, not pop the screen — the custom Mode state machine sits
+  // below the navigator, which never learned about it.
+  useEffect(() => {
+    if (mode.kind === "list") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      setMode({ kind: "list" });
+      return true;
+    });
+    return () => sub.remove();
+  }, [mode.kind]);
 
   /** Badge value: the entry's own check-in pick first, the mood log's day
    *  value as fallback; undefined = no badge (never a verdict). */
@@ -434,6 +456,14 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     );
   }
 
+  // The list the user sees: search + tapped-day filters applied to the
+  // decrypted list, in display order. Computed per render — the corpus is
+  // bounded by the account's own entries.
+  const visibleEntries = filterEntries(
+    dayFilter !== null ? entries.filter((e) => e.entryDate === dayFilter) : entries,
+    query,
+  );
+  const journaledDays = new Set(entries.map((e) => e.entryDate).filter((d) => d !== ""));
   return (
     <ScrollView
       style={[styles.flex, { backgroundColor: t.colors.bg }]}
@@ -474,7 +504,51 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           </Text>
         </View>
       )}
-      {entries.slice(0, shown).map((entry) => (
+      {!loading && !offline && !error && entries.length > 0 && (
+        <>
+          {/* Search: filters the decrypted on-device list; never sent anywhere. */}
+          <TextInput
+            style={{
+              backgroundColor: t.colors.card,
+              color: t.colors.text,
+              borderRadius: t.radius.md,
+              padding: 12,
+              fontSize: t.type.body.fontSize,
+            }}
+            placeholder="Search your entries"
+            placeholderTextColor={t.colors.placeholder}
+            value={query}
+            onChangeText={(next) => {
+              touchActivity();
+              setQuery(next);
+              setShown(PAGE_SIZE);
+            }}
+            accessibilityLabel="Search your entries"
+            autoCorrect={false}
+            spellCheck={false}
+            autoCapitalize="none"
+            textContentType="none"
+          />
+          <MoodCalendar
+            dayMoods={logMoods}
+            journaledDays={journaledDays}
+            selectedDay={dayFilter}
+            onSelectDay={(iso) => {
+              touchActivity();
+              setDayFilter(iso);
+              setShown(PAGE_SIZE);
+            }}
+          />
+          {(query.trim() !== "" || dayFilter !== null) && (
+            <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+              {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"} match
+              {dayFilter !== null ? ` · ${dayFilter}` : ""}
+              {query.trim() !== "" ? " · search" : ""}
+            </Text>
+          )}
+        </>
+      )}
+      {visibleEntries.slice(0, shown).map((entry) => (
         <TouchableOpacity
           key={entry.clientEntryId}
           style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, minHeight: t.minTouch }]}
@@ -491,14 +565,19 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           </Text>
         </TouchableOpacity>
       ))}
-      {entries.length > shown && (
+      {visibleEntries.length > shown && (
         <GhostButton
-          label={`Show older entries (${entries.length - shown} more)`}
+          label={`Show older entries (${visibleEntries.length - shown} more)`}
           onPress={() => {
             touchActivity();
             setShown(shown + PAGE_SIZE);
           }}
         />
+      )}
+      {!loading && !offline && !error && entries.length > 0 && visibleEntries.length === 0 && (
+        <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize, textAlign: "center" }}>
+          Nothing matches {query.trim() !== "" ? "that search" : "that day"}.
+        </Text>
       )}
       {unreadable > 0 && (
         <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>

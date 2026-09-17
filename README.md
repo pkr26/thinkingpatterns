@@ -18,11 +18,11 @@ observation shows you its evidence.**
 | `RESEARCH.md` | The industry/clinical-research audit behind the engine: every detector mapped to its citation |
 | `CHANGELOG.md` | Release notes, plus the running log of the audit/remediation waves |
 | `backend/` | FastAPI service (Python 3.12+): entry sync, secure processing session, stateful deterministic "mini-brain" v3 (see below), 30-day threshold, daily questions |
-| `backend/tests/` | 658-test suite (+ 1 Postgres-gated skip): unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions |
+| `backend/tests/` | 877-test suite (+ 1 Postgres-gated skip): unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions + the promoted crisis/AAD corpora |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
-| `mobile/` | React Native (iOS/Android) client: encrypted journal with entry history (read/edit/delete), one-tap mood check-in, day-1 reflective questions, evidence-view pattern cards, crisis resources, first-run onboarding + offline privacy policy, dark/light theme, "Share with my therapist" (pairing-code consent, wrapped-key grant, revoke) |
-| `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes, "since your last visit" delta — read-only by construction |
+| `mobile/` | React Native (iOS/Android) client: encrypted journal with entry history (read/edit/delete), one-tap mood check-in, day-1 reflective questions, evidence-view pattern cards, crisis resources, first-run onboarding + offline privacy policy, dark/light theme, "Share with my therapist" (pairing-code consent, wrapped-key grant, revoke), persistent bottom navigation, readable Markdown export, history search + mood calendar, question feedback ("did this land?"), energy/sleep/tag check-ins, theme override, haptics, prompt chips |
+| `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes (editable, searchable, templates), the "since your last review" delta anchored to an explicit Mark-reviewed action, printable session summaries, caseload triage scan, mood sparklines, 401-expiry + idle auto-lock — read-only by construction |
 | `shared/vectors.json` | Cross-platform crypto vectors (backend ⇄ mobile ⇄ portal), including non-ASCII AAD cases and the therapist wrap (ECDH→HKDF→AES-GCM) constructions |
 | `shared/crisis_phrases.json` | Cross-platform crisis-language contract (client dialog tier + server suppression tier), consumed by both platforms |
 | `shared/generic_questions.json` | Pre-threshold reflective question pool (embedded copies pinned to it by tests) |
@@ -47,6 +47,8 @@ population averages. Full citations in `RESEARCH.md`.
 | `rumination` | "the worry 'X' keeps returning" | near-duplicate **negative** phrase clusters + negation-heavy phrasing + absolutist-word density | Ehring & Watkins 2008 (RNT); Al-Mosaiwi & Johnstone 2018 (absolutist words) |
 | `topic` | "'guitar' has been taking up more space in your writing" | emergent topic discovery: recurring content n-grams beyond the fixed lexicon (function/theme/sentiment words excluded); RISING topics tested against your own earlier entries (exact binomial, BH) or persistent presence (≥30% of entries — a direct measurement requiring ≥4 distinct following-token contexts, suppressed when ≥80% covered by the run's own recurring-phrase clusters; carries `detail.presence=true`) | bursty recurring topics are a standard diary-analysis signal |
 | `recurring_phrase` | "the phrase 'X' keeps returning" | MinHash (64-perm) + LSH (16×4 bands) near-duplicate clustering | — |
+| `avoidance` | "the day after 'X' comes up, you go quiet" | theme-days followed by journaling silence vs your own base skip rate (censoring-honest, exact binomial, BH) | avoidance/silence after stressors is a standard diary-analysis signal |
+| `cadence` | "your writing rhythm has been less regular" | gap spread, recent vs your earlier norm (Brown-Forsythe) | engagement-rhythm change as a within-person signal |
 
 Patterns carry a **lifecycle** (`candidate → emerging → confirmed → fading →
 archived`, 45-day evidence half-life). Statistical kinds (`temporal`,
@@ -66,7 +68,15 @@ evidence" / "established" / "fading") with a **"Why am I seeing this?"
 panel** per card — window, sample size, effect size, significance, and the
 method in plain language.
 
-Sentiment is a **graded lexicon engine** (VADER-style: graded valences,
+Entries can carry **structured channels** (payload v2): a 1-5 sleep rating, an energy pick,
+and activity tags. Poor-sleep nights (strictly below YOUR median rating) and recurring
+proper names (person anchoring) ride the same theme machinery as every lexicon word —
+same gating, same correction, rating-aware copy. Question feedback ("this resonated /
+not me") is encrypted on-device, rides the next recompute as an opaque blob, and
+reorders future questions.
+
+Sentiment is a **graded lexicon engine** (curated-over-VADER: 7,200+ graded words +
+emoji valence, the curation rules winning word-for-word: graded valences,
 intensifiers, damped negation, "but" re-weighting — Hutto & Gilbert 2014),
 deterministic and self-contained. The lexicon is curated: context-dependent
 words ("kind", "fed", "present") were removed after measurement, and
@@ -228,7 +238,7 @@ docker compose --profile backups up -d backup
 # Mobile (source; native projects are generated with the RN toolchain)
 cd mobile && npm install && npm run ios   # or android; point Settings at your API
 
-# Mobile tests: 759 tests across 33 files — real crypto modules against shared vectors + queue/client/screen regressions
+# Mobile tests: 1,169 tests across 60 files — real crypto modules against shared vectors + queue/client/screen regressions
 cd mobile && npm test
 
 # Cross-platform crypto check over the REAL compiled modules
@@ -241,9 +251,11 @@ cd backend && ../.venv/bin/python probe_brain.py
 node mobile/tools/decrypt_export.mjs --bundle export.json
 ```
 
-No metrics or crash reporting ship in v1 — a deliberate privacy posture,
-documented here as a gap rather than an oversight: production visibility is
-`/healthz` + `/readyz` + container logs.
+Crash reporting still ships absent (a deliberate privacy posture), but
+production visibility grew a `/metrics` endpoint (2026-09-17): aggregate
+counters only — status-code families, recompute-duration histogram, LLM
+failure counts, keystore length — behind `MINDPATTERN_METRICS_TOKEN`
+(fail-closed: without the token the endpoint 404s in production).
 
 ## Database & migrations
 
@@ -360,9 +372,12 @@ turn it back into readable files offline.
   ever explicit: the Question screen's button opens the single-use
   processing session itself — no screen ships the data key automatically
   (the at-most-daily auto-refresh was removed after the red-team audit).
-- The default analyzer is **deterministic**; the LLM path is consent-gated,
-  threshold-gated, output-sanitized, and untested-by-unit-suite by design
-  (its `_post` is monkeypatched in tests).
+- The default analyzer is **deterministic**; the LLM path is INVERTED
+  (2026-09-17): the model receives the brain's findings and may only
+  attach one sanitized narrative to them — label-restricted by
+  construction, it cannot mint claims that bypassed the statistics. It
+  remains consent-gated, threshold-gated, and untested-by-unit-suite by
+  design (its `_post` is monkeypatched in tests).
 - The enclave is an in-process seam (`app/security/enclave.py`); SGX/TEE
   attestation is deployment work, not application logic.
 - Single-process deployment: the rate counter, keystore, and token epochs

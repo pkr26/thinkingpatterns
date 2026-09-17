@@ -742,7 +742,7 @@ async def test_load_rows_has_stable_total_order(client, app):
         await s.execute(sql_update(Entry).values(
             received_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
         await s.commit()
-        rows = await _load_rows(s, emu.user_id, limit=10)
+        rows = await _load_rows(s, emu.user_id, limit=10, blob_budget=8 * 1024 * 1024)
     # Entry ids are random uuid hex, so ascending id order can only come from
     # an explicit ORDER BY ... id — never from insertion/rowid order.
     ids = [row.id for row in rows]
@@ -766,6 +766,6 @@ async def test_load_rows_sql_bounds_to_the_most_recent_n(client, app):
         await emu.create_entry(client, f"day minus {offset}", d,
                                client_entry_id=f"e-cap-{offset}")
     async with app.state.sessionmaker() as s:
-        rows = await _load_rows(s, emu.user_id, limit=4)
+        rows = await _load_rows(s, emu.user_id, limit=4, blob_budget=8 * 1024 * 1024)
     dates = [row.entry_date for row in rows]
     assert dates == [day - timedelta(days=o) for o in (4, 3, 2, 1)]  # newest 4, ascending

@@ -25,7 +25,8 @@ const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
 const tscBin = join(here, "..", "node_modules", ".bin", "tsc");
 const buildDir = join(here, "..", ".verify-build");
 
-const { vectors, encrypt_vectors: encryptVectors } = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const vectorsJson = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const { vectors, encrypt_vectors: encryptVectors } = vectorsJson;
 // Fail CLOSED: a renamed/dropped key must not read as "0 vectors verified".
 if (!Array.isArray(vectors) || vectors.length < 4) {
   console.error(`vectors.json: "vectors" key missing or has ${vectors?.length ?? "no"} entries (expected >= 4)`);
@@ -177,10 +178,22 @@ for (const [i, v] of encryptVectors.entries()) {
   }
 }
 
+// AAD edge-case corpus (promoted 2026-09-17 from redteam/a_crypto.py A6):
+// surrogates, DEL/control chars, CJK, RTL, combining marks, empty parts.
+const edgeCases = vectorsJson.aad_edge_cases ?? [];
+for (const c of edgeCases) {
+  const got = await impl.envelope.buildAad(...c.parts);
+  const want = Buffer.from(c.aad_b64, "base64");
+  if (Buffer.compare(Buffer.from(got), want) !== 0) {
+    console.error(`aad edge case ${c.name}: MISMATCH (${got}) != (${want})`);
+    failures += 1;
+  }
+}
+
 if (impl.mode.startsWith("REAL")) rmSync(buildDir, { recursive: true, force: true });
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);
   process.exit(1);
 }
-console.log(`all ${vectors.length} vectors + ${encryptVectors.length} encrypt vectors verified`);
+console.log(`all ${vectors.length} vectors + ${encryptVectors.length} encrypt vectors + ${edgeCases.length} AAD edge cases verified`);

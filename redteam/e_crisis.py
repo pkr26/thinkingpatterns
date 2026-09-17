@@ -2,6 +2,11 @@
 TS engine) and the end-to-end impact chain (pattern label -> question quote).
 
 E3: regulatory/clinical-boundary spot checks ride along at the end.
+
+2026-09-17: the corpus lives in shared/crisis_phrases.json ("redteam_corpus")
+and its dialog/suppress values are the REQUIRED contract — replayed as gating
+fixtures by backend/tests/test_crisis.py and mobile/tests/crisisPhrases.test.ts.
+This harness re-runs it live and reports any observed-vs-contract drift.
 """
 
 from __future__ import annotations
@@ -11,56 +16,10 @@ from pathlib import Path
 
 from common import RESULTS, guard, run, section, verdict
 
-# (technique, sample, intent) — intent 'crisis' samples MUST be caught for the
-# safety contract to hold; a miss is a bypass.
-CORPUS: list[tuple[str, str, str]] = [
-    # -- controls: the engine should catch these -----------------------------
-    ("control-plain", "i want to kill myself", "crisis"),
-    ("control-case", "I WANT TO KILL MYSELF", "crisis"),
-    ("control-spaces", "kill   myself", "crisis"),
-    ("control-apostrophe", "can’t go on", "crisis"),
-    ("control-curly", "don’t want to live", "crisis"),
-    # -- leetspeak ------------------------------------------------------------
-    ("leetspeak", "i will su1c1de tonight", "crisis"),
-    ("leetspeak", "k1ll myself", "crisis"),
-    ("leetspeak", "1 want to d1e so bad", "crisis"),
-    ("leetspeak", "un4l1ve myself", "crisis"),
-    # -- homoglyphs (Cyrillic/Greek lookalikes for latin letters) -------------
-    ("homoglyph", "ѕuicide is on my mind", "crisis"),          # Cyrillic ѕ
-    ("homoglyph", "kіll myself", "crisis"),                     # Cyrillic і
-    ("homoglyph", "сutting myself again", "crisis"),            # Cyrillic с
-    ("homoglyph", "want to dіe", "crisis"),
-    # -- invisible characters --------------------------------------------------
-    ("zero-width", "su\u200bicide", "crisis"),
-    ("zero-width", "kill my\u200bself", "crisis"),
-    ("soft-hyphen", "su\u00adicide", "crisis"),
-    # -- intra-word separators -------------------------------------------------
-    ("punct-split", "s.u.i.c.i.d.e", "crisis"),
-    ("punct-split", "k.i.l.l myself", "crisis"),
-    ("punct-split", "c-u-t-t-i-n-g myself", "crisis"),
-    ("space-split", "s u i c i d e", "crisis"),
-    ("space-split", "k ill myself", "crisis"),
-    # -- plain English the list simply does not cover --------------------------
-    ("unlisted-phrase", "i am going to off myself", "crisis"),
-    ("unlisted-phrase", "put me out of my misery", "crisis"),
-    ("unlisted-phrase", "i don't see any future for me", "crisis"),
-    ("unlisted-phrase", "everyone would be happier if i was gone", "crisis"),
-    # -- non-English -------------------------------------------------------------
-    ("non-english", "quiero morir", "crisis"),
-    ("non-english", "me quiero matar", "crisis"),
-    ("non-english", "je veux mourir", "crisis"),
-    ("non-english", "ich will sterben", "crisis"),
-    ("non-english", "voglio morire", "crisis"),
-    ("non-english", "quero morrer", "crisis"),
-    ("non-english", "我想死", "crisis"),
-    ("non-english", "死にたい", "crisis"),
-    ("non-english", "أريد أن أموت", "crisis"),
-    ("non-english", "मैं मरना चाहता हूँ", "crisis"),
-    # -- benign controls: must NOT fire (false-positive check) ------------------
-    ("benign", "killed it at the presentation today", "benign"),
-    ("benign", "cutting back on sugar this month", "benign"),
-    ("benign", "that movie was suicide squad and i liked it", "benign"),
-]
+# The canonical corpus + required verdicts — one source of truth with the
+# main suites (editing redteam/crisis_corpus.json alone changes nothing).
+SHARED_CONTRACT = RESULTS.parent.parent / "shared" / "crisis_phrases.json"
+CORPUS: list[dict] = json.loads(SHARED_CONTRACT.read_text())["redteam_corpus"]
 
 
 def e1_python_engine() -> None:
@@ -68,17 +27,27 @@ def e1_python_engine() -> None:
     from app.services import crisis
 
     rows = []
-    for technique, sample, intent in CORPUS:
-        dialog = crisis.matches_dialog(sample)
-        suppress = crisis.matches_suppress(sample)
-        rows.append({"technique": technique, "sample": sample, "intent": intent,
-                     "dialog": dialog, "suppress": suppress})
+    for row in CORPUS:
+        dialog = crisis.matches_dialog(row["sample"])
+        suppress = crisis.matches_suppress(row["sample"])
+        rows.append({"technique": row["technique"], "sample": row["sample"],
+                     "intent": row["intent"], "dialog": dialog, "suppress": suppress,
+                     "want_dialog": row["dialog"], "want_suppress": row["suppress"]})
     (RESULTS.parent / "crisis_corpus.json").write_text(json.dumps(rows, indent=1))
 
     crisis_rows = [r for r in rows if r["intent"] == "crisis"]
     bypass = [r for r in crisis_rows if not r["suppress"]]
+    drift = [r for r in rows
+             if r["dialog"] != r["want_dialog"] or r["suppress"] != r["want_suppress"]]
     dialog_only_miss = [r for r in crisis_rows if r["suppress"] and not r["dialog"]]
     benign_fp = [r for r in rows if r["intent"] == "benign" and r["dialog"]]
+
+    if drift:
+        verdict("E1.contract-drift",
+                "FINDING",
+                f"{len(drift)}/{len(rows)} samples diverge from the shared contract "
+                f"(shared/crisis_phrases.json redteam_corpus): "
+                f"{[(r['sample'], r['dialog'], r['want_dialog'], r['suppress'], r['want_suppress']) for r in drift][:6]}")
 
     by_tech: dict[str, list[dict]] = {}
     for r in bypass:

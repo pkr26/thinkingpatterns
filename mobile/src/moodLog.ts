@@ -29,6 +29,11 @@ import { zeroize } from "./crypto/kdf";
 export interface MoodDay {
   date: string; // YYYY-MM-DD
   value: number; // [-1, 1]
+  /** Optional second dimension (2026-09-17): energy, [-1, 1] where -1 is
+   *  drained and +1 is energized. Absent = not tapped (never zero-filled:
+   *  "no answer" is not "neutral"). Device-local like the rest of the log;
+   *  the structured-channel payload (entry v2) carries its own copies. */
+  energy?: number;
 }
 
 const key = (userId: string): string => `mindpattern.moodlog.${userId}`;
@@ -79,7 +84,12 @@ function sanitize(raw: unknown): MoodDay[] {
     if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     // Stryker disable next-line LogicalOperator,ConditionalExpression: JSON.parse can never yield NaN/Infinity (the only inputs where these forms differ), and Number.isFinite returns false for every non-number without coercion
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
-    days.push({ date, value: Math.max(-1, Math.min(1, value)) });
+    const day: MoodDay = { date, value: Math.max(-1, Math.min(1, value)) };
+    const { energy } = item as Record<string, unknown>;
+    if (typeof energy === "number" && Number.isFinite(energy)) {
+      day.energy = Math.max(-1, Math.min(1, energy));
+    }
+    days.push(day);
   }
   days.sort((a, b) => a.date.localeCompare(b.date));
   return days;
@@ -133,8 +143,16 @@ async function write(dataKey: Buffer, userId: string, days: MoodDay[]): Promise<
   await AsyncStorage.setItem(key(userId), blob.toString("base64"));
 }
 
-/** Upsert one day's mood (latest value wins for the same date). */
-export async function recordMood(dataKey: Buffer, userId: string, date: string, value: number): Promise<void> {
+/** Upsert one day's mood (latest value wins for the same date). The
+ *  optional energy pick rides along; passing undefined PRESERVES a prior
+ *  energy pick for the day (clearing it is a separate explicit null). */
+export async function recordMood(
+  dataKey: Buffer,
+  userId: string,
+  date: string,
+  value: number,
+  energy?: number | null,
+): Promise<void> {
   // Snapshot the key NOW, at call time — NOT inside the serialized block,
   // which may run much later (or after a lock zeroized the shared buffer).
   const keyCopy = Buffer.from(dataKey);
@@ -143,8 +161,16 @@ export async function recordMood(dataKey: Buffer, userId: string, date: string, 
       const { days } = await read(keyCopy, userId);
       const clean = Math.max(-1, Math.min(1, value));
       const existing = days.findIndex((d) => d.date === date);
-      if (existing >= 0) days[existing] = { date, value: clean };
-      else days.push({ date, value: clean });
+      const prior = existing >= 0 ? days[existing] : undefined;
+      const cleanEnergy =
+        energy === null
+          ? undefined
+          : typeof energy === "number" && Number.isFinite(energy)
+            ? Math.max(-1, Math.min(1, energy))
+            : prior?.energy;
+      const day: MoodDay = cleanEnergy === undefined ? { date, value: clean } : { date, value: clean, energy: cleanEnergy };
+      if (existing >= 0) days[existing] = day;
+      else days.push(day);
       await write(keyCopy, userId, days);
     });
   // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)

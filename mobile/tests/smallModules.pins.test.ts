@@ -146,9 +146,12 @@ describe("onboarding pins", () => {
 describe("genericQuestions pins", () => {
   it("the djb2×33 rotation picks the exact pool slot per date", async () => {
     const { genericQuestionForDate } = await import("../src/genericQuestions");
-    expect(genericQuestionForDate("2026-09-07")).toBe("If today had a title, what would it be?");
-    expect(genericQuestionForDate("2026-09-08")).toBe("When did you feel most like yourself today?");
-    expect(genericQuestionForDate("2026-10-01")).toBe("What's one small thing that went right today?");
+    // 2026-09-17: the pool grew 8 -> 60, so the same djb2 rotation lands
+    // on new slots — recomputed against the shipped pool (the parity test
+    // pins the pool itself array-for-array).
+    expect(genericQuestionForDate("2026-09-07")).toBe("What did you get through today that felt heavy?");
+    expect(genericQuestionForDate("2026-09-08")).toBe("What conversation stayed with you today?");
+    expect(genericQuestionForDate("2026-10-01")).toBe("When did you feel understood today?");
   });
 });
 

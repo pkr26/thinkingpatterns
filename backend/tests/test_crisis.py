@@ -46,6 +46,9 @@ class TestParity:
     def test_suppress_extra_list_matches_json(self):
         assert list(crisis.SUPPRESS_EXTRA_PATTERNS) == _contract()["suppress_extra"]
 
+    def test_benign_compounds_match_json(self):
+        assert list(crisis.BENIGN_COMPOUNDS) == _contract()["benign_compounds"]
+
     def test_suppress_tier_is_dialog_plus_extra(self):
         data = _contract()
         assert list(crisis.SUPPRESS_PATTERNS) == data["dialog"] + data["suppress_extra"]
@@ -75,6 +78,79 @@ class TestFixtures:
         # The suppress tier is dialog + extra: every dialog fire suppresses.
         for text in _contract()["fixtures"]["dialog_fires"]:
             assert crisis.matches_suppress(text), f"suppress tier missed {text!r}"
+
+
+class TestRedteamCorpus:
+    """The adversarial E1 corpus (promoted 2026-09-17 from
+    redteam/e_crisis.py into the shared contract): every row's
+    dialog/suppress values are the REQUIRED contract, not an observation.
+    A crisis sample that evades the suppress tier is a bypass; a benign
+    sample that fires the dialog tier is a false positive. The mobile
+    suite replays the identical rows (mobile/tests/crisisPhrases.test.ts)
+    — the two engines must agree or the shared contract has drifted."""
+
+    def test_every_crisis_sample_is_suppressed(self):
+        rows = _contract()["redteam_corpus"]
+        crisis_rows = [r for r in rows if r["intent"] == "crisis"]
+        assert len(crisis_rows) >= 30, "the corpus must stay substantial"
+        for row in crisis_rows:
+            assert crisis.matches_suppress(row["sample"]), (
+                f"BYPASS: suppress tier missed {row['sample']!r} "
+                f"(technique {row['technique']})"
+            )
+
+    def test_observed_dialog_matches_contract_exactly(self):
+        for row in _contract()["redteam_corpus"]:
+            assert crisis.matches_dialog(row["sample"]) is row["dialog"], (
+                f"dialog tier diverged from the contract on {row['sample']!r} "
+                f"(want dialog={row['dialog']})"
+            )
+            assert crisis.matches_suppress(row["sample"]) is row["suppress"], (
+                f"suppress tier diverged from the contract on {row['sample']!r} "
+                f"(want suppress={row['suppress']})"
+            )
+
+    def test_corpus_still_covers_the_original_techniques(self):
+        techniques = {r["technique"] for r in _contract()["redteam_corpus"]}
+        for required in ("leetspeak", "homoglyph", "zero-width", "punct-split",
+                         "space-split", "unlisted-phrase", "non-english", "benign"):
+            assert required in techniques, f"corpus lost its {required} coverage"
+
+
+class TestDualVariantAndMasking:
+    """The 2026-09-17 hardening: orphan-join variant + benign-compound
+    masking, behavior-pinned here and mirrored by the mobile engine."""
+
+    def test_orphan_splits_fire_the_dialog_tier(self):
+        # The documented residual bypass ("k ill myself") and siblings.
+        for text in ("k ill myself", "o ff myself tonight", "k i ll myself",
+                     "s uicide is on my mind"):
+            assert crisis.matches_dialog(text), f"orphan variant missed {text!r}"
+
+    def test_orphan_variant_never_breaks_ordinary_prose(self):
+        # Gluing single letters onto the next word must not create matches
+        # where the primary variant has none.
+        for text in ("i am so sad today", "iwant to diet", "a way out of the city",
+                     "u s a won gold", "a e i o u are vowels"):
+            assert not crisis.matches_dialog(text), f"orphan variant fired on {text!r}"
+            assert not crisis.matches_suppress(text), f"orphan variant fired on {text!r}"
+
+    def test_benign_compounds_do_not_fire(self):
+        for text in ("that movie was suicide squad and i liked it",
+                     "we discussed suicide prevention in class today",
+                     "listening to suicide silence again",
+                     "suicideboys dropped a new album"):
+            assert not crisis.matches_dialog(text), f"benign mask failed on {text!r}"
+
+    def test_benign_mask_does_not_silence_real_phrasing(self):
+        # The mask removes only the compound: surrounding ideation still fires.
+        for text in ("suicide prevention did not help, i still want to die",
+                     "after the suicide squad premiere i can't go on"):
+            assert crisis.matches_dialog(text), f"mask over-reached on {text!r}"
+
+    def test_bare_topic_word_still_fires(self):
+        assert crisis.matches_dialog("thinking about suicide")
+        assert crisis.matches_dialog("suicidal thoughts again")
 
 
 class TestEngineInterlock:
@@ -184,10 +260,11 @@ class TestProbeCorpusRegression:
         result = brain.update(brain.load_state(None), entries, T0)
 
         # The patterns still SURFACE — suppression means non-quoting cards,
-        # not hidden ones.
+        # not hidden ones. (2026-09-17: 'cutting' carries a VADER valence
+        # now, so it is sentiment-owned and no longer a TOPIC candidate —
+        # the repeated sentence surfaces as the phrase/rumination card,
+        # which is what the suppression contract actually guards.)
         cards = [p for p in result.surfaced if "cutting" in p.label]
-        assert any(p.kind == "topic" for p in cards), \
-            "the rising 'cutting' topic must still surface"
         assert any(p.kind in ("recurring_phrase", "rumination") for p in cards), \
             "the repeated sentence must still surface as a phrase card"
         # ...and every one carries sensitive: true (pre-fix: None), so the

@@ -52,6 +52,16 @@ export const useColorScheme = vi.fn((): "dark" | "light" => "dark");
 /** Keyboard.dismiss is the keyboard-dismiss affordance on the Entry screen. */
 export const Keyboard = { dismiss: vi.fn() };
 
+/** Vibration backs the light haptics (src/haptics.ts); captured for asserts. */
+export const Vibration = { vibrate: vi.fn() };
+
+/** BackHandler stub: HistoryScreen's Android hardware-back handling
+ *  registers here; tests capture the subscription to fire it. */
+export const BackHandler = {
+  addEventListener: vi.fn((_event: string, _handler: () => boolean) => ({ remove: vi.fn() })),
+  exitApp: vi.fn(),
+};
+
 /** AppState stub: listeners are captured so tests can fire background /
  *  inactive transitions and assert the vault auto-lock. */
 export const AppState = {

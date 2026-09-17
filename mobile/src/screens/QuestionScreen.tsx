@@ -29,6 +29,8 @@ import React, { useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { api, ApiError } from "../api/client";
 import { decryptQuestion } from "../crypto/MindPatternCrypto";
+import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
+import { lightHaptic } from "../haptics";
 import { vault } from "../vault";
 import { useSession, stashDraft } from "../store";
 import { genericQuestionForDate } from "../genericQuestions";
@@ -70,6 +72,29 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     return decryptQuestion(vault.get(), userId, direct.for_date, direct.blob);
   };
 
+  /** The pattern behind today's question (null on generic days): powers
+   *  the "did this land?" taps (2026-09-17). */
+  const [patternPid, setPatternPid] = useState<string | null>(null);
+  const [feedbackGiven, setFeedbackGiven] = useState(false);
+  const recordTap = async (resonated: boolean) => {
+    const pid = patternPid;
+    if (!pid || feedbackGiven) return;
+    setFeedbackGiven(true);
+    lightHaptic();
+    try {
+      const userId = await api.getUserId();
+      if (userId) {
+        await recordFeedbackTap(vault.get().dataKey, userId, pid, resonated);
+        setNotice(resonated
+          ? "Noted — questions like this will come up more often."
+          : "Noted — this one will step back.");
+      }
+    } catch {
+      setNotice("Your answer stays on this device; it could not be saved just now.");
+      setFeedbackGiven(false);
+    }
+  };
+
   const reportFailure = (err: unknown) => {
     const message = failureCopy(err);
     setError(message);
@@ -89,13 +114,20 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     setNotice(null);
     try {
       const session = await api.openProcessingSession(vault.get().dataKey.toString("base64"));
-      const result = await api.recompute(session.session_token);
+      // Pending question-feedback taps ride along, encrypted like every
+      // other payload (2026-09-17); cleared once the server consumed them.
+      const userId = await api.getUserId();
+      const feedbackBlob = userId ? await buildFeedbackBlob(vault.get().dataKey, userId) : null;
+      const result = await api.recompute(session.session_token, feedbackBlob ?? undefined);
+      if (feedbackBlob && userId) await clearFeedback(userId).catch(() => {});
       if (!result.question_stored) {
         setNotice("No recurring pattern has enough evidence yet — keep writing.");
         return;
       }
       const payload = await decryptToday();
       setQuestion(payload.question);
+      setPatternPid(typeof payload.pattern_pid === "string" ? payload.pattern_pid : null);
+      setFeedbackGiven(false);
     } catch (err) {
       reportFailure(err);
     } finally {
@@ -244,7 +276,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
               Day {dayProgress.active} of {dayProgress.total}
             </Text>
           )}
-          <GhostButton
+<GhostButton
             label="Write about this"
             center={false}
             onPress={() => void writeAbout(generic)}
@@ -259,7 +291,23 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
             One question a day. No advice — just something to sit with.
           </Text>
-          <GhostButton
+                    {patternPid !== null && !feedbackGiven && (
+            <View style={{ flexDirection: "row", gap: 8, justifyContent: "center" }}>
+              <GhostButton
+                label="This resonated"
+                center={false}
+                onPress={() => void recordTap(true)}
+                accessibilityLabel="This question resonated with me"
+              />
+              <GhostButton
+                label="Not me"
+                center={false}
+                onPress={() => void recordTap(false)}
+                accessibilityLabel="This question does not land for me"
+              />
+            </View>
+          )}
+<GhostButton
             label="Write about this"
             center={false}
             onPress={() => void writeAbout(question)}

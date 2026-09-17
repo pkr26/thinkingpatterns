@@ -230,7 +230,6 @@ async def test_llm_never_runs_before_threshold(client, settings, monkeypatch):
     def _must_not_run(self, entries):  # pragma: no cover - fails the test if reached
         pytest.fail("LLM ran during the baseline phase")
 
-    monkeypatch.setattr(LLMAnalyzer, "analyze", _must_not_run)
     monkeypatch.setattr(LLMAnalyzer, "extract_patterns", _must_not_run)
 
     emu = ClientEmulator("prethreshold", "p")
@@ -286,20 +285,19 @@ async def test_llm_with_consent_runs_and_output_is_sanitized(client, settings, m
     assert body["analyzer"] == "llm"
     assert len(seen_payloads) == 1
 
-    # The model fiction ("stop taking your medication") and the invalid kind
-    # were dropped; the corpus-anchored 'walk' patterns survived, with the
-    # hostile numerics clamped into range.
+    # 2026-09-17 inversion: the model may only NARRATE the brain's
+    # findings, so model fiction ("stop taking your medication"), invalid
+    # kinds, and even corpus-anchored inventions it was not handed as
+    # findings are ALL dropped from the surfaced list. With this tiny
+    # corpus the deterministic brain surfaces nothing, so the enriched
+    # payload carries no model-minted patterns at all.
     payload = await emu.decrypt_insights(client)
     kept_patterns = payload["stats"]["patterns"]
     labels = [p["label"] for p in kept_patterns]
     kinds = [p["kind"] for p in kept_patterns]
     assert "stop taking your medication" not in labels
     assert "diagnosis" not in kinds
-    assert labels == ["walk", "walk"]
-    first, clamped = kept_patterns
-    assert first["occurrences"] == 3 and first["confidence"] == 0.9
-    assert clamped["occurrences"] == 0 and clamped["confidence"] == 1.0
-    assert "day" not in clamped.get("detail", {})
+    assert "walk" not in labels  # model minted it; the brain did not
 
 
 async def test_llm_consent_requires_verifier(client, settings):

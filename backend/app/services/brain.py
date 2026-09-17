@@ -77,6 +77,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -128,8 +129,8 @@ STATISTICAL_KINDS = frozenset({
 #     ~11-day EWMA memory re-qualifies one fluke for days running): the
 #     two qualification days must be >= REPLICATION_MIN_SPREAD_DAYS apart,
 #     so the window has genuinely moved between observations.
-EVIDENCE_DATE_KINDS = frozenset({"temporal", "mood_correlation", "link"})
-WINDOW_STAT_KINDS = frozenset({"inertia", "instability", "mood_shift"})
+EVIDENCE_DATE_KINDS = frozenset({"temporal", "mood_correlation", "link", "avoidance"})
+WINDOW_STAT_KINDS = frozenset({"inertia", "instability", "mood_shift", "cadence"})
 REPLICATION_MIN_SPREAD_DAYS = 2
 
 # --- statistical gates -------------------------------------------------------
@@ -178,12 +179,35 @@ MOOD_SHIFT_RUN = 3         # beyond-limit points required in the tail
 MOOD_SHIFT_MIN_SHIFT = 0.15
 MOOD_SHIFT_SIGMA_FLOOR = 0.05
 
+# Once a stored mood shift's evidence is this many days old, the EWMA
+# baseline re-anchors PAST it (see _mood_reanchor_day): a stable,
+# months-old improvement must not keep qualifying cards whose copy says
+# "lately" — statistically true, conversationally false.
+MOOD_SHIFT_REANCHOR_DAYS = 21
+
 # --- lifecycle ---------------------------------------------------------------
 GRACE_DAYS = 7     # unqualified days before active → fading
 ARCHIVE_DAYS = 45  # unqualified days before fading → archived
 DROP_DAYS = 90     # archived patterns are dropped after this
 PROMOTE_AGE_DAYS = 7   # candidate → emerging by age without re-qualification
 CONFIRM_AGE_DAYS = 21  # emerging → confirmed by age
+
+# --- language gate (2026-09-17) ----------------------------------------------------
+# The lexicons are English. Non-Latin journals already read as "honest
+# nothing" (WORD_RE strips them); LATIN-script non-English is the dangerous
+# case: German/French/Spanish function words ("nicht", "mais", "para") are
+# not in TOPIC_STOPWORDS, pass topic eligibility, and can surface as
+# garbage topic cards ("'nicht' is a steady presence in your writing"),
+# while lexicon collisions ("Bad" German=bath, English=bad) score mood
+# from noise. Gate: the share of window tokens the engine actually
+# recognizes; below the floor, topic mining is suppressed, text-derived
+# sentiment stops feeding the mood detectors (explicit client mood tags
+# still count — they are the user's own report, never a translation
+# guess), and rumination's English negativity classifier steps aside
+# (recurring phrases still surface: repetition is script-independent).
+LANGUAGE_MIN_TOKENS = 50      # too little text to judge a language honestly
+LANGUAGE_HIT_FLOOR = 0.10     # ~10% recognized = English with names/slang;
+                              # Latin-script non-English prose lands ~2-5%
 
 # --- store bounds --------------------------------------------------------------
 HISTORY_DAYS = 90
@@ -248,7 +272,13 @@ THEME_WORDS: dict[str, str] = {
 # attendance / "presented" via -ed stemming outnumber the mindful sense).
 # "miss" stays: in first-person journal text the longing sense dominates and
 # the collision senses ("missed the bus") read mildly negative anyway.
-SENTIMENT_LEXICON: dict[str, float] = {
+# 2026-09-17: the graded lexicon is now CURATED-OVER-VADER. The VADER
+# base (7,200+ words, MIT) ships in services/sentiment_lexicon.py; every
+# value curated HERE wins word-for-word (the curation rules documented
+# above stay authoritative), and the emoji map scores alongside WORD_RE.
+from .sentiment_lexicon import EMOJI_VALENCES, VADER_BASE  # noqa: E402
+
+CURATED_SENTIMENT: dict[str, float] = {
     # positive — mild
     "okay": 0.9, "ok": 0.9, "alright": 0.9, "fine": 0.8, "decent": 1.1,
     "calm": 1.5, "quiet": 0.6, "settled": 1.2, "steady": 1.0, "neutral": 0.0,
@@ -319,6 +349,9 @@ SENTIMENT_LEXICON: dict[str, float] = {
     "suicidal": -3.8, "unreal": -1.6, "impossible": -2.1,
 }
 
+# The active graded lexicon: VADER breadth + curated authority.
+SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
+
 # Intensifiers/downtoners (VADER booster conventions, multiplicative).
 # "hardly"/"barely" are NOT downtoners: VADER treats them as negations
 # ("hardly good" ≈ "not good"). Listing them here AND in NEGATORS applied
@@ -362,6 +395,49 @@ ABSOLUTIST_WORDS = frozenset({
 # (share of entries vs the user's own earlier-window base rate, exact
 # binomial into the BH family) or a PERSISTENT presence (a direct
 # measurement — share of entries — so no significance test applies).
+# --- structured channels (entry payload v2, 2026-09-17) ------------------------
+# Sleep quality is the best-validated lagged daily-diary channel (Konjarski
+# 2018 meta-analysis: sleep QUALITY → next-day affect). The user's 1-5
+# rating becomes a within-person binary: nights rated strictly below the
+# user's OWN median are "poor sleep" days (a 3 means something different
+# for someone who averages 4 than for someone averaging 2 — never pooled).
+# The synthetic theme rides the SAME detector machinery as every lexicon
+# theme: weekday concentration, same-day mood correlation, and the day-after
+# link, all gated and multiple-comparison-corrected identically. Activity
+# tags merge into the theme set directly — a tagged day is by definition a
+# themed day, and "your mood on days you tag 'family'" is exactly the
+# Daylio-style question asked with real statistics instead of a bar chart.
+SLEEP_CHANNEL_THEME = "poor sleep"
+SLEEP_MIN_RATED_NIGHTS = 10   # distinct rated nights before the split is claimable
+
+# --- cadence signals (2026-09-17) ------------------------------------------------
+# The server already holds the writing CALENDAR (metadata, no decryption
+# beyond what recompute already does): two honest signals live there.
+# AVOIDANCE: theme-days followed by SILENCE (no entry the next calendar
+# day, with later writing proving the silence was a choice, not an end) —
+# "the day after conflict comes up, you go quiet". Exact binomial against
+# the user's own base skip rate, one-sided (more silence than usual), in
+# the BH family like every other claim.
+AVOIDANCE_MIN_OBSERVED = 10   # theme-days with an observable next-day outcome
+AVOIDANCE_MIN_SKIPS = 5
+AVOIDANCE_MIN_LIFT = 0.20     # skips share must exceed base rate by this
+# RHYTHM: the regularity of the journaling rhythm itself (gap spread,
+# recent vs the user's earlier norm) — the same comparative shape as the
+# instability detector, applied to gaps between writing days.
+CADENCE_MIN_DAYS = 12         # journaling days per window half
+
+# --- person anchoring (2026-09-17) ------------------------------------------------
+# "My mood dips after seeing my mom, not my dad" is the most-requested
+# real-world insight. Deterministic extraction: mid-sentence CAPITALIZED
+# tokens (proper names survive the lowercase tokenizer's fold only by
+# re-reading the raw text) and "my <relation>" bigrams, recurring on
+# enough distinct days. Strict bars — a false person theme costs trust —
+# and the candidates ride the SAME detector machinery as every theme
+# (weekday concentration, mood ties, day-after links), so no new claims
+# are possible without the usual gating and correction.
+PERSON_MIN_DISTINCT_DAYS = 6
+PERSON_MIN_TOTAL_MENTIONS = 8
+
 TOPIC_MIN_ENTRIES = 6       # entries mentioning it before it can be tested
 TOPIC_MIN_DISTINCT_DAYS = 4
 TOPIC_RISING_MIN_RECENT = 5     # recent-half mentions for a rising claim
@@ -452,6 +528,38 @@ IRREGULAR_FORMS: dict[str, str] = {
 BOOSTER_SCOPE = 3       # tokens before a sentiment word that may boost or negate it
 
 
+# The high-frequency English function-word core. TOPIC_STOPWORDS
+# deliberately omits the shortest words (its eligibility rule already
+# filters len < 4), so the language gate carries its own frequency list —
+# these are the words that make English prose READ as English (~40-50% of
+# tokens in any English sentence) regardless of content.
+_LANGUAGE_FUNCTION_WORDS: frozenset[str] = frozenset({
+    "a", "am", "an", "and", "any", "are", "as", "at", "be", "been", "being",
+    "but", "by", "can", "could", "did", "do", "does", "doing", "for", "from",
+    "had", "has", "have", "he", "her", "here", "hers", "him", "his", "i",
+    "if", "in", "into", "is", "it", "its", "me", "much", "must", "my", "no",
+    "not", "of", "on", "or", "our", "out", "over", "she", "so", "some",
+    "such", "than", "that", "the", "their", "them", "then", "there",
+    "these", "they", "this", "those", "to", "up", "us", "was", "we", "were",
+    "what", "when", "where", "which", "who", "why", "will", "with", "would",
+    "you", "your",
+})
+
+# Every token the engine has an opinion about (function words, sentiment,
+# themes, negators, absolutists, irregulars). The language gate asks: of
+# the window's tokens, what share are these? English prose runs ~35-55%
+# (function-word density); Latin-script non-English prose ~2-8% even with
+# the handful of shared short words ("in", "a", "so").
+_KNOWN_TOKENS: frozenset[str] = (
+    frozenset(TOPIC_STOPWORDS)
+    | _LANGUAGE_FUNCTION_WORDS
+    | frozenset(SENTIMENT_LEXICON)
+    | frozenset(NEGATORS)
+    | frozenset(ABSOLUTIST_WORDS)
+    | frozenset(IRREGULAR_FORMS)
+    | {word for words in THEME_LEXICON.values() for word in words}
+)
+
 # --- NLP primitives -------------------------------------------------------------
 
 def word_forms(token: str) -> list[str]:
@@ -498,6 +606,11 @@ def theme_for(token: str) -> str | None:
 
 
 def _word_valence(token: str) -> float:
+    # Emoji are their own tokens (extracted alongside WORD_RE); they have
+    # no word forms and live in their own graded map.
+    emoji = EMOJI_VALENCES.get(token)
+    if emoji is not None:
+        return emoji
     for form in word_forms(token):
         valence = SENTIMENT_LEXICON.get(form)
         if valence is not None:
@@ -816,10 +929,53 @@ def _decay_strength(evidence: list[date], today: date) -> float:
     return min(1.0, weight / EVIDENCE_FULL)
 
 
+def _mentions_name(text: str, name: str) -> bool:
+    """Case-insensitive word-boundary mention of a person candidate."""
+    return re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) is not None
+
+
+def _person_candidates(window: list[JournalEntry]) -> set[str]:
+    """Recurring proper-name/possessive candidates, deterministically.
+
+    A candidate is either a mid-sentence capitalized token (sentence
+    initials are excluded — they are just ordinary sentence starts) whose
+    lowercase form the engine does not already know (not a lexicon/theme/
+    stopword word), or the word after "my" when that bigram recurs. Both
+    must clear PERSON_MIN_DISTINCT_DAYS across PERSON_MIN_TOTAL_MENTIONS.
+    """
+    counts: dict[str, int] = {}
+    days: dict[str, set[date]] = {}
+    for entry in window:
+        raw = entry.text.split()
+        lowered = [t.lower().strip(".,!?:;()\"'") for t in raw]
+        found: set[str] = set()
+        for i, token in enumerate(raw):
+            clean = token.strip(".,!?:;()\"'")
+            low = clean.lower()
+            if not clean or not clean[0].isupper() or not low.isalpha():
+                continue
+            if i == 0:
+                continue  # sentence-initial capitalization carries no signal
+            if low in _KNOWN_TOKENS or theme_for(low) is not None:
+                continue
+            found.add(low)
+            # "my <capitalized or plain relation>" bigram
+            if i >= 1 and lowered[i - 1] == "my":
+                found.add(low)
+        for name in found:
+            counts[name] = counts.get(name, 0) + 1
+            days.setdefault(name, set()).add(entry.entry_date)
+    return {
+        name for name, n in counts.items()
+        if n >= PERSON_MIN_TOTAL_MENTIONS
+        and len(days.get(name, set())) >= PERSON_MIN_DISTINCT_DAYS
+    }
+
+
 def _detect_themes(
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
-    weekday_total: dict[int, int],
-    total_entries: int,
+    weekday_days: dict[int, int],
+    total_days: int,
     lag1: float | None = None,
 ) -> list[_Signal]:
     """Base-rate-corrected weekday concentration + within-person mood ties.
@@ -849,18 +1005,23 @@ def _detect_themes(
     for theme in themes:
         with_theme = [(e, s) for e, _, themes, s in per_entry if theme in themes]
         without_theme = [(e, s) for e, _, themes, s in per_entry if theme not in themes]
-        count = len(with_theme)
+        # Day-level Bernoulli (2026-09-17): a user who writes 4 entries
+        # every Sunday contributes 4 CORRELATED trials to one weekday —
+        # one calendar day, one observation. The entry-level version
+        # over-counted clustered journals and inflated significance;
+        # TEMPORAL_MIN_N now reads in theme-DAYS, honestly.
+        days = sorted({e.entry_date for e, _ in with_theme})
+        count = len(days)
         if count < TEMPORAL_MIN_N:
             continue
-        days = [e.entry_date for e, _ in with_theme]
 
         # Weekday concentration: test EVERY candidate day, not just the max.
         weekday_counts: dict[int, int] = {}
-        for e, _ in with_theme:
-            weekday_counts[e.entry_date.weekday()] = weekday_counts.get(e.entry_date.weekday(), 0) + 1
+        for day in days:
+            weekday_counts[day.weekday()] = weekday_counts.get(day.weekday(), 0) + 1
         candidates: list[tuple[int, int, float, float, bool]] = []  # (weekday, k, fraction, pvalue, gate_ok)
         for weekday in sorted(weekday_counts):
-            base_rate = weekday_total.get(weekday, 0) / total_entries
+            base_rate = weekday_days.get(weekday, 0) / total_days
             if not 0.0 < base_rate < 1.0:
                 continue  # the test itself is undefined here
             k = weekday_counts[weekday]
@@ -883,7 +1044,7 @@ def _detect_themes(
                     "day": DAY_NAMES[weekday],
                     "day_count": k,
                     "day_fraction": round(fraction, 3),
-                    "base_rate": round(weekday_total.get(weekday, 0) / total_entries, 3),
+                    "base_rate": round(weekday_days.get(weekday, 0) / total_days, 3),
                     "p_value": round(pvalue, 6),
                     "days_tested": len(candidates),
                 },
@@ -1060,19 +1221,22 @@ def _detect_mood_dynamics(
     if len(recent_vals) >= INSTABILITY_MIN_DAYS and len(earlier_vals) >= INSTABILITY_MIN_DAYS:
         sd_recent = statsig.sample_sd(recent_vals)
         sd_earlier = statsig.sample_sd(earlier_vals)
-        # Variance-ratio claim → F-test p-value, in the BH family whether
-        # or not the effect gates (spread floor, ratio) pass. The p is now
-        # computed pre-gate, so the degenerate zero-spread case the gate
-        # used to hide needs its own guard: a frozen series is the
-        # OPPOSITE of an instability claim — "no evidence", not a crash.
-        v_r, v_e = sd_recent**2, max(sd_earlier, 1e-12) ** 2
-        f_stat = v_r / v_e
-        pvalue = 1.0 if f_stat <= 0.0 else min(
-            1.0,
-            2.0 * min(
-                statsig.f_sf(f_stat, len(recent_vals) - 1, len(earlier_vals) - 1),
-                statsig.f_sf(1.0 / f_stat, len(earlier_vals) - 1, len(recent_vals) - 1),
-            ),
+        # Spread claim → Brown-Forsythe (median-centered Levene) p-value
+        # (2026-09-17), in the BH family whether or not the effect gates
+        # (spread floor, ratio) pass. The variance-ratio F-test it replaced
+        # assumed iid normal observations and was notoriously kurtosis-
+        # sensitive — the input is bounded, platykurtic residual sentiment,
+        # often literally discrete 5-point mood tags — and unlike its
+        # sibling detectors it carried NO autocorrelation deflation. The
+        # spread ratio stays the reported EFFECT (gates below); the TEST
+        # now deflates df by the residual series' own lag-1 autocorrelation
+        # (the same Bartlett deflation Welch applies). Degenerate inputs
+        # fail closed to p=1: "no evidence", never a crash.
+        resid_phi = _daily_lag1_autocorr(day_residuals)
+        pvalue = statsig.brown_forsythe_two_sided_p(
+            recent_vals, earlier_vals,
+            n_eff_x=statsig.effective_sample_size(len(recent_vals), resid_phi),
+            n_eff_y=statsig.effective_sample_size(len(earlier_vals), resid_phi),
         )
         signals.append(_Signal(
             pid="instability:mood",
@@ -1142,7 +1306,8 @@ def _phrase_clusters(window: list[JournalEntry]) -> list[phrase_miner.PhraseClus
     )
 
 
-def _detect_phrases(clusters: list[phrase_miner.PhraseCluster]) -> list[_Signal]:
+def _detect_phrases(clusters: list[phrase_miner.PhraseCluster],
+                    allow_rumination: bool = True) -> list[_Signal]:
     """Near-duplicate clusters; negative ones surface as rumination.
 
     A recurring near-duplicate cluster is surfaced as a repeated *worry*
@@ -1152,6 +1317,12 @@ def _detect_phrases(clusters: list[phrase_miner.PhraseCluster]) -> list[_Signal]
     phrasing). Absolutist-word density (Al-Mosaiwi & Johnstone 2018) rides
     along in the detail. Non-negative repeats stay the neutral
     "recurring_phrase".
+
+    ``allow_rumination=False`` (language gate): the negativity/negation
+    classifiers are English, and scoring a language the lexicons do not
+    know produces noise dressed as a worry. Repetition itself is
+    script-independent, so clusters still surface — always as the neutral
+    recurring_phrase kind.
     """
     signals: list[_Signal] = []
     for cluster in clusters:
@@ -1161,7 +1332,7 @@ def _detect_phrases(clusters: list[phrase_miner.PhraseCluster]) -> list[_Signal]
         member_negators = [sum(1 for t in ref.text.split() if t in NEGATORS) for ref in cluster.members]
         negativity = sum(member_sentiments) / len(member_sentiments)
         negators = sum(member_negators) / len(member_negators)
-        is_rumination = (
+        is_rumination = allow_rumination and (
             negativity <= RUMINATION_NEGATIVITY_MAX
             or (negativity <= 0.0 and negators >= RUMINATION_MIN_NEGATORS)
         )
@@ -1188,6 +1359,150 @@ def _detect_phrases(clusters: list[phrase_miner.PhraseCluster]) -> list[_Signal]
             evidence_days=days,
         ))
     return signals
+
+
+def _detect_avoidance(
+    day_themes: dict[date, set[str]],
+    entry_days: set[date],
+    today: date,
+) -> list[_Signal]:
+    """Theme-days followed by journaling SILENCE vs the user's base skip rate.
+
+    The observation is the writing calendar alone (metadata the server
+    already holds). For a theme-day d the next-day outcome is observable
+    when journaling continued afterwards: wrote on d+1, or skipped d+1 but
+    wrote later — a corpus that simply ENDS after d carries no evidence.
+    Censoring-honest, base-rate-corrected, one-sided into the BH family.
+    """
+    days_sorted = sorted(entry_days)
+    if len(days_sorted) < 2:
+        return []
+    last_day = days_sorted[-1]
+    # Base skip rate over ALL observable transitions (not just theme-days):
+    base_skips = 0
+    base_total = 0
+    for idx, d in enumerate(days_sorted):
+        next_day = d + timedelta(days=1)
+        if next_day in entry_days:
+            base_total += 1
+            continue  # wrote tomorrow: observable, not a skip
+        if idx == len(days_sorted) - 1:
+            continue  # corpus ends here: censored
+        base_total += 1
+        base_skips += 1
+    if base_total < 2 or not 0.0 < base_skips / base_total < 1.0:
+        return []
+
+    base_rate = base_skips / base_total
+    signals: list[_Signal] = []
+    themes = sorted({t for theme_set in day_themes.values() for t in theme_set})
+    for theme in themes:
+        observed = 0
+        skips = 0
+        skip_days: list[date] = []
+        for d in sorted(day_themes):
+            if theme not in day_themes[d]:
+                continue
+            next_day = d + timedelta(days=1)
+            if next_day in entry_days:
+                observed += 1
+                continue
+            if d == last_day and not any(x > d for x in days_sorted):
+                continue  # censored tail
+            observed += 1
+            skips += 1
+            skip_days.append(d)
+        if observed < AVOIDANCE_MIN_OBSERVED or skips < AVOIDANCE_MIN_SKIPS:
+            continue
+        share = skips / observed
+        pvalue = statsig.binomial_sf(skips, observed, base_rate)
+        signals.append(_Signal(
+            pid=f"avoidance:{theme}",
+            kind="avoidance",
+            label=theme,
+            occurrences=skips,
+            pvalue=pvalue,
+            detail={
+                "silences": skips,
+                "observed": observed,
+                "base_rate": round(base_rate, 3),
+                "share": round(share, 3),
+                "p_value": round(pvalue, 6),
+            },
+            evidence_days=skip_days,
+            gate_ok=share >= base_rate + AVOIDANCE_MIN_LIFT,
+        ))
+    return signals
+
+
+def _detect_cadence(entry_days: set[date], today: date) -> list[_Signal]:
+    """Journaling-rhythm regularity, recent vs the user's earlier norm.
+
+    Same comparative shape as instability — never an absolute verdict —
+    applied to the gaps between writing days. Brown-Forsythe on the gap
+    deviations (gaps are counts; the median-centered test is robust to
+    their skew), failing closed on degenerate windows.
+    """
+    days_sorted = sorted(entry_days)
+    recent_cutoff = today - timedelta(days=INERTIA_RECENT_DAYS)
+    recent_days = [d for d in days_sorted if d > recent_cutoff]
+    earlier_days = [d for d in days_sorted if d <= recent_cutoff]
+    if len(recent_days) < CADENCE_MIN_DAYS or len(earlier_days) < CADENCE_MIN_DAYS:
+        return []
+
+    def gaps(day_list: list[date]) -> list[float]:
+        return [float((b - a).days) for a, b in zip(day_list, day_list[1:])]
+
+    recent_gaps = gaps(recent_days)
+    earlier_gaps = gaps(earlier_days)
+    if len(recent_gaps) < 3 or len(earlier_gaps) < 3:
+        return []
+    sd_recent = statsig.sample_sd(recent_gaps)
+    sd_earlier = statsig.sample_sd(earlier_gaps)
+    pvalue = statsig.brown_forsythe_two_sided_p(recent_gaps, earlier_gaps)
+    return [_Signal(
+        pid="cadence:rhythm",
+        kind="cadence",
+        label="writing rhythm",
+        occurrences=len(recent_days),
+        pvalue=pvalue,
+        detail={
+            "gap_spread_recent": round(sd_recent, 3),
+            "gap_spread_earlier": round(sd_earlier, 3),
+            "median_gap_recent": round(sorted(recent_gaps)[len(recent_gaps) // 2], 1),
+            "p_value": round(pvalue, 6),
+        },
+        evidence_days=recent_days,
+        gate_ok=(sd_recent >= 0.5 and sd_recent >= 1.5 * max(sd_earlier, 1e-9)),
+    )]
+
+
+def _mood_reanchor_day(store: dict, today: date) -> date | None:
+    """Latest ESTABLISHED mood-shift evidence start; None = no re-anchor.
+
+    The EWMA chart's baseline is the first quarter of the window — without
+    this hook, a genuine shift that happened months ago keeps re-qualifying
+    on every run as the window slides past it, and the card keeps saying
+    your mood is lower/higher "lately" when it has been the new normal for
+    a season. Once a stored shift's ``first_seen`` (the day the chart first
+    flagged it — at or shortly after the true onset) is
+    MOOD_SHIFT_REANCHOR_DAYS in the past, the chart restarts its baseline
+    AFTER that day: it re-learns the user's new normal from post-shift data
+    (silently, until enough of it exists). Idempotent and state-driven —
+    the same store + corpus always anchors the same way.
+    """
+    anchor: date | None = None
+    for record in store["patterns"].values():
+        if record.kind != "mood_shift":
+            continue
+        parsed = _parse_iso(record.first_seen)
+        if parsed is None:
+            continue
+        start = date.fromisoformat(parsed)
+        if today - start >= timedelta(days=MOOD_SHIFT_REANCHOR_DAYS):
+            if anchor is None or start > anchor:
+                anchor = start
+    return anchor
 
 
 def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal]:
@@ -1692,7 +2007,8 @@ class BrainUpdate:
     patterns_fading: int
 
 
-def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate:
+def update(state: dict, entries: list[JournalEntry], today: date,
+           feedback: list[tuple[str, bool]] | None = None) -> BrainUpdate:
     """Fold the corpus into the persistent store; surface what earned it.
 
     Pure: the caller's ``state`` is never mutated. Copy-on-entry via a
@@ -1711,9 +2027,36 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
     ordered = sorted(entries, key=lambda e: e.entry_date)
     window = [e for e in ordered if e.entry_date >= cutoff][-MAX_WINDOW_ENTRIES:]
 
+    # Structured channels (2026-09-17): the sleep-quality split is decided
+    # BEFORE the per-entry pass so every entry on a poor night carries the
+    # synthetic theme; tags merge into the theme set as-is.
+    day_sleep_vals: dict[date, list[float]] = {}
+    for entry in window:
+        if entry.sleep_quality is not None:
+            day_sleep_vals.setdefault(entry.entry_date, []).append(float(entry.sleep_quality))
+    day_sleep_mean = {day: sum(v) / len(v) for day, v in day_sleep_vals.items()}
+    poor_sleep_days: set[date] = set()
+    if len(day_sleep_mean) >= SLEEP_MIN_RATED_NIGHTS:
+        ordered_ratings = sorted(day_sleep_mean.values())
+        mid = len(ordered_ratings) // 2
+        median = (
+            ordered_ratings[mid]
+            if len(ordered_ratings) % 2 == 1
+            else (ordered_ratings[mid - 1] + ordered_ratings[mid]) / 2
+        )
+        # Strictly below the user's own median = a rough night FOR THEM.
+        poor_sleep_days = {day for day, q in day_sleep_mean.items() if q < median}
+    tag_vocab: set[str] = set()
+    for entry in window:
+        tag_vocab.update(entry.tags)
+
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
     for entry in window:
         tokens = WORD_RE.findall(entry.text.lower())
+        # Emoji ride along as their own tokens: they score mood through
+        # EMOJI_VALENCES but never become themes or phrase shingles (the
+        # theme/phrase lookups simply never match them).
+        tokens.extend(e for e in EMOJI_VALENCES if e in entry.text)
         if entry.sentiment is not None and math.isfinite(entry.sentiment):
             # Client-supplied mood tag: clamped to the engine's scale. A
             # non-finite value (NaN poisons every average downstream) falls
@@ -1721,16 +2064,49 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
             sentiment = max(-1.0, min(1.0, entry.sentiment))
         else:
             sentiment = sentiment_score(tokens)
-        per_entry.append((entry, tokens, extract_themes(tokens), sentiment))
+        themes = extract_themes(tokens) | set(entry.tags)
+        if entry.entry_date in poor_sleep_days:
+            themes.add(SLEEP_CHANNEL_THEME)
+        per_entry.append((entry, tokens, themes, sentiment))
+    # Person anchoring: computed once per run over the raw window.
+    person_names = _person_candidates(window)
+    if person_names:
+        per_entry = [
+            (entry, tokens, themes | {n for n in person_names if _mentions_name(entry.text, n)}, sentiment)
+            for entry, tokens, themes, sentiment in per_entry
+        ]
 
-    weekday_total: dict[int, int] = {}
-    for entry, _, _, _ in per_entry:
-        weekday_total[entry.entry_date.weekday()] = weekday_total.get(entry.entry_date.weekday(), 0) + 1
+    # Language gate (2026-09-17): see the LANGUAGE_* constants. When the
+    # window's text is not something the lexicons know, mood analyses keep
+    # only explicitly tagged entries (the user's own report) and topic
+    # mining / rumination classification step aside.
+    token_total = sum(len(tokens) for _, tokens, _, _ in per_entry)
+    if token_total >= LANGUAGE_MIN_TOKENS:
+        known_hits = sum(
+            1 for _, tokens, _, _ in per_entry for token in tokens if token in _KNOWN_TOKENS
+        )
+        language_ok = known_hits >= LANGUAGE_HIT_FLOOR * token_total
+    else:
+        language_ok = True  # too little text to judge a language honestly
+    mood_entries = (
+        per_entry
+        if language_ok
+        else [(e, t, th, m) for (e, t, th, m) in per_entry if e.sentiment is not None]
+    )
 
     day_buckets: dict[date, list[float]] = {}
-    for entry, _, _, sentiment in per_entry:
+    for entry, _, _, sentiment in mood_entries:
         day_buckets.setdefault(entry.entry_date, []).append(sentiment)
     day_sentiments = sorted((day, sum(v) / len(v)) for day, v in day_buckets.items())
+
+    # Day-level writing calendar: one calendar day, one Bernoulli (see
+    # _detect_themes) — the BASE RATE counts distinct journaling days per
+    # weekday too, so clustered journals cannot inflate their own
+    # reference rate. Built from the mood-relevant entries so a language-
+    # gated corpus cannot manufacture weekday claims from noise moods.
+    weekday_days: dict[int, int] = {}
+    for entry_day in day_buckets:
+        weekday_days[entry_day.weekday()] = weekday_days.get(entry_day.weekday(), 0) + 1
 
     # Within-person residuals: each entry's mood minus the user's own rolling
     # baseline for that day. All mood ASSOCIATIONS run on these; level claims
@@ -1740,10 +2116,10 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
     day_residuals = {day: mood - baselines.get(day, mood) for day, mood in day_sentiments}
     residual_per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = [
         (entry, tokens, themes, sentiment - baselines.get(entry.entry_date, sentiment))
-        for entry, tokens, themes, sentiment in per_entry
+        for entry, tokens, themes, sentiment in mood_entries
     ]
     day_themes: dict[date, set[str]] = {}
-    for entry, _, themes, _ in per_entry:
+    for entry, _, themes, _ in mood_entries:
         day_themes.setdefault(entry.entry_date, set()).update(themes)
 
     signals: list[_Signal] = []
@@ -1756,12 +2132,35 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
         # the topic presence gate (a presence a repeated sentence already
         # explains is the same measurement twice) — computed once per run.
         clusters = _phrase_clusters(window)
-        signals.extend(_detect_themes(residual_per_entry, weekday_total, len(per_entry), resid_lag1))
-        signals.extend(_detect_phrases(clusters))
-        signals.extend(_detect_mood_shift(day_sentiments))
+        signals.extend(_detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1))
+        signals.extend(_detect_phrases(clusters, allow_rumination=language_ok))
+        # EWMA baseline re-anchor: once a stored shift is established, the
+        # chart re-learns the new normal from post-shift data only.
+        anchor = _mood_reanchor_day(store, today)
+        shift_series = (
+            day_sentiments
+            if anchor is None
+            else [(day, mood) for day, mood in day_sentiments if day > anchor]
+        )
+        signals.extend(_detect_mood_shift(shift_series))
         signals.extend(_detect_links(day_themes, day_residuals, today, resid_lag1))
+        signals.extend(_detect_avoidance(day_themes, set(day_buckets), today))
+        signals.extend(_detect_cadence(set(day_buckets), today))
         signals.extend(_detect_mood_dynamics(day_sentiments, day_residuals, today))
-        signals.extend(_detect_topics(per_entry, clusters))
+        if language_ok:
+            signals.extend(_detect_topics(per_entry, clusters))
+
+    # Origin marking (2026-09-17): patterns fed by the user's own tags or
+    # structured ratings say so — "you tagged it" is a different evidence
+    # statement than "your words mentioned it", and the card copy can be
+    # honest about which.
+    for signal in signals:
+        if signal.label in tag_vocab:
+            signal.detail["source"] = "tag"
+        if signal.label in person_names:
+            signal.detail["source"] = "person"
+        if signal.label == SLEEP_CHANNEL_THEME:
+            signal.detail["channel"] = "sleep_quality"
 
     # Multiple-testing correction over the FULL family: every test that ran
     # this run, whether or not its effect gates passed. Correcting only the
@@ -1813,6 +2212,21 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
 
     _merge_lifecycle(store, qualified, today)
 
+    # Question feedback (2026-09-17): "this resonated / not me" taps ride
+    # with the next recompute (encrypted like everything else) and land in
+    # the pattern's stored memory — question selection reads them below.
+    # Unknown pids are ignored (patterns retire); the counts are capped so
+    # a stuck button cannot dominate forever.
+    if feedback:
+        for pid, resonated in feedback[:100]:
+            record = store["patterns"].get(pid)
+            if record is None:
+                continue
+            key = "resonated" if resonated else "not_me"
+            counts = dict(record.feedback)
+            counts[key] = min(99, counts.get(key, 0) + 1)
+            record.feedback = counts
+
     surfaced_records: list[tuple[StoredPattern, float]] = []
     for pid in sorted(store["patterns"]):
         record = store["patterns"][pid]
@@ -1863,6 +2277,9 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
                 # patient's app and the therapist portal fetch the entries
                 # for exactly these dates. Dates only — never quotes text.
                 "evidence_dates": list(record.evidence_dates),
+                # Question-feedback taps (encrypted at rest with the rest
+                # of the state): powers feedback-aware question ranking.
+                "feedback": dict(record.feedback),
                 # Crisis interlock: when the wording itself is suppress-tier,
                 # the card is marked so the client renders the NON-QUOTING
                 # variant (and the question engine never touches it —
