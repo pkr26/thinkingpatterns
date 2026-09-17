@@ -21,8 +21,9 @@ observation shows you its evidence.**
 | `backend/tests/` | 658-test suite (+ 1 Postgres-gated skip): unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
-| `mobile/` | React Native (iOS/Android) client: encrypted journal with entry history (read/edit/delete), one-tap mood check-in, day-1 reflective questions, evidence-view pattern cards, crisis resources, first-run onboarding + offline privacy policy, dark/light theme |
-| `shared/vectors.json` | Cross-platform crypto vectors (backend ⇄ mobile), including non-ASCII AAD cases |
+| `mobile/` | React Native (iOS/Android) client: encrypted journal with entry history (read/edit/delete), one-tap mood check-in, day-1 reflective questions, evidence-view pattern cards, crisis resources, first-run onboarding + offline privacy policy, dark/light theme, "Share with my therapist" (pairing-code consent, wrapped-key grant, revoke) |
+| `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes, "since your last visit" delta — read-only by construction |
+| `shared/vectors.json` | Cross-platform crypto vectors (backend ⇄ mobile ⇄ portal), including non-ASCII AAD cases and the therapist wrap (ECDH→HKDF→AES-GCM) constructions |
 | `shared/crisis_phrases.json` | Cross-platform crisis-language contract (client dialog tier + server suppression tier), consumed by both platforms |
 | `shared/generic_questions.json` | Pre-threshold reflective question pool (embedded copies pinned to it by tests) |
 | `docker-compose.yml` | postgres + api for local dev (+ optional profile-gated backup service) |
@@ -107,6 +108,51 @@ brain surfaced; sign into the app as `demo` with the password you provided
 to see the same cards. `probe_brain.py` runs the ground-truth check offline
 (9/9).
 
+## Sharing with a therapist (the zero-knowledge path)
+
+A patient can let their therapist see every pattern and, one click deeper,
+the entries behind it — without the server ever being able to read
+anything:
+
+1. **Therapist accounts** register through the portal with a P-256 wrap
+   keypair; the server stores the public key and the PRIVATE key only as
+   a blob encrypted under a password-derived HKDF subkey. One username
+   namespace, two roles (`users.role`) — journal routes reject therapist
+   tokens and therapist routes reject patient tokens (403 at the
+   dependency layer). There is no therapist write path to patient data:
+   read-only is the absence of endpoints, not a UI convention.
+2. **Pairing**: the portal shows a short-lived (15 min), single-use code;
+   the patient types it in the app, sees the therapist's NAME and public
+   key, confirms against an explicit disclosure, and re-authenticates
+   with their password. The app then wraps its data key to the
+   therapist's public key (ECDH → HKDF, salt = both SPKI keys →
+   AES-256-GCM, AAD bound to the patient/therapist pair) and uploads one
+   small blob. The code burns in the same transaction. Codes are stored
+   only as HMACs; unknown/expired/consumed all answer the same 404.
+3. **Reads**: the portal unwraps the data key locally after login and
+   decrypts the SAME blobs the patient's app decrypts — insights
+   (byte-identical to `GET /insights`) and entries (paginated, date
+   windows). Every surfaced pattern now carries `detail.evidence_dates`
+   (the capped days whose entries fed it) and `detail.pattern_pid`, which
+   power the drill-down: the portal fetches exactly those days, decrypts
+   the entries, and highlights label occurrences with per-entry mood.
+   Sensitive (crisis-adjacent) cards render non-quoting, as in the app.
+4. **Notes** are the therapist's own record: encrypted under the
+   therapist's password-derived key in the browser, attachable to a
+   patient or a pattern, surviving a revoke and dying with either
+   account. Patients cannot read them.
+5. **Revoke** (password-gated) clears the wrapped key — future access
+   ends immediately. What was already read cannot be unread; the grant
+   disclosure says so plainly. Re-granting reactivates the same consent
+   row (note continuity for the therapist). Every grant/revoke and every
+   patient-data read/write is audit-logged; the access log outlives
+   account deletion.
+6. **Compliance flag**: sharing journal data with clinicians moves an
+   operator into health-data territory (HIPAA BAA in the US or
+   equivalent). The architecture (explicit consent records with
+   disclosure versions, revocation, access audit) is built for it; the
+   operator obligations are real.
+
 ## Safety
 
 * **Crisis resources are built in and offline**: a "Get help" screen (988
@@ -138,7 +184,13 @@ to see the same cards. `probe_brain.py` runs the ground-truth check offline
 6. **Destructive actions re-authenticate.** `DELETE /api/account` and enabling LLM analysis require the password-derived verifier — a stolen bearer token cannot erase a journal. `POST /api/auth/logout` bumps a token epoch that revokes every token for the account.
 7. **Metadata the server does hold** (be aware of it): usernames, per-entry calendar dates and received timestamps, entry ciphertext sizes, insight dates. A DB leak reveals *when* and *how much* you wrote — never *what*.
 8. **Optional LLM analysis is opt-in per user.** If the operator configures `MINDPATTERN_LLM_URL`, journal text is only sent to that third-party endpoint for accounts that explicitly consented (re-authenticated toggle in Settings, with the disclosure that named-provider retention applies), only post-threshold, with model output sanitized (labels length-capped, "recurring phrases" verified against your actual text, numerics clamped). Enabling records `llm_consent_at` + `llm_consent_disclosure` ("v1") on the account — cleared on disable, and included in the export bundle, so the GDPR record of what was consented to (and when) travels with the user's own data. Off by default for every account.
-9. **Transport & ops hardening.** Non-development boots with OpenAPI/docs disabled and refuses the dev token secret and SQLite in every non-development environment (fail-closed). Every response — including 500s and 413s — carries `nosniff`/`DENY`/`no-referrer`/`no-store` plus HSTS (`strict-transport-security: max-age=31536000; includeSubDomains`). Request bodies are capped at 2 MiB **before** parsing; validation errors never echo input. Rate limiting covers auth, entries, processing, reads, deletes; behind a proxy it uses the rightmost `X-Forwarded-For` across **all** header lines; the counter's memory is bounded. Access logs are disabled in the image. Export is streamed. Per-account quotas bound storage and recompute cost.
+9. **Therapist sharing keeps the server blind.** The patient's client
+   wraps the data key to the therapist's public P-256 key (the server
+   stores the wrap, never a usable key); the portal unwraps it locally.
+   See "Sharing with a therapist" above for the full lifecycle, including
+   the honest revocation limit: revocation ends ACCESS, it cannot unread
+   what a browser already decrypted.
+10. **Transport & ops hardening.** Non-development boots with OpenAPI/docs disabled and refuses the dev token secret and SQLite in every non-development environment (fail-closed). Every response — including 500s and 413s — carries `nosniff`/`DENY`/`no-referrer`/`no-store` plus HSTS (`strict-transport-security: max-age=31536000; includeSubDomains`). Request bodies are capped at 2 MiB **before** parsing; validation errors never echo input. Rate limiting covers auth, entries, processing, reads, deletes; behind a proxy it uses the rightmost `X-Forwarded-For` across **all** header lines; the counter's memory is bounded. Access logs are disabled in the image. Export is streamed. Per-account quotas bound storage and recompute cost.
 
 The mobile client keeps derived keys memory-only: after an app restart the session token is still valid but the key vault is locked behind an unlock screen, and navigation is tri-state (no login-flash race). The session token itself is stored AES-256-GCM-encrypted under a random per-install device key (`mobile/src/secureStore.ts`) — stated plainly: that device key currently also lives in AsyncStorage as a documented fallback pending react-native-keychain, so device backups include both the key and the ciphertext it protects, and a fully-controlled device attacker recovers the session. Keychain/Keystore custody is the fix (checklist in `mobile/README.md`). The offline sync queue is account-bound by mechanism; server error text is sanitized before reaching dialogs, and the app switcher sees only a blank shield. Sync is deliberately **push-only**: v1 is a single-device-writer design — entries push up, and the History screen pulls this account's entries back (same-device restore, new device). There is no multi-device conflict model.
 

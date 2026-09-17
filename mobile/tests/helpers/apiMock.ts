@@ -49,6 +49,23 @@ export function makeApiMock() {
     deleteAccount: vi.fn(async () => ({})),
     getLlmConsent: vi.fn(async () => ({ enabled: false })),
     setLlmConsent: vi.fn(async () => ({ enabled: true })),
+    // Therapist sharing (2026-09-16)
+    pairingLookup: vi.fn(async () => ({
+      therapist_id: "therapist-1",
+      display_name: "Dr. Mock",
+      wrap_pub_key: "A".repeat(124),
+    })),
+    grantConsent: vi.fn(async () => ({
+      id: "a".repeat(32),
+      therapist_id: "therapist-1",
+      display_name: "Dr. Mock",
+      username: "drmock",
+      status: "active",
+      granted_at: "2026-09-16T12:00:00Z",
+      revoked_at: null,
+    })),
+    listConsents: vi.fn(async () => []),
+    revokeConsent: vi.fn(async () => ({})),
   };
 }
 

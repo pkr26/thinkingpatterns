@@ -893,6 +893,15 @@ describe("About and Advanced sections", () => {
   });
 });
 
+describe("therapist sharing entry point", () => {
+  it("navigates to the share screen", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Share with my therapist");
+    expect(nav.navigate).toHaveBeenCalledWith("TherapistShare");
+  });
+});
+
 describe("accessibility", () => {
   it("labels the LLM switch and reports checked/disabled state", async () => {
     vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);

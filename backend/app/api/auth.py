@@ -103,6 +103,7 @@ def _issue(request: Request, user: User) -> TokenResponse:
         ),
         user_id=user.id,
         expires_in=settings.token_ttl_seconds,
+        role=user.role,
     )
 
 

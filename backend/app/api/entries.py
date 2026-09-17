@@ -28,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_user
+from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks
 from ..models import Entry, User
 from ..schemas import EntryCreate, EntryOut, entry_out
@@ -106,7 +106,7 @@ async def _assert_within_quota(session: AsyncSession, user: User, incoming: int,
 async def create_entry(
     body: EntryCreate,
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     try:
@@ -177,7 +177,7 @@ async def create_entry(
     dependencies=[Depends(make_rate_limiter("entries-read", "read_rate_limit", "read_rate_window"))],
 )
 async def list_entries(
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     since: date_type | None = Query(default=None),
     offset: int = Query(default=0, ge=0, le=100_000),
@@ -206,7 +206,7 @@ async def list_entries(
 )
 async def delete_entry(
     client_entry_id: str,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(

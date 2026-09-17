@@ -112,6 +112,29 @@ jobs:
         working-directory: mobile
         run: npm test
 
+  portal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - name: Install dependencies
+        working-directory: portal
+        run: npm ci
+      - name: Typecheck
+        working-directory: portal
+        run: npx tsc --noEmit
+      - name: Portal tests (cross-platform vectors + coverage thresholds)
+        working-directory: portal
+        run: npm test
+      - name: Production build
+        working-directory: portal
+        run: npm run build
+
   contract-gates:
     # The repo's two standalone proof tools, wired as gates (they were built
     # for this and previously ran only by hand):

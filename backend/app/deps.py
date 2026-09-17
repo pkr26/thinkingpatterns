@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import User
+from .models import ROLE_THERAPIST, ROLE_USER, User
 from .security import tokens
 
 # Codes assigned when the raised exception carries no explicit one.
@@ -42,7 +42,9 @@ DEFAULT_ERROR_CODES: dict[int, str] = {
 class ApiError(HTTPException):
     """HTTPException carrying the machine-readable `code` of the envelope."""
 
-    def __init__(self, status_code: int, detail: str, code: str, headers: dict | None = None) -> None:
+    def __init__(
+        self, status_code: int, detail: str, code: str, headers: dict | None = None
+    ) -> None:
         super().__init__(status_code=status_code, detail=detail, headers=headers)
         self.code = code
 
@@ -62,7 +64,7 @@ async def require_user(
     failure = ApiError(status_code=401, detail="invalid token", code="unauthorized")
     if not authorization or not authorization.startswith("Bearer "):
         raise failure
-    token = authorization[len("Bearer "):].strip()
+    token = authorization[len("Bearer ") :].strip()
     try:
         payload = tokens.verify_token(token, request.app.state.settings.token_secret)
     except tokens.TokenError:
@@ -87,4 +89,34 @@ async def require_user(
     except Exception:
         await session.rollback()
         user = await session.get(User, payload["uid"]) or user
+    return user
+
+
+async def require_regular_user(
+    user: User = Depends(require_user),
+) -> User:
+    """Journal-owner endpoints: a therapist token must not reach them. The
+    token authenticated fine — the ROLE is wrong — so this is 403
+    (forbidden), not 401; a client that treats 401 as "re-login" would
+    otherwise loop a logged-in therapist forever."""
+    if user.role != ROLE_USER:
+        raise ApiError(
+            status_code=403,
+            detail="therapist accounts cannot access journal endpoints",
+            code="forbidden",
+        )
+    return user
+
+
+async def require_therapist(
+    user: User = Depends(require_user),
+) -> User:
+    """Sharing endpoints: only therapist accounts. Same 403-not-401 logic,
+    mirrored — a patient token is a valid session with the wrong role."""
+    if user.role != ROLE_THERAPIST:
+        raise ApiError(
+            status_code=403,
+            detail="not a therapist account",
+            code="forbidden",
+        )
     return user

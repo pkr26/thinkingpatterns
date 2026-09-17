@@ -48,7 +48,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_user
+from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks
 from ..models import Entry, Insight, User, new_id, utcnow
 from ..schemas import (
@@ -154,7 +154,7 @@ def _is_fk_violation(exc: IntegrityError) -> bool:
 async def create_processing_session(
     body: ProcessingSessionRequest,
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
 ):
     data_key = _decode_b64(body.data_key, "data_key")
     if len(data_key) != crypto.KEY_SIZE:
@@ -297,7 +297,7 @@ async def _latest_insight(session: AsyncSession, user_id: str, kind: str) -> Ins
 )
 async def recompute(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     x_processing_token: str | None = Header(default=None),
 ):
     settings = request.app.state.settings
@@ -534,7 +534,7 @@ async def recompute(
 )
 async def get_insights(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     # Same configured threshold as /insights/recompute, or the summary and
@@ -558,7 +558,7 @@ async def get_insights(
     dependencies=[Depends(make_rate_limiter("questions-read", "read_rate_limit", "read_rate_window"))],
 )
 async def get_question_today(
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     today = date_type.today()

@@ -522,7 +522,8 @@ async def test_app_metadata_and_healthz(app, client):
 async def test_cors_middleware_contract(settings):
     application = create_app(settings)
     cors = next(m for m in application.user_middleware if m.cls.__name__ == "CORSMiddleware")
-    assert cors.kwargs["allow_methods"] == ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    # PATCH joined the allowlist with the therapist portal (note updates).
+    assert cors.kwargs["allow_methods"] == ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     # Pin updated 2026-09-08: X-Account-Verifier joined the list — it is the
     # preferred DELETE /account re-auth transport and a browser client must
     # be allowed to send it cross-origin (origins themselves stay opt-in).

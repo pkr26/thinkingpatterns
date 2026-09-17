@@ -1,132 +1,167 @@
 {
-  "vectors": [
-    {
-      "password": "correct horse battery staple",
-      "salt": "AAECAwQFBgcICQoLDA0ODw==",
-      "iterations": 600000,
-      "master_key": "7xdxRO7JQgy8EJPSqLNEqSvFBtDU7JwCjdGfgyTYweY=",
-      "auth_key": "/nZai1rpo2JhJA7muC392WguD3neGYG3cnRlZLQqaVA=",
-      "data_key": "qHOz93IjzXKZIPmmA0SIYsCheK83px5tF6gHhVayXyQ=",
-      "plaintext": "U3VuZGF5IG5pZ2h0IGFnYWluLiBUaGUgZGVhZGxpbmUgZHJlYWQgaXMgYmFjay4=",
-      "aad": "WyJlbnRyeSIsInVzZXItMTIzNCIsImVudHJ5LTIwMjYtMDktMDEtYSJd",
-      "nonce": "AAECAwQFBgcICQoL",
-      "blob": "AAECAwQFBgcICQoLDQd5ZjDOegtntkk+81yTzw/BWYMn7edIcz+Ip7RkintmryhY0ysAARJJyTOf9gqbidosqFe264EfoxHAf4MU"
-    },
-    {
-      "password": "p@ssw0rd-\u00ef\u00f1-unicode",
-      "salt": "EBESExQVFhcYGRobHB0eHw==",
-      "iterations": 600000,
-      "master_key": "dPgObU+iZR37N7aWEO0Cl9/bCE0ZWpwPhA4f0TKAINU=",
-      "auth_key": "PlZomALNjbGyB/X/Oa3Mnwc6sNG4O1svBu1v6rUaMjE=",
-      "data_key": "zv2efX1eHgddIH5UCAEF6wIcssqGTt0V+PQnGKateUE=",
-      "plaintext": "eyJ2IjoxLCJ0ZXh0IjoiZ29vZCBtb3JuaW5nIiwic2VudGltZW50IjowLjUsImNyZWF0ZWRfYXQiOiIyMDI2LTA5LTAyIn0=",
-      "aad": "WyJpbnNpZ2h0cyIsInVzZXItYWJjZCIsInBhdHRlcm5zIl0=",
-      "nonce": "AAECAwQFBgcICQoL",
-      "blob": "AAECAwQFBgcICQoLuxoN1wEqq6sLQc4tuJPVtQuu++pP8y9hT5jOpCfU/cbir+xI499db0H6nInW38IMpFOD6FRCChlY5CEaBXJbtpN68MnqcCVUTkCsySjkPPNMo2sE0tRB"
-    },
-    {
-      "password": "unicode-aad-case",
-      "salt": "ICEiIyQlJicoKSorLC0uLw==",
-      "iterations": 600000,
-      "master_key": "Cc6fQH7CI0xFb4t8f3jW4zjcIj4R82JP8vqyD5AhMD0=",
-      "auth_key": "JkFKx5BsiL/p38UDxSGyxBZ+1CkkJRaGd8eXH2fvw00=",
-      "data_key": "f+66e9x8jmcFZp5VVE4p4cuZAqSOP/hT1e1rjf/Nm8A=",
-      "plaintext": "bm9uLWFzY2lpIEFBRCBiaW5kaW5nIGNoZWNr",
-      "aad": "WyJlbnRyeSIsIlx1MDBmY25cdTAwZWZjb2RlLXVzZXIiLCJlbnRyXHUwMGU5ZS1cdWQ4M2VcdWRkZTAtMSJd",
-      "nonce": "AAECAwQFBgcICQoL",
-      "blob": "AAECAwQFBgcICQoL8AfyB6q9w0mcQ5zaPerq3+tUGQx5YTSNpFsobGuQynuow/gB+u+Rv+Epdg=="
-    },
-    {
-      "password": "astral-aad-case",
-      "salt": "MDEyMzQ1Njc4OTo7PD0+Pw==",
-      "iterations": 600000,
-      "master_key": "d9B6w+add5oSOG9PuUpAkspW0RTG7xAHQOjsDKvQN34=",
-      "auth_key": "iBp6M3R8yUKgzn6LpP0S+pjV0M7yO0HopKOeSi60cM0=",
-      "data_key": "psdh1yQKrneDY0ILdKwxk/5FYjCgKylSBa8MBnVc9UU=",
-      "plaintext": "YXN0cmFsIEFBRCBiaW5kaW5nIGNoZWNr",
-      "aad": "WyJpbnNpZ2h0cyIsInVzZXItXHVkODNlXHVkZGUwLWJyYWluIiwicGF0dGVybnMiXQ==",
-      "nonce": "AAECAwQFBgcICQoL",
-      "blob": "AAECAwQFBgcICQoLkQNMk7ME4Yx+LRz2ONlXXJZzovE6xsVkSImNnmn3bYX8k7Nbh1omyg=="
-    }
-  ],
-  "encrypt_vectors": [
-    {
-      "password": "encrypt-pin-ascii",
-      "salt": "QEFCQ0RFRkdISUpLTE1OTw==",
-      "iterations": 600000,
-      "data_key": "QCQKfp5j4hwR1xLN4U+hFOFGNweruQLRlYzQDA9tkkA=",
-      "plaintext": "RmVlbGluZyBjYWxtZXIgYWZ0ZXIgdGhlIG1vcm5pbmcgd2Fsay4=",
-      "aad_parts": [
-        "entry",
-        "user-777",
-        "entry-2026-09-07-morning"
-      ],
-      "nonce": "DA0ODxAREhMUFRYX",
-      "blob": "DA0ODxAREhMUFRYXkjGM+7g5WgyDdEEw/qBtOUYg+jAG5rcAfFOZlXZ5K8jP1gUe5KAvkpV6lU2S//ob3YXdXrSP"
-    },
-    {
-      "password": "encrypt-pin-\u00fcn\u00efcode",
-      "salt": "UFFSU1RVVldYWVpbXF1eXw==",
-      "iterations": 600000,
-      "data_key": "xqhR7Q8WrDbi2A91yFrJILHLbhZkBp3Hd1RFwsPV+nU=",
-      "plaintext": "Zml4ZWQtbm9uY2UgZW5jcnlwdCBwaW4gd2l0aCBhc3RyYWwgQUFEIGJpbmRpbmc=",
-      "aad_parts": [
-        "entry",
-        "\u00fcs\u00e9r-\ud83e\udde0",
-        "entr\u00e9e-\ud83c\udf19-42"
-      ],
-      "nonce": "FxYVFBMSERAPDg0M",
-      "blob": "FxYVFBMSERAPDg0M13mEJ0sbunsiV2eJDbZDxA8cH8qNMyEAGUBTyYiCDko1bpov44wV2v4Y6jrHXPETanHIBB8wYHYMxO453vhz"
-    },
-    {
-      "password": "encrypt-pin-moodlog",
-      "salt": "YGFiY2RlZmdoaWprbG1ubw==",
-      "iterations": 600000,
-      "data_key": "SndeNSTyW5k68/qtSydulOhpGRUyBZUjbxgFNVL99/Q=",
-      "plaintext": "W3siZGF0ZSI6IjIwMjYtMDktMDciLCJ2YWx1ZSI6MC43NX1d",
-      "aad_parts": [
-        "moodlog",
-        "user-555"
-      ],
-      "nonce": "GBkaGxwdHh8gISIj",
-      "blob": "GBkaGxwdHh8gISIjIUflys1UXHwsl1rOearkCn3xR4lbYhhvtOe5h7oU53ETNxkm+4IwJ83/rrBEv6TRshnhvA=="
-    },
-    {
-      "password": "encrypt-pin-unlockproof",
-      "salt": "cHFyc3R1dnd4eXp7fH1+fw==",
-      "iterations": 600000,
-      "data_key": "6hjEIIRNIyGnMcehF5A5hbcb3CK/JYO8bzrmn1sUPdc=",
-      "plaintext": "bWluZHBhdHRlcm4tdW5sb2NrLXByb29mL3Yx",
-      "aad_parts": [
-        "unlockproof",
-        "user-888"
-      ],
-      "nonce": "IyIhIB8eHRwbGhkY",
-      "blob": "IyIhIB8eHRwbGhkY9x5ADZ90DIpOJmtk8zzp3QYqMQpwFJQYUWu1/6Pm006k008vBcLTtUxWfg=="
-    },
-    {
-      "password": "encrypt-pin-empty",
-      "salt": "gIGCg4SFhoeIiYqLjI2Ojw==",
-      "iterations": 600000,
-      "data_key": "q4z425GuFSJFf7T3xWxhYt5XczarLuiTw79/UdZ4aFY=",
-      "plaintext": "",
-      "aad_parts": [
-        "entry",
-        "user-000",
-        "entry-empty"
-      ],
-      "nonce": "JCUmJygpKissLS4v",
-      "blob": "JCUmJygpKissLS4vK0JihaChqR+vTSwKrNiNzg=="
-    },
-    {
-      "password": "encrypt-pin-no-aad",
-      "salt": "kJGSk5SVlpeYmZqbnJ2enw==",
-      "iterations": 600000,
-      "data_key": "QO8sHciHsAMHJyGysEksV3sgeAw5IXlxGEG+aIhWkgo=",
-      "plaintext": "ZGV2aWNlLWxvY2FsIHNlY3JldCB3aXRob3V0IGFhZCBiaW5kaW5n",
-      "aad_parts": null,
-      "nonce": "Ly4tLCsqKSgnJiUk",
-      "blob": "Ly4tLCsqKSgnJiUkDkC9nsSCAUqzYYc3JZ2Qk90xm4sIm9pszUn7+nGKpxzGgTMz9XroU/yzKgaFDL/yGSeAOj7HpA=="
-    }
-  ]
+ "vectors": [
+  {
+   "password": "correct horse battery staple",
+   "salt": "AAECAwQFBgcICQoLDA0ODw==",
+   "iterations": 600000,
+   "master_key": "7xdxRO7JQgy8EJPSqLNEqSvFBtDU7JwCjdGfgyTYweY=",
+   "auth_key": "/nZai1rpo2JhJA7muC392WguD3neGYG3cnRlZLQqaVA=",
+   "data_key": "qHOz93IjzXKZIPmmA0SIYsCheK83px5tF6gHhVayXyQ=",
+   "plaintext": "U3VuZGF5IG5pZ2h0IGFnYWluLiBUaGUgZGVhZGxpbmUgZHJlYWQgaXMgYmFjay4=",
+   "aad": "WyJlbnRyeSIsInVzZXItMTIzNCIsImVudHJ5LTIwMjYtMDktMDEtYSJd",
+   "nonce": "AAECAwQFBgcICQoL",
+   "blob": "AAECAwQFBgcICQoLDQd5ZjDOegtntkk+81yTzw/BWYMn7edIcz+Ip7RkintmryhY0ysAARJJyTOf9gqbidosqFe264EfoxHAf4MU"
+  },
+  {
+   "password": "p@ssw0rd-\u00ef\u00f1-unicode",
+   "salt": "EBESExQVFhcYGRobHB0eHw==",
+   "iterations": 600000,
+   "master_key": "dPgObU+iZR37N7aWEO0Cl9/bCE0ZWpwPhA4f0TKAINU=",
+   "auth_key": "PlZomALNjbGyB/X/Oa3Mnwc6sNG4O1svBu1v6rUaMjE=",
+   "data_key": "zv2efX1eHgddIH5UCAEF6wIcssqGTt0V+PQnGKateUE=",
+   "plaintext": "eyJ2IjoxLCJ0ZXh0IjoiZ29vZCBtb3JuaW5nIiwic2VudGltZW50IjowLjUsImNyZWF0ZWRfYXQiOiIyMDI2LTA5LTAyIn0=",
+   "aad": "WyJpbnNpZ2h0cyIsInVzZXItYWJjZCIsInBhdHRlcm5zIl0=",
+   "nonce": "AAECAwQFBgcICQoL",
+   "blob": "AAECAwQFBgcICQoLuxoN1wEqq6sLQc4tuJPVtQuu++pP8y9hT5jOpCfU/cbir+xI499db0H6nInW38IMpFOD6FRCChlY5CEaBXJbtpN68MnqcCVUTkCsySjkPPNMo2sE0tRB"
+  },
+  {
+   "password": "unicode-aad-case",
+   "salt": "ICEiIyQlJicoKSorLC0uLw==",
+   "iterations": 600000,
+   "master_key": "Cc6fQH7CI0xFb4t8f3jW4zjcIj4R82JP8vqyD5AhMD0=",
+   "auth_key": "JkFKx5BsiL/p38UDxSGyxBZ+1CkkJRaGd8eXH2fvw00=",
+   "data_key": "f+66e9x8jmcFZp5VVE4p4cuZAqSOP/hT1e1rjf/Nm8A=",
+   "plaintext": "bm9uLWFzY2lpIEFBRCBiaW5kaW5nIGNoZWNr",
+   "aad": "WyJlbnRyeSIsIlx1MDBmY25cdTAwZWZjb2RlLXVzZXIiLCJlbnRyXHUwMGU5ZS1cdWQ4M2VcdWRkZTAtMSJd",
+   "nonce": "AAECAwQFBgcICQoL",
+   "blob": "AAECAwQFBgcICQoL8AfyB6q9w0mcQ5zaPerq3+tUGQx5YTSNpFsobGuQynuow/gB+u+Rv+Epdg=="
+  },
+  {
+   "password": "astral-aad-case",
+   "salt": "MDEyMzQ1Njc4OTo7PD0+Pw==",
+   "iterations": 600000,
+   "master_key": "d9B6w+add5oSOG9PuUpAkspW0RTG7xAHQOjsDKvQN34=",
+   "auth_key": "iBp6M3R8yUKgzn6LpP0S+pjV0M7yO0HopKOeSi60cM0=",
+   "data_key": "psdh1yQKrneDY0ILdKwxk/5FYjCgKylSBa8MBnVc9UU=",
+   "plaintext": "YXN0cmFsIEFBRCBiaW5kaW5nIGNoZWNr",
+   "aad": "WyJpbnNpZ2h0cyIsInVzZXItXHVkODNlXHVkZGUwLWJyYWluIiwicGF0dGVybnMiXQ==",
+   "nonce": "AAECAwQFBgcICQoL",
+   "blob": "AAECAwQFBgcICQoLkQNMk7ME4Yx+LRz2ONlXXJZzovE6xsVkSImNnmn3bYX8k7Nbh1omyg=="
+  }
+ ],
+ "encrypt_vectors": [
+  {
+   "password": "encrypt-pin-ascii",
+   "salt": "QEFCQ0RFRkdISUpLTE1OTw==",
+   "iterations": 600000,
+   "data_key": "QCQKfp5j4hwR1xLN4U+hFOFGNweruQLRlYzQDA9tkkA=",
+   "plaintext": "RmVlbGluZyBjYWxtZXIgYWZ0ZXIgdGhlIG1vcm5pbmcgd2Fsay4=",
+   "aad_parts": [
+    "entry",
+    "user-777",
+    "entry-2026-09-07-morning"
+   ],
+   "nonce": "DA0ODxAREhMUFRYX",
+   "blob": "DA0ODxAREhMUFRYXkjGM+7g5WgyDdEEw/qBtOUYg+jAG5rcAfFOZlXZ5K8jP1gUe5KAvkpV6lU2S//ob3YXdXrSP"
+  },
+  {
+   "password": "encrypt-pin-\u00fcn\u00efcode",
+   "salt": "UFFSU1RVVldYWVpbXF1eXw==",
+   "iterations": 600000,
+   "data_key": "xqhR7Q8WrDbi2A91yFrJILHLbhZkBp3Hd1RFwsPV+nU=",
+   "plaintext": "Zml4ZWQtbm9uY2UgZW5jcnlwdCBwaW4gd2l0aCBhc3RyYWwgQUFEIGJpbmRpbmc=",
+   "aad_parts": [
+    "entry",
+    "\u00fcs\u00e9r-\ud83e\udde0",
+    "entr\u00e9e-\ud83c\udf19-42"
+   ],
+   "nonce": "FxYVFBMSERAPDg0M",
+   "blob": "FxYVFBMSERAPDg0M13mEJ0sbunsiV2eJDbZDxA8cH8qNMyEAGUBTyYiCDko1bpov44wV2v4Y6jrHXPETanHIBB8wYHYMxO453vhz"
+  },
+  {
+   "password": "encrypt-pin-moodlog",
+   "salt": "YGFiY2RlZmdoaWprbG1ubw==",
+   "iterations": 600000,
+   "data_key": "SndeNSTyW5k68/qtSydulOhpGRUyBZUjbxgFNVL99/Q=",
+   "plaintext": "W3siZGF0ZSI6IjIwMjYtMDktMDciLCJ2YWx1ZSI6MC43NX1d",
+   "aad_parts": [
+    "moodlog",
+    "user-555"
+   ],
+   "nonce": "GBkaGxwdHh8gISIj",
+   "blob": "GBkaGxwdHh8gISIjIUflys1UXHwsl1rOearkCn3xR4lbYhhvtOe5h7oU53ETNxkm+4IwJ83/rrBEv6TRshnhvA=="
+  },
+  {
+   "password": "encrypt-pin-unlockproof",
+   "salt": "cHFyc3R1dnd4eXp7fH1+fw==",
+   "iterations": 600000,
+   "data_key": "6hjEIIRNIyGnMcehF5A5hbcb3CK/JYO8bzrmn1sUPdc=",
+   "plaintext": "bWluZHBhdHRlcm4tdW5sb2NrLXByb29mL3Yx",
+   "aad_parts": [
+    "unlockproof",
+    "user-888"
+   ],
+   "nonce": "IyIhIB8eHRwbGhkY",
+   "blob": "IyIhIB8eHRwbGhkY9x5ADZ90DIpOJmtk8zzp3QYqMQpwFJQYUWu1/6Pm006k008vBcLTtUxWfg=="
+  },
+  {
+   "password": "encrypt-pin-empty",
+   "salt": "gIGCg4SFhoeIiYqLjI2Ojw==",
+   "iterations": 600000,
+   "data_key": "q4z425GuFSJFf7T3xWxhYt5XczarLuiTw79/UdZ4aFY=",
+   "plaintext": "",
+   "aad_parts": [
+    "entry",
+    "user-000",
+    "entry-empty"
+   ],
+   "nonce": "JCUmJygpKissLS4v",
+   "blob": "JCUmJygpKissLS4vK0JihaChqR+vTSwKrNiNzg=="
+  },
+  {
+   "password": "encrypt-pin-no-aad",
+   "salt": "kJGSk5SVlpeYmZqbnJ2enw==",
+   "iterations": 600000,
+   "data_key": "QO8sHciHsAMHJyGysEksV3sgeAw5IXlxGEG+aIhWkgo=",
+   "plaintext": "ZGV2aWNlLWxvY2FsIHNlY3JldCB3aXRob3V0IGFhZCBiaW5kaW5n",
+   "aad_parts": null,
+   "nonce": "Ly4tLCsqKSgnJiUk",
+   "blob": "Ly4tLCsqKSgnJiUkDkC9nsSCAUqzYYc3JZ2Qk90xm4sIm9pszUn7+nGKpxzGgTMz9XroU/yzKgaFDL/yGSeAOj7HpA=="
+  }
+ ],
+ "wrap_vectors": [
+  {
+   "therapist_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGis8TV5vcIGhRANCAARyiQ4pHYhlLWPYG2LRLmo53A1lBD03/we1YNZthBxfWRFnOncJcFZNmd6gZtRu+eWJyFiu92kI/LNTy4NSIg3A",
+   "therapist_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcokOKR2IZS1j2Bti0S5qOdwNZQQ9N/8HtWDWbYQcX1kRZzp3CXBWTZneoGbUbvnlichYrvdpCPyzU8uDUiINwA==",
+   "ephemeral_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAmot8bV5PMCGhRANCAAQ2n86ogQRo76WzdfDAlsdS/mbYylUCgJd07CKx1ZM+0fUBTvD0J0d6POq83BpmfuwNTC8K0ubpQfnOj/0fFx1i",
+   "ephemeral_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENp/OqIEEaO+ls3XwwJbHUv5m2MpVAoCXdOwisdWTPtH1AU7w9CdHejzqvNwaZn7sDUwvCtLm6UH5zo/9HxcdYg==",
+   "data_key": "ERERERERERERERERERERERERERERERERERERERERERE=",
+   "user_id": "user-777",
+   "therapist_id": "therapist-901",
+   "nonce": "AAECAwQFBgcICQoL",
+   "wrapped": "AAECAwQFBgcICQoLDJCZplB8p9JVDxkyhn4I90fSt2REjIiMwjxNMx0bnX0oSv1OhhIkrckETJoTeOkf"
+  },
+  {
+   "therapist_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA3q2+78r+ur6hRANCAAQETpL047R+tNWU/hlL/vDwHg84qR4oprTKhg3rWvU5uMd7j+Car1+XRgKlmfw1imecujOepVVsO812oMffdysB",
+   "therapist_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEBE6S9OO0frTVlP4ZS/7w8B4POKkeKKa0yoYN61r1ObjHe4/gmq9fl0YCpZn8NYpnnLoznqVVbDvNdqDH33crAQ==",
+   "ephemeral_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASNFZ4mrze+hRANCAAQ5iDIqufUsfxHV0aqSoqwLACdbytjpNGgiVzI/2mckgoVbc4nxFsGcABQxHD1X3AIAHjoOyL2Qx5dzIDSqzZkY",
+   "ephemeral_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOYgyKrn1LH8R1dGqkqKsCwAnW8rY6TRoIlcyP9pnJIKFW3OJ8RbBnAAUMRw9V9wCAB46Dsi9kMeXcyA0qs2ZGA==",
+   "data_key": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+   "user_id": "user-778",
+   "therapist_id": "therapist-902",
+   "nonce": "DA0ODxAREhMUFRYX",
+   "wrapped": "DA0ODxAREhMUFRYXVeg+jPDRcE8Pje71KWAjVQ/oVXFqUQGa4u1PIvaw+xiJAySkM1oIfo1l1xVV5xQ8"
+  },
+  {
+   "therapist_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAq83vASNFZ4mhRANCAASEwCqf8oji2cXOXfEmUZQX5yaMuqty2nz+QPk6y4atAvQPujOAsYqNFl6o1Mfy4smCJihxPmJVnRwxh0/1uCuv",
+   "therapist_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhMAqn/KI4tnFzl3xJlGUF+cmjLqrctp8/kD5OsuGrQL0D7ozgLGKjRZeqNTH8uLJgiYocT5iVZ0cMYdP9bgrrw==",
+   "ephemeral_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/ty6mHZUMhChRANCAASGTcc86bJnPNw/ory5IbJWvG562a/EOaTDAdRymxpcd5fH+hHNrhMG5q5m5V8dQAk2p38+etvuZgvPtW97D8+L",
+   "ephemeral_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhk3HPOmyZzzcP6K8uSGyVrxuetmvxDmkwwHUcpsaXHeXx/oRza4TBuauZuVfHUAJNqd/Pnrb7mYLz7Vvew/Piw==",
+   "data_key": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=",
+   "user_id": "user-779",
+   "therapist_id": "therapist-903",
+   "nonce": "GBkaGxwdHh8gISIj",
+   "wrapped": "GBkaGxwdHh8gISIjrF2WzZCZpbrW81Hub/VBNiJ3giwVJtDbGEf86AUp0WIlFcxtZJ/F5bSE+TJw/VB/"
+  }
+ ]
 }

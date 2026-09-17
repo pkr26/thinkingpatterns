@@ -26,14 +26,15 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_user
-from ..models import Entry, Insight, User, utcnow
+from ..deps import ApiError, get_session, require_regular_user
+from ..models import Consent, Entry, Insight, User, utcnow
 from ..schemas import (
     AccountDeleteRequest,
     ExportBundle,
     InsightOut,
     LlmConsentRequest,
     LlmConsentResponse,
+    ShareRecord,
     entry_out,
 )
 from .auth import _auth_limiter, hash_verifier_off_loop
@@ -73,7 +74,7 @@ async def _require_verifier(user: User, body_verifier: str, request: Request) ->
     dependencies=[Depends(make_rate_limiter("account-export", "export_rate_limit", "export_rate_window"))],
 )
 async def export_account(
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Stream everything the server holds: ciphertext only.
@@ -102,6 +103,16 @@ async def export_account(
                 select(Insight).where(Insight.user_id == user.id).order_by(Insight.created_at.asc())
             )
         ).scalars()
+        # Sharing records (metadata only): assembled BEFORE streaming so
+        # the head carries them — a consent is account data, not content.
+        share_rows = (
+            await session.execute(
+                select(Consent, User)
+                .join(User, Consent.therapist_id == User.id)
+                .where(Consent.user_id == user.id)
+                .order_by(Consent.granted_at.asc())
+            )
+        ).all()
         head = ExportBundle(
             version=1,
             exported_at=datetime.now(timezone.utc),
@@ -110,6 +121,16 @@ async def export_account(
             llm_consent=bool(user.llm_consent),
             llm_consent_at=user.llm_consent_at,
             llm_consent_disclosure=user.llm_consent_disclosure,
+            shares=[
+                ShareRecord(
+                    therapist_username=therapist.username,
+                    therapist_display_name=therapist.display_name or therapist.username,
+                    status=consent.status,
+                    granted_at=consent.granted_at,
+                    revoked_at=consent.revoked_at,
+                )
+                for consent, therapist in share_rows
+            ],
             entries=[],
             insights=[],
         )
@@ -152,7 +173,7 @@ def _consent_response(user: User) -> LlmConsentResponse:
     dependencies=[Depends(make_rate_limiter("account-consent-read", "read_rate_limit", "read_rate_window"))],
 )
 async def get_llm_consent(
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
 ) -> LlmConsentResponse:
     """Current consent state, so the client toggle reflects the account."""
     return _consent_response(user)
@@ -166,7 +187,7 @@ async def get_llm_consent(
 async def set_llm_consent(
     body: LlmConsentRequest,
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     """Explicit, re-authenticated per-user opt-in for LLM analysis.
@@ -199,7 +220,7 @@ async def set_llm_consent(
 async def delete_account(
     request: Request,
     body: AccountDeleteRequest | None = None,
-    user: User = Depends(require_user),
+    user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
 ):

@@ -35,3 +35,6 @@ backend/demo.db
 .ruff_cache/
 .mypy_cache/
 .pre-commit-cache
+
+# Portal build output
+portal/dist/

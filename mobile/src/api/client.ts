@@ -44,6 +44,36 @@ const MAX_LIST_PAGES = 100;
  *  forever only to be 422'd at upload. */
 const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** Consent ids are the server's 32-hex new_id(); the same URL-path hygiene
+ *  as entry ids (backend/app/models.py new_id). */
+const CONSENT_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/** Which sharing-disclosure copy the grant flow showed; recorded on the
+ *  consent row server-side (GDPR Art. 7 parity with the LLM consent).
+ *  Keep in sync with backend/app/api/consents.py SHARING_DISCLOSURE_VERSION
+ *  — bump BOTH when the disclosure copy changes. */
+export const SHARING_DISCLOSURE_VERSION = "v1";
+
+/** A sharing consent as the patient's app renders it (backend ConsentOut).
+ *  The server is untrusted; unknown fields pass through untouched. */
+export interface ListedConsent {
+  id: string;
+  therapist_id: string;
+  display_name: string;
+  username: string;
+  status: string;
+  granted_at: string;
+  revoked_at: string | null;
+}
+
+/** The pairing-lookup answer: who the code belongs to, before any data
+ *  moves. The user sees exactly this before deciding to share. */
+export interface PairingLookup {
+  therapist_id: string;
+  display_name: string;
+  wrap_pub_key: string;
+}
+
 export function parseServerUrl(candidate: string): { url: string; insecure: boolean } | null {
   const trimmed = candidate.trim();
   const match = /^(https?):\/\/([^\s/?#@]+)(\/[^\s?#]*)?$/.exec(trimmed);
@@ -485,4 +515,39 @@ export const api = {
   getLlmConsent: () => request("GET", `${API_PREFIX}/account/llm-consent`),
   setLlmConsent: (enabled: boolean, verifierB64: string) =>
     request("PUT", `${API_PREFIX}/account/llm-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
+
+  // --- therapist sharing (2026-09-16) ---------------------------------------
+  /** Resolve a pairing code to WHO it belongs to. No data moves yet — the
+   *  user must see the therapist's name before confirming anything. */
+  pairingLookup: (code: string): Promise<PairingLookup> =>
+    request("POST", `${API_PREFIX}/consents/pairing/lookup`, { code }),
+  /** Grant sharing: the wrapped data key ships once, verifier-gated (the
+   *  verifier header carries the password proof; sensitive = redirect-refused). */
+  grantConsent: (
+    code: string,
+    ephemeralPubB64: string,
+    wrappedKeyB64: string,
+    verifierB64: string,
+  ): Promise<ListedConsent> =>
+    request(
+      "POST",
+      `${API_PREFIX}/consents`,
+      { code, ephemeral_pub: ephemeralPubB64, wrapped_key: wrappedKeyB64, disclosure: SHARING_DISCLOSURE_VERSION },
+      { "X-Account-Verifier": verifierB64 },
+      { sensitive: true },
+    ),
+  listConsents: (): Promise<ListedConsent[]> => request("GET", `${API_PREFIX}/consents`),
+  /** Revoke: verifier-gated like every disclosure-widening/narrowing action. */
+  revokeConsent: async (consentId: string, verifierB64: string) => {
+    if (!CONSENT_ID_PATTERN.test(consentId)) {
+      throw new ApiError(0, "invalid consent id — refusing the request");
+    }
+    return request(
+      "DELETE",
+      `${API_PREFIX}/consents/${consentId}`,
+      undefined,
+      { "X-Account-Verifier": verifierB64 },
+      { sensitive: true },
+    );
+  },
 };

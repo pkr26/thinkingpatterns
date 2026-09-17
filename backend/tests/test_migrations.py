@@ -77,7 +77,7 @@ def test_migrations_reproduce_create_all_schema(tmp_path, monkeypatch):
     # The schema diff above ignores the version table; assert the stamp too.
     with mig_engine.connect() as conn:
         rows = conn.exec_driver_sql("SELECT version_num FROM alembic_version").all()
-    assert rows == [("a7c91e4b2d03",)]  # head: users GDPR consent record columns
+    assert rows == [("c41f8a92d5e7",)]  # head: therapist sharing tables
     mig_engine.dispose()
     ref_engine.dispose()
 

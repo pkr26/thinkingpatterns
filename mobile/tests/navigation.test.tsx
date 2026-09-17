@@ -119,7 +119,7 @@ describe("AppNavigator", () => {
     const root = await render(<AppNavigator />);
     await flush();
 
-    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "Privacy", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Privacy", "Crisis"]);
     const text = textOf(root);
     expect(text).toContain("Save entry");
     expect(text).toContain("Show today's question");
@@ -145,7 +145,7 @@ describe("AppNavigator", () => {
     await flush();
 
     expect(screenNames(root)).toEqual([
-      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "Privacy", "Crisis",
+      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Privacy", "Crisis",
     ]);
     expect(screenOptions(root, "Onboarding")).toEqual({ headerShown: false });
     // The first panel is what a brand-new account actually sees.

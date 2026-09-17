@@ -37,6 +37,24 @@ export interface CryptoEngine {
     update(data: Buffer): Buffer;
     final(): Buffer;
   };
+  // --- therapist sharing (2026-09-16): the EC subset used by the data-key
+  // wrap. Mirrors node:crypto / quick-crypto exactly (generateKeyPairSync
+  // for "ec", KeyObject DER import/export, diffieHellman) so the same cast
+  // in loadEngine covers both backends.
+  /** Opaque EC key handle — the KeyObject surface the sharing code touches
+   *  (DER export only; nothing else is observable through the seam). */
+  generateKeyPairSync(
+    type: "ec",
+    options: { namedCurve: string },
+  ): { publicKey: EcKeyObject; privateKey: EcKeyObject };
+  createPublicKey(input: { key: Buffer; format: "der"; type: "spki" }): EcKeyObject;
+  diffieHellman(config: { privateKey: EcKeyObject; publicKey: EcKeyObject }): Buffer;
+}
+
+/** The KeyObject subset the sharing code relies on. KeyObjects are opaque;
+ *  DER export is the one operation shared verbatim by both backends. */
+export interface EcKeyObject {
+  export(options: { format: "der"; type: "spki" | "pkcs8" }): Buffer;
 }
 
 // Metro (React Native) and tsc-emitted CJS provide require(); declare it

@@ -6,6 +6,65 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Added — Therapist sharing (zero-knowledge patient→clinician sharing)
+
+The feature this app was building toward: a patient can let their therapist
+see every surfaced pattern and, on click, the journal entries behind it —
+read-only, with the therapist's own encrypted notes. The server stays blind
+to content throughout.
+
+- **Zero-knowledge grant (E2E preserved).** The therapist portal (new
+  `portal/`, React + WebCrypto) registers with a P-256 wrap keypair; the
+  private key is stored only as a password-encrypted blob. A patient types
+  a short-lived single-use pairing code in the app ("Share with my
+  therapist" in Settings), sees the therapist's name, re-authenticates with
+  their password, and their client wraps the data key to the therapist's
+  public key (ECDH → HKDF salted with both SPKI keys → AES-256-GCM, AAD
+  `("consent-wrap", user, therapist)` — see
+  `backend/app/security/sharing.py`, the reference implementation). The
+  portal unwraps locally after login; the server never holds anything that
+  decrypts patient content.
+- **Pairing codes.** 8 chars, 15-minute TTL, single-use, stored only as an
+  HMAC; unknown/expired/consumed answer the same 404. Codes replace
+  username search so no therapist-enumeration oracle exists.
+- **Role separation.** `users.role` gates every route: therapist tokens
+  cannot reach journal endpoints (403 by dependency, not UI convention);
+  patient tokens cannot reach therapist routes. There is NO therapist
+  write path to patient data — read-only by construction.
+- **Therapist reads + audit.** `GET /therapist/patients`, per-patient
+  insights (byte-identical blob to the patient's own view) and entries
+  (paginated, `since`/`until`). Every grant/revoke and patient-data
+  read/write appends an `access_log` row; the log outlives account
+  deletion (plain-string ids, no FK).
+- **Evidence drill-down.** Surfaced patterns now carry
+  `detail.evidence_dates` (the capped list of days whose entries fed the
+  pattern) and `detail.pattern_pid` (stable id for note attachment). The
+  portal fetches exactly those days' entries, decrypts them, and
+  highlights label occurrences with per-entry mood — the "see all the data
+  under this pattern" view. Sensitive (crisis-adjacent) cards stay
+  non-quoting; the drill-down shows the patient's own words.
+- **Notes.** Therapist-private (encrypted under the therapist's
+  password-derived `portal-notes` key before leaving the browser),
+  attachable to a patient or a pattern id, surviving revoke, cascading
+  with account deletion on either side.
+- **Revoke semantics, honestly stated.** Revoke (password-gated) clears
+  the wrapped key — future access dies immediately; already-read data
+  cannot be unread (the grant disclosure says so). Re-granting reactivates
+  the same consent row, keeping the therapist's note continuity.
+- **Cross-platform pins.** `shared/vectors.json` gains `wrap_vectors`
+  (fixed test keypairs); backend, mobile (real quick-crypto seam code
+  under node) and portal (real WebCrypto) all verify against them.
+  Export bundles now carry share records (metadata only). GDPR posture:
+  grant records the disclosure version, mirroring the LLM-consent record.
+- **Tests.** Backend +64 API/crypto tests (role separation, pairing
+  lifecycle, consent boundaries, cross-therapist isolation, E2E decrypt
+  round-trips, audit, cascades, evidence dates) — suite 814. Mobile +26
+  (wrap vectors, client wire shapes, full share-screen flows incl. wrong
+  password/verifier/session-death branches) — suite 1103 at the same 98%
+  per-file coverage floor. Portal: 62 (crypto vectors incl. the unwrap
+  path, api client, app state machine, all views) with per-file coverage
+  thresholds and a CI job.
+
 ### Security — 2026-09-16 red-team remediation wave
 
 Full audit: `reports/redteam_audit_2026-09-16.md` (96 executable verdicts);

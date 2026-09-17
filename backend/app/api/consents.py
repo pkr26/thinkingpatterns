@@ -1,0 +1,319 @@
+"""Patient-side sharing: pairing lookup, consent grant/list/revoke.
+
+The sharing model is zero-knowledge end to end:
+
+  * The therapist's portal shows a short-lived pairing code.
+  * The patient types it; lookup answers with the therapist's display name
+    and P-256 public wrap key WITHOUT burning the code (the patient sees
+    exactly who they are about to share with before deciding).
+  * On confirm, the app wraps its data key to that public key
+    (ECDH + HKDF + AES-GCM — see security/sharing.py) and the grant call
+    burns the code and stores the wrap. The verifier (password proof) is
+    required: a stolen bearer token must not be able to hand a journal to
+    a third party, exactly like account deletion.
+  * Revoke clears the wrapped key. The server cannot claw back bytes a
+    browser already decrypted — the disclosure copy says so plainly — but
+    every read path dies with the consent.
+
+Enumeration posture: pairing lookup and grant answer 404 for any unknown,
+expired, or consumed code — indistinguishable — and share the auth rate
+bucket, so code guessing is throttled with credential guessing.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+
+from fastapi import APIRouter, Depends, Header, Request
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..cache import make_rate_limiter
+from ..deps import ApiError, get_session, require_regular_user
+from ..models import (
+    ROLE_THERAPIST,
+    AccessLog,
+    Consent,
+    PairingCode,
+    User,
+    utcnow,
+)
+from ..schemas import (
+    ConsentGrantRequest,
+    ConsentOut,
+    PairingLookupRequest,
+    PairingLookupResponse,
+)
+from ..security import sharing
+from ..security.crypto import MIN_BLOB_SIZE
+from .account import _require_verifier
+
+router = APIRouter(prefix="/consents", tags=["consents"])
+
+# Version of the sharing disclosure copy the mobile app shows before a
+# grant (Art. 7 record parity with the LLM consent flow).
+SHARING_DISCLOSURE_VERSION = "v1"
+
+# The wrap of a 32-byte data key is 12 + 32 + 16 = 60 bytes; a little
+# headroom for format evolution, still far below anything worth storing.
+MAX_WRAPPED_KEY_BYTES = 256
+
+_b64_error = (binascii.Error, ValueError)
+
+
+def _decode_b64(value: str, what: str) -> bytes:
+    try:
+        return base64.b64decode(value, validate=True)
+    except _b64_error:
+        raise ApiError(
+            status_code=422, detail=f"{what} must be base64", code="validation_error"
+        ) from None
+
+
+async def _live_code(session: AsyncSession, code: str, secret: str) -> PairingCode | None:
+    """The unconsumed, unexpired pairing-code row for this code, or None.
+    Lookup and grant share this: both must treat unknown/expired/consumed
+    identically."""
+    digest = sharing.pairing_code_digest(code, secret)
+    row = (
+        (
+            await session.execute(
+                select(PairingCode)
+                .where(PairingCode.code_hash == digest, PairingCode.consumed_at.is_(None))
+                .order_by(PairingCode.expires_at.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None or row.expires_at <= utcnow():
+        return None
+    return row
+
+
+async def _therapist_for_code(session: AsyncSession, code_row: PairingCode) -> User | None:
+    """The live therapist account behind a pairing code. A deactivated or
+    degraded therapist row answers None (404) — an expired code from a
+    closed account must not route a grant at a dead target."""
+    therapist = await session.get(User, code_row.therapist_id)
+    if (
+        therapist is None
+        or not therapist.is_active
+        or therapist.role != ROLE_THERAPIST
+        or not therapist.wrap_pub_key
+    ):
+        return None
+    return therapist
+
+
+@router.post(
+    "/pairing/lookup",
+    response_model=PairingLookupResponse,
+    dependencies=[
+        Depends(make_rate_limiter("pairing-lookup", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def lookup_pairing(
+    body: PairingLookupRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    code = sharing.normalize_pairing_code(body.code)
+    code_row = await _live_code(session, code, request.app.state.settings.token_secret)
+    if code_row is None:
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
+    therapist = await _therapist_for_code(session, code_row)
+    if therapist is None:
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
+    return PairingLookupResponse(
+        therapist_id=therapist.id,
+        display_name=therapist.display_name or therapist.username,
+        wrap_pub_key=therapist.wrap_pub_key or "",
+    )
+
+
+def _consent_out(consent: Consent, therapist: User) -> ConsentOut:
+    return ConsentOut(
+        id=consent.id,
+        therapist_id=therapist.id,
+        display_name=therapist.display_name or therapist.username,
+        username=therapist.username,
+        status=consent.status,
+        granted_at=consent.granted_at,
+        revoked_at=consent.revoked_at,
+    )
+
+
+@router.get(
+    "",
+    response_model=list[ConsentOut],
+    dependencies=[
+        Depends(make_rate_limiter("consents-read", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def list_consents(
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    rows = (
+        await session.execute(
+            select(Consent, User)
+            .join(User, Consent.therapist_id == User.id)
+            .where(Consent.user_id == user.id)
+            .order_by(Consent.granted_at.desc())
+        )
+    ).all()
+    return [_consent_out(consent, therapist) for consent, therapist in rows]
+
+
+@router.post(
+    "",
+    response_model=ConsentOut,
+    status_code=201,
+    dependencies=[
+        Depends(make_rate_limiter("consents-grant", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def grant_consent(
+    body: ConsentGrantRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    # The grant widens who can read the journal — password proof required,
+    # header transport preferred (same contract as DELETE /account).
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    await _require_verifier(user, verifier, request)
+
+    try:
+        sharing.validate_public_key_b64(body.ephemeral_pub)
+    except sharing.SharingError:
+        raise ApiError(
+            status_code=422,
+            detail="ephemeral_pub must be a P-256 SPKI key",
+            code="validation_error",
+        ) from None
+    wrapped = _decode_b64(body.wrapped_key, "wrapped_key")
+    if not MIN_BLOB_SIZE <= len(wrapped) <= MAX_WRAPPED_KEY_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrapped_key must be {MIN_BLOB_SIZE}-{MAX_WRAPPED_KEY_BYTES} bytes",
+            code="validation_error",
+        )
+
+    code = sharing.normalize_pairing_code(body.code)
+    code_row = await _live_code(session, code, request.app.state.settings.token_secret)
+    if code_row is None:
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
+    therapist = await _therapist_for_code(session, code_row)
+    if therapist is None:
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
+
+    # Burn the code FIRST (same transaction as the grant): a code consumed
+    # by a failed grant would be a code the therapist cannot reuse and the
+    # patient cannot retry — but the unique-consent race below must also
+    # not leave a burned code with no grant. Single transaction = both or
+    # neither.
+    code_row.consumed_at = utcnow()
+    now = utcnow()
+    existing = (
+        (
+            await session.execute(
+                select(Consent).where(
+                    Consent.user_id == user.id, Consent.therapist_id == therapist.id
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is not None:
+        # Re-grant (after revoke, or to refresh the wrap): same pair, same
+        # row — the therapist's note history survives.
+        existing.status = "active"
+        existing.granted_at = now
+        existing.revoked_at = None
+        existing.ephemeral_pub = body.ephemeral_pub
+        existing.wrapped_key = wrapped
+        existing.disclosure = body.disclosure
+        consent = existing
+    else:
+        consent = Consent(
+            user_id=user.id,
+            therapist_id=therapist.id,
+            status="active",
+            granted_at=now,
+            ephemeral_pub=body.ephemeral_pub,
+            wrapped_key=wrapped,
+            disclosure=body.disclosure,
+        )
+        session.add(consent)
+    session.add(AccessLog(actor_id=user.id, actor_role=user.role, user_id=user.id, action="grant"))
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        # Concurrent grants of the same pair (two tabs, same code redeemed
+        # twice concurrently — the code row was selected FOR-burn by both).
+        raise ApiError(
+            status_code=409, detail="consent already being granted", code="conflict"
+        ) from exc
+    await session.refresh(consent)
+    return _consent_out(consent, therapist)
+
+
+@router.delete(
+    "/{consent_id}",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("consents-revoke", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def revoke_consent(
+    consent_id: str,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    await _require_verifier(user, verifier, request)
+    consent = (
+        (
+            await session.execute(
+                select(Consent).where(Consent.id == consent_id, Consent.user_id == user.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if consent is None:
+        raise ApiError(status_code=404, detail="consent not found", code="not_found")
+    if consent.status != "revoked":
+        consent.status = "revoked"
+        consent.revoked_at = utcnow()
+        # Nothing left to unwrap: the wrapped key and the ephemeral public
+        # key are the grant's key material — cleared, not archived.
+        consent.wrapped_key = None
+        consent.ephemeral_pub = None
+        session.add(
+            AccessLog(actor_id=user.id, actor_role=user.role, user_id=user.id, action="revoke")
+        )
+        await session.commit()

@@ -54,8 +54,9 @@ class ClientEmulator:
 
     # ---- envelope helpers (identical contract to the mobile app) ----------------
 
-    def encrypt_entry(self, text: str, entry_date: date, client_entry_id: str,
-                      sentiment: float | None = None) -> str:
+    def encrypt_entry(
+        self, text: str, entry_date: date, client_entry_id: str, sentiment: float | None = None
+    ) -> str:
         payload = {
             "v": 1,
             "text": text,
@@ -80,11 +81,14 @@ class ClientEmulator:
         return {"Authorization": f"Bearer {self.token}"}
 
     async def register(self, client: AsyncClient) -> dict:
-        response = await client.post("/api/auth/register", json={
-            "username": self.username,
-            "salt": self.salt_b64,
-            "verifier": self.auth_key_b64,
-        })
+        response = await client.post(
+            "/api/auth/register",
+            json={
+                "username": self.username,
+                "salt": self.salt_b64,
+                "verifier": self.auth_key_b64,
+            },
+        )
         assert response.status_code == 201, response.text
         body = response.json()
         self.user_id = body["user_id"]
@@ -92,10 +96,13 @@ class ClientEmulator:
         return body
 
     async def login(self, client: AsyncClient) -> dict:
-        response = await client.post("/api/auth/login", json={
-            "username": self.username,
-            "verifier": self.auth_key_b64,
-        })
+        response = await client.post(
+            "/api/auth/login",
+            json={
+                "username": self.username,
+                "verifier": self.auth_key_b64,
+            },
+        )
         assert response.status_code == 200, response.text
         body = response.json()
         self.user_id = body["user_id"]
@@ -128,27 +135,39 @@ class ClientEmulator:
     async def delete_account(self, client: AsyncClient) -> int:
         """Delete this account with the required password-equivalent proof."""
         response = await client.request(
-            "DELETE", "/api/account", headers=self.headers,
+            "DELETE",
+            "/api/account",
+            headers=self.headers,
             json={"verifier": self.auth_key_b64},
         )
         return response.status_code
 
-    async def create_entry(self, client: AsyncClient, text: str, entry_date: date,
-                           client_entry_id: str | None = None,
-                           sentiment: float | None = None) -> dict:
+    async def create_entry(
+        self,
+        client: AsyncClient,
+        text: str,
+        entry_date: date,
+        client_entry_id: str | None = None,
+        sentiment: float | None = None,
+    ) -> dict:
         client_entry_id = client_entry_id or f"e-{entry_date.isoformat()}-{os.urandom(4).hex()}"
         blob = self.encrypt_entry(text, entry_date, client_entry_id, sentiment)
-        response = await client.post("/api/entries", headers=self.headers, json={
-            "client_entry_id": client_entry_id,
-            "blob": blob,
-            "entry_date": entry_date.isoformat(),
-        })
+        response = await client.post(
+            "/api/entries",
+            headers=self.headers,
+            json={
+                "client_entry_id": client_entry_id,
+                "blob": blob,
+                "entry_date": entry_date.isoformat(),
+            },
+        )
         assert response.status_code == 201, response.text
         return response.json()
 
     async def open_processing_session(self, client: AsyncClient) -> str:
-        response = await client.post("/api/processing/sessions", headers=self.headers,
-                                     json={"data_key": self.data_key_b64})
+        response = await client.post(
+            "/api/processing/sessions", headers=self.headers, json={"data_key": self.data_key_b64}
+        )
         assert response.status_code == 201, response.text
         return response.json()["session_token"]
 
@@ -178,14 +197,228 @@ class ClientEmulator:
         response = await client.get("/api/questions/today", headers=self.headers)
         assert response.status_code == 200, response.text
         return self.decrypt_blob(
-            response.json()["blob"], crypto.build_aad("question", self.user_id, for_date.isoformat())
+            response.json()["blob"],
+            crypto.build_aad("question", self.user_id, for_date.isoformat()),
         )
+
+    # ---- sharing flows (2026-09-16, additive) -------------------------------
+
+    async def pairing_lookup(self, client: AsyncClient, code: str) -> dict:
+        response = await client.post(
+            "/api/consents/pairing/lookup", headers=self.headers, json={"code": code}
+        )
+        return {
+            "status": response.status_code,
+            "body": response.json() if response.content else None,
+        }
+
+    async def grant_consent(
+        self,
+        client: AsyncClient,
+        code: str,
+        therapist_pub_b64: str,
+        therapist_id: str,
+        verifier: str | None = None,
+    ) -> dict:
+        """POST /consents with the X-Account-Verifier re-auth, wrapping the
+        data key to the therapist's public key first (mobile parity)."""
+        wrap = patient_wrap_for(self, therapist_pub_b64, therapist_id)
+        response = await client.post(
+            "/api/consents",
+            headers={**self.headers, "X-Account-Verifier": verifier or self.auth_key_b64},
+            json={"code": code, **wrap, "disclosure": "v1"},
+        )
+        return {
+            "status": response.status_code,
+            "body": response.json() if response.content else None,
+        }
+
+    async def list_consents(self, client: AsyncClient) -> dict:
+        response = await client.get("/api/consents", headers=self.headers)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def revoke_consent(
+        self, client: AsyncClient, consent_id: str, verifier: str | None = None
+    ) -> int:
+        response = await client.request(
+            "DELETE",
+            f"/api/consents/{consent_id}",
+            headers={**self.headers, "X-Account-Verifier": verifier or self.auth_key_b64},
+        )
+        return response.status_code
 
 
 def daterange(days: int, end: date) -> list[date]:
     """The last *days* calendar days ending at *end* (inclusive)."""
     from datetime import timedelta
+
     return [end - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+
+
+# ---------------------------------------------------------------------------
+# Therapist sharing (2026-09-16, additive): a faithful mirror of the portal's
+# crypto stack — same key schedule (portal wrap/notes HKDF labels), a real
+# P-256 keypair, the same wrap construction as security.sharing — so the
+# sharing API tests exercise the exact bytes a real browser would send.
+# ---------------------------------------------------------------------------
+
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
+from cryptography.hazmat.primitives.serialization import (  # noqa: E402
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
+
+from app.security import sharing as sharing_crypto  # noqa: E402
+from app.security.kdf import hkdf_sha256  # noqa: E402
+
+
+class TherapistEmulator:
+    def __init__(self, username: str, password: str, display_name: str | None = None):
+        self.username = username
+        self.password = password
+        self.display_name = display_name or f"Dr. {username.title()}"
+        self.salt = os.urandom(16)
+        self.master_key = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), self.salt, FAST_ITERATIONS
+        )
+        self.auth_key = kdf.derive_auth_key(self.master_key)
+        # The portal's two HKDF subkeys (contract lives in security.sharing).
+        self.wrap_kek = hkdf_sha256(self.master_key, None, sharing_crypto.PORTAL_WRAP_INFO)
+        self.notes_key = hkdf_sha256(self.master_key, None, sharing_crypto.PORTAL_NOTES_INFO)
+        # A real P-256 keypair, generated once per emulator instance.
+        self.private_key = ec.generate_private_key(ec.SECP256R1())
+        self.wrap_pub_key = base64.b64encode(
+            self.private_key.public_key().public_bytes(
+                Encoding.DER, PublicFormat.SubjectPublicKeyInfo
+            )
+        ).decode("ascii")
+        self.user_id: str | None = None
+        self.token: str | None = None
+
+    # ---- key material encodings ---------------------------------------------
+
+    @property
+    def salt_b64(self) -> str:
+        return base64.b64encode(self.salt).decode("ascii")
+
+    @property
+    def auth_key_b64(self) -> str:
+        return base64.b64encode(self.auth_key).decode("ascii")
+
+    def _pkcs8(self) -> bytes:
+        return self.private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+
+    def wrap_key_blob_b64(self) -> str:
+        """The private key, encrypted under the portal wrap KEK — exactly
+        what a real portal uploads at registration."""
+        blob = crypto.encrypt(
+            self.wrap_kek,
+            self._pkcs8(),
+            crypto.build_aad(sharing_crypto.THERAPIST_KEY_CONTEXT, self.username),
+        )
+        return base64.b64encode(blob).decode("ascii")
+
+    def unlock_private_key(self) -> ec.EllipticCurvePrivateKey:
+        """Mirror of the portal's post-login unlock: derive the KEK from the
+        password, decrypt the stored blob."""
+        blob = base64.b64decode(getattr(self, "stored_key_blob_b64", self.wrap_key_blob_b64()))
+        plain = crypto.decrypt(
+            self.wrap_kek,
+            blob,
+            crypto.build_aad(sharing_crypto.THERAPIST_KEY_CONTEXT, self.username),
+        )
+        return sharing_crypto.load_private_key_pkcs8(plain)
+
+    def unwrap_patient_data_key(
+        self, patient: "ClientEmulator", ephemeral_pub_b64: str, wrapped_key_b64: str
+    ) -> bytes:
+        """The portal-side unwrap of a patient's data key."""
+        assert patient.user_id and self.user_id
+        return sharing_crypto.unwrap_data_key(
+            self.unlock_private_key(),
+            ephemeral_pub_b64,
+            base64.b64decode(wrapped_key_b64),
+            patient.user_id,
+            self.user_id,
+            therapist_pub_der=base64.b64decode(self.wrap_pub_key),
+        )
+
+    def encrypt_note(self, patient: "ClientEmulator", client_note_id: str, text: str) -> str:
+        payload = {"v": 1, "text": text}
+        aad = crypto.build_aad(
+            sharing_crypto.NOTE_CONTEXT, self.user_id or "", patient.user_id or "", client_note_id
+        )
+        blob = crypto.encrypt(self.notes_key, json.dumps(payload).encode("utf-8"), aad)
+        return base64.b64encode(blob).decode("ascii")
+
+    def decrypt_note(self, patient: "ClientEmulator", client_note_id: str, blob_b64: str) -> dict:
+        aad = crypto.build_aad(
+            sharing_crypto.NOTE_CONTEXT, self.user_id or "", patient.user_id or "", client_note_id
+        )
+        plain = crypto.decrypt(self.notes_key, base64.b64decode(blob_b64), aad)
+        return json.loads(plain.decode("utf-8"))
+
+    # ---- API flows ------------------------------------------------------------
+
+    @property
+    def headers(self) -> dict:
+        if not self.token:
+            raise RuntimeError("not logged in")
+        return {"Authorization": f"Bearer {self.token}"}
+
+    async def register(self, client: AsyncClient) -> dict:
+        response = await client.post(
+            "/api/therapist/register",
+            json={
+                "username": self.username,
+                "salt": self.salt_b64,
+                "verifier": self.auth_key_b64,
+                "display_name": self.display_name,
+                "wrap_pub_key": self.wrap_pub_key,
+                "wrap_key_blob": self.wrap_key_blob_b64(),
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        self.user_id = body["user_id"]
+        self.token = body["token"]
+        return body
+
+    async def login(self, client: AsyncClient) -> dict:
+        response = await client.post(
+            "/api/auth/login",
+            json={
+                "username": self.username,
+                "verifier": self.auth_key_b64,
+            },
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        self.user_id = body["user_id"]
+        self.token = body["token"]
+        # The portal persists the server-held blob at login (it arrives via
+        # GET /therapist/me); remember it so unlock uses the stored bytes.
+        me = await client.get("/api/therapist/me", headers=self.headers)
+        assert me.status_code == 200, me.text
+        self.stored_key_blob_b64 = me.json()["wrap_key_blob"]
+        return body
+
+    async def create_pairing_code(self, client: AsyncClient) -> str:
+        response = await client.post("/api/therapist/pairing-codes", headers=self.headers)
+        assert response.status_code == 201, response.text
+        return response.json()["code"]
+
+
+def patient_wrap_for(patient: ClientEmulator, therapist_pub_b64: str, therapist_id: str) -> dict:
+    """The patient-side grant body fields, mirroring the mobile app's wrap."""
+    assert patient.user_id
+    eph_b64, wrapped_b64 = sharing_crypto.wrap_data_key(
+        patient.data_key, therapist_pub_b64, patient.user_id, therapist_id
+    )
+    return {"ephemeral_pub": eph_b64, "wrapped_key": wrapped_b64}
 
 
 # ---------------------------------------------------------------------------

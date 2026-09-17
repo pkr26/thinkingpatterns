@@ -388,6 +388,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         </View>
       )}
 
+      <GhostButton
+        label="Share with my therapist"
+        center={false}
+        onPress={() => navigation.navigate("TherapistShare")}
+        accessibilityLabel="Share your entries and patterns with a therapist"
+      />
       <PrimaryButton label="Export my data (encrypted)" onPress={exportData} disabled={busy} />
       <PrimaryButton label="Delete my account and data" onPress={deleteEverything} disabled={busy} danger />
       <GhostButton

@@ -106,7 +106,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # CORS; browser frontends set an explicit MINDPATTERN_CORS_ORIGINS
         # allowlist. Credentials stay off.
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         # X-Processing-Token drives recomputes; X-Account-Verifier is the
         # preferred DELETE /account re-auth transport — a browser client
         # could not send either in a cross-origin request without this.

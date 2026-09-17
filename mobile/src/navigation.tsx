@@ -11,6 +11,7 @@ import { HistoryScreen } from "./screens/HistoryScreen";
 import { InsightsScreen } from "./screens/InsightsScreen";
 import { QuestionScreen } from "./screens/QuestionScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { TherapistShareScreen } from "./screens/TherapistShareScreen";
 import { PrivacyScreen } from "./screens/PrivacyScreen";
 import { CrisisScreen } from "./screens/CrisisScreen";
 import { takePendingOnboarding } from "./onboarding";
@@ -25,6 +26,7 @@ export type RootStackParamList = {
   Insights: undefined;
   Question: undefined;
   Settings: undefined;
+  TherapistShare: undefined;
   Privacy: undefined;
   Crisis: undefined;
 };
@@ -106,6 +108,7 @@ export function AppNavigator(): React.JSX.Element {
           <Stack.Screen name="Insights" component={InsightsScreen} options={{ title: "Patterns" }} />
           <Stack.Screen name="Question" component={QuestionScreen} options={{ title: "One question" }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "Settings" }} />
+          <Stack.Screen name="TherapistShare" component={TherapistShareScreen} options={{ title: "My therapist" }} />
           {/* The privacy policy is static, offline content (like Crisis). */}
           <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: "Privacy" }} />
           {/* Crisis help: one navigation hop from every screen (offline,

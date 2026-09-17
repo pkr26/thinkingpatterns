@@ -9,9 +9,17 @@ alternating mounts.
 
 from fastapi import APIRouter
 
-from . import account, auth, entries, insights, meta
+from . import account, auth, consents, entries, insights, meta, therapist
 
-_module_routers = (auth.router, entries.router, insights.router, account.router, meta.router)
+_module_routers = (
+    auth.router,
+    entries.router,
+    insights.router,
+    account.router,
+    consents.router,
+    therapist.router,
+    meta.router,
+)
 
 # Canonical, versioned mount.
 api_v1_router = APIRouter(prefix="/api/v1")

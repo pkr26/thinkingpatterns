@@ -1848,12 +1848,21 @@ def update(state: dict, entries: list[JournalEntry], today: date) -> BrainUpdate
             confidence=round(strength, 3),
             detail={
                 **record.detail,
+                # Stable identity for external attachment (therapist notes):
+                # phrase-cluster pids are anchored on internal sentence
+                # refs, so kind+label alone cannot reconstruct them.
+                "pattern_pid": record.pid,
                 "pattern_state": record.state,
                 "strength": round(strength, 3),
                 "first_seen": record.first_seen,
                 "last_seen": record.last_seen,
                 "is_new": is_new,
                 "sample_days": n_window_entries,
+                # The days whose entries fed this pattern (capped at
+                # EVIDENCE_DATES_CAP). Powers the evidence drill-down: the
+                # patient's app and the therapist portal fetch the entries
+                # for exactly these dates. Dates only — never quotes text.
+                "evidence_dates": list(record.evidence_dates),
                 # Crisis interlock: when the wording itself is suppress-tier,
                 # the card is marked so the client renders the NON-QUOTING
                 # variant (and the question engine never touches it —
