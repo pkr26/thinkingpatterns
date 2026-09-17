@@ -1,0 +1,3755 @@
+{
+  "days": 60,
+  "users": [
+    {
+      "name": "maya",
+      "blurb": "work-dread Sundays + sleep worry with next-day dips",
+      "expected": [
+        "temporal (work -> Sundays)",
+        "mood_correlation (work days lower)",
+        "link (day after sleep worry reads lower)",
+        "rumination / recurring_phrase (the worry)"
+      ],
+      "entries": 120,
+      "active_days": 60,
+      "patterns_live": [
+        {
+          "kind": "recurring_phrase",
+          "label": "went to bed late",
+          "occurrences": 23,
+          "confidence": 1.0,
+          "detail": {
+            "span_days": 58,
+            "distinct_days": 23,
+            "first": "2026-07-20",
+            "last": "2026-09-16",
+            "variants": [
+              "went to bed late"
+            ],
+            "pattern_pid": "recurring_phrase:d4abe03f3d20",
+            "pattern_state": "emerging",
+            "strength": 1.0,
+            "first_seen": "2026-07-20",
+            "last_seen": "2026-09-16",
+            "is_new": true,
+            "sample_days": 120,
+            "evidence_dates": [
+              "2026-07-20",
+              "2026-07-22",
+              "2026-07-24",
+              "2026-07-29",
+              "2026-08-03",
+              "2026-08-05",
+              "2026-08-07",
+              "2026-08-10",
+              "2026-08-12",
+              "2026-08-14",
+              "2026-08-17",
+              "2026-08-19",
+              "2026-08-21",
+              "2026-08-24",
+              "2026-08-26",
+              "2026-08-28",
+              "2026-08-31",
+              "2026-09-02",
+              "2026-09-04",
+              "2026-09-09",
+              "2026-09-11",
+              "2026-09-14",
+              "2026-09-16"
+            ]
+          }
+        },
+        {
+          "kind": "rumination",
+          "label": "i can't sleep my mind won't stop",
+          "occurrences": 23,
+          "confidence": 1.0,
+          "detail": {
+            "span_days": 58,
+            "distinct_days": 23,
+            "first": "2026-07-20",
+            "last": "2026-09-16",
+            "variants": [
+              "can't sleep my mind won't stop racing",
+              "i can't sleep my mind just won't stop tonight",
+              "i can't sleep my mind won't stop"
+            ],
+            "negativity": 0.0,
+            "mean_negators": 2.0,
+            "absolutist_per_100": 0.0,
+            "pattern_pid": "rumination:db00b247af9a",
+            "pattern_state": "emerging",
+            "strength": 1.0,
+            "first_seen": "2026-07-20",
+            "last_seen": "2026-09-16",
+            "is_new": true,
+            "sample_days": 120,
+            "evidence_dates": [
+              "2026-07-20",
+              "2026-07-22",
+              "2026-07-24",
+              "2026-07-29",
+              "2026-08-03",
+              "2026-08-05",
+              "2026-08-07",
+              "2026-08-10",
+              "2026-08-12",
+              "2026-08-14",
+              "2026-08-17",
+              "2026-08-19",
+              "2026-08-21",
+              "2026-08-24",
+              "2026-08-26",
+              "2026-08-28",
+              "2026-08-31",
+              "2026-09-02",
+              "2026-09-04",
+              "2026-09-09",
+              "2026-09-11",
+              "2026-09-14",
+              "2026-09-16"
+            ]
+          }
+        }
+      ],
+      "patterns_replay_daily": [
+        {
+          "pid": "link:sleep",
+          "kind": "link",
+          "label": "sleep",
+          "state": "confirmed",
+          "occurrences": 24
+        },
+        {
+          "pid": "recurring_phrase:d4abe03f3d20",
+          "kind": "recurring_phrase",
+          "label": "went to bed late",
+          "state": "confirmed",
+          "occurrences": 23
+        },
+        {
+          "pid": "rumination:db00b247af9a",
+          "kind": "rumination",
+          "label": "i can't sleep my mind won't stop",
+          "state": "confirmed",
+          "occurrences": 23
+        },
+        {
+          "pid": "recurring_phrase:384d7d66d05c",
+          "kind": "recurring_phrase",
+          "label": "the week is looming big deadline pressure at work again",
+          "state": "confirmed",
+          "occurrences": 9
+        },
+        {
+          "pid": "temporal:work",
+          "kind": "temporal",
+          "label": "work",
+          "state": "emerging",
+          "occurrences": 11
+        },
+        {
+          "pid": "recurring_phrase:828433ec26bc",
+          "kind": "recurring_phrase",
+          "label": "called the pharmacy about the prescription refill",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:83459ab61b98",
+          "kind": "recurring_phrase",
+          "label": "made the bed properly for once",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3591f05bb42a",
+          "kind": "recurring_phrase",
+          "label": "walked the long way to the pharmacy",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef3cd638f33e",
+          "kind": "recurring_phrase",
+          "label": "answered a few lingering messages at lunch",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:0ba0f40f53d5",
+          "kind": "recurring_phrase",
+          "label": "listened to half a podcast episode on the way home",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:87204e9fa48b",
+          "kind": "recurring_phrase",
+          "label": "morning coffee on the balcony before anything else",
+          "state": "emerging",
+          "occurrences": 3
+        }
+      ],
+      "patterns_replay_singleshot": [
+        {
+          "pid": "recurring_phrase:d4abe03f3d20",
+          "kind": "recurring_phrase",
+          "label": "went to bed late",
+          "state": "emerging",
+          "occurrences": 23
+        },
+        {
+          "pid": "rumination:db00b247af9a",
+          "kind": "rumination",
+          "label": "i can't sleep my mind won't stop",
+          "state": "emerging",
+          "occurrences": 23
+        }
+      ],
+      "pattern_first_day": {
+        "recurring_phrase|went to bed late": 30,
+        "rumination|i can't sleep my mind won't stop": 30,
+        "link|sleep": 31,
+        "recurring_phrase|the week is looming big deadline pressure at work again": 31,
+        "temporal|work": 50,
+        "recurring_phrase|morning coffee on the balcony before anything else": 53,
+        "recurring_phrase|answered a few lingering messages at lunch": 55,
+        "recurring_phrase|listened to half a podcast episode on the way home": 55,
+        "recurring_phrase|walked the long way to the pharmacy": 57,
+        "recurring_phrase|made the bed properly for once": 58,
+        "recurring_phrase|called the pharmacy about the prescription refill": 60
+      },
+      "determinism_live_eq_singleshot": true,
+      "question_today": "If today had a title, what would it be?",
+      "timeline": [
+        {
+          "day": 1,
+          "date": "2026-07-19",
+          "active_days": 1,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 2,
+          "date": "2026-07-20",
+          "active_days": 2,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 3,
+          "date": "2026-07-21",
+          "active_days": 3,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 4,
+          "date": "2026-07-22",
+          "active_days": 4,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 5,
+          "date": "2026-07-23",
+          "active_days": 5,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 6,
+          "date": "2026-07-24",
+          "active_days": 6,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 7,
+          "date": "2026-07-25",
+          "active_days": 7,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 8,
+          "date": "2026-07-26",
+          "active_days": 8,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 9,
+          "date": "2026-07-27",
+          "active_days": 9,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 10,
+          "date": "2026-07-28",
+          "active_days": 10,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 11,
+          "date": "2026-07-29",
+          "active_days": 11,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 12,
+          "date": "2026-07-30",
+          "active_days": 12,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 13,
+          "date": "2026-07-31",
+          "active_days": 13,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 14,
+          "date": "2026-08-01",
+          "active_days": 14,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 15,
+          "date": "2026-08-02",
+          "active_days": 15,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 16,
+          "date": "2026-08-03",
+          "active_days": 16,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 17,
+          "date": "2026-08-04",
+          "active_days": 17,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 18,
+          "date": "2026-08-05",
+          "active_days": 18,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 19,
+          "date": "2026-08-06",
+          "active_days": 19,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 20,
+          "date": "2026-08-07",
+          "active_days": 20,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 21,
+          "date": "2026-08-08",
+          "active_days": 21,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 22,
+          "date": "2026-08-09",
+          "active_days": 22,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 23,
+          "date": "2026-08-10",
+          "active_days": 23,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 24,
+          "date": "2026-08-11",
+          "active_days": 24,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 25,
+          "date": "2026-08-12",
+          "active_days": 25,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 26,
+          "date": "2026-08-13",
+          "active_days": 26,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 27,
+          "date": "2026-08-14",
+          "active_days": 27,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 28,
+          "date": "2026-08-15",
+          "active_days": 28,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 29,
+          "date": "2026-08-16",
+          "active_days": 29,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 30,
+          "date": "2026-08-17",
+          "active_days": 30,
+          "recomputed": true,
+          "surfaced": 2,
+          "new": [
+            "recurring_phrase: went to bed late",
+            "rumination: i can't sleep my mind won't stop"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 31,
+          "date": "2026-08-18",
+          "active_days": 31,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [
+            "link: sleep",
+            "recurring_phrase: the week is looming big deadline pressure at wor"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 32,
+          "date": "2026-08-19",
+          "active_days": 32,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 33,
+          "date": "2026-08-20",
+          "active_days": 33,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 34,
+          "date": "2026-08-21",
+          "active_days": 34,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 35,
+          "date": "2026-08-22",
+          "active_days": 35,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 36,
+          "date": "2026-08-23",
+          "active_days": 36,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 37,
+          "date": "2026-08-24",
+          "active_days": 37,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 38,
+          "date": "2026-08-25",
+          "active_days": 38,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 39,
+          "date": "2026-08-26",
+          "active_days": 39,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 40,
+          "date": "2026-08-27",
+          "active_days": 40,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 41,
+          "date": "2026-08-28",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 42,
+          "date": "2026-08-29",
+          "active_days": 42,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 43,
+          "date": "2026-08-30",
+          "active_days": 43,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 44,
+          "date": "2026-08-31",
+          "active_days": 44,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 45,
+          "date": "2026-09-01",
+          "active_days": 45,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 46,
+          "date": "2026-09-02",
+          "active_days": 46,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 47,
+          "date": "2026-09-03",
+          "active_days": 47,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 48,
+          "date": "2026-09-04",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 49,
+          "date": "2026-09-05",
+          "active_days": 49,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 50,
+          "date": "2026-09-06",
+          "active_days": 50,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [
+            "temporal: work"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 51,
+          "date": "2026-09-07",
+          "active_days": 51,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": [
+            "link 'sleep' emerging -> confirmed",
+            "recurring_phrase 'went to bed late' emerging -> confirmed",
+            "rumination 'i can't sleep my mind won't stop' emerging -> confirmed",
+            "recurring_phrase 'the week is looming big deadline' emerging -> confirmed"
+          ]
+        },
+        {
+          "day": 52,
+          "date": "2026-09-08",
+          "active_days": 52,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 53,
+          "date": "2026-09-09",
+          "active_days": 53,
+          "recomputed": true,
+          "surfaced": 6,
+          "new": [
+            "recurring_phrase: morning coffee on the balcony before anything el"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 54,
+          "date": "2026-09-10",
+          "active_days": 54,
+          "recomputed": true,
+          "surfaced": 6,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 55,
+          "date": "2026-09-11",
+          "active_days": 55,
+          "recomputed": true,
+          "surfaced": 8,
+          "new": [
+            "recurring_phrase: answered a few lingering messages at lunch",
+            "recurring_phrase: listened to half a podcast episode on the way ho"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 56,
+          "date": "2026-09-12",
+          "active_days": 56,
+          "recomputed": true,
+          "surfaced": 8,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 57,
+          "date": "2026-09-13",
+          "active_days": 57,
+          "recomputed": true,
+          "surfaced": 9,
+          "new": [
+            "recurring_phrase: walked the long way to the pharmacy"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 58,
+          "date": "2026-09-14",
+          "active_days": 58,
+          "recomputed": true,
+          "surfaced": 10,
+          "new": [
+            "recurring_phrase: made the bed properly for once"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 59,
+          "date": "2026-09-15",
+          "active_days": 59,
+          "recomputed": true,
+          "surfaced": 10,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 60,
+          "date": "2026-09-16",
+          "active_days": 60,
+          "recomputed": true,
+          "surfaced": 11,
+          "new": [
+            "recurring_phrase: called the pharmacy about the prescription refil"
+          ],
+          "transitions": []
+        }
+      ],
+      "user_id": "40c28a7d8fca4d2382fdacf1c3cb4c24",
+      "storage": {
+        "entry_rows": 120,
+        "entry_ciphertext_bytes": 16977,
+        "insights": {
+          "brain": {
+            "rows": 1,
+            "bytes": 7645
+          },
+          "patterns": {
+            "rows": 1,
+            "bytes": 1886
+          },
+          "question": {
+            "rows": 1,
+            "bytes": 109
+          }
+        }
+      }
+    },
+    {
+      "name": "omar",
+      "blurb": "stable; guitar topic rising in the last 3 weeks",
+      "expected": [
+        "topic (guitar rising)",
+        "(little else \u2014 stable baseline)"
+      ],
+      "entries": 120,
+      "active_days": 60,
+      "patterns_live": [
+        {
+          "kind": "topic",
+          "label": "guitar",
+          "occurrences": 13,
+          "confidence": 1.0,
+          "detail": {
+            "entries": 13,
+            "distinct_days": 13,
+            "share": 0.108,
+            "share_earlier": 0.033,
+            "share_recent": 0.183,
+            "trend": "rising",
+            "p_value": 2.9e-05,
+            "pattern_pid": "topic:guitar",
+            "pattern_state": "emerging",
+            "strength": 1.0,
+            "first_seen": "2026-07-25",
+            "last_seen": "2026-09-15",
+            "is_new": true,
+            "sample_days": 120,
+            "evidence_dates": [
+              "2026-07-25",
+              "2026-08-08",
+              "2026-08-21",
+              "2026-08-28",
+              "2026-08-30",
+              "2026-09-01",
+              "2026-09-03",
+              "2026-09-05",
+              "2026-09-07",
+              "2026-09-09",
+              "2026-09-11",
+              "2026-09-13",
+              "2026-09-15"
+            ]
+          }
+        }
+      ],
+      "patterns_replay_daily": [
+        {
+          "pid": "recurring_phrase:066efea47ca8",
+          "kind": "recurring_phrase",
+          "label": "messed around on the guitar for a bit",
+          "state": "confirmed",
+          "occurrences": 3
+        },
+        {
+          "pid": "topic:guitar",
+          "kind": "topic",
+          "label": "guitar",
+          "state": "emerging",
+          "occurrences": 13
+        },
+        {
+          "pid": "recurring_phrase:bfc7f2b2abaf",
+          "kind": "recurring_phrase",
+          "label": "spent the evening with the guitar learning fingerpicking",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ff72ebdf7229",
+          "kind": "recurring_phrase",
+          "label": "fixed the wobbly chair leg at last",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:828433ec26bc",
+          "kind": "recurring_phrase",
+          "label": "called the pharmacy about the prescription refill",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef379c55eae0",
+          "kind": "recurring_phrase",
+          "label": "reorganized one shelf of the bookcase",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:dd3f967fa5f1",
+          "kind": "recurring_phrase",
+          "label": "stretched for five minutes in the evening",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:f12cc5cb1fb9",
+          "kind": "recurring_phrase",
+          "label": "brewed tea and watched the rain start",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:83459ab61b98",
+          "kind": "recurring_phrase",
+          "label": "made the bed properly for once",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3591f05bb42a",
+          "kind": "recurring_phrase",
+          "label": "walked the long way to the pharmacy",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:da561df8f996",
+          "kind": "recurring_phrase",
+          "label": "tidied the desk and cleared the inbox",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3930f2ba2c86",
+          "kind": "recurring_phrase",
+          "label": "read ten pages of the novel before bed",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:c47c041f2360",
+          "kind": "recurring_phrase",
+          "label": "took the stairs instead of the elevator",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef3cd638f33e",
+          "kind": "recurring_phrase",
+          "label": "answered a few lingering messages at lunch",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:0ba0f40f53d5",
+          "kind": "recurring_phrase",
+          "label": "listened to half a podcast episode on the way home",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:d82d1cde1e8d",
+          "kind": "recurring_phrase",
+          "label": "watered the plants and swept the kitchen",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:9adec381d65f",
+          "kind": "recurring_phrase",
+          "label": "cooked something simple for dinner",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:77538be129de",
+          "kind": "recurring_phrase",
+          "label": "the commute was uneventful today",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:87204e9fa48b",
+          "kind": "recurring_phrase",
+          "label": "morning coffee on the balcony before anything else",
+          "state": "emerging",
+          "occurrences": 3
+        }
+      ],
+      "patterns_replay_singleshot": [
+        {
+          "pid": "topic:guitar",
+          "kind": "topic",
+          "label": "guitar",
+          "state": "emerging",
+          "occurrences": 13
+        }
+      ],
+      "pattern_first_day": {
+        "recurring_phrase|messed around on the guitar for a bit": 35,
+        "recurring_phrase|the commute was uneventful today": 53,
+        "recurring_phrase|morning coffee on the balcony before anything else": 53,
+        "recurring_phrase|watered the plants and swept the kitchen": 54,
+        "recurring_phrase|cooked something simple for dinner": 54,
+        "recurring_phrase|answered a few lingering messages at lunch": 55,
+        "recurring_phrase|listened to half a podcast episode on the way home": 55,
+        "recurring_phrase|spent the evening with the guitar learning fingerpicking": 56,
+        "recurring_phrase|read ten pages of the novel before bed": 56,
+        "recurring_phrase|took the stairs instead of the elevator": 56,
+        "recurring_phrase|walked the long way to the pharmacy": 57,
+        "recurring_phrase|tidied the desk and cleared the inbox": 57,
+        "recurring_phrase|brewed tea and watched the rain start": 58,
+        "recurring_phrase|made the bed properly for once": 58,
+        "topic|guitar": 59,
+        "recurring_phrase|reorganized one shelf of the bookcase": 59,
+        "recurring_phrase|stretched for five minutes in the evening": 59,
+        "recurring_phrase|fixed the wobbly chair leg at last": 60,
+        "recurring_phrase|called the pharmacy about the prescription refill": 60
+      },
+      "determinism_live_eq_singleshot": true,
+      "question_today": "What felt different today compared to yesterday?",
+      "timeline": [
+        {
+          "day": 1,
+          "date": "2026-07-19",
+          "active_days": 1,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 2,
+          "date": "2026-07-20",
+          "active_days": 2,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 3,
+          "date": "2026-07-21",
+          "active_days": 3,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 4,
+          "date": "2026-07-22",
+          "active_days": 4,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 5,
+          "date": "2026-07-23",
+          "active_days": 5,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 6,
+          "date": "2026-07-24",
+          "active_days": 6,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 7,
+          "date": "2026-07-25",
+          "active_days": 7,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 8,
+          "date": "2026-07-26",
+          "active_days": 8,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 9,
+          "date": "2026-07-27",
+          "active_days": 9,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 10,
+          "date": "2026-07-28",
+          "active_days": 10,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 11,
+          "date": "2026-07-29",
+          "active_days": 11,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 12,
+          "date": "2026-07-30",
+          "active_days": 12,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 13,
+          "date": "2026-07-31",
+          "active_days": 13,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 14,
+          "date": "2026-08-01",
+          "active_days": 14,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 15,
+          "date": "2026-08-02",
+          "active_days": 15,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 16,
+          "date": "2026-08-03",
+          "active_days": 16,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 17,
+          "date": "2026-08-04",
+          "active_days": 17,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 18,
+          "date": "2026-08-05",
+          "active_days": 18,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 19,
+          "date": "2026-08-06",
+          "active_days": 19,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 20,
+          "date": "2026-08-07",
+          "active_days": 20,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 21,
+          "date": "2026-08-08",
+          "active_days": 21,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 22,
+          "date": "2026-08-09",
+          "active_days": 22,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 23,
+          "date": "2026-08-10",
+          "active_days": 23,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 24,
+          "date": "2026-08-11",
+          "active_days": 24,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 25,
+          "date": "2026-08-12",
+          "active_days": 25,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 26,
+          "date": "2026-08-13",
+          "active_days": 26,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 27,
+          "date": "2026-08-14",
+          "active_days": 27,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 28,
+          "date": "2026-08-15",
+          "active_days": 28,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 29,
+          "date": "2026-08-16",
+          "active_days": 29,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 30,
+          "date": "2026-08-17",
+          "active_days": 30,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 31,
+          "date": "2026-08-18",
+          "active_days": 31,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 32,
+          "date": "2026-08-19",
+          "active_days": 32,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 33,
+          "date": "2026-08-20",
+          "active_days": 33,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 34,
+          "date": "2026-08-21",
+          "active_days": 34,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 35,
+          "date": "2026-08-22",
+          "active_days": 35,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [
+            "recurring_phrase: messed around on the guitar for a bit"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 36,
+          "date": "2026-08-23",
+          "active_days": 36,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 37,
+          "date": "2026-08-24",
+          "active_days": 37,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 38,
+          "date": "2026-08-25",
+          "active_days": 38,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 39,
+          "date": "2026-08-26",
+          "active_days": 39,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 40,
+          "date": "2026-08-27",
+          "active_days": 40,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 41,
+          "date": "2026-08-28",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 42,
+          "date": "2026-08-29",
+          "active_days": 42,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 43,
+          "date": "2026-08-30",
+          "active_days": 43,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 44,
+          "date": "2026-08-31",
+          "active_days": 44,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 45,
+          "date": "2026-09-01",
+          "active_days": 45,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 46,
+          "date": "2026-09-02",
+          "active_days": 46,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 47,
+          "date": "2026-09-03",
+          "active_days": 47,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 48,
+          "date": "2026-09-04",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 49,
+          "date": "2026-09-05",
+          "active_days": 49,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 50,
+          "date": "2026-09-06",
+          "active_days": 50,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 51,
+          "date": "2026-09-07",
+          "active_days": 51,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 52,
+          "date": "2026-09-08",
+          "active_days": 52,
+          "recomputed": true,
+          "surfaced": 1,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 53,
+          "date": "2026-09-09",
+          "active_days": 53,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [
+            "recurring_phrase: the commute was uneventful today",
+            "recurring_phrase: morning coffee on the balcony before anything el"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 54,
+          "date": "2026-09-10",
+          "active_days": 54,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [
+            "recurring_phrase: watered the plants and swept the kitchen",
+            "recurring_phrase: cooked something simple for dinner"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 55,
+          "date": "2026-09-11",
+          "active_days": 55,
+          "recomputed": true,
+          "surfaced": 7,
+          "new": [
+            "recurring_phrase: answered a few lingering messages at lunch",
+            "recurring_phrase: listened to half a podcast episode on the way ho"
+          ],
+          "transitions": [
+            "recurring_phrase 'messed around on the guitar for ' emerging -> confirmed"
+          ]
+        },
+        {
+          "day": 56,
+          "date": "2026-09-12",
+          "active_days": 56,
+          "recomputed": true,
+          "surfaced": 10,
+          "new": [
+            "recurring_phrase: spent the evening with the guitar learning finge",
+            "recurring_phrase: read ten pages of the novel before bed",
+            "recurring_phrase: took the stairs instead of the elevator"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 57,
+          "date": "2026-09-13",
+          "active_days": 57,
+          "recomputed": true,
+          "surfaced": 12,
+          "new": [
+            "recurring_phrase: walked the long way to the pharmacy",
+            "recurring_phrase: tidied the desk and cleared the inbox"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 58,
+          "date": "2026-09-14",
+          "active_days": 58,
+          "recomputed": true,
+          "surfaced": 14,
+          "new": [
+            "recurring_phrase: brewed tea and watched the rain start",
+            "recurring_phrase: made the bed properly for once"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 59,
+          "date": "2026-09-15",
+          "active_days": 59,
+          "recomputed": true,
+          "surfaced": 17,
+          "new": [
+            "topic: guitar",
+            "recurring_phrase: reorganized one shelf of the bookcase",
+            "recurring_phrase: stretched for five minutes in the evening"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 60,
+          "date": "2026-09-16",
+          "active_days": 60,
+          "recomputed": true,
+          "surfaced": 19,
+          "new": [
+            "recurring_phrase: fixed the wobbly chair leg at last",
+            "recurring_phrase: called the pharmacy about the prescription refil"
+          ],
+          "transitions": []
+        }
+      ],
+      "user_id": "0a361c250fdf4785a10e71bb7347ba18",
+      "storage": {
+        "entry_rows": 120,
+        "entry_ciphertext_bytes": 16463,
+        "insights": {
+          "brain": {
+            "rows": 1,
+            "bytes": 11597
+          },
+          "patterns": {
+            "rows": 1,
+            "bytes": 797
+          },
+          "question": {
+            "rows": 1,
+            "bytes": 118
+          }
+        }
+      }
+    },
+    {
+      "name": "priya",
+      "blurb": "scrolling nights read low; late decline + inertia + swings",
+      "expected": [
+        "mood_correlation (scrolling nights <-> lower days)",
+        "mood_shift (late decline)",
+        "inertia (day-to-day carryover)"
+      ],
+      "entries": 126,
+      "active_days": 60,
+      "patterns_live": [],
+      "patterns_replay_daily": [
+        {
+          "pid": "recurring_phrase:0f0efb33b5e1",
+          "kind": "recurring_phrase",
+          "label": "short note drank enough water today",
+          "state": "confirmed",
+          "occurrences": 6
+        },
+        {
+          "pid": "rumination:e100c3a7796d",
+          "kind": "rumination",
+          "label": "fell down the feed again regret it every time",
+          "state": "confirmed",
+          "occurrences": 6
+        },
+        {
+          "pid": "rumination:17f49eae9fd0",
+          "kind": "rumination",
+          "label": "wasted the whole evening scrolling eyes tired",
+          "state": "confirmed",
+          "occurrences": 6
+        },
+        {
+          "pid": "recurring_phrase:d44cff143fff",
+          "kind": "recurring_phrase",
+          "label": "screens all evening head buzzing afterwards",
+          "state": "confirmed",
+          "occurrences": 4
+        },
+        {
+          "pid": "mood_shift:lower",
+          "kind": "mood_shift",
+          "label": "recent mood",
+          "state": "emerging",
+          "occurrences": 5
+        },
+        {
+          "pid": "recurring_phrase:ff72ebdf7229",
+          "kind": "recurring_phrase",
+          "label": "fixed the wobbly chair leg at last",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:828433ec26bc",
+          "kind": "recurring_phrase",
+          "label": "called the pharmacy about the prescription refill",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef379c55eae0",
+          "kind": "recurring_phrase",
+          "label": "reorganized one shelf of the bookcase",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:dd3f967fa5f1",
+          "kind": "recurring_phrase",
+          "label": "stretched for five minutes in the evening",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:f12cc5cb1fb9",
+          "kind": "recurring_phrase",
+          "label": "brewed tea and watched the rain start",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:83459ab61b98",
+          "kind": "recurring_phrase",
+          "label": "made the bed properly for once",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3591f05bb42a",
+          "kind": "recurring_phrase",
+          "label": "walked the long way to the pharmacy",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:da561df8f996",
+          "kind": "recurring_phrase",
+          "label": "tidied the desk and cleared the inbox",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3930f2ba2c86",
+          "kind": "recurring_phrase",
+          "label": "read ten pages of the novel before bed",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:c47c041f2360",
+          "kind": "recurring_phrase",
+          "label": "took the stairs instead of the elevator",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef3cd638f33e",
+          "kind": "recurring_phrase",
+          "label": "answered a few lingering messages at lunch",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:0ba0f40f53d5",
+          "kind": "recurring_phrase",
+          "label": "listened to half a podcast episode on the way home",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:d82d1cde1e8d",
+          "kind": "recurring_phrase",
+          "label": "watered the plants and swept the kitchen",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:9adec381d65f",
+          "kind": "recurring_phrase",
+          "label": "cooked something simple for dinner",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:77538be129de",
+          "kind": "recurring_phrase",
+          "label": "the commute was uneventful today",
+          "state": "emerging",
+          "occurrences": 3
+        }
+      ],
+      "patterns_replay_singleshot": [],
+      "pattern_first_day": {
+        "rumination|wasted the whole evening scrolling eyes tired": 31,
+        "rumination|fell down the feed again regret it every time": 31,
+        "recurring_phrase|short note drank enough water today": 31,
+        "recurring_phrase|screens all evening head buzzing afterwards": 33,
+        "mood_shift|recent mood": 43,
+        "recurring_phrase|the commute was uneventful today": 53,
+        "recurring_phrase|morning coffee on the balcony before anything else": 53,
+        "recurring_phrase|watered the plants and swept the kitchen": 54,
+        "recurring_phrase|cooked something simple for dinner": 54,
+        "recurring_phrase|answered a few lingering messages at lunch": 55,
+        "recurring_phrase|listened to half a podcast episode on the way home": 55,
+        "recurring_phrase|read ten pages of the novel before bed": 56,
+        "recurring_phrase|took the stairs instead of the elevator": 56,
+        "recurring_phrase|walked the long way to the pharmacy": 57,
+        "recurring_phrase|tidied the desk and cleared the inbox": 57,
+        "recurring_phrase|brewed tea and watched the rain start": 58,
+        "recurring_phrase|made the bed properly for once": 58,
+        "recurring_phrase|reorganized one shelf of the bookcase": 59,
+        "recurring_phrase|stretched for five minutes in the evening": 59,
+        "recurring_phrase|fixed the wobbly chair leg at last": 60,
+        "recurring_phrase|called the pharmacy about the prescription refill": 60
+      },
+      "determinism_live_eq_singleshot": true,
+      "question_today": null,
+      "timeline": [
+        {
+          "day": 1,
+          "date": "2026-07-19",
+          "active_days": 1,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 2,
+          "date": "2026-07-20",
+          "active_days": 2,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 3,
+          "date": "2026-07-21",
+          "active_days": 3,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 4,
+          "date": "2026-07-22",
+          "active_days": 4,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 5,
+          "date": "2026-07-23",
+          "active_days": 5,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 6,
+          "date": "2026-07-24",
+          "active_days": 6,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 7,
+          "date": "2026-07-25",
+          "active_days": 7,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 8,
+          "date": "2026-07-26",
+          "active_days": 8,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 9,
+          "date": "2026-07-27",
+          "active_days": 9,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 10,
+          "date": "2026-07-28",
+          "active_days": 10,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 11,
+          "date": "2026-07-29",
+          "active_days": 11,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 12,
+          "date": "2026-07-30",
+          "active_days": 12,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 13,
+          "date": "2026-07-31",
+          "active_days": 13,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 14,
+          "date": "2026-08-01",
+          "active_days": 14,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 15,
+          "date": "2026-08-02",
+          "active_days": 15,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 16,
+          "date": "2026-08-03",
+          "active_days": 16,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 17,
+          "date": "2026-08-04",
+          "active_days": 17,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 18,
+          "date": "2026-08-05",
+          "active_days": 18,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 19,
+          "date": "2026-08-06",
+          "active_days": 19,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 20,
+          "date": "2026-08-07",
+          "active_days": 20,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 21,
+          "date": "2026-08-08",
+          "active_days": 21,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 22,
+          "date": "2026-08-09",
+          "active_days": 22,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 23,
+          "date": "2026-08-10",
+          "active_days": 23,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 24,
+          "date": "2026-08-11",
+          "active_days": 24,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 25,
+          "date": "2026-08-12",
+          "active_days": 25,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 26,
+          "date": "2026-08-13",
+          "active_days": 26,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 27,
+          "date": "2026-08-14",
+          "active_days": 27,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 28,
+          "date": "2026-08-15",
+          "active_days": 28,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 29,
+          "date": "2026-08-16",
+          "active_days": 29,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 30,
+          "date": "2026-08-17",
+          "active_days": 30,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 31,
+          "date": "2026-08-18",
+          "active_days": 31,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [
+            "rumination: wasted the whole evening scrolling eyes tired",
+            "rumination: fell down the feed again regret it every time",
+            "recurring_phrase: short note drank enough water today"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 32,
+          "date": "2026-08-19",
+          "active_days": 32,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 33,
+          "date": "2026-08-20",
+          "active_days": 33,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [
+            "recurring_phrase: screens all evening head buzzing afterwards"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 34,
+          "date": "2026-08-21",
+          "active_days": 34,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 35,
+          "date": "2026-08-22",
+          "active_days": 35,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 36,
+          "date": "2026-08-23",
+          "active_days": 36,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 37,
+          "date": "2026-08-24",
+          "active_days": 37,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 38,
+          "date": "2026-08-25",
+          "active_days": 38,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 39,
+          "date": "2026-08-26",
+          "active_days": 39,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 40,
+          "date": "2026-08-27",
+          "active_days": 40,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 41,
+          "date": "2026-08-28",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 42,
+          "date": "2026-08-29",
+          "active_days": 42,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 43,
+          "date": "2026-08-30",
+          "active_days": 43,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [
+            "mood_shift: recent mood"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 44,
+          "date": "2026-08-31",
+          "active_days": 44,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 45,
+          "date": "2026-09-01",
+          "active_days": 45,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 46,
+          "date": "2026-09-02",
+          "active_days": 46,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 47,
+          "date": "2026-09-03",
+          "active_days": 47,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 48,
+          "date": "2026-09-04",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 49,
+          "date": "2026-09-05",
+          "active_days": 49,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 50,
+          "date": "2026-09-06",
+          "active_days": 50,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 51,
+          "date": "2026-09-07",
+          "active_days": 51,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": [
+            "rumination 'fell down the feed again regret ' emerging -> confirmed",
+            "rumination 'wasted the whole evening scrolli' emerging -> confirmed",
+            "recurring_phrase 'short note drank enough water to' emerging -> confirmed"
+          ]
+        },
+        {
+          "day": 52,
+          "date": "2026-09-08",
+          "active_days": 52,
+          "recomputed": true,
+          "surfaced": 5,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 53,
+          "date": "2026-09-09",
+          "active_days": 53,
+          "recomputed": true,
+          "surfaced": 7,
+          "new": [
+            "recurring_phrase: the commute was uneventful today",
+            "recurring_phrase: morning coffee on the balcony before anything el"
+          ],
+          "transitions": [
+            "recurring_phrase 'screens all evening head buzzing' emerging -> confirmed"
+          ]
+        },
+        {
+          "day": 54,
+          "date": "2026-09-10",
+          "active_days": 54,
+          "recomputed": true,
+          "surfaced": 9,
+          "new": [
+            "recurring_phrase: watered the plants and swept the kitchen",
+            "recurring_phrase: cooked something simple for dinner"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 55,
+          "date": "2026-09-11",
+          "active_days": 55,
+          "recomputed": true,
+          "surfaced": 11,
+          "new": [
+            "recurring_phrase: answered a few lingering messages at lunch",
+            "recurring_phrase: listened to half a podcast episode on the way ho"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 56,
+          "date": "2026-09-12",
+          "active_days": 56,
+          "recomputed": true,
+          "surfaced": 13,
+          "new": [
+            "recurring_phrase: read ten pages of the novel before bed",
+            "recurring_phrase: took the stairs instead of the elevator"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 57,
+          "date": "2026-09-13",
+          "active_days": 57,
+          "recomputed": true,
+          "surfaced": 15,
+          "new": [
+            "recurring_phrase: walked the long way to the pharmacy",
+            "recurring_phrase: tidied the desk and cleared the inbox"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 58,
+          "date": "2026-09-14",
+          "active_days": 58,
+          "recomputed": true,
+          "surfaced": 17,
+          "new": [
+            "recurring_phrase: brewed tea and watched the rain start",
+            "recurring_phrase: made the bed properly for once"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 59,
+          "date": "2026-09-15",
+          "active_days": 59,
+          "recomputed": true,
+          "surfaced": 19,
+          "new": [
+            "recurring_phrase: reorganized one shelf of the bookcase",
+            "recurring_phrase: stretched for five minutes in the evening"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 60,
+          "date": "2026-09-16",
+          "active_days": 60,
+          "recomputed": true,
+          "surfaced": 20,
+          "new": [
+            "recurring_phrase: fixed the wobbly chair leg at last",
+            "recurring_phrase: called the pharmacy about the prescription refil"
+          ],
+          "transitions": []
+        }
+      ],
+      "user_id": "6b31477cd2074e1aa2611053d57cffb8",
+      "storage": {
+        "entry_rows": 126,
+        "entry_ciphertext_bytes": 17598,
+        "insights": {
+          "brain": {
+            "rows": 1,
+            "bytes": 12300
+          },
+          "patterns": {
+            "rows": 1,
+            "bytes": 204
+          }
+        }
+      }
+    },
+    {
+      "name": "lena",
+      "blurb": "family visits with next-day dips; Sunday grandma calls",
+      "expected": [
+        "link (day after family visits reads lower)",
+        "temporal (family mentions / Sundays)"
+      ],
+      "entries": 129,
+      "active_days": 60,
+      "patterns_live": [],
+      "patterns_replay_daily": [
+        {
+          "pid": "recurring_phrase:5621dcc1de5c",
+          "kind": "recurring_phrase",
+          "label": "called grandma like every sunday",
+          "state": "confirmed",
+          "occurrences": 9
+        },
+        {
+          "pid": "recurring_phrase:5cb56908334b",
+          "kind": "recurring_phrase",
+          "label": "long slow dinner afterwards",
+          "state": "confirmed",
+          "occurrences": 9
+        },
+        {
+          "pid": "recurring_phrase:f73a5afed9a5",
+          "kind": "recurring_phrase",
+          "label": "visited the family mom and dad were there",
+          "state": "confirmed",
+          "occurrences": 8
+        },
+        {
+          "pid": "temporal:family",
+          "kind": "temporal",
+          "label": "family",
+          "state": "emerging",
+          "occurrences": 22
+        },
+        {
+          "pid": "link:family",
+          "kind": "link",
+          "label": "family",
+          "state": "emerging",
+          "occurrences": 21
+        },
+        {
+          "pid": "link:health",
+          "kind": "link",
+          "label": "health",
+          "state": "emerging",
+          "occurrences": 11
+        },
+        {
+          "pid": "recurring_phrase:ff72ebdf7229",
+          "kind": "recurring_phrase",
+          "label": "fixed the wobbly chair leg at last",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:828433ec26bc",
+          "kind": "recurring_phrase",
+          "label": "called the pharmacy about the prescription refill",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef379c55eae0",
+          "kind": "recurring_phrase",
+          "label": "reorganized one shelf of the bookcase",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:dd3f967fa5f1",
+          "kind": "recurring_phrase",
+          "label": "stretched for five minutes in the evening",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:f12cc5cb1fb9",
+          "kind": "recurring_phrase",
+          "label": "brewed tea and watched the rain start",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:83459ab61b98",
+          "kind": "recurring_phrase",
+          "label": "made the bed properly for once",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3591f05bb42a",
+          "kind": "recurring_phrase",
+          "label": "walked the long way to the pharmacy",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:da561df8f996",
+          "kind": "recurring_phrase",
+          "label": "tidied the desk and cleared the inbox",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:3930f2ba2c86",
+          "kind": "recurring_phrase",
+          "label": "read ten pages of the novel before bed",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:c47c041f2360",
+          "kind": "recurring_phrase",
+          "label": "took the stairs instead of the elevator",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:ef3cd638f33e",
+          "kind": "recurring_phrase",
+          "label": "answered a few lingering messages at lunch",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:0ba0f40f53d5",
+          "kind": "recurring_phrase",
+          "label": "listened to half a podcast episode on the way home",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:d82d1cde1e8d",
+          "kind": "recurring_phrase",
+          "label": "watered the plants and swept the kitchen",
+          "state": "emerging",
+          "occurrences": 3
+        },
+        {
+          "pid": "recurring_phrase:9adec381d65f",
+          "kind": "recurring_phrase",
+          "label": "cooked something simple for dinner",
+          "state": "emerging",
+          "occurrences": 3
+        }
+      ],
+      "patterns_replay_singleshot": [],
+      "pattern_first_day": {
+        "recurring_phrase|called grandma like every sunday": 31,
+        "recurring_phrase|long slow dinner afterwards": 31,
+        "recurring_phrase|visited the family mom and dad were there": 31,
+        "link|health": 48,
+        "link|family": 53,
+        "recurring_phrase|the commute was uneventful today": 53,
+        "recurring_phrase|morning coffee on the balcony before anything else": 53,
+        "recurring_phrase|watered the plants and swept the kitchen": 54,
+        "recurring_phrase|cooked something simple for dinner": 54,
+        "recurring_phrase|answered a few lingering messages at lunch": 55,
+        "recurring_phrase|listened to half a podcast episode on the way home": 55,
+        "recurring_phrase|read ten pages of the novel before bed": 56,
+        "recurring_phrase|took the stairs instead of the elevator": 56,
+        "recurring_phrase|walked the long way to the pharmacy": 57,
+        "recurring_phrase|tidied the desk and cleared the inbox": 57,
+        "recurring_phrase|brewed tea and watched the rain start": 58,
+        "recurring_phrase|made the bed properly for once": 58,
+        "temporal|family": 59,
+        "recurring_phrase|reorganized one shelf of the bookcase": 59,
+        "recurring_phrase|stretched for five minutes in the evening": 59,
+        "recurring_phrase|fixed the wobbly chair leg at last": 60,
+        "recurring_phrase|called the pharmacy about the prescription refill": 60
+      },
+      "determinism_live_eq_singleshot": true,
+      "question_today": null,
+      "timeline": [
+        {
+          "day": 1,
+          "date": "2026-07-19",
+          "active_days": 1,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 2,
+          "date": "2026-07-20",
+          "active_days": 2,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 3,
+          "date": "2026-07-21",
+          "active_days": 3,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 4,
+          "date": "2026-07-22",
+          "active_days": 4,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 5,
+          "date": "2026-07-23",
+          "active_days": 5,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 6,
+          "date": "2026-07-24",
+          "active_days": 6,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 7,
+          "date": "2026-07-25",
+          "active_days": 7,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 8,
+          "date": "2026-07-26",
+          "active_days": 8,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 9,
+          "date": "2026-07-27",
+          "active_days": 9,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 10,
+          "date": "2026-07-28",
+          "active_days": 10,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 11,
+          "date": "2026-07-29",
+          "active_days": 11,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 12,
+          "date": "2026-07-30",
+          "active_days": 12,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 13,
+          "date": "2026-07-31",
+          "active_days": 13,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 14,
+          "date": "2026-08-01",
+          "active_days": 14,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 15,
+          "date": "2026-08-02",
+          "active_days": 15,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 16,
+          "date": "2026-08-03",
+          "active_days": 16,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 17,
+          "date": "2026-08-04",
+          "active_days": 17,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 18,
+          "date": "2026-08-05",
+          "active_days": 18,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 19,
+          "date": "2026-08-06",
+          "active_days": 19,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 20,
+          "date": "2026-08-07",
+          "active_days": 20,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 21,
+          "date": "2026-08-08",
+          "active_days": 21,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 22,
+          "date": "2026-08-09",
+          "active_days": 22,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 23,
+          "date": "2026-08-10",
+          "active_days": 23,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 24,
+          "date": "2026-08-11",
+          "active_days": 24,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 25,
+          "date": "2026-08-12",
+          "active_days": 25,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 26,
+          "date": "2026-08-13",
+          "active_days": 26,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 27,
+          "date": "2026-08-14",
+          "active_days": 27,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 28,
+          "date": "2026-08-15",
+          "active_days": 28,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 29,
+          "date": "2026-08-16",
+          "active_days": 29,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 30,
+          "date": "2026-08-17",
+          "active_days": 30,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 31,
+          "date": "2026-08-18",
+          "active_days": 31,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [
+            "recurring_phrase: called grandma like every sunday",
+            "recurring_phrase: long slow dinner afterwards",
+            "recurring_phrase: visited the family mom and dad were there"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 32,
+          "date": "2026-08-19",
+          "active_days": 32,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 33,
+          "date": "2026-08-20",
+          "active_days": 33,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 34,
+          "date": "2026-08-21",
+          "active_days": 34,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 35,
+          "date": "2026-08-22",
+          "active_days": 35,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 36,
+          "date": "2026-08-23",
+          "active_days": 36,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 37,
+          "date": "2026-08-24",
+          "active_days": 37,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 38,
+          "date": "2026-08-25",
+          "active_days": 38,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 39,
+          "date": "2026-08-26",
+          "active_days": 39,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 40,
+          "date": "2026-08-27",
+          "active_days": 40,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 41,
+          "date": "2026-08-28",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 42,
+          "date": "2026-08-29",
+          "active_days": 42,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 43,
+          "date": "2026-08-30",
+          "active_days": 43,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 44,
+          "date": "2026-08-31",
+          "active_days": 44,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 45,
+          "date": "2026-09-01",
+          "active_days": 45,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 46,
+          "date": "2026-09-02",
+          "active_days": 46,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 47,
+          "date": "2026-09-03",
+          "active_days": 47,
+          "recomputed": true,
+          "surfaced": 3,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 48,
+          "date": "2026-09-04",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [
+            "link: health"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 49,
+          "date": "2026-09-05",
+          "active_days": 49,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 50,
+          "date": "2026-09-06",
+          "active_days": 50,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 51,
+          "date": "2026-09-07",
+          "active_days": 51,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": [
+            "recurring_phrase 'called grandma like every sunday' emerging -> confirmed",
+            "recurring_phrase 'long slow dinner afterwards' emerging -> confirmed",
+            "recurring_phrase 'visited the family mom and dad w' emerging -> confirmed"
+          ]
+        },
+        {
+          "day": 52,
+          "date": "2026-09-08",
+          "active_days": 52,
+          "recomputed": true,
+          "surfaced": 4,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 53,
+          "date": "2026-09-09",
+          "active_days": 53,
+          "recomputed": true,
+          "surfaced": 7,
+          "new": [
+            "link: family",
+            "recurring_phrase: the commute was uneventful today",
+            "recurring_phrase: morning coffee on the balcony before anything el"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 54,
+          "date": "2026-09-10",
+          "active_days": 54,
+          "recomputed": true,
+          "surfaced": 9,
+          "new": [
+            "recurring_phrase: watered the plants and swept the kitchen",
+            "recurring_phrase: cooked something simple for dinner"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 55,
+          "date": "2026-09-11",
+          "active_days": 55,
+          "recomputed": true,
+          "surfaced": 11,
+          "new": [
+            "recurring_phrase: answered a few lingering messages at lunch",
+            "recurring_phrase: listened to half a podcast episode on the way ho"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 56,
+          "date": "2026-09-12",
+          "active_days": 56,
+          "recomputed": true,
+          "surfaced": 13,
+          "new": [
+            "recurring_phrase: read ten pages of the novel before bed",
+            "recurring_phrase: took the stairs instead of the elevator"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 57,
+          "date": "2026-09-13",
+          "active_days": 57,
+          "recomputed": true,
+          "surfaced": 15,
+          "new": [
+            "recurring_phrase: walked the long way to the pharmacy",
+            "recurring_phrase: tidied the desk and cleared the inbox"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 58,
+          "date": "2026-09-14",
+          "active_days": 58,
+          "recomputed": true,
+          "surfaced": 17,
+          "new": [
+            "recurring_phrase: brewed tea and watched the rain start",
+            "recurring_phrase: made the bed properly for once"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 59,
+          "date": "2026-09-15",
+          "active_days": 59,
+          "recomputed": true,
+          "surfaced": 20,
+          "new": [
+            "temporal: family",
+            "recurring_phrase: reorganized one shelf of the bookcase",
+            "recurring_phrase: stretched for five minutes in the evening"
+          ],
+          "transitions": []
+        },
+        {
+          "day": 60,
+          "date": "2026-09-16",
+          "active_days": 60,
+          "recomputed": true,
+          "surfaced": 20,
+          "new": [
+            "recurring_phrase: fixed the wobbly chair leg at last",
+            "recurring_phrase: called the pharmacy about the prescription refil"
+          ],
+          "transitions": []
+        }
+      ],
+      "user_id": "f84d0dc0c4b2472db35974ccba8c3017",
+      "storage": {
+        "entry_rows": 129,
+        "entry_ciphertext_bytes": 17647,
+        "insights": {
+          "brain": {
+            "rows": 1,
+            "bytes": 13091
+          },
+          "patterns": {
+            "rows": 1,
+            "bytes": 204
+          }
+        }
+      }
+    },
+    {
+      "name": "tom",
+      "blurb": "CONTROL: pure noise, no planted structure",
+      "expected": [
+        "NOTHING (false-positive control)"
+      ],
+      "entries": 73,
+      "active_days": 49,
+      "patterns_live": [],
+      "patterns_replay_daily": [],
+      "patterns_replay_singleshot": [],
+      "pattern_first_day": {},
+      "determinism_live_eq_singleshot": true,
+      "question_today": null,
+      "timeline": [
+        {
+          "day": 1,
+          "date": "2026-07-19",
+          "active_days": 1,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 2,
+          "date": "2026-07-20",
+          "active_days": 2,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 3,
+          "date": "2026-07-21",
+          "active_days": 2,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 4,
+          "date": "2026-07-22",
+          "active_days": 3,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 5,
+          "date": "2026-07-23",
+          "active_days": 4,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 6,
+          "date": "2026-07-24",
+          "active_days": 5,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 7,
+          "date": "2026-07-25",
+          "active_days": 6,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 8,
+          "date": "2026-07-26",
+          "active_days": 7,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 9,
+          "date": "2026-07-27",
+          "active_days": 8,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 10,
+          "date": "2026-07-28",
+          "active_days": 9,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 11,
+          "date": "2026-07-29",
+          "active_days": 9,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 12,
+          "date": "2026-07-30",
+          "active_days": 10,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 13,
+          "date": "2026-07-31",
+          "active_days": 10,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 14,
+          "date": "2026-08-01",
+          "active_days": 11,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 15,
+          "date": "2026-08-02",
+          "active_days": 12,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 16,
+          "date": "2026-08-03",
+          "active_days": 13,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 17,
+          "date": "2026-08-04",
+          "active_days": 14,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 18,
+          "date": "2026-08-05",
+          "active_days": 15,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 19,
+          "date": "2026-08-06",
+          "active_days": 16,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 20,
+          "date": "2026-08-07",
+          "active_days": 16,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 21,
+          "date": "2026-08-08",
+          "active_days": 17,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 22,
+          "date": "2026-08-09",
+          "active_days": 18,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 23,
+          "date": "2026-08-10",
+          "active_days": 19,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 24,
+          "date": "2026-08-11",
+          "active_days": 20,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 25,
+          "date": "2026-08-12",
+          "active_days": 21,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 26,
+          "date": "2026-08-13",
+          "active_days": 22,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 27,
+          "date": "2026-08-14",
+          "active_days": 22,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 28,
+          "date": "2026-08-15",
+          "active_days": 23,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 29,
+          "date": "2026-08-16",
+          "active_days": 24,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 30,
+          "date": "2026-08-17",
+          "active_days": 25,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 31,
+          "date": "2026-08-18",
+          "active_days": 26,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 32,
+          "date": "2026-08-19",
+          "active_days": 27,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 33,
+          "date": "2026-08-20",
+          "active_days": 28,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 34,
+          "date": "2026-08-21",
+          "active_days": 29,
+          "recomputed": false,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 35,
+          "date": "2026-08-22",
+          "active_days": 30,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 36,
+          "date": "2026-08-23",
+          "active_days": 30,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 37,
+          "date": "2026-08-24",
+          "active_days": 31,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 38,
+          "date": "2026-08-25",
+          "active_days": 32,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 39,
+          "date": "2026-08-26",
+          "active_days": 33,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 40,
+          "date": "2026-08-27",
+          "active_days": 34,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 41,
+          "date": "2026-08-28",
+          "active_days": 35,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 42,
+          "date": "2026-08-29",
+          "active_days": 36,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 43,
+          "date": "2026-08-30",
+          "active_days": 37,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 44,
+          "date": "2026-08-31",
+          "active_days": 37,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 45,
+          "date": "2026-09-01",
+          "active_days": 38,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 46,
+          "date": "2026-09-02",
+          "active_days": 39,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 47,
+          "date": "2026-09-03",
+          "active_days": 40,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 48,
+          "date": "2026-09-04",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 49,
+          "date": "2026-09-05",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 50,
+          "date": "2026-09-06",
+          "active_days": 41,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 51,
+          "date": "2026-09-07",
+          "active_days": 42,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 52,
+          "date": "2026-09-08",
+          "active_days": 43,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 53,
+          "date": "2026-09-09",
+          "active_days": 44,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 54,
+          "date": "2026-09-10",
+          "active_days": 45,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 55,
+          "date": "2026-09-11",
+          "active_days": 46,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 56,
+          "date": "2026-09-12",
+          "active_days": 47,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 57,
+          "date": "2026-09-13",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 58,
+          "date": "2026-09-14",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 59,
+          "date": "2026-09-15",
+          "active_days": 48,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        },
+        {
+          "day": 60,
+          "date": "2026-09-16",
+          "active_days": 49,
+          "recomputed": true,
+          "surfaced": 0,
+          "new": [],
+          "transitions": []
+        }
+      ],
+      "user_id": "3af31155fbfa49a99d71714ee4575b37",
+      "storage": {
+        "entry_rows": 73,
+        "entry_ciphertext_bytes": 9701,
+        "insights": {
+          "brain": {
+            "rows": 1,
+            "bytes": 79
+          },
+          "patterns": {
+            "rows": 1,
+            "bytes": 203
+          }
+        }
+      }
+    }
+  ],
+  "tables_in_db": [
+    "access_log",
+    "consents",
+    "entries",
+    "insights",
+    "pairing_codes",
+    "therapist_notes",
+    "users"
+  ],
+  "sample_entry_row_at_rest": {
+    "client_entry_id": "maya-0000",
+    "entry_date": "2026-07-19",
+    "blob_prefix_hex": "4ee11d5e610d14d71772608e362a3735b8f8cb300eaaca06",
+    "blob_len": 147
+  }
+}
