@@ -8,9 +8,9 @@
  * rows are encrypted with the same envelope the Entry screen writes, so the
  * decrypt path is exercised end to end.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { Alert } from "react-native";
+import { Alert, BackHandler } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
@@ -809,6 +809,118 @@ describe("HistoryScreen focus reload and crisis access", () => {
     await pressLabel(root, "Edit this entry");
     await pressLabel(root, "Need help now? Crisis resources");
     expect(nav.navigate.mock.calls).toEqual([["Crisis"], ["Crisis"], ["Crisis"]]);
+  });
+});
+
+describe("HistoryScreen Android hardware back (focus-scoped)", () => {
+  /** Navigation prop whose addListener captures callbacks per event name. */
+  function navWithFocusBlur() {
+    const listeners: Record<string, Array<() => void>> = {};
+    const focusBlurNav = {
+      navigate: vi.fn(),
+      addListener: vi.fn((event: string, cb: () => void) => {
+        (listeners[event] ??= []).push(cb);
+        return vi.fn();
+      }),
+    };
+    return { focusBlurNav, fire: (event: string) => (listeners[event] ?? []).forEach((cb) => cb()) };
+  }
+
+  /** Capture hardwareBack subscriptions; one is "active" until its remove() runs. */
+  function captureBack() {
+    const subs: Array<{ handler: () => boolean; remove: ReturnType<typeof vi.fn> }> = [];
+    BackHandler.addEventListener.mockImplementation(((event: string, handler: () => boolean) => {
+      expect(event).toBe("hardwareBackPress");
+      const sub = { handler, remove: vi.fn() };
+      subs.push(sub);
+      return sub;
+    }) as never);
+    const live = () => subs.filter((s) => s.remove.mock.calls.length === 0);
+    return {
+      activeCount: () => live().length,
+      pressBack: (): boolean => {
+        const current = live();
+        if (current.length === 0) throw new Error("no active hardwareBack subscription");
+        return current[current.length - 1]!.handler();
+      },
+    };
+  }
+
+  afterEach(() => {
+    // Restore the inert default stub for the rest of the file.
+    BackHandler.addEventListener.mockImplementation((() => ({ remove: vi.fn() })) as never);
+  });
+
+  it("back while focused in detail mode returns to the list (behavior unchanged)", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-bbb", "an ordinary entry", "2026-09-03"),
+    ] as never);
+    const { focusBlurNav, fire } = navWithFocusBlur();
+    const back = captureBack();
+    const root = await render(<HistoryScreen navigation={focusBlurNav} />);
+    await flush();
+    fire("focus"); // the mount focus (consumed by the reload-skip)
+    expect(back.activeCount()).toBe(0); // list mode owns no back press
+    await pressLabel(root, "an ordinary entry");
+    expect(back.activeCount()).toBe(1);
+    expect(back.pressBack()).toBe(true); // consumed by History: detail → list
+    await flush();
+    expect(textOf(root)).not.toContain("Edit this entry");
+    expect(back.activeCount()).toBe(0); // back in list mode: unsubscribed
+  });
+
+  it("back while focused in edit mode returns to the list too", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-bbb", "an ordinary entry", "2026-09-03"),
+    ] as never);
+    const { focusBlurNav } = navWithFocusBlur();
+    const back = captureBack();
+    const root = await render(<HistoryScreen navigation={focusBlurNav} />);
+    await flush();
+    await openEditor(root, "an ordinary entry");
+    expect(back.activeCount()).toBe(1);
+    expect(back.pressBack()).toBe(true);
+    await flush();
+    // List again: the editor input is gone and the entry row is back.
+    const { TextInput } = await import("react-native");
+    expect(root.root.findAllByType(TextInput).find((n) => n.props.accessibilityLabel === "Edit entry")).toBeUndefined();
+    expect(entryRows(root)).toHaveLength(1);
+  });
+
+  it("blur releases the back press for whichever screen is on top; focus reclaims it", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-bbb", "an ordinary entry", "2026-09-03"),
+    ] as never);
+    const { focusBlurNav, fire } = navWithFocusBlur();
+    const back = captureBack();
+    const root = await render(<HistoryScreen navigation={focusBlurNav} />);
+    await flush();
+    await pressLabel(root, "an ordinary entry");
+    expect(back.activeCount()).toBe(1);
+    // A screen pushed on top (native-stack keeps History mounted beneath):
+    // its back press must reach IT, not silently reset History to list mode.
+    fire("blur");
+    expect(back.activeCount()).toBe(0);
+    // …and returning to History restores detail → list on back.
+    fire("focus");
+    expect(back.activeCount()).toBe(1);
+    expect(back.pressBack()).toBe(true);
+    await flush();
+    expect(textOf(root)).not.toContain("Edit this entry");
+  });
+
+  it("unmounting while in detail mode removes the handler", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-bbb", "an ordinary entry", "2026-09-03"),
+    ] as never);
+    const { focusBlurNav } = navWithFocusBlur();
+    const back = captureBack();
+    const root = await render(<HistoryScreen navigation={focusBlurNav} />);
+    await flush();
+    await pressLabel(root, "an ordinary entry");
+    expect(back.activeCount()).toBe(1);
+    await act(async () => root.unmount());
+    expect(back.activeCount()).toBe(0);
   });
 });
 

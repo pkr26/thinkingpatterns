@@ -33,6 +33,28 @@ samples bypassed the raw matcher on both engines).
     either tier matches, so "that movie was suicide squad" no longer
     fires the dialog tier. Any first-person ideation phrasing around
     them still matches on its own words.
+
+2026-09-17 audit remediation (both engines, pinned by the shared corpus):
+  * Masking is applied to the PRE-punctuation-fold text and only matches
+    compounds whose words are joined by whitespace/hyphens — punctuation
+    between the words ("thinking about suicide, silence and pain") is
+    NOT the compound, so real ideation adjacent to a masked word can no
+    longer be silenced by the mask.
+  * CONCAT VARIANT — a third matching form with all whitespace removed,
+    matched against space-free copies of the tier patterns. This closes
+    every residual split family ("su icide", "ki ll myself",
+    "kill my self", "end i t all", "k y s") and plain concatenation
+    ("killmyself", "i will killmyself tonight"). Concat patterns ending
+    in an extendable word (die/diet, dead/deadline, on/online, ...) keep
+    a trailing (?![a-z]) so benign "i wanna diet" cannot fire.
+  * Homoglyph map gains Cyrillic к/м and Turkish dotless ı; Latin
+    diacritics fold to their base letter (é -> e — "suicidé" fires on
+    both engines, not just one); a script boundary between ASCII and
+    non-ASCII letters becomes a space so \\b behaves identically under
+    Python re (Unicode \\w) and ECMAScript (ASCII \\w).
+  * Variation selectors FE00-FE0F, U+034F and the Arabic Letter Mark
+    join the invisible set; leet digits also fold at a word's leading
+    edge ("5uicide", "$uicide").
 """
 
 from __future__ import annotations
@@ -86,12 +108,19 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     # --- non-Latin scripts: plain substrings (\\b never fires next to
     #     CJK/Arabic/Devanagari in ECMAScript) --------------------------------
     "我想死",
+    "我想去死",
     "自杀",
     "死にたい",
     "自殺",
+    "자살하고 싶다",
+    "죽고 싶다",
     "أريد أن أموت",
+    "أريد أن أنتحر",
     "मरना चाहता",
     "मरना चाहती",
+    # --- Turkish (Latin script; 2026-09-17 audit: ı/é parity pinned) --------
+    "\\bintihar\\s+etmek\\s+istiyorum\\b",
+    "\\bcanını\\s+almak\\s+istiyorum\\b",
 )
 
 SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
@@ -128,9 +157,11 @@ SUPPRESS_PATTERNS: tuple[str, ...] = DIALOG_PATTERNS + SUPPRESS_EXTRA_PATTERNS
 # Multiword titles/causes masked from BOTH tiers before matching: the bare
 # topic word inside them is not first-person ideation ("that movie was
 # suicide squad" must not fire the dialog tier; "we discussed suicide
-# prevention in class" either). Masked on the normalized text, plain
-# lowercase substring, longest-first by the caller. Any genuine crisis
-# phrasing around them ("...makes me want to die") matches on its own.
+# prevention in class" either). Masked on the pre-punctuation-fold text as
+# whole words joined by whitespace/hyphens (see _match_variants) — a comma
+# between the words is NOT the compound, so "...suicide, silence and pain"
+# still fires. Any genuine crisis phrasing around them ("...makes me want
+# to die") matches on its own.
 BENIGN_COMPOUNDS: tuple[str, ...] = (
     "suicide squad",
     "suicide silence",
@@ -165,20 +196,27 @@ SUPPRESS_RE = _compile_tier(SUPPRESS_PATTERNS)
 # Format/invisible characters that carry no meaning: soft hyphen, Mongolian
 # vowel separator, zero-width joiner/non-joiner/spacer, LRM/RLM, the bidi
 # embedding/override/isolate controls, word joiner, invisible separators,
-# and the BOM.
-_INVISIBLE = dict.fromkeys(map(ord, (
-    "\u00ad\u180e\u200b\u200c\u200d\u200e\u200f\u202a\u202b\u202c\u202d\u202e"
-    "\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068\u2069\ufeff"
-)))
+# the BOM — plus (2026-09-17 audit) the combining grapheme joiner, the
+# Arabic Letter Mark, and the variation selectors (FE0F rides along with
+# emoji, so it lands inside typed words).
+_INVISIBLE = dict.fromkeys(
+    [ord(c) for c in (
+        "\u00ad\u034f\u061c\u180e\u200b\u200c\u200d\u200e\u200f\u202a\u202b"
+        "\u202c\u202d\u202e\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068"
+        "\u2069\ufeff"
+    )] + list(range(0xfe00, 0xfe10)))
 
 # Latin lookalikes from Cyrillic/Greek (the confusables an attacker can
-# actually type on any keyboard). Keys are the post-NFKC lowercase forms;
-# the sigma family (final/lunate) is spelled by codepoint — ς, σ and ϲ all
-# look like "s".
+# actually type on any keyboard), plus (2026-09-17 audit) Cyrillic к/м and
+# the Turkish dotless ı — without ı, Python's Unicode case-insensitive re
+# fires on "kıll myself" while ECMAScript does not, splitting the engines.
+# Keys are the post-NFKC lowercase forms; the sigma family (final/lunate)
+# is spelled by codepoint — ς, σ and ϲ all look like "s".
 _HOMOGLYPHS = str.maketrans({
     "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x", "у": "y",
     "і": "i", "ѕ": "s", "ј": "j", "һ": "h", "ԁ": "d", "ɡ": "g", "ԛ": "q",
     "ԝ": "w", "ѵ": "v", "з": "3",  # з folds to 3, then leet-folds to e
+    "к": "k", "м": "m", "ı": "i",
     "ο": "o", "α": "a", "ε": "e", "ι": "i", "κ": "k", "ρ": "p", "τ": "t",
     "υ": "u", "ν": "v", "μ": "m", "η": "n", "ω": "w",
     "\u03c2": "s", "\u03c3": "s",  # final/regular sigma: "s"-shaped
@@ -186,10 +224,13 @@ _HOMOGLYPHS = str.maketrans({
 })
 
 # Leet substitutions applied ONLY between two letters ("k1ll"->"kill" but
-# "1 want" keeps its digit, and no date or phone number is rewritten).
+# "1 want" keeps its digit, and no date or phone number is rewritten), or
+# at a word's leading edge ("5uicide" -> "suicide") — a leading digit is
+# never part of a number the way a trailing one can be.
 _LEET = {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
          "8": "b", "@": "a", "!": "i", "$": "s"}
 _LEET_RE = re.compile(r"([a-z])([0-9@!$34578])([a-z])")
+_LEET_EDGE_RE = re.compile(r"(^|\s)([0-9@!$34578])([a-z])")
 
 # A single-letter token run this long is a spelled-out word ("s u i c i d e"),
 # not prose — ordinary English never strings 4+ one-letter words together
@@ -199,7 +240,7 @@ _SINGLE_LETTER_JOIN = 4
 _PUNCT_TO_SPACE_RE = re.compile(r"[^0-9a-z'\-\s\u00c0-\u02af\u0370-\u03ff"
                                 r"\u0400-\u04ff\u0600-\u06ff\u0900-\u097f"
                                 r"\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff"
-                                r"\uf900-\ufaff\uff66-\uff9f]")
+                                r"\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]")
 
 
 def _leet_fold(text: str) -> str:
@@ -208,13 +249,45 @@ def _leet_fold(text: str) -> str:
     while True:
         folded = _LEET_RE.sub(
             lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), text)
+        folded = _LEET_EDGE_RE.sub(
+            lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), folded)
         if folded == text:
             return text
         text = folded
 
 
-def _normalize_to_tokens(text: str) -> list[str]:
-    """The shared pipeline up to (but not including) single-letter joining."""
+def _fold_latin_marks(text: str) -> str:
+    """é -> e, but only for Latin: a mark folded off a Devanagari letter
+    would break the non-Latin patterns, so only a decomposable char whose
+    BASE is Latin (below U+0250) and whose remainder is combining marks
+    in the U+0300 block is reduced. Without this, "suicidé" fires the
+    Python suppress tier but not the ECMAScript one (é is \\w in re,
+    non-word in JS)."""
+    out: list[str] = []
+    for ch in text:
+        decomposed = unicodedata.normalize("NFKD", ch)
+        base = decomposed[0]
+        if (len(decomposed) > 1 and ord(base) < 0x0250
+                and all("\u0300" <= c <= "\u036f" for c in decomposed[1:])):
+            out.append(base)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+# A letter/digit sitting directly against a non-ASCII letter is a script
+# boundary: separate them with a space so \b means the same thing under
+# Python re (Unicode \w: "suicideम" has NO boundary after "suicide") and
+# ECMAScript (ASCII \w: it does). Both engines then agree on every input.
+_SCRIPT_BOUNDARY_RE = re.compile(r"([a-z0-9])([^\x00-\x7f])")
+_SCRIPT_BOUNDARY_RE2 = re.compile(r"([^\x00-\x7f])([a-z0-9])")
+
+
+def _normalize_pre_punct(text: str) -> str:
+    """The shared pipeline up to (but not including) the punctuation fold.
+    Benign-compound masking runs HERE (see _match_variants): at this point
+    a comma between two words is still a comma, so "suicide, silence"
+    cannot be mistaken for the compound "suicide silence"."""
     out = text.lower()
     out = out.translate(_INVISIBLE)
     # Homoglyphs BEFORE NFKC: NFKC collapses U+03F2 (lunate sigma, "c"-like)
@@ -222,11 +295,18 @@ def _normalize_to_tokens(text: str) -> list[str]:
     # still tell the two confusable families apart.
     out = out.translate(_HOMOGLYPHS)
     out = unicodedata.normalize("NFKC", out)
+    out = _fold_latin_marks(out)
     # Curly apostrophe to ASCII before punctuation folding (the patterns'
     # ['\u2019]? classes accept both, but only ASCII ' survives the fold).
     out = out.replace("\u2019", "'")
+    out = _SCRIPT_BOUNDARY_RE.sub(r"\1 \2", out)
+    out = _SCRIPT_BOUNDARY_RE2.sub(r"\1 \2", out)
     out = _leet_fold(out)
-    out = _PUNCT_TO_SPACE_RE.sub(" ", out)
+    return out
+
+
+def _normalize_to_tokens(text: str) -> list[str]:
+    out = _PUNCT_TO_SPACE_RE.sub(" ", _normalize_pre_punct(text))
     return [t for t in re.split(r"[\s\-]+", out) if t]
 
 
@@ -271,10 +351,12 @@ def _orphan_glue(tokens: list[str]) -> str:
     FOLLOWING word ("k ill myself" -> "kill myself", "k i ll myself" ->
     "kill myself"), catching partial splits the >=4 threshold misses.
     Runs of >=4 join as their own word, exactly like the primary variant.
-    Safe against ordinary prose ("i am so sad" -> "iam so sad") because
-    the result is only ever matched IN ADDITION to the unjoined variant:
-    a real crisis phrase still matches there, and no benign sentence
-    turns into one ("iwant to diet" matches nothing either way).
+    A TRAILING run (no following word to glue onto) joins into its own
+    word — "k y s" -> "kys". Safe against ordinary prose ("i am so sad"
+    -> "iam so sad") because the result is only ever matched IN ADDITION
+    to the unjoined variant: a real crisis phrase still matches there,
+    and no benign sentence turns into one ("iwant to diet" matches
+    nothing either way).
     """
     out: list[str] = []
     run: list[str] = []
@@ -290,33 +372,88 @@ def _orphan_glue(tokens: list[str]) -> str:
         else:
             out.append(token)
         run = []
-    out.extend(run)  # a trailing run has nothing to glue onto
+    if run:
+        out.append("".join(run))
     return " ".join(out)
 
 
-def _mask_benign(variant: str) -> str:
-    for compound in BENIGN_COMPOUNDS:
-        variant = variant.replace(compound, " ")
-    return variant
+def _concat_join(tokens: list[str]) -> str:
+    """Evasion variant: every token joined with no separator at all.
+    Splits leave the fragments ("su icide"), and plain concatenation
+    ("killmyself"), as recoverable substrings; matched against
+    space-free copies of the tier patterns (see _concat_pattern)."""
+    return "".join(tokens)
+
+
+# Concat-pattern endings that must keep a trailing boundary: these words
+# extend into benign ones once the spaces are gone (die->diet,
+# dead->deadline, on->online, up->upon, out->outfield, cutting->cutting
+# board), so an unanchored substring match would fire on ordinary text.
+# Every other ending ("myself", "suicide", "everything", ...) has no
+# benign extension worth fearing, and the anchor would only create misses.
+_CONCAT_ANCHORED_ENDINGS: tuple[str, ...] = (
+    "die", "dead", "cutting", "gone", "on", "up", "out",
+)
+
+
+def _concat_pattern(pattern: str) -> str:
+    """The space-free twin of a tier pattern: \\s+ and \\b removed (a
+    boundary can never fire inside concatenated text), plus a trailing
+    (?![a-z]) when the pattern's final literal word is extendable."""
+    src = pattern.replace(r"\s+", "").replace(r"\b", "")
+    m = re.search(r"([a-z]+)\)?$", src)
+    if m and m.group(1).endswith(_CONCAT_ANCHORED_ENDINGS):
+        src += "(?![a-z])"
+    return src
+
+
+DIALOG_CONCAT_RE = _compile_tier(
+    tuple(_concat_pattern(p) for p in DIALOG_PATTERNS))
+SUPPRESS_CONCAT_RE = _compile_tier(
+    tuple(_concat_pattern(p) for p in SUPPRESS_PATTERNS))
+
+
+# Benign compounds are masked on the PRE-punctuation-fold text, matched as
+# whole words joined by whitespace/hyphens only: punctuation between the
+# words ("suicide, silence") is not the compound, so real ideation next to
+# a masked word cannot be silenced. Longest-first so "suicide squad" can
+# never eat only half of a longer entry.
+_BENIGN_MASK_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(
+        r"\b" + r"[\s\-]+".join(re.escape(w) for w in compound.split()) + r"\b",
+        re.IGNORECASE)
+    for compound in sorted(BENIGN_COMPOUNDS, key=len, reverse=True)
+)
+
+
+def _mask_benign(text: str) -> str:
+    for mask in _BENIGN_MASK_RES:
+        text = mask.sub(" ", text)
+    return text
 
 
 def _match_variants(text: str) -> tuple[str, ...]:
-    """Every normalized form the tiers match against, benign compounds
-    masked. MUST stay behavior-compatible with the mobile engine's
-    matchVariants (the shared fixtures pin both)."""
-    tokens = _normalize_to_tokens(text)
+    """Every normalized form the tiers match against. MUST stay
+    behavior-compatible with the mobile engine's matchVariants (the shared
+    fixtures pin both)."""
+    tokens = _normalize_to_tokens(_mask_benign(_normalize_pre_punct(text)))
     return (
-        _mask_benign(_primary_join(tokens)),
-        _mask_benign(_orphan_glue(tokens)),
+        _primary_join(tokens),
+        _orphan_glue(tokens),
+        _concat_join(tokens),
     )
 
 
 def matches_dialog(text: str) -> bool:
     """True when the (conservative) client dialog tier fires."""
-    return any(DIALOG_RE.search(v) for v in _match_variants(text))
+    variants = _match_variants(text)
+    return (any(DIALOG_RE.search(v) for v in variants[:2])
+            or any(DIALOG_CONCAT_RE.search(v) for v in (variants[2],)))
 
 
 def matches_suppress(text: str) -> bool:
     """True when the (broader) suppression tier fires: never quote this
     back as a pattern card or reflective question."""
-    return any(SUPPRESS_RE.search(v) for v in _match_variants(text))
+    variants = _match_variants(text)
+    return (any(SUPPRESS_RE.search(v) for v in variants[:2])
+            or any(SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)))

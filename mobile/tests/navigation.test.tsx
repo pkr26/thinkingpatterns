@@ -136,6 +136,30 @@ describe("AppNavigator", () => {
     expect(screenOptions(root, "Crisis")).toEqual({ title: "Get help" });
   });
 
+  it("a session-context re-render keeps the shell screens' component identity (no remount)", async () => {
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    const root = await render(<AppNavigator />);
+    await flush();
+    const componentOf = (name: string): unknown =>
+      (root.root
+        .findAll((n) => (n.props as { name?: unknown } | undefined)?.name === name)
+        .find(() => true)!.props as { component?: unknown }).component;
+    const before = ["History", "Insights", "Question", "Settings"].map((n) => [n, componentOf(n)] as const);
+    // Any session/active-days context change re-renders AppNavigator; a
+    // fresh wrapped identity per render would REMOUNT the screen and destroy
+    // its local state (e.g. a History edit draft mid-typing).
+    sessionState = { authStatus: "loggedIn", unlocked: true, unlockDays: 45 };
+    const { act } = await import("./helpers/rtr");
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    await flush();
+    for (const [name, component] of before) {
+      expect(componentOf(name)).toBe(component);
+    }
+  });
+
   it("a just-registered account lands on onboarding FIRST, before the journal", async () => {
     const { queueOnboarding } = await import("../src/onboarding");
     queueOnboarding(); // what LoginScreen does on a successful register

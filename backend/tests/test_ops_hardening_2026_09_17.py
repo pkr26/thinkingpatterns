@@ -10,7 +10,11 @@ Three changes, pinned here:
      memory is bounded by the analysis budget, not the storage quota.
   3. CROSS-HOST BOOT GUARD — on Postgres the app holds a lifetime session
      advisory lock; a second host on the same database refuses to boot
-     (the 2026-09-16 flock guard is per-host only).
+     (the 2026-09-16 flock guard is per-host only). The lock's autobegun
+     transaction is COMMITTED — session locks survive commit, and an
+     idle-in-transaction guard connection would pin xmin for the app
+     lifetime (see test_ops_fixes_2026_09_17b.py for the rest of the
+     2026-09-17 ops fixes).
 """
 
 from __future__ import annotations
@@ -214,6 +218,7 @@ async def test_cross_host_guard_acquires_and_releases_on_postgres(monkeypatch):
     class FakePgConnection:
         def __init__(self):
             self.locks = []
+            self.commits = 0
             self.closed = False
 
         async def exec_driver_sql(self, sql):
@@ -223,6 +228,9 @@ async def test_cross_host_guard_acquires_and_releases_on_postgres(monkeypatch):
                 def scalar(self):
                     return True
             return _Scalar()
+
+        async def commit(self):
+            self.commits += 1
 
         async def close(self):
             self.closed = True
@@ -239,6 +247,10 @@ async def test_cross_host_guard_acquires_and_releases_on_postgres(monkeypatch):
 
     got = await _acquire_cross_host_guard(FakePgEngine())
     assert got is conn
+    # The SELECT autobegins a transaction; it must be COMMITTED (session
+    # advisory locks survive commit) — an open one would leave the guard
+    # connection idle-in-transaction for the app lifetime, pinning xmin.
+    assert conn.commits == 1
     await main_mod._release_cross_host_guard(got)
     assert conn.closed
     assert len(conn.locks) == 2  # lock + unlock

@@ -160,6 +160,28 @@ describe("session-expiry hook (2026-09-17)", () => {
     expect(fired).toHaveLength(1);
   });
 
+  it("a new session re-arms the latch: one fire per sign-in, still latched within it", async () => {
+    const { setSession, clearSession, setUnauthorizedHandler, api, ApiError } = await import("../src/api");
+    const fired: number[] = [];
+    setUnauthorizedHandler(() => fired.push(1));
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ detail: "unauthorized", code: "unauthorized" }), { status: 401 })));
+    // The handler is registered once (App never re-registers); only the
+    // session changes between expiries, exactly like a same-tab re-login.
+    setSession("tok-1", "http://localhost:5173");
+    for (let i = 0; i < 2; i++) {
+      await expect(api.me()).rejects.toBeInstanceOf(ApiError);
+    }
+    expect(fired).toHaveLength(1);
+    setSession("tok-2", "http://localhost:5173");
+    for (let i = 0; i < 2; i++) {
+      await expect(api.me()).rejects.toBeInstanceOf(ApiError);
+    }
+    setUnauthorizedHandler(null);
+    clearSession();
+    expect(fired).toHaveLength(2);
+  });
+
   it("non-401 errors never fire the handler", async () => {
     const { setSession, clearSession, setUnauthorizedHandler, api } = await import("../src/api");
     setSession("tok", "http://localhost:5173");

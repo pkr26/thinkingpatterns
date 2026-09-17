@@ -153,6 +153,65 @@ class TestDualVariantAndMasking:
         assert crisis.matches_dialog("suicidal thoughts again")
 
 
+class TestAuditRemediation2026_09_17:
+    """The 2026-09-17 audit remediation: the benign mask must not silence
+    real ideation (the mask regression), residual splits and concatenation
+    are closed by the concat variant, and the two engines agree on the
+    inputs where Python re and ECMAScript regex semantics diverge (Turkish
+    ı, Latin diacritics, script boundaries). Every corpus row for these
+    families lives in the shared contract; these pins are the readable
+    summary, mirrored by mobile/tests/crisisDetect.test.ts."""
+
+    def test_mask_gap_ideation_adjacent_to_compound_word_fires(self):
+        # Punctuation between the words is NOT the benign compound: the
+        # pre-commit engine fired here and the mask had silenced it.
+        for text in ("thinking about suicide, silence and pain",
+                     "i keep thinking about suicide, silence is all i have",
+                     "thinking about suicide. Silence would be better.",
+                     "help me with suicide. Prevention is everyone's job."):
+            assert crisis.matches_dialog(text), f"mask silenced ideation: {text!r}"
+            assert crisis.matches_suppress(text), f"suppress tier missed {text!r}"
+
+    def test_residual_splits_and_concat_fire(self):
+        for text in ("su icide", "ki ll myself", "kil l myself",
+                     "kill my self", "su.i.cide", "sui cide", "su i cide",
+                     "suici de", "cu tting myself", "k y s", "end i t all",
+                     "killmyself", "i will killmyself tonight"):
+            assert crisis.matches_dialog(text), f"split/concat bypass: {text!r}"
+            assert crisis.matches_suppress(text), f"suppress tier missed {text!r}"
+
+    def test_invisible_and_homoglyph_families_fire(self):
+        assert crisis.matches_dialog("su͏icide")  # U+034F grapheme joiner
+        assert crisis.matches_dialog("su️icide")   # U+FE0F variation selector
+        assert crisis.matches_dialog("кill myself")  # Cyrillic к
+        assert crisis.matches_dialog("kill мyself")  # Cyrillic м
+        assert crisis.matches_dialog("5uicide") and crisis.matches_dialog("$uicide")
+
+    def test_cross_engine_divergence_inputs(self):
+        # Python re folds ı under IGNORECASE and treats é/म as \w;
+        # ECMAScript does not. Normalization now levels the field BEFORE
+        # the regex, so both engines fire (or stay silent) together.
+        assert crisis.matches_dialog("kıll myself")
+        assert crisis.matches_dialog("suıcıde")
+        assert crisis.matches_suppress("je veux me suicidé")
+
+    def test_concat_variant_anchored_endings_stay_benign(self):
+        # Concat patterns ending in an extendable word keep a trailing
+        # boundary: diet/online prose must not fire.
+        for text in ("i wanna diet after the holidays",
+                     "my mom wants to diet with me",
+                     "i can't go online until the wifi is fixed"):
+            assert not crisis.matches_dialog(text), f"concat FP on {text!r}"
+            assert not crisis.matches_suppress(text), f"concat FP on {text!r}"
+
+    def test_concat_patterns_are_the_space_free_twins(self):
+        # The transformation itself, pinned: \b and \s+ removed, trailing
+        # boundary re-added only for extendable endings.
+        assert crisis._concat_pattern(r"\bkill(?:ing)?\s+myself\b") == "kill(?:ing)?myself"
+        assert crisis._concat_pattern(r"\bwanna\s+(?:to\s+)?die\b") == r"wanna(?:to)?die(?![a-z])"
+        assert crisis._concat_pattern(r"\bno\s+reason\s+to\s+(?:live|go\s+on)\b") == r"noreasonto(?:live|goon)(?![a-z])"
+
+
 class TestEngineInterlock:
     """A crisis-adjacent cluster: flagged sensitive, never a question."""
 

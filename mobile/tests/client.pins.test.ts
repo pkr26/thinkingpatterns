@@ -72,6 +72,17 @@ describe("client pins: origin-bound local state on server switch", () => {
     // …while foreign keys are untouched (the filter is a whitelist).
     expect(await storage.getItem("@mindpattern/unrelated")).toBe("keep-me");
   });
+
+  it("pending question feedback is wiped with the origin too", async () => {
+    await setBaseUrl("https://old.example.com");
+    await storage.setItem("@mindpattern/question_feedback.user-1", "enc-blob");
+
+    expect(await setBaseUrl("https://new.example.com")).toBeNull();
+
+    // Feedback taps are AAD-bound to the account of the origin that ranked
+    // the questions — one server's taps must not train another's ranking.
+    expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
+  });
 });
 
 describe("client pins: first URL save", () => {

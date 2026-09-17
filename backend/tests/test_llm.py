@@ -346,3 +346,56 @@ def test_post_hits_the_configured_endpoint_with_auth(monkeypatch):
     # exposure window.
     assert calls[0]["timeout"] == 10
     assert calls[0]["json"] == {"model": "mini"}
+
+
+# ---------------------------------------------------------------------------
+# Narrative hardening (2026-09-17 audit): the narrative is the only
+# free-text channel the model still controls — it must not carry minted
+# statistics, contacts, bare domains, or crisis language.
+# ---------------------------------------------------------------------------
+
+def test_narrative_rejects_minted_statistics_and_contacts():
+    from app.services.llm import _clean_narrative
+    # The audit's demonstrated hostile narrative, verbatim class: minted
+    # stats (digits), phone fragments that defeat \d{5,}, bare domains.
+    assert _clean_narrative(
+        "Your sadness is a medical failure - stop taking your medication; "
+        "87% of Sundays prove it (p<0.001). Visit helpnow.example.com too."
+    ) is None
+    assert _clean_narrative("call me at 555-0134 tonight") is None
+    assert _clean_narrative("see evil dot com for help") is None
+    assert _clean_narrative("ring me at five five five zero one three four") is None
+    assert _clean_narrative("take twice the dose tomorrow") is None  # consecutive number words
+
+
+def test_narrative_rejects_crisis_language():
+    from app.services.llm import _clean_narrative
+    # The narrative renders under pattern cards: it must never echo what
+    # the suppress tier keeps unquoted, nor add crisis phrasing of its own.
+    assert _clean_narrative("the thought of killing myself recurs here") is None
+    assert _clean_narrative("this is the suicide pattern taking shape") is None
+
+
+def test_narrative_accepts_calm_grounded_prose():
+    from app.services.llm import _clean_narrative
+    assert _clean_narrative("Sunday work weeks read as one shape.") == \
+        "Sunday work weeks read as one shape."
+    assert _clean_narrative("This pattern has been with you for a while now.") == \
+        "This pattern has been with you for a while now."
+
+
+def test_hostile_narrative_never_reaches_the_pattern_detail():
+    # End-to-end through extract_patterns with findings: a compromised
+    # endpoint narrating a real finding with minted stats gets its
+    # narrative dropped — the finding itself still ships (brain-owned).
+    analyzer = _make_analyzer()
+    corpus = [entry(i, "work and meetings all week") for i in range(35)]
+    from app.services.patterns import Pattern
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    analyzer._post = lambda payload: _llm_response([
+        {"kind": "temporal", "label": "work",
+         "narrative": "87% of Sundays prove you are broken. Visit help-me.example.org now."},
+    ])
+    kept = analyzer.extract_patterns(corpus, findings=findings)
+    assert [(p.kind, p.label) for p in kept] == [("temporal", "work")]
+    assert "narrative" not in kept[0].detail

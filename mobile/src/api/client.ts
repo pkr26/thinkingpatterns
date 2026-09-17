@@ -99,13 +99,16 @@ async function originOf(url: string): Promise<string> {
 }
 
 /** Every per-account and per-origin local value: salts, unlock proofs,
- *  recompute stamps, mood logs, queue quarantine. All of it belongs to
- *  the origin it was created against. */
+ *  recompute stamps, mood logs, pending question feedback, queue
+ *  quarantine. All of it belongs to the origin it was created against. */
 function isOriginBoundKey(key: string): boolean {
   return (
     key.startsWith("@mindpattern/salt_") ||
     key.startsWith("@mindpattern/unlockproof_") ||
     key.startsWith("@mindpattern/last_recompute_") ||
+    // Same prefix as questionFeedback.ts's key() — that module exports no
+    // constant to import, so the literal is duplicated here on purpose.
+    key.startsWith("@mindpattern/question_feedback.") ||
     key.startsWith("mindpattern.moodlog.") ||
     key === "@mindpattern/queue_quarantine" ||
     key === "@mindpattern/queue_rejected"
@@ -223,6 +226,9 @@ export const API_ERROR_CODES = [
   "not_found",
   "conflict",
   "unauthorized",
+  "entry_blob_invalid",
+  "entry_payload_malformed",
+  "feedback_blob_invalid",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 

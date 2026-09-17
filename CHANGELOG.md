@@ -6,6 +6,108 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-17 (b) — Independent-audit remediation
+
+A deep independent audit of the two 2026-09-17 commits (crisis safety,
+stats engine, feedback loop, LLM narration, mobile, portal, ops/CI)
+verified the test claims and found one shipped-dead feature, one safety
+regression, and several correctness gaps. All fixed, each with a pinning
+test; crisis fixes are byte-identical across both engines (184-input
+parity harness) and promoted into the shared contract corpus.
+
+**Crisis safety (both engines, shared contract)**
+
+- REGRESSION FIXED: the benign-compound mask silenced real ideation
+  ("thinking about suicide, silence and pain" — the comma manufactured
+  the compound "suicide silence" after punctuation folding). The mask now
+  runs on the PRE-punctuation-fold text and requires the compound's words
+  to be whitespace/hyphen-joined; punctuation between words is not the
+  compound. Ideation adjacent to a masked word fires again.
+- Residual splits closed by a third, CONCAT matching variant
+  (whitespace-free text vs space-free pattern twins with an anchored
+  trailing boundary for extendable endings): "su icide", "ki ll myself",
+  "kill my self", "end i t all", "k y s", and plain "killmyself" /
+  "i will killmyself tonight" all fire; "i wanna diet" / "wants to diet"
+  / "can't go online" stay benign.
+- Cross-engine parity: Cyrillic к/м and Turkish dotless ı join the
+  homoglyph map; Latin diacritics fold to base letters (é→e); script
+  boundaries (ASCII against non-ASCII letters) become spaces — the
+  Python-re-vs-ECMAScript divergences (kıll/suıcıde/suicidé/…) now agree,
+  verified by a 184-input two-engine parity run and pinned as corpus rows.
+- Variation selectors FE00–FE0F, U+034F and U+061C stripped as invisibles;
+  leet digits fold at a word's leading edge ("5uicide", "$uicide");
+  Hangul survives the punctuation fold. New non-Latin phrases: 我想去死,
+  자살하고 싶다, 죽고 싶다, أريد أن أنتحر, Turkish intihar/canımı patterns.
+  The shared corpus grew from 40 to 70 adversarial rows.
+
+**Feedback loop (shipped dead → working)**
+
+- The mobile client POSTs `{"feedback_blob": ...}` while the endpoint
+  declared a bare scalar Body — every feedback-carrying recompute was a
+  422 and one pending tap poisoned all later question loads. The endpoint
+  now embeds the body param; an end-to-end HTTP test pins the wire shape
+  (there was none).
+- A tampered feedback blob no longer triggers the brain-state amnesia
+  retry: it is isolated first (entries+state retry) and answered with its
+  own `feedback_blob_invalid` 400; the mobile client quarantines the
+  undecryptable queue and retries the recompute without it. The retry
+  factory bug (retry paths closed over the truthy feedback_item and
+  stripped the state blob as feedback) is fixed.
+- `_chosen_pattern_pid` now mirrors `build_pool`'s slice-then-skip
+  ordering (filter-before-slice misattributed taps whenever a sensitive
+  pattern ranked in the top 5); bad base64 is a 422, not a 500.
+
+**LLM narration**
+
+- The narrative is no longer an ungrounded free-text channel: no digits
+  at all (minted statistics, phone fragments), no bare domains
+  (helpnow.example.com), no clinical/advice vocabulary (dose/medication/
+  diagnosis), no consecutive spelled numbers, and crisis-screened through
+  both tiers before it can render. The audit's demonstrated hostile
+  narrative is now rejected verbatim.
+
+**Engine correctness**
+
+- Avoidance detector: the null is now the skip rate of the theme-day's
+  OWN weekday with an exact Poisson-binomial tail (new
+  `statsig.poisson_binomial_sf`). A pure Mon–Fri writer mentioning a
+  theme on Fridays no longer gets a confident false "you go quiet after
+  X" card (p=0.0 under the old pooled-rate binomial); genuine
+  weekday-spread avoidance still surfaces.
+- mood_correlation copy is direction-aware everywhere it is rendered
+  (server `describe()` incl. the sleep and tag branches, and the mobile
+  sleep card): a poor-sleep→higher-mood user is no longer told their
+  entries "read lower".
+- Language gate scores ≥3-letter tokens only: negation-dense Spanish
+  ("No me siento bien…", inflated to ~25% "known" by no/me/a) is gated;
+  no more English-lexicon rumination cards on Spanish prose.
+- Person anchoring: sentence initials are the entry's first token AND
+  post-.!? tokens (Telegram-style "Woke tired. Netflix til late." no
+  longer mints Netflix/Stayed as persons); name homographs (may/bill/
+  sue/june/…) match only their capitalized form.
+- Emoji valence counts per occurrence, not per distinct emoji.
+
+**Mobile / portal / ops** (from the same audit)
+
+- Mobile: shell-wrapped screens hoisted to module scope (no more remount
+  state loss on context change); Android back handler scoped to History
+  focus (no longer swallows back on the screen above); stored-question
+  feedback attribution sets/clears `pattern_pid` with the question;
+  narrative rendered under the same 500-char cap as labels; account
+  deletion clears the question-feedback record (and it is origin-bound);
+  theme radio no longer flashes a derived value.
+- Portal: the 401 latch re-arms on every new session (one fire per
+  session preserved) — a second expiry after re-login locks the UI again.
+- Ops: the pg advisory-lock connection commits (no more lifetime
+  `idle in transaction` pinning vacuum); `/metrics` token compared with
+  `hmac.compare_digest` against the LIVE settings (stale-closure
+  fail-open closed); access_log pruning runs as a daily lifespan sweep,
+  not only inside pairing-code minting; `rehearse_restore.sh` actually
+  finds the encrypted backups the compose stack writes (and fails on
+  row-count mismatch); `loadtest.py` logs in on 409 instead of measuring
+  401 latencies; release/mutation workflows SHA-pinned (mutable tags
+  resolved to commits) with per-job permissions.
+
 ### 2026-09-17 — Full-stack improvement wave (audit-driven, five waves)
 
 A complete audit (six parallel deep-dives: backend architecture, the

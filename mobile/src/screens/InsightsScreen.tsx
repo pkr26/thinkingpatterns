@@ -267,7 +267,8 @@ function describe(p: PatternCard): string {
       return `The day after a night you rated as rougher than your own usual, your entries read ${direction} than usual for you.`;
     }
     if (p.kind === "mood_correlation") {
-      return "On nights you rated as rougher than your own usual, your entries read lower the same day.";
+      const direction = p.detail?.direction === "higher" ? "higher" : "lower";
+      return `On nights you rated as rougher than your own usual, your entries read ${direction} the same day.`;
     }
     if (p.kind === "temporal") {
       return `Your rougher nights (by your own ratings) fall most often on ${p.detail?.day ?? "certain"}s.`;
@@ -370,13 +371,17 @@ function sanitizePatterns(raw: unknown): PatternCard[] {
     const confidence = typeof p.confidence === "number" && Number.isFinite(p.confidence)
       ? Math.min(1, Math.max(0, p.confidence))
       : 0;
+    const detail = (p.detail ?? undefined) as PatternDetail | undefined;
+    // Same render cap as the label: the narrative is one calm sentence —
+    // a hostile blob must not push unbounded text into the card.
+    if (typeof detail?.narrative === "string") detail.narrative = detail.narrative.slice(0, MAX_LABEL_CHARS);
     cards.push({
       // Stryker disable next-line MethodExpression: kind is only compared for equality against known kinds far below 64 chars; truncation cannot change an outcome.
       kind: p.kind.slice(0, 64),
       label: p.label.slice(0, MAX_LABEL_CHARS),
       occurrences,
       confidence,
-      detail: (p.detail ?? undefined) as PatternDetail | undefined,
+      detail,
       describe: undefined,
     });
   }

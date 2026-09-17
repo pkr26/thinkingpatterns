@@ -93,7 +93,28 @@ class LoadUser:
             self.token = r.json()["token"]
             self.user_id = r.json()["user_id"]
             return True
-        return r.status_code == 409  # already registered counts as fine
+        if r.status_code == 409:
+            # Persistent handles re-register on every run: 409 is the
+            # expected answer, and without this login fallback every
+            # later call would run with `Bearer None` and measure 401
+            # latencies instead of entry/recompute work.
+            return await self.login()
+        return False
+
+    async def login(self) -> bool:
+        auth_key, _ = derive(self.password, self.salt, None)
+        r = await self.client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": self.name,
+                "verifier": base64.b64encode(auth_key).decode(),
+            },
+        )
+        if r.status_code == 200:
+            self.token = r.json()["token"]
+            self.user_id = r.json()["user_id"]
+            return True
+        return False
 
     async def create_entry(self, day: str, text: str) -> bool:
         from app.security import crypto
@@ -154,13 +175,20 @@ async def main() -> int:
 
     password = "loadtest-password-1"
     async with httpx.AsyncClient(base_url=args.url, timeout=120) as client:
-        users: list[LoadUser] = []
         print(f"==> load probe against {args.url} ({args.users} users)")
-        await phase(client, "register", [LoadUser(client, i, password).register() for i in range(args.users)])
-        # (register coros created their own users; recreate handles for the rest)
+        # Two scrypt phases over the SAME handles: a fresh database
+        # answers registration (201); an existing one answers 409 and the
+        # login fallback takes over — either way every later phase runs
+        # with a real bearer token.
         users = [LoadUser(client, i, password) for i in range(args.users)]
-        for u in users:
-            await u.register()
+        await phase(client, "register", [u.register() for u in users])
+        await phase(client, "login", [u.register() for u in users])
+        tokenless = sum(1 for u in users if u.token is None)
+        if tokenless:
+            print(f"  WARNING: {tokenless}/{len(users)} handles have no token")
+            print("  (auth rate limits?): their timings below measure 401s,")
+            print("  not real work — raise MINDPATTERN_AUTH_RATE_* on the")
+            print("  server for the probe.")
 
         today = date.today()
         jobs = []

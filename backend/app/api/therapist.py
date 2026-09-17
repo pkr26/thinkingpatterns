@@ -68,6 +68,15 @@ PAIRING_RETENTION = timedelta(days=1)
 # deletion still never touches them — they simply live out their window).
 ACCESS_LOG_RETENTION = timedelta(days=730)
 
+
+def access_log_prune_statement(now):
+    """DELETE for audit rows past the retention window. THE one statement
+    for both call sites — the opportunistic prune in POST /therapist/
+    pairing-codes below and the lifespan's daily sweep (main.py): a
+    steady-state deployment creates no pairing codes, so the endpoint
+    alone never prunes and the table grows unbounded."""
+    return delete(AccessLog).where(AccessLog.at < now - ACCESS_LOG_RETENTION)
+
 MAX_WRAP_KEY_BLOB_BYTES = 1024  # b64 cap mirrors schemas; decoded bound
 
 _b64_error = (binascii.Error, ValueError)
@@ -257,9 +266,7 @@ async def create_pairing_code(
     # records-process window; time-based only (account deletion NEVER
     # cascade-deletes audit rows — that property is what lets a trail
     # outlive the account for its full retention period).
-    await session.execute(
-        delete(AccessLog).where(AccessLog.at < now - ACCESS_LOG_RETENTION)
-    )
+    await session.execute(access_log_prune_statement(now))
     code = sharing.generate_pairing_code()
     row = PairingCode(
         therapist_id=user.id,

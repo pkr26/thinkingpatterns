@@ -21,7 +21,7 @@ import React, { useEffect, useState } from "react";
 import { Alert, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, getBaseUrl, getInsecureConsentUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { buildReadableExport, MAX_READABLE_CHARS } from "../readableExport";
-import { ThemeMode, themeStorageKey, useSetThemeMode, useTheme as useThemeForMode } from "../theme";
+import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
 import { reminderCapability, biometricCapability } from "../nativeFeatures";
 import { vault } from "../vault";
@@ -36,6 +36,7 @@ import {
 import { clearKeyShipConsent } from "../components/keyConsent";
 import { clearOnboardingSeen } from "../onboarding";
 import { clearCrisisDialogStamp } from "../crisisDialog";
+import { clearFeedback } from "../questionFeedback";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy, calmFallbackCopy } from "../components/errors";
@@ -213,6 +214,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           await clearKeyShipConsent(userId); // the consent flag dies with its account
           await clearOnboardingSeen(userId); // so does the onboarding acknowledgment
           await clearCrisisDialogStamp(userId); // and the dialog-throttle stamp
+          await clearFeedback(userId); // and the pending question-feedback taps
         }
         if (username) await api.clearCachedSalt(username);
       } catch {
@@ -340,20 +342,18 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     );
   };
 
-  // Appearance state (2026-09-17).
+  // Appearance state (2026-09-17). The radio starts at the provider's own
+  // default and takes the PERSISTED preference from storage below — never a
+  // value derived from the active palette (a "system" preference on a
+  // dark-OS device must not select "Dark" as if it were the override).
   const setThemeMode = useSetThemeMode();
   const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
   const [haptics, setHaptics] = useState(true);
   const [reminders] = useState(reminderCapability());
   const [biometrics] = useState(biometricCapability());
-  const modeFromContext = useThemeForMode();
   React.useEffect(() => {
-    setThemeModeState(modeFromContext.dark ? (modeFromContext === undefined ? "system" : "dark") : "light");
     void loadHapticsSetting().then(setHaptics);
-    // The mode is derived from the active theme (the context does not
-    // expose "system" directly; re-derived below from the stored pref).
-  }, // eslint-disable-next-line react-hooks/exhaustive-deps
-  []);
+  }, []);
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {

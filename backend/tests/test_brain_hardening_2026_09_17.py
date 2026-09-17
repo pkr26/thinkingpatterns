@@ -290,3 +290,62 @@ def test_language_gate_is_deterministic():
     b = _run(corpus, T0)
     assert brain.dump_state(a.new_state) == brain.dump_state(b.new_state)
     assert math.isfinite(a.stats["avg_sentiment"])
+
+
+class TestAuditRemediation2026_09_17:
+    """The independent-audit fixes: Spanish end-run around the language
+    gate, sentence-initial person extraction, name homographs, and
+    per-occurrence emoji valence."""
+
+    def _run(self, corpus: list[JournalEntry]) -> brain.BrainUpdate:
+        return _run_twice(corpus, T0)
+
+    def test_negation_dense_spanish_is_gated(self):
+        # "no"/"me"/"a" are English tokens too: counting 1-2-letter tokens
+        # let this Spanish register pass at ~25% "known" and mint
+        # English-lexicon rumination cards. The gate scores >=3-letter
+        # tokens, so the same text now steps aside (phrases may surface;
+        # rumination/mood/topic must not).
+        spanish = [
+            JournalEntry(
+                "No me siento bien hoy. No quiero ir al trabajo y no me "
+                "dejan en paz los pensamientos.",
+                T0 - timedelta(days=ago),
+            )
+            for ago in range(70, 0, -1)
+        ]
+        result = self._run(spanish)
+        assert all(p.kind not in ("rumination", "mood_shift", "topic",
+                                  "mood_correlation", "instability", "inertia")
+                   for p in result.surfaced), [p.kind for p in result.surfaced]
+
+    def test_sentence_initial_words_are_not_person_candidates(self):
+        # Telegram-style fragments: every fragment starts capitalized, but
+        # only the entry's first token and post-terminator tokens are
+        # sentence starts — none of these are names.
+        entries = [
+            JournalEntry("Woke tired. Netflix til late. Regret nothing. Stayed in bed.",
+                         T0 - timedelta(days=ago))
+            for ago in range(20, 0, -1)
+        ]
+        assert brain._person_candidates(entries) == set()
+
+    def test_name_homographs_match_only_capitalized(self):
+        # "May"/"Bill" remain eligible candidates, but "I may go" / "the
+        # bill arrived" must not count as mentions of them.
+        assert not brain._mentions_name("I may go tomorrow", "may")
+        assert not brain._mentions_name("the bill arrived today", "bill")
+        assert brain._mentions_name("I may go see May tomorrow", "may")
+        assert brain._mentions_name("Bill called again", "bill")
+
+    def test_emoji_valence_counts_per_occurrence(self):
+        one = [JournalEntry("words about the day and one \U0001f62d here",
+                            T0 - timedelta(days=ago)) for ago in range(60, 0, -1)]
+        five = [JournalEntry("words about the day and one \U0001f62d\U0001f62d\U0001f62d\U0001f62d\U0001f62d here",
+                             T0 - timedelta(days=ago)) for ago in range(60, 0, -1)]
+        a = brain.update(brain.load_state(None), one, T0)
+        b = brain.update(brain.load_state(None), five, T0)
+        # Five sobs carry more weight than one; before the fix both scored
+        # identically (membership test counted each emoji once).
+        assert a.stats["avg_sentiment"] != b.stats["avg_sentiment"]
+        assert b.stats["avg_sentiment"] < a.stats["avg_sentiment"]

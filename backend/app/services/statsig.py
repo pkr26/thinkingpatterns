@@ -16,6 +16,7 @@ caps so they cannot spin or diverge silently.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 _BETACF_MAX_ITER = 200
 _BETACF_EPS = 3e-12
@@ -48,6 +49,36 @@ def binomial_sf(k: int, n: int, p: float) -> float:
         log_coef = math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1)
         total += math.exp(log_coef + i * log_p + (n - i) * log_q)
     return min(1.0, total)
+
+
+def poisson_binomial_sf(k: int, probs: Sequence[float]) -> float:
+    """P(X >= k) for independent Bernoulli trials with PER-TRIAL p.
+
+    The exact tail when the null itself is heterogeneous — the avoidance
+    detector's trials carry the skip rate of the theme-day's own WEEKDAY,
+    so a Mon-Fri writer's Friday->Saturday silence (p = 1 under their own
+    calendar) contributes no surprise. Float DP over the exact
+    distribution; monotone in k by construction (the SF sums the same
+    computed dist). Matches binomial_sf on the constant-p case.
+    """
+    n = len(probs)
+    if n == 0:
+        return 1.0 if k <= 0 else 0.0
+    for p in probs:
+        if not 0.0 <= p <= 1.0:
+            raise ValueError("every p must be in [0, 1]")
+    if k <= 0:
+        return 1.0
+    if k > n:
+        return 0.0
+    dist = [0.0] * (n + 1)
+    dist[0] = 1.0
+    for p in probs:
+        q = 1.0 - p
+        for j in range(n, 0, -1):
+            dist[j] = dist[j] * q + dist[j - 1] * p
+        dist[0] *= q
+    return min(1.0, math.fsum(dist[k:]))
 
 
 def benjamini_hochberg(pvalues: list[float], q: float = 0.05) -> list[bool]:

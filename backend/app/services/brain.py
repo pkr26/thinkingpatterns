@@ -929,8 +929,25 @@ def _decay_strength(evidence: list[date], today: date) -> float:
     return min(1.0, weight / EVIDENCE_FULL)
 
 
+# Common-word homographs that are also given/month names ("I may go",
+# "the bill arrived", "sue the clinic", "in June"). They stay ELIGIBLE as
+# candidates (a journal can genuinely be about Bill or May), but their
+# mentions must be CAPITALIZED — case-insensitive matching counted every
+# modal verb and invoice as a person-day.
+_NAME_HOMOGRAPHS = frozenset({
+    "may", "bill", "sue", "rob", "pat", "mark", "frank", "grace", "rose",
+    "jack", "reed", "miles", "art", "will", "ray", "vic", "dan", "jan",
+    "june", "april", "august",
+})
+
+
 def _mentions_name(text: str, name: str) -> bool:
-    """Case-insensitive word-boundary mention of a person candidate."""
+    """Word-boundary mention of a person candidate. Case-insensitive for
+    real names; homograph names ("may", "bill") match only their
+    CAPITALIZED form, so "I may go tomorrow" is not a May mention."""
+    if name in _NAME_HOMOGRAPHS:
+        capital = name[0].upper() + name[1:]
+        return re.search(rf"\b{re.escape(capital)}\b", text) is not None
     return re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) is not None
 
 
@@ -938,10 +955,12 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
     """Recurring proper-name/possessive candidates, deterministically.
 
     A candidate is either a mid-sentence capitalized token (sentence
-    initials are excluded — they are just ordinary sentence starts) whose
-    lowercase form the engine does not already know (not a lexicon/theme/
-    stopword word), or the word after "my" when that bigram recurs. Both
-    must clear PERSON_MIN_DISTINCT_DAYS across PERSON_MIN_TOTAL_MENTIONS.
+    initials are excluded — first token of the entry AND the first token
+    after a . ! ? terminator — they are just ordinary sentence starts)
+    whose lowercase form the engine does not already know (not a
+    lexicon/theme/stopword word), or the word after "my" when that bigram
+    recurs. Both must clear PERSON_MIN_DISTINCT_DAYS across
+    PERSON_MIN_TOTAL_MENTIONS.
     """
     counts: dict[str, int] = {}
     days: dict[str, set[date]] = {}
@@ -954,8 +973,11 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
             low = clean.lower()
             if not clean or not clean[0].isupper() or not low.isalpha():
                 continue
-            if i == 0:
-                continue  # sentence-initial capitalization carries no signal
+            # Sentence initials carry no signal: the entry's first token,
+            # and the first token after a . ! ? terminator (Telegram-style
+            # journals make every fragment start look like a name).
+            if i == 0 or raw[i - 1].endswith((".", "!", "?")):
+                continue
             if low in _KNOWN_TOKENS or theme_for(low) is not None:
                 continue
             found.add(low)
@@ -1366,56 +1388,79 @@ def _detect_avoidance(
     entry_days: set[date],
     today: date,
 ) -> list[_Signal]:
-    """Theme-days followed by journaling SILENCE vs the user's base skip rate.
+    """Theme-days followed by journaling SILENCE vs the user's own rhythm.
 
     The observation is the writing calendar alone (metadata the server
     already holds). For a theme-day d the next-day outcome is observable
     when journaling continued afterwards: wrote on d+1, or skipped d+1 but
     wrote later — a corpus that simply ENDS after d carries no evidence.
     Censoring-honest, base-rate-corrected, one-sided into the BH family.
+
+    The null is PER WEEKDAY of the theme-day (2026-09-17 audit): the skip
+    rate after the theme-day's own weekday, pooled only when that weekday
+    has fewer than three observable transitions. A weekly writing calendar
+    is not avoidance — the Mon-Fri writer's Friday->Saturday silence has
+    p=1 under their own rhythm and must not print a card. The tail is the
+    exact Poisson-binomial over the per-day probabilities.
     """
     days_sorted = sorted(entry_days)
     if len(days_sorted) < 2:
         return []
     last_day = days_sorted[-1]
-    # Base skip rate over ALL observable transitions (not just theme-days):
+    # Observable next-day transitions, bucketed by the FROM-day's weekday.
+    weekday_skips: dict[int, int] = {}
+    weekday_total: dict[int, int] = {}
     base_skips = 0
     base_total = 0
     for idx, d in enumerate(days_sorted):
         next_day = d + timedelta(days=1)
         if next_day in entry_days:
+            weekday_total[d.weekday()] = weekday_total.get(d.weekday(), 0) + 1
             base_total += 1
             continue  # wrote tomorrow: observable, not a skip
         if idx == len(days_sorted) - 1:
             continue  # corpus ends here: censored
+        weekday_skips[d.weekday()] = weekday_skips.get(d.weekday(), 0) + 1
+        weekday_total[d.weekday()] = weekday_total.get(d.weekday(), 0) + 1
         base_total += 1
         base_skips += 1
     if base_total < 2 or not 0.0 < base_skips / base_total < 1.0:
         return []
 
     base_rate = base_skips / base_total
+
+    def day_rate(d: date) -> float:
+        total = weekday_total.get(d.weekday(), 0)
+        if total < 3:
+            return base_rate  # too few same-weekday references: the pooled rate
+        return weekday_skips.get(d.weekday(), 0) / total
+
     signals: list[_Signal] = []
     themes = sorted({t for theme_set in day_themes.values() for t in theme_set})
     for theme in themes:
         observed = 0
         skips = 0
         skip_days: list[date] = []
+        probs: list[float] = []
         for d in sorted(day_themes):
             if theme not in day_themes[d]:
                 continue
             next_day = d + timedelta(days=1)
             if next_day in entry_days:
                 observed += 1
+                probs.append(day_rate(d))
                 continue
             if d == last_day and not any(x > d for x in days_sorted):
                 continue  # censored tail
             observed += 1
             skips += 1
             skip_days.append(d)
+            probs.append(day_rate(d))
         if observed < AVOIDANCE_MIN_OBSERVED or skips < AVOIDANCE_MIN_SKIPS:
             continue
         share = skips / observed
-        pvalue = statsig.binomial_sf(skips, observed, base_rate)
+        expected_rate = sum(probs) / observed
+        pvalue = statsig.poisson_binomial_sf(skips, probs)
         signals.append(_Signal(
             pid=f"avoidance:{theme}",
             kind="avoidance",
@@ -1426,11 +1471,12 @@ def _detect_avoidance(
                 "silences": skips,
                 "observed": observed,
                 "base_rate": round(base_rate, 3),
+                "expected_silences": round(sum(probs), 2),
                 "share": round(share, 3),
                 "p_value": round(pvalue, 6),
             },
             evidence_days=skip_days,
-            gate_ok=share >= base_rate + AVOIDANCE_MIN_LIFT,
+            gate_ok=share >= expected_rate + AVOIDANCE_MIN_LIFT,
         ))
     return signals
 
@@ -2055,8 +2101,12 @@ def update(state: dict, entries: list[JournalEntry], today: date,
         tokens = WORD_RE.findall(entry.text.lower())
         # Emoji ride along as their own tokens: they score mood through
         # EMOJI_VALENCES but never become themes or phrase shingles (the
-        # theme/phrase lookups simply never match them).
-        tokens.extend(e for e in EMOJI_VALENCES if e in entry.text)
+        # theme/phrase lookups simply never match them). Counted per
+        # OCCURRENCE: an entry of five sobs carries five sob tokens, not
+        # one (a repeated word is counted five times too).
+        tokens.extend(
+            e for e in EMOJI_VALENCES for _ in range(entry.text.count(e))
+        )
         if entry.sentiment is not None and math.isfinite(entry.sentiment):
             # Client-supplied mood tag: clamped to the engine's scale. A
             # non-finite value (NaN poisons every average downstream) falls
@@ -2079,13 +2129,15 @@ def update(state: dict, entries: list[JournalEntry], today: date,
     # Language gate (2026-09-17): see the LANGUAGE_* constants. When the
     # window's text is not something the lexicons know, mood analyses keep
     # only explicitly tagged entries (the user's own report) and topic
-    # mining / rumination classification step aside.
-    token_total = sum(len(tokens) for _, tokens, _, _ in per_entry)
-    if token_total >= LANGUAGE_MIN_TOKENS:
-        known_hits = sum(
-            1 for _, tokens, _, _ in per_entry for token in tokens if token in _KNOWN_TOKENS
-        )
-        language_ok = known_hits >= LANGUAGE_HIT_FLOOR * token_total
+    # mining / rumination classification step aside. Scored over tokens of
+    # >= 3 letters only (2026-09-17 audit): Spanish function words ("no",
+    # "me", "a", "y") are English tokens too, and counting them let
+    # negation-dense Spanish through at ~25% "known" — enough to mint
+    # English-lexicon rumination cards on Spanish prose.
+    scored = [t for _, tokens, _, _ in per_entry for t in tokens if len(t) >= 3]
+    if len(scored) >= LANGUAGE_MIN_TOKENS:
+        known_hits = sum(1 for t in scored if t in _KNOWN_TOKENS)
+        language_ok = known_hits >= LANGUAGE_HIT_FLOOR * len(scored)
     else:
         language_ok = True  # too little text to judge a language honestly
     mood_entries = (

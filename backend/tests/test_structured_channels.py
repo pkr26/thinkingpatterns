@@ -180,22 +180,25 @@ def test_determinism_with_channels():
 
 class TestAvoidance:
     def _planted(self) -> list[JournalEntry]:
-        """'conflict' days are followed by silence ~70% of the time; the
-        base skip rate across all days is ~25%."""
+        """'conflict' days spread across ALL weekdays are followed by
+        silence ~70% of the time; ordinary days ~20%. Deterministic LCG so
+        the corpus is reproducible. (The 2026-09-17 audit rewrite: theme
+        days must NOT pile onto one weekday — a Friday-only theme with
+        Friday-always-silent is the user's calendar, not avoidance, and
+        the per-weekday null correctly refuses it.)"""
         entries: list[JournalEntry] = []
-        day = T0 - timedelta(days=83)
+        day = T0 - timedelta(days=130)
         i = 0
+        seed = 12345
         while day <= T0 - timedelta(days=3):
-            is_theme = i % 3 == 0
+            seed = (seed * 1103515245 + 12345) % (2 ** 31)
+            is_theme = i % 4 == 0
             entries.append(JournalEntry(
                 text="conflict at dinner again" if is_theme else "quiet ordinary day notes",
                 entry_date=day,
             ))
-            # After every other theme day, the next calendar day is silent.
-            if is_theme and (i // 3) % 2 == 0:
-                day += timedelta(days=2)
-            else:
-                day += timedelta(days=1)
+            skip = (seed % 10 < 8) if is_theme else (seed % 10 < 1)
+            day += timedelta(days=2 if skip else 1)
             i += 1
         return entries
 
@@ -211,6 +214,30 @@ class TestAvoidance:
         # the theme the words carry, exactly like every other detector.
         assert card.label == "food"
         assert card.detail["silences"] >= brain.AVOIDANCE_MIN_SKIPS
+        # The per-weekday null (2026-09-17 audit): the card's own detail
+        # reports how many silences the user's same-weekday rhythm already
+        # predicts — never more than were observed, or it would not fire.
+        assert card.detail["expected_silences"] < card.detail["silences"]
+
+    def test_weekly_calendar_is_not_avoidance(self):
+        # THE 2026-09-17 audit false positive: a Mon-Fri writer mentioning
+        # "work" every Friday has 100% Friday->Saturday silence — their
+        # own rhythm, p=1 under the per-weekday null. No card may print a
+        # confident "you go quiet after work" claim for an ordinary
+        # weekday calendar.
+        start = T0 - timedelta(days=126)  # 18 weeks, a Monday
+        entries = []
+        d = start
+        while d <= T0 - timedelta(days=2):
+            if d.weekday() < 5:
+                text = "big work push before the weekend, long day at work" \
+                    if d.weekday() == 4 else "standup, tickets, lunch, walked a bit"
+                entries.append(JournalEntry(text, d, sentiment=0.0))
+            d += timedelta(days=1)
+        result = _run_twice(entries, T0)
+        assert not [p for p in result.surfaced if p.kind == "avoidance"], \
+            [(p.kind, p.label, p.detail) for p in result.surfaced
+             if p.kind == "avoidance"]
 
     def test_a_theme_without_following_silence_makes_no_claim(self):
         # Same calendar, but the theme NEVER precedes a skip.

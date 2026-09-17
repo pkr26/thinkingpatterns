@@ -109,8 +109,9 @@ class Pattern:
                 return ("The day after a night you rated as rougher than your own "
                         f"usual, your entries read {direction} than usual for you.")
             if self.kind == "mood_correlation":
+                direction = self.detail.get("direction", "lower")
                 return ("On nights you rated as rougher than your own usual, "
-                        "your entries read lower the same day.")
+                        f"your entries read {direction} the same day.")
             if self.kind == "temporal":
                 day = self.detail.get("day", "the same day")
                 return (f"Your rougher nights (by your own ratings) fall most often on {day}s.")
@@ -123,11 +124,15 @@ class Pattern:
                     f"most often on {day}s.")
         if self.kind == "mood_correlation":
             delta = self.detail.get("mood_delta", 0.0)
+            # Old blobs carry no direction: derive it from the delta's sign,
+            # defaulting to "lower" (the conservative reading) at exactly 0.
+            direction = self.detail.get("direction") or ("higher" if delta < 0 else "lower")
+            shift = "drop" if direction == "lower" else "lift"
             if self.detail.get("source") == "tag":
-                return (f"Your entries read lower on days you tag '{self.label}' "
-                        f"(mood drop of {delta:.1f}).")
-            return (f"Your entries read lower on days when '{self.label}' comes up "
-                    f"(mood drop of {delta:.1f}).")
+                return (f"Your entries read {direction} on days you tag '{self.label}' "
+                        f"(mood {shift} of {abs(delta):.1f}).")
+            return (f"Your entries read {direction} on days when '{self.label}' comes up "
+                    f"(mood {shift} of {abs(delta):.1f}).")
         if self.kind == "avoidance":
             silences = self.detail.get("silences", self.occurrences)
             share = self.detail.get("share", 0.0)

@@ -49,6 +49,7 @@ const { api, getBaseUrl, getInsecureConsentUrl, setBaseUrl } = await import("../
 const { flushQueue, clearQueue, rejectedEntryCount, requeueRejected, quarantinedQueueExists } = await import(
   "../../src/offlineQueue"
 );
+const { recordFeedbackTap } = await import("../../src/questionFeedback");
 const { SettingsScreen } = await import("../../src/screens/SettingsScreen");
 const { vault } = await import("../../src/vault");
 const {
@@ -607,6 +608,9 @@ describe("destructive delete", () => {
     // Per-account acknowledgments die with the account too.
     await storage.setItem("@mindpattern/keyship_consent_user-1", "1");
     await storage.setItem("@mindpattern/onboarding_seen_user-1", "1");
+    // …and so does the pending question-feedback record (encrypted locally,
+    // written through the real module so the key format is the real one).
+    await recordFeedbackTap(Buffer.alloc(32, 3), "user-1", "pid-1", true);
 
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
@@ -621,6 +625,7 @@ describe("destructive delete", () => {
     expect(await storage.getItem("@mindpattern/last_recompute_user-1")).toBeNull();
     expect(await storage.getItem("@mindpattern/keyship_consent_user-1")).toBeNull();
     expect(await storage.getItem("@mindpattern/onboarding_seen_user-1")).toBeNull();
+    expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
     expect(api.clearCachedSalt).toHaveBeenCalledWith("alice");
   });
 
@@ -791,6 +796,60 @@ describe("verification-failure branching (403 vs 401)", () => {
     await reauth(root);
     expect(Alert.alert).toHaveBeenCalledWith("Delete failed", expect.stringContaining("Session expired"));
     expect(signOut).not.toHaveBeenCalled();
+  });
+});
+
+describe("theme radio initial value", () => {
+  /** The radio touchable for a theme mode, by its accessibility label. */
+  function radioOf(root: Awaited<ReturnType<typeof render>>, mode: string) {
+    const node = root.root
+      .findAll((n) => n.props.accessibilityLabel === `Theme: ${mode}`)
+      .find(() => true);
+    if (!node) throw new Error(`no radio for ${JSON.stringify(mode)}`);
+    return node;
+  }
+
+  it("shows the provider default while the persisted read is in flight — never a palette-derived value", async () => {
+    // Dark OS palette + persisted "system": the old derived init selected
+    // "Dark" on the first paint, as if the user had pinned an override.
+    const { useColorScheme } = await import("react-native");
+    useColorScheme.mockReturnValue("dark");
+    let resolveStored!: (v: string | null) => void;
+    const original = storage.getItem;
+    storage.getItem = vi.fn(async (k: string) =>
+      k === "@mindpattern/theme.mode" ? new Promise((resolve) => (resolveStored = resolve)) : original(k),
+    ) as never;
+    try {
+      const root = await render(<SettingsScreen navigation={nav} />);
+      expect(radioOf(root, "system").props.accessibilityState).toEqual({ selected: true });
+      expect(radioOf(root, "dark").props.accessibilityState).toEqual({ selected: false });
+      // The read lands: the persisted preference takes over.
+      const { act } = await import("../helpers/rtr");
+      await act(async () => {
+        resolveStored("dark");
+      });
+      await flush();
+      expect(radioOf(root, "dark").props.accessibilityState).toEqual({ selected: true });
+      expect(radioOf(root, "system").props.accessibilityState).toEqual({ selected: false });
+    } finally {
+      storage.getItem = original;
+    }
+  });
+
+  it("takes the persisted 'light' preference from storage", async () => {
+    await storage.setItem("@mindpattern/theme.mode", "light");
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(radioOf(root, "light").props.accessibilityState).toEqual({ selected: true });
+    expect(radioOf(root, "dark").props.accessibilityState).toEqual({ selected: false });
+    expect(radioOf(root, "system").props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it("with nothing persisted the radio rests on System (the provider default)", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(radioOf(root, "system").props.accessibilityState).toEqual({ selected: true });
+    expect(radioOf(root, "dark").props.accessibilityState).toEqual({ selected: false });
   });
 });
 

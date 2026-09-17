@@ -213,15 +213,38 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
 
   // Android hardware back (2026-09-17): in detail/edit mode it must return
   // to the list, not pop the screen — the custom Mode state machine sits
-  // below the navigator, which never learned about it.
+  // below the navigator, which never learned about it. The handler lives
+  // only while THIS screen is focused: native-stack keeps History mounted
+  // beneath pushed screens, so a mode-only listener would swallow the back
+  // press on whatever screen is on top.
+  const backSub = useRef<{ remove: () => void } | null>(null);
   useEffect(() => {
     if (mode.kind === "list") return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+    const onBack = () => {
       setMode({ kind: "list" });
       return true;
-    });
-    return () => sub.remove();
-  }, [mode.kind]);
+    };
+    const addBack = () => {
+      backSub.current?.remove();
+      backSub.current = BackHandler.addEventListener("hardwareBackPress", onBack);
+    };
+    const removeBack = () => {
+      backSub.current?.remove();
+      backSub.current = null;
+    };
+    addBack(); // the mode left "list" while this screen was focused
+    const subs: Array<() => void> = [];
+    if (typeof navigation?.addListener === "function") {
+      subs.push(
+        navigation.addListener("focus", addBack) as () => void,
+        navigation.addListener("blur", removeBack) as () => void,
+      );
+    }
+    return () => {
+      for (const off of subs) off();
+      removeBack();
+    };
+  }, [mode.kind, navigation]);
 
   /** Badge value: the entry's own check-in pick first, the mood log's day
    *  value as fallback; undefined = no badge (never a verdict). */

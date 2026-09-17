@@ -39,10 +39,12 @@ const storage = (await import("../helpers/storageMock")).default;
 
 const dataKey = Buffer.alloc(32, 5);
 const FOR_DATE = "2026-09-03";
-const questionBlob = (question: string, forDate = FOR_DATE): string =>
+const questionBlob = (question: string, forDate = FOR_DATE, patternPid?: string): string =>
   encrypt(
     dataKey,
-    Buffer.from(JSON.stringify({ for_date: forDate, question })),
+    Buffer.from(
+      JSON.stringify({ for_date: forDate, question, ...(patternPid !== undefined ? { pattern_pid: patternPid } : {}) }),
+    ),
     buildAad("question", "user-1", forDate),
   ).toString("base64");
 
@@ -582,5 +584,88 @@ describe("QuestionScreen key-shipment consent (informed consent fix)", () => {
     await pressLabel(root, "Refresh");
     await flush();
     expect(textOf(root)).toContain("held in memory for up to 5 minutes, never stored.");
+  });
+});
+
+describe("QuestionScreen feedback attribution (pattern_pid)", () => {
+  const insightPhase = () => {
+    vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+  };
+
+  /** Decrypt the locally stored pending taps (the record the recompute ships). */
+  const readTaps = async (): Promise<Array<{ pid: string; resonated: boolean }>> => {
+    const { decrypt } = await import("../../src/crypto/envelope");
+    const raw = await storage.getItem("@mindpattern/question_feedback.user-1");
+    if (raw === null) return [];
+    const plain = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("feedback-local", "user-1"));
+    return JSON.parse(plain.toString("utf8")) as Array<{ pid: string; resonated: boolean }>;
+  };
+
+  it("a stored question carrying pattern_pid offers the taps and records THAT pid", async () => {
+    insightPhase();
+    vi.mocked(api.questionToday).mockResolvedValue({
+      for_date: FOR_DATE,
+      blob: questionBlob("What repeats?", FOR_DATE, "pid-1"),
+    } as never);
+    const root = await render(<QuestionScreen />);
+    await pressLabel(root, "Show today's question");
+    await flush();
+    expect(textOf(root)).toContain("What repeats?");
+    expect(textOf(root)).toContain("This resonated");
+    expect(textOf(root)).toContain("Not me");
+    await pressLabel(root, "This resonated");
+    await flush();
+    expect(await readTaps()).toEqual([{ pid: "pid-1", resonated: true }]);
+  });
+
+  it("an ordinary stored question (no pid) never offers the taps", async () => {
+    insightPhase();
+    vi.mocked(api.questionToday).mockResolvedValue({
+      for_date: FOR_DATE,
+      blob: questionBlob("What did you notice?"),
+    } as never);
+    const root = await render(<QuestionScreen />);
+    await pressLabel(root, "Show today's question");
+    await flush();
+    expect(textOf(root)).toContain("What did you notice?");
+    expect(textOf(root)).not.toContain("This resonated");
+    expect(textOf(root)).not.toContain("Not me");
+  });
+
+  it("a refresh that swaps the question re-attributes the taps to the NEW pid", async () => {
+    insightPhase();
+    vi.mocked(api.questionToday)
+      .mockRejectedValueOnce(new ApiError(404, "none")) // first load: nothing stored
+      .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("What repeats?", FOR_DATE, "pid-a") } as never) // post-recompute
+      .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("What changed?", FOR_DATE, "pid-b") } as never); // refresh
+    vi.mocked(api.recompute).mockResolvedValue({ question_stored: true } as never);
+    const root = await render(<QuestionScreen />);
+    await pressLabel(root, "Show today's question");
+    await flush();
+    expect(textOf(root)).toContain("What repeats?");
+    expect(textOf(root)).toContain("This resonated");
+    await pressLabel(root, "Refresh");
+    await flush();
+    expect(textOf(root)).toContain("What changed?");
+    await pressLabel(root, "Not me");
+    await flush();
+    // The pid follows the question swap — never the previous question's.
+    expect(await readTaps()).toEqual([{ pid: "pid-b", resonated: false }]);
+  });
+
+  it("a refresh onto a pid-less question clears the stale pid (no taps offered)", async () => {
+    insightPhase();
+    vi.mocked(api.questionToday)
+      .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("What repeats?", FOR_DATE, "pid-a") } as never)
+      .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("A plain follow-up?") } as never);
+    const root = await render(<QuestionScreen />);
+    await pressLabel(root, "Show today's question");
+    await flush();
+    expect(textOf(root)).toContain("This resonated");
+    await pressLabel(root, "Refresh");
+    await flush();
+    expect(textOf(root)).toContain("A plain follow-up?");
+    expect(textOf(root)).not.toContain("This resonated");
+    expect(textOf(root)).not.toContain("Not me");
   });
 });

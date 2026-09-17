@@ -200,17 +200,55 @@ def sanitize_pattern(item: object, corpus_texts: list[str]) -> Pattern | None:
 
 MAX_NARRATIVE_CHARS = 240
 
+# Bare domains without scheme or www ("helpnow.example.com") — the URL
+# regex can't see these, and a calm reframing sentence has no reason to
+# contain one.
+_DOMAIN_LIKE = re.compile(
+    r"\b[a-z0-9][a-z0-9-]{1,30}(?:\.(?:com|net|org|io|app|dev|co|uk|edu|gov|xyz|me|tv|info))+\b",
+    re.IGNORECASE,
+)
+
+# Clinical/advice vocabulary a calm reframe has no reason to contain: the
+# model must not tell a vulnerable user anything about medication, dosage
+# or diagnosis ("stop taking your medication", "take twice the dose").
+_CLINICAL_TERMS = frozenset({
+    "dose", "dosage", "medication", "medications", "meds", "medicine",
+    "medicines", "pill", "pills", "prescription", "prescriptions",
+    "prescribe", "prescribed", "diagnosis", "diagnose", "diagnosed",
+})
+
 
 def _clean_narrative(raw: object) -> str | None:
     """One calm sentence, or None. Hostile-input rules: control characters
-    stripped, length capped, URLs/phones/spelled contacts rejected — the
-    narrative renders under pattern cards, so it gets label treatment."""
+    stripped, length capped, URLs/domains/phones/spelled contacts rejected,
+    NO digits at all (statistics live in the brain's own record — a digit
+    in a narrative is a minted claim, a dosage, or a phone fragment), and
+    crisis language rejected (the narrative must never quote or echo what
+    the suppress tier exists to keep unquoted). The narrative renders
+    under pattern cards, so it gets stricter-than-label treatment."""
+    from . import crisis
+
     if not isinstance(raw, str):
         return None
     text = _CONTROL_CHARS.sub(" ", raw).strip()
     if not text or len(text) > MAX_NARRATIVE_CHARS:
         return None if not text else text[:MAX_NARRATIVE_CHARS].rstrip()
     if _URL_OR_PHONE.search(text) or _SPELLED_CONTACT.search(text):
+        return None
+    # Any digit: minted statistics ("87% of Sundays"), phone fragments
+    # ("555-0134" defeats the \d{5,} rule via the hyphen), dates, dosages.
+    if any(ch.isdigit() for ch in text):
+        return None
+    if _DOMAIN_LIKE.search(text):
+        return None
+    # Two number words in a row assembles a spoken phone number or address
+    # ("five five five..."); a lone "one calm pattern" is ordinary prose.
+    words = text.lower().split()
+    if any(a in _NUMBER_WORDS and b in _NUMBER_WORDS for a, b in zip(words, words[1:])):
+        return None
+    if any(w.strip(".,;:!?\"'()") in _CLINICAL_TERMS for w in words):
+        return None
+    if crisis.matches_dialog(text) or crisis.matches_suppress(text):
         return None
     return text
 

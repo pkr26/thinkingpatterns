@@ -1,6 +1,6 @@
 {
  "v": 1,
- "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation.",
+ "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-17 audit): the matchers additionally test a whitespace-free copy of the text against space-free copies of the tier patterns (\\b and \\s+ removed; a trailing (?![a-z]) is re-added for patterns whose final word extends into a benign one — die/diet, dead/deadline, on/online, up, out, cutting, gone), closing every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself'). 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold.",
  "regex_rules": "Every pattern must compile under BOTH Python re and ECMAScript RegExp. No lookahead/lookbehind. Consumers apply case-insensitive matching AFTER the shared normalization pipeline described in this file's description. \\s+ for whitespace, ['\\u2019]? for optional apostrophes, \\b word boundaries (Latin-script patterns only — \\b never fires next to CJK/Arabic/Devanagari in ECMAScript, so non-Latin patterns are plain substrings).",
  "dialog": [
   "\\bsuicid(?:e|al)\\b",
@@ -44,12 +44,18 @@
   "\\bquero\\s+morrer\\b",
   "\\bme\\s+matar\\b",
   "我想死",
+  "我想去死",
   "自杀",
   "死にたい",
   "自殺",
+  "자살하고 싶다",
+  "죽고 싶다",
   "أريد أن أموت",
+  "أريد أن أنتحر",
   "मरना चाहता",
-  "मरना चाहती"
+  "मरना चाहती",
+  "\\bintihar\\s+etmek\\s+istiyorum\\b",
+  "\\bcanını\\s+almak\\s+istiyorum\\b"
  ],
  "suppress_extra": [
   "\\bsuicid\\w+",
@@ -112,7 +118,17 @@
    "मरना चाहता हूँ",
    "k ill myself",
    "o ff myself tonight",
-   "k i ll myself"
+   "k i ll myself",
+   "thinking about suicide, silence and pain",
+   "su icide",
+   "ki ll myself",
+   "kill my self",
+   "kıll myself",
+   "кill myself",
+   "5uicide",
+   "killmyself",
+   "我想去死",
+   "자살하고 싶다"
   ],
   "dialog_silent": [
    "This traffic is killing me",
@@ -136,7 +152,10 @@
    "that movie was suicide squad and i liked it",
    "we discussed suicide prevention in class today",
    "suicide squad was honestly a fun movie",
-   "listening to suicide silence again"
+   "listening to suicide silence again",
+   "i wanna diet after the holidays",
+   "my mom wants to diet with me",
+   "i can't go online until the wifi is fixed"
   ],
   "suppress_only_fires": [
    "this traffic is killing me",
@@ -425,6 +444,230 @@
   {
    "technique": "benign",
    "sample": "that movie was suicide squad and i liked it",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "benign-mask-gap",
+   "sample": "thinking about suicide, silence and pain",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "benign-mask-gap",
+   "sample": "i keep thinking about suicide, silence is all i have",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "benign-mask-gap",
+   "sample": "thinking about suicide. Silence would be better.",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "benign-mask-gap",
+   "sample": "help me with suicide. Prevention is everyone's job.",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "su icide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "ki ll myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "kil l myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "kill my self",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "sui cide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "su i cide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "suici de",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "su.i.cide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "cu tting myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "k y s",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "residual-split",
+   "sample": "end i t all",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "concat",
+   "sample": "killmyself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "concat",
+   "sample": "i will killmyself tonight",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "invisible",
+   "sample": "su͏icide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "invisible",
+   "sample": "su️icide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "homoglyph",
+   "sample": "кill myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "homoglyph",
+   "sample": "kill мyself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "homoglyph",
+   "sample": "kıll myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "homoglyph",
+   "sample": "suıcıde",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "diacritic",
+   "sample": "je veux me suicidé",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "leetspeak",
+   "sample": "5uicide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "leetspeak",
+   "sample": "$uicide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "我想去死",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "자살하고 싶다",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "intihar etmek istiyorum",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "benign",
+   "sample": "i wanna diet after the holidays",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "benign",
+   "sample": "my mom wants to diet with me",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "benign",
+   "sample": "i can't go online until the wifi is fixed",
    "intent": "benign",
    "dialog": false,
    "suppress": false

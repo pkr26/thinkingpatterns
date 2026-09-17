@@ -180,10 +180,15 @@ describe("dual-variant matching + benign masking (2026-09-17)", () => {
     expect(detectCrisisLanguage("a way out of the city")).toBe(false);
   });
 
-  it("matchVariants returns the primary and orphan forms, benign compounds masked in both", () => {
-    const [primary, orphan] = matchVariants("k ill myself after that suicide squad movie");
-    expect(primary).toBe("k ill myself after that   movie");
-    expect(orphan).toBe("kill myself after that   movie"); // glued AND masked
+  it("matchVariants returns the primary, orphan and concat forms, benign compounds masked in all three", () => {
+    const [primary, orphan, concat] = matchVariants("k ill myself after that suicide squad movie");
+    expect(primary).toBe("k ill myself after that movie");
+    expect(orphan).toBe("kill myself after that movie"); // glued AND masked
+    expect(concat).toBe("killmyselfafterthatmovie"); // concatenated AND masked
+    // The mask runs pre-punctuation-fold: a comma between the compound's
+    // words is NOT the compound, so real ideation survives (audit pin).
+    const [p2] = matchVariants("thinking about suicide, silence and pain");
+    expect(p2).toBe("thinking about suicide silence and pain");
   });
 
   it("the primary variant equals normalizeCrisisText on compound-free text", () => {

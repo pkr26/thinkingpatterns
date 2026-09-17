@@ -70,12 +70,18 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bquero\\s+morrer\\b",
   "\\bme\\s+matar\\b",
   "我想死",
+  "我想去死",
   "自杀",
   "死にたい",
   "自殺",
+  "자살하고 싶다",
+  "죽고 싶다",
   "أريد أن أموت",
+  "أريد أن أنتحر",
   "मरना चाहता",
   "मरना चाहती",
+  "\\bintihar\\s+etmek\\s+istiyorum\\b",
+  "\\bcanını\\s+almak\\s+istiyorum\\b",
 ];
 
 /** The broader suppression tier's EXTRA patterns (the effective suppress

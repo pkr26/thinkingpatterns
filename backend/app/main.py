@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
@@ -49,6 +51,14 @@ async def _acquire_cross_host_guard(engine) -> object | None:
         acquired = (await conn.exec_driver_sql(
             f"SELECT pg_try_advisory_lock({CROSS_HOST_ADVISORY_LOCK_ID})"
         )).scalar()
+        if acquired:
+            # The SELECT autobegins a transaction; close it. Session-level
+            # advisory locks survive COMMIT, but a transaction held open
+            # for the app lifetime leaves this connection "idle in
+            # transaction" — pinning xmin and blocking vacuum on every
+            # table. The CONNECTION stays open (out of the pool) for the
+            # app lifetime; that part is deliberate.
+            await conn.commit()
     except Exception:
         await conn.close()
         raise
@@ -79,6 +89,38 @@ logger = logging.getLogger("mindpattern")
 
 # Kept as an alias: older code/tests reference APP_VERSION on this module.
 APP_VERSION = __version__
+
+# access_log retention sweep cadence. The DELETE used to run only inside
+# POST /therapist/pairing-codes (opportunistic housekeeping), so a
+# steady-state deployment — no new pairings — never pruned and the table
+# grew unbounded. The sweep runs the same shared statement (see
+# api/therapist.py) once at startup and then daily.
+ACCESS_LOG_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+async def _prune_access_log_once(app: FastAPI) -> None:
+    """One access_log retention pass: the SAME statement the pairing-code
+    path issues (api.therapist.access_log_prune_statement — imported at
+    call time so both call sites provably share one definition)."""
+    from .api.therapist import access_log_prune_statement
+    from .models import utcnow
+
+    async with app.state.sessionmaker() as session:
+        await session.execute(access_log_prune_statement(utcnow()))
+        await session.commit()
+
+
+async def _access_log_retention_sweep(app: FastAPI) -> None:
+    """Retention pass immediately, then every 24h. A failed pass logs and
+    waits for the next cycle: retention lag must never take the app down."""
+    while True:
+        try:
+            await _prune_access_log_once(app)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("access_log retention sweep failed; retrying next cycle")
+        await asyncio.sleep(ACCESS_LOG_SWEEP_INTERVAL_SECONDS)
 
 
 def _error_envelope(status_code: int, detail, code: str | None = None) -> dict:
@@ -115,6 +157,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             # Cross-host guard (2026-09-17): the flock above is per-host;
             # on Postgres a session advisory lock closes the multi-HOST hole.
             boot_guard_conn = await _acquire_cross_host_guard(app.state.engine)
+            sweep_task: asyncio.Task | None = None
             try:
                 # create_all is a dev/test convenience only. Outside development
                 # the schema comes from `alembic upgrade head` (run by the image
@@ -124,8 +167,16 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 # conflicts.
                 if is_development:
                     await init_models(app.state.engine)
+                # Started AFTER init_models so the first pass never races
+                # schema creation. The app.state handle pins the task's
+                # lifecycle to the lifespan for tests.
+                sweep_task = asyncio.create_task(_access_log_retention_sweep(app))
+                app.state.access_log_sweep_task = sweep_task
                 yield
             finally:
+                if sweep_task is not None:
+                    sweep_task.cancel()
+                    await asyncio.gather(sweep_task, return_exceptions=True)
                 await _release_cross_host_guard(boot_guard_conn)
                 await app.state.engine.dispose()
 
@@ -238,8 +289,13 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 raise StarletteHTTPException(status_code=404, detail="not found")
         else:
             provided = request.headers.get("authorization", "")
-            expected = f"Bearer {settings.metrics_token}"
-            if provided != expected:
+            # The token ALSO comes from the live settings: the create_app
+            # closure's copy goes stale the moment app.state.settings is
+            # replaced at runtime — the old, possibly-empty token would
+            # stay accepted forever. compare_digest (UTF-8 encodings, the
+            # account.py idiom): the comparison itself must not leak.
+            expected = f"Bearer {live_settings.metrics_token}"
+            if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
                 raise StarletteHTTPException(
                     status_code=401, detail="metrics token required"
                 )

@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { act } from "react";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
@@ -128,5 +129,35 @@ describe("App", () => {
     await press(root, "Sign out");
     await flush();
     expect(textOf(root)).toContain("Create a therapist account instead");
+  });
+
+  it("a 401 locks the app down, and a same-tab re-login re-arms the expiry hook", async () => {
+    // The mock above replaces the api object only — setSession and the
+    // 401 latch are the real module state, so drive a genuine 401 through
+    // the real request core to exercise App's registered lockDown.
+    const { api: actualApi } = await vi.importActual<typeof import("../src/api")>("../src/api");
+    const expire = async (): Promise<void> => {
+      vi.stubGlobal("fetch", vi.fn(async () =>
+        new Response(JSON.stringify({ detail: "unauthorized", code: "unauthorized" }), { status: 401 })));
+      await act(async () => {
+        await actualApi.patients().catch(() => {});
+      });
+      vi.unstubAllGlobals();
+    };
+
+    const root = await login();
+    await expire();
+    expect(textOf(root)).toContain("Session expired — please sign in again.");
+
+    // Sign back in on the same rendered app — no reload, no re-registration.
+    await typeInto(root, "Username", "drportal");
+    await typeInto(root, "Password", "pw");
+    await press(root, "Sign in");
+    await flush();
+    expect(textOf(root)).toContain("Patients — Dr. Portal");
+    expect(textOf(root)).not.toContain("Session expired");
+
+    await expire();
+    expect(textOf(root)).toContain("Session expired — please sign in again.");
   });
 });

@@ -191,6 +191,9 @@ INNER_DATE_TOLERANCE_DAYS = 1
 # 500 exactly when the state blob was ALSO tampered. OverflowError is a
 # backstop behind the date validation above.
 _ENTRY_MALFORMED = (json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError, TypeError, OverflowError)
+# Flattened once: Python 3.14 rejects the nested except (TamperError,
+# _ENTRY_MALFORMED) form.
+_TAMPER_OR_MALFORMED = (TamperError, *_ENTRY_MALFORMED)
 
 
 def _parse_entries(
@@ -274,11 +277,14 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
     """
     from ..services import questions as question_engine
 
-    pool_patterns = [p for p in patterns if not question_engine.pattern_is_sensitive(p)]
-    pool_patterns = sorted(
-        pool_patterns,
-        key=question_engine.feedback_rank,
-    )[:question_engine.MAX_PATTERN_QUESTIONS]
+    # Mirror build_pool EXACTLY: top-5 by feedback rank FIRST, sensitive
+    # patterns skipped AFTER the slice. Filtering before the slice admits
+    # different patterns into the pool and misattributes taps to the wrong
+    # pattern whenever a sensitive pattern ranks in the top 5.
+    pool_patterns = [
+        p for p in sorted(patterns, key=question_engine.feedback_rank)[:question_engine.MAX_PATTERN_QUESTIONS]
+        if not question_engine.pattern_is_sensitive(p)
+    ]
     rendered: list[str | None] = []
     owners: list[str | None] = []
     for p in pool_patterns:
@@ -428,7 +434,7 @@ async def recompute(
     request: Request,
     user: User = Depends(require_regular_user),
     x_processing_token: str | None = Header(default=None),
-    feedback_blob: str | None = Body(default=None),
+    feedback_blob: str | None = Body(default=None, embed=True),
 ):
     """``feedback_blob`` (2026-09-17): optional base64 AES-GCM blob holding
     the user's question-feedback taps ({"feedback": [{pid, resonated}]}),
@@ -521,15 +527,17 @@ async def recompute(
                 )
             enricher = llm.get_enricher(settings, llm_consent=user.llm_consent)
 
-            def make_analyze_fn(with_state: bool):
-                # A factory, not a plain closure: the tamper-retry below passes the
-                # entry items WITHOUT the state blob, and a closure over a truthy
-                # state_item would strip the newest ENTRY as "state" on that path.
+            def make_analyze_fn(with_state: bool, with_feedback: bool):
+                # A factory, not a plain closure: the tamper-retry below passes
+                # different item TAILS (without the state blob, or without the
+                # feedback blob), and a closure over the truthy originals would
+                # strip the wrong plaintexts as "state"/"feedback" on those
+                # paths.
                 def analyze_fn(plains: list[bytearray]):
-                    tail = (1 if with_state else 0) + (1 if feedback_item else 0)
+                    tail = (1 if with_state else 0) + (1 if with_feedback else 0)
                     entry_plains = plains[:-tail] if tail else plains
                     state_plain = bytes(plains[-tail]) if with_state and tail else None
-                    fb_plain = bytes(plains[-1]) if feedback_item else None
+                    fb_plain = bytes(plains[-1]) if with_feedback else None
                     entries = _parse_entries(entry_plains, analysis_dates)
                     feedback_events = _parse_feedback(fb_plain) if fb_plain is not None else []
                     result = brain.update(brain.load_state(state_plain), entries, today,
@@ -549,7 +557,10 @@ async def recompute(
                 return analyze_fn
 
             feedback_item = (
-                (crypto.build_aad("feedback", user.id), base64.b64decode(feedback_blob))
+                # Same 4xx discipline as every other payload: bad base64 is
+                # a client bug, not a 500, and must not echo payload bytes.
+                (crypto.build_aad("feedback", user.id),
+                 _decode_b64(feedback_blob, "feedback_blob"))
                 if feedback_blob
                 else None
             )
@@ -566,38 +577,64 @@ async def recompute(
                 # LLM round-trip); run it in a worker thread so the event loop that
                 # serves every other request never stalls behind a recompute.
                 result, merged = await anyio.to_thread.run_sync(
-                    SecureProcessingContext(data_key).run, encrypted, make_analyze_fn(state_item is not None),
+                    SecureProcessingContext(data_key).run, encrypted,
+                    make_analyze_fn(state_item is not None, feedback_item is not None),
                     limiter=analyze_limiter,
                 )
             except TamperError:
-                if state_item is None:
+                if state_item is None and feedback_item is None:
                     raise ApiError(
                         status_code=400,
                         detail="entry blob failed authentication",
                         code="entry_blob_invalid",
                     ) from None
-                # A tampered/corrupt brain state must not brick the account forever:
-                # retry once with amnesia (fresh state, the same capped entry
-                # corpus) — if an ENTRY blob is the culprit the retry fails the
-                # same way and surfaces the real error.
+                # Isolate the culprit before touching the brain state: retry
+                # with entries + state but WITHOUT the feedback item. If that
+                # succeeds, the (client-controlled) feedback blob was the
+                # tampered one — a 400 with its own code, never a state wipe.
+                # A tampered/corrupt brain state must not brick the account
+                # forever: retry once with amnesia (fresh state, the same
+                # capped entry corpus) — if an ENTRY blob is the culprit the
+                # retry fails the same way and surfaces the real error.
                 try:
                     result, merged = await anyio.to_thread.run_sync(
-                        SecureProcessingContext(data_key).run, entry_items, make_analyze_fn(False),
+                        SecureProcessingContext(data_key).run,
+                        entry_items + ([state_item] if state_item else []),
+                        make_analyze_fn(state_item is not None, False),
                         limiter=analyze_limiter,
                     )
-                except TamperError:
+                except _TAMPER_OR_MALFORMED:
+                    # Still failing without the feedback item: either an entry
+                    # blob or the state itself — the amnesia retry (entries
+                    # only) distinguishes them exactly as before.
+                    try:
+                        result, merged = await anyio.to_thread.run_sync(
+                            SecureProcessingContext(data_key).run, entry_items, make_analyze_fn(False, False),
+                            limiter=analyze_limiter,
+                        )
+                    except TamperError:
+                        raise ApiError(
+                            status_code=400,
+                            detail="entry blob failed authentication",
+                            code="entry_blob_invalid",
+                        ) from None
+                    except _ENTRY_MALFORMED:
+                        # The state was tampered AND an entry payload is bad JSON
+                        # (AEAD-valid): same 400 the primary path would give.
+                        raise ApiError(
+                            status_code=400,
+                            detail="entry payload malformed",
+                            code="entry_payload_malformed",
+                        ) from None
+                else:
+                    # entries+state decrypted cleanly: the feedback blob was
+                    # the tampered item. The client must quarantine its
+                    # feedback queue (it can never authenticate), not wipe
+                    # state and not silently drop the taps.
                     raise ApiError(
                         status_code=400,
-                        detail="entry blob failed authentication",
-                        code="entry_blob_invalid",
-                    ) from None
-                except _ENTRY_MALFORMED:
-                    # The state was tampered AND an entry payload is bad JSON
-                    # (AEAD-valid): same 400 the primary path would give.
-                    raise ApiError(
-                        status_code=400,
-                        detail="entry payload malformed",
-                        code="entry_payload_malformed",
+                        detail="feedback blob failed authentication",
+                        code="feedback_blob_invalid",
                     ) from None
             except _ENTRY_MALFORMED:
                 # No exception-text echo: parser internals can quote payload content.

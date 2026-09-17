@@ -1043,6 +1043,34 @@ describe("InsightsScreen path to help + accessibility", () => {
   });
 });
 
+describe("narrative render cap (same discipline as the label)", () => {
+  const withNarrative = (narrative: string) =>
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 31,
+      days_remaining: 0,
+      blob: insightsBlob({
+        stats: { patterns: [pattern({ label: "work", detail: { day: "Sunday", day_fraction: 0.57, narrative } })] },
+      }),
+    } as never);
+
+  it("a hostile over-long narrative renders only its first 500 characters", async () => {
+    withNarrative(`${"n".repeat(600)}`);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    // Exactly the capped run is rendered — never a longer one.
+    expect(allText(root)).toContain("n".repeat(500));
+    expect(allText(root).some((t) => t.includes("n".repeat(501)))).toBe(false);
+  });
+
+  it("a narrative of exactly 500 characters renders whole", async () => {
+    withNarrative("m".repeat(500));
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(allText(root)).toContain("m".repeat(500));
+  });
+});
+
 describe("sparklineSummary", () => {
   it("describes rising, falling and steady trends with the latest day", async () => {
     const { sparklineSummary } = await import("../../src/screens/InsightsScreen");

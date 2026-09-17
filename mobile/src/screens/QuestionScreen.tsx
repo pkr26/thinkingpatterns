@@ -118,7 +118,20 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       // other payload (2026-09-17); cleared once the server consumed them.
       const userId = await api.getUserId();
       const feedbackBlob = userId ? await buildFeedbackBlob(vault.get().dataKey, userId) : null;
-      const result = await api.recompute(session.session_token, feedbackBlob ?? undefined);
+      let result: Awaited<ReturnType<typeof api.recompute>>;
+      try {
+        result = await api.recompute(session.session_token, feedbackBlob ?? undefined);
+      } catch (err) {
+        // A feedback blob that failed AEAD can never authenticate again —
+        // quarantine it (drop the queue) and finish the recompute without
+        // it, instead of failing every question load from now on.
+        if (err instanceof ApiError && err.code === "feedback_blob_invalid" && userId) {
+          await clearFeedback(userId).catch(() => {});
+          result = await api.recompute(session.session_token);
+        } else {
+          throw err;
+        }
+      }
       if (feedbackBlob && userId) await clearFeedback(userId).catch(() => {});
       if (!result.question_stored) {
         setNotice("No recurring pattern has enough evidence yet — keep writing.");
@@ -180,6 +193,10 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       try {
         const payload = await decryptToday();
         setQuestion(payload.question);
+        // The pid must follow every question swap (a refresh after a
+        // recompute would otherwise keep the PREVIOUS question's pid and
+        // attribute the taps to the wrong pattern); no pid → none offered.
+        setPatternPid(typeof payload.pattern_pid === "string" ? payload.pattern_pid : null);
         return;
       } catch (err) {
         // 404 = none stored yet (expected, continue to recompute). Anything

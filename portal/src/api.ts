@@ -29,6 +29,9 @@ let session: Session | null = null;
 
 export function setSession(token: string, baseUrl: string): void {
   session = { token, baseUrl };
+  // A new session re-arms the 401 latch below: every sign-in gets its own
+  // one-shot expiry fire, even without a page reload in between.
+  unauthorizedFired = false;
 }
 
 export function clearSession(): void {
@@ -44,9 +47,10 @@ function message(detail: unknown, status: number): string {
   return `request failed (${status})`;
 }
 
-/** Session-expiry hook (2026-09-17): any 401 fires this ONCE — App swaps
- *  the whole UI to an explicit "session expired" sign-in instead of a
- *  cryptic banner while keys sit in memory. */
+/** Session-expiry hook (2026-09-17): any 401 fires this ONCE per session
+ *  (setSession re-arms it) — App swaps the whole UI to an explicit
+ *  "session expired" sign-in instead of a cryptic banner while keys sit
+ *  in memory. */
 let unauthorizedHandler: (() => void) | null = null;
 let unauthorizedFired = false;
 export function setUnauthorizedHandler(fn: (() => void) | null): void {

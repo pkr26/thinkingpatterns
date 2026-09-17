@@ -54,6 +54,14 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+// Wrapped ONCE at module scope: a fresh component identity per render would
+// remount the screen (destroying its local state — e.g. History edit drafts)
+// on every AppNavigator re-render (session/active-days context changes).
+const HistoryWithShell = withShell("History")(HistoryScreen);
+const InsightsWithShell = withShell("Insights")(InsightsScreen);
+const QuestionWithShell = withShell("Question")(QuestionScreen);
+const SettingsWithShell = withShell("Settings")(SettingsScreen);
+
 /** Branded boot splash (replacing the bare spinner): app name + the calm
  *  tagline while the saved session resolves from disk. */
 function BootSplash(): React.JSX.Element {
@@ -125,10 +133,10 @@ export function AppNavigator(): React.JSX.Element {
             <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
           )}
           <Stack.Screen name="Entry" component={EntryScreen} options={{ title: "Today" }} />
-          <Stack.Screen name="History" component={withShell("History")(HistoryScreen)} options={{ title: "History" }} />
-          <Stack.Screen name="Insights" component={withShell("Insights")(InsightsScreen)} options={{ title: "Patterns" }} />
-          <Stack.Screen name="Question" component={withShell("Question")(QuestionScreen)} options={{ title: "One question" }} />
-          <Stack.Screen name="Settings" component={withShell("Settings")(SettingsScreen)} options={{ title: "Settings" }} />
+          <Stack.Screen name="History" component={HistoryWithShell} options={{ title: "History" }} />
+          <Stack.Screen name="Insights" component={InsightsWithShell} options={{ title: "Patterns" }} />
+          <Stack.Screen name="Question" component={QuestionWithShell} options={{ title: "One question" }} />
+          <Stack.Screen name="Settings" component={SettingsWithShell} options={{ title: "Settings" }} />
           <Stack.Screen name="TherapistShare" component={TherapistShareScreen} options={{ title: "My therapist" }} />
           {/* The privacy policy is static, offline content (like Crisis). */}
           <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: "Privacy" }} />
