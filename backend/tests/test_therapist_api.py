@@ -21,13 +21,25 @@ The claims under test, in order of consequence:
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select, update
 
-from app.models import AccessLog, Consent, PairingCode, TherapistNote, User
+from app.api.therapist import THERAPIST_ENTRY_PAGE_SIZE, THERAPIST_ENTRY_RESPONSE_BLOB_BYTES
+from app.models import (
+    ROLE_THERAPIST,
+    AccessLog,
+    Consent,
+    Entry,
+    PairingCode,
+    TherapistNote,
+    User,
+    new_id,
+    utcnow,
+)
 from app.security import crypto
 from tests.helpers import ClientEmulator, TherapistEmulator, daterange
 
@@ -265,6 +277,22 @@ class TestPairing:
         assert result["status"] == 404
         assert result["body"]["code"] == "not_found"
 
+    async def test_non_ascii_pairing_code_is_flat_404(self, client):
+        th = TherapistEmulator("drunicode", "pw")
+        await th.register(client)
+        patient = ClientEmulator("unicodepatient", "pw")
+        await patient.register(client)
+
+        # The server must not leak a UnicodeEncodeError as a 500 while
+        # calculating the digest for either public code path.
+        bad_code = "\u00e9" * 8
+        lookup = await patient.pairing_lookup(client, bad_code)
+        assert lookup["status"] == 404
+        assert lookup["body"]["code"] == "not_found"
+        grant = await patient.grant_consent(client, bad_code, th.wrap_pub_key, th.user_id)
+        assert grant["status"] == 404
+        assert grant["body"]["code"] == "not_found"
+
     async def test_expired_code_404(self, client):
         th = TherapistEmulator("drexpire", "pw")
         await th.register(client)
@@ -407,6 +435,61 @@ class TestConsentGrant:
         assert consents[0]["status"] == "active"
         assert consents[0]["revoked_at"] is None
 
+    async def test_consent_list_cap_is_explicit_and_does_not_burn_pairing_code(
+        self, client, monkeypatch
+    ):
+        """Preserve the mobile complete-list contract at a bounded size."""
+        from app.api import consents as consents_api
+
+        monkeypatch.setattr(consents_api, "MAX_CONSENTS_PER_PATIENT", 1)
+        patient = ClientEmulator("sharecap", "pw")
+        await patient.register(client)
+        target = TherapistEmulator("drcap", "pw")
+        await target.register(client)
+
+        async def add_prior_share(label: str) -> None:
+            app = client._transport.app  # noqa: SLF001 — compact test fixture setup
+            async with app.state.sessionmaker() as session:
+                therapist_id = new_id()
+                session.add(
+                    User(
+                        id=therapist_id,
+                        username=f"prior-{label}",
+                        salt="c2FsdA==",
+                        verifier=b"v",
+                        scrypt_salt=b"s",
+                        role=ROLE_THERAPIST,
+                        display_name="Prior therapist",
+                        wrap_pub_key="not-used-by-this-test",
+                    )
+                )
+                await session.flush()
+                session.add(
+                    Consent(
+                        user_id=patient.user_id,
+                        therapist_id=therapist_id,
+                        status="revoked",
+                        revoked_at=utcnow(),
+                    )
+                )
+                await session.commit()
+
+        await add_prior_share("one")
+        assert len(await patient.list_consents(client)) == 1
+
+        code = await target.create_pairing_code(client)
+        denied = await patient.grant_consent(client, code, target.wrap_pub_key, target.user_id)
+        assert denied["status"] == 413
+        assert denied["body"]["code"] == "payload_too_large"
+        # The quota preflight runs before the conditional code-consumption
+        # update, so a later revoke lets this same code be retried.
+        assert (await patient.pairing_lookup(client, code))["status"] == 200
+
+        await add_prior_share("two")
+        oversized = await client.get("/api/consents", headers=patient.headers)
+        assert oversized.status_code == 413
+        assert oversized.json()["code"] == "payload_too_large"
+
 
 class TestConsentRevoke:
     async def _granted(self, client):
@@ -485,6 +568,60 @@ class TestTherapistReads:
         assert body[0]["ephemeral_pub"]
         assert base64.b64decode(body[0]["wrapped_key"])
 
+    async def test_patient_list_cap_is_explicit_and_grant_preserves_code(self, client, monkeypatch):
+        from app.api import consents as consents_api
+        from app.api import therapist as therapist_api
+
+        # Small test seam; production keeps a 100-record total cap.  Patch
+        # both modules because therapist.py imports the shared constant for
+        # its legacy-data list guard.
+        monkeypatch.setattr(consents_api, "MAX_PATIENTS_PER_THERAPIST", 1)
+        monkeypatch.setattr(therapist_api, "MAX_PATIENTS_PER_THERAPIST", 1)
+        th = TherapistEmulator("drcaseload", "pw")
+        await th.register(client)
+        patient = ClientEmulator("caseloadtarget", "pw")
+        await patient.register(client)
+
+        async def add_prior_patient(label: str) -> None:
+            app = client._transport.app  # noqa: SLF001 — compact test fixture setup
+            async with app.state.sessionmaker() as session:
+                prior_id = new_id()
+                session.add(
+                    User(
+                        id=prior_id,
+                        username=f"prior-patient-{label}",
+                        salt="c2FsdA==",
+                        verifier=b"v",
+                        scrypt_salt=b"s",
+                    )
+                )
+                await session.flush()
+                session.add(
+                    Consent(
+                        user_id=prior_id,
+                        therapist_id=th.user_id,
+                        status="revoked",
+                        revoked_at=utcnow(),
+                    )
+                )
+                await session.commit()
+
+        await add_prior_patient("one")
+        first = await client.get("/api/therapist/patients", headers=th.headers)
+        assert first.status_code == 200
+        assert len(first.json()) == 1
+
+        code = await th.create_pairing_code(client)
+        denied = await patient.grant_consent(client, code, th.wrap_pub_key, th.user_id)
+        assert denied["status"] == 413
+        assert denied["body"]["code"] == "payload_too_large"
+        assert (await patient.pairing_lookup(client, code))["status"] == 200
+
+        await add_prior_patient("two")
+        oversized = await client.get("/api/therapist/patients", headers=th.headers)
+        assert oversized.status_code == 413
+        assert oversized.json()["code"] == "payload_too_large"
+
     async def test_insights_blob_identical_to_patient_view(self, client):
         patient, th = await self._shared_patient(client)
         await patient.recompute(client)
@@ -537,24 +674,105 @@ class TestTherapistReads:
 
     async def test_entries_pagination(self, client):
         patient, th = await self._shared_patient(client, days=10)
-        page1 = (
-            await client.get(
-                f"/api/therapist/patients/{patient.user_id}/entries",
-                headers=th.headers,
-                params={"limit": 4},
-            )
-        ).json()
-        page2 = (
-            await client.get(
-                f"/api/therapist/patients/{patient.user_id}/entries",
-                headers=th.headers,
-                params={"limit": 4, "offset": 4},
-            )
-        ).json()
+        first = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+            params={"limit": 4, "page_bytes": THERAPIST_ENTRY_RESPONSE_BLOB_BYTES},
+        )
+        second = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+            params={"limit": 4, "offset": 4, "page_bytes": THERAPIST_ENTRY_RESPONSE_BLOB_BYTES},
+        )
+        page1 = first.json()
+        page2 = second.json()
         assert len(page1) == 4 and len(page2) == 4
         assert page1[-1]["id"] != page2[0]["id"]
         ids = [e["id"] for e in page1 + page2]
         assert len(set(ids)) == 8
+        assert first.headers["X-Next-Offset"] == "4"
+        assert second.headers["X-Next-Offset"] == "8"
+
+    async def test_entries_default_page_is_25_and_exposes_an_exact_continuation(self, client):
+        patient, th = await self._shared_patient(client, days=THERAPIST_ENTRY_PAGE_SIZE + 1)
+        first = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+        )
+        assert first.status_code == 200
+        assert len(first.json()) == THERAPIST_ENTRY_PAGE_SIZE
+        assert first.headers["X-Next-Offset"] == str(THERAPIST_ENTRY_PAGE_SIZE)
+
+        second = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+            params={"offset": THERAPIST_ENTRY_PAGE_SIZE},
+        )
+        assert second.status_code == 200
+        assert len(second.json()) == 1
+        assert "X-Next-Offset" not in second.headers
+
+        too_many = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+            params={"limit": THERAPIST_ENTRY_PAGE_SIZE + 1},
+        )
+        assert too_many.status_code == 422
+
+    async def test_entries_byte_budget_requires_opt_in_and_returns_a_continuation(self, client):
+        # Two individually valid-size ciphertext blobs exceed the cumulative
+        # response budget. Seed directly so the test exercises response
+        # selection rather than request-body handling.
+        patient, th = await self._shared_patient(client, days=0)
+        raw_blob = b"x" * (THERAPIST_ENTRY_RESPONSE_BLOB_BYTES // 2 + 1)
+        app = client._transport.app  # noqa: SLF001 - fixture application state
+        async with app.state.sessionmaker() as session:
+            session.add_all(
+                [
+                    Entry(
+                        user_id=patient.user_id,
+                        client_entry_id="large-a",
+                        blob=raw_blob,
+                        entry_date=TODAY,
+                    ),
+                    Entry(
+                        user_id=patient.user_id,
+                        client_entry_id="large-b",
+                        blob=raw_blob,
+                        entry_date=TODAY,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        legacy = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries", headers=th.headers
+        )
+        assert legacy.status_code == 413
+        assert legacy.json()["code"] == "payload_too_large"
+
+        first = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+            params={"page_bytes": THERAPIST_ENTRY_RESPONSE_BLOB_BYTES},
+        )
+        assert first.status_code == 200
+        first_rows = first.json()
+        assert len(first_rows) == 1
+        assert first.headers["X-Next-Offset"] == "1"
+        assert (
+            sum(len(base64.b64decode(row["blob"])) for row in first_rows)
+            <= THERAPIST_ENTRY_RESPONSE_BLOB_BYTES
+        )
+
+        second = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries",
+            headers=th.headers,
+            params={"offset": 1, "page_bytes": THERAPIST_ENTRY_RESPONSE_BLOB_BYTES},
+        )
+        assert second.status_code == 200
+        assert len(second.json()) == 1
+        assert "X-Next-Offset" not in second.headers
 
     async def test_baseline_phase_patient_gets_no_blob(self, client):
         patient, th = await self._shared_patient(client, days=5)
@@ -576,6 +794,56 @@ class TestTherapistReads:
             )
             assert response.status_code == 404
             assert response.json()["code"] == "not_found"
+
+    async def test_revoke_serializes_with_an_inflight_content_read(self, client, monkeypatch):
+        """A read that won the fence linearizes before revoke; the next read
+        must see the committed revoke. Without the shared patient lock, the
+        DELETE can commit while the paused read still returns journal rows."""
+        from app.api import therapist as therapist_api
+        from app.locks import sharing_locks, sharing_patient_lock_key
+
+        patient, th = await self._shared_patient(client, days=1)
+        consent_id = (await patient.list_consents(client))[0]["id"]
+        real_active_consent = therapist_api._active_consent
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        paused = False
+
+        async def paused_active_consent(*args, **kwargs):
+            nonlocal paused
+            consent = await real_active_consent(*args, **kwargs)
+            if not paused:
+                paused = True
+                entered.set()
+                await release.wait()
+            return consent
+
+        monkeypatch.setattr(therapist_api, "_active_consent", paused_active_consent)
+        read = asyncio.create_task(
+            client.get(f"/api/therapist/patients/{patient.user_id}/entries", headers=th.headers)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        revoke = asyncio.create_task(patient.revoke_consent(client, consent_id))
+        key = sharing_patient_lock_key(patient.user_id or "")
+        for _ in range(200):
+            entry = sharing_locks._locks.get(key)  # noqa: SLF001 - lock-order regression
+            if entry is not None and entry.refs >= 2:
+                break
+            await asyncio.sleep(0.005)
+        else:
+            release.set()
+            await asyncio.gather(read, revoke)
+            raise AssertionError("revoke never queued behind the content-read sharing fence")
+        assert revoke.done() is False
+
+        release.set()
+        read_response, revoke_status = await asyncio.gather(read, revoke)
+        assert read_response.status_code == 200
+        assert revoke_status == 204
+        after = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/entries", headers=th.headers
+        )
+        assert after.status_code == 404
 
     async def test_cross_therapist_isolation(self, client):
         patient, th_a = await self._shared_patient(client)
@@ -647,6 +915,69 @@ class TestNotes:
         assert (
             await client.get(f"/api/therapist/patients/{patient.user_id}/notes", headers=th.headers)
         ).json() == []
+        actions = [row.action for row in await _audit(client)]
+        assert "write_note" in actions
+        assert "update_note" in actions
+        assert "delete_note" in actions
+
+    async def test_update_delete_race_is_serialized_and_never_500(self, client):
+        patient, th = await self._shared(client)
+        created = await client.post(
+            f"/api/therapist/patients/{patient.user_id}/notes",
+            headers=th.headers,
+            json={
+                "client_note_id": "race-note",
+                "blob": th.encrypt_note(patient, "race-note", "before race"),
+            },
+        )
+        assert created.status_code == 201
+        note_id = created.json()["id"]
+        update, removal = await asyncio.gather(
+            client.patch(
+                f"/api/therapist/notes/{note_id}",
+                headers=th.headers,
+                json={"blob": th.encrypt_note(patient, "race-note", "concurrent update")},
+            ),
+            client.delete(f"/api/therapist/notes/{note_id}", headers=th.headers),
+        )
+        # Depending on which request acquires the chart lock first, update
+        # succeeds before delete (200/204) or delete wins (404/204). Neither
+        # valid ordering can surface a stale-row 500.
+        assert update.status_code in {200, 404}
+        assert removal.status_code in {204, 404}
+        assert 500 not in {update.status_code, removal.status_code}
+
+    async def test_note_write_response_is_constructed_under_chart_fence(self, client, monkeypatch):
+        """A delete cannot interleave after the write commit but before its response."""
+        from app.api import therapist as therapist_api
+
+        patient, th = await self._shared(client)
+        original_note_out = therapist_api._note_out
+        observed_locked: list[bool] = []
+        chart_key = f"notes:{th.user_id}:{patient.user_id}"
+
+        def observe_note_out(row):
+            entry = therapist_api._note_locks._locks.get(chart_key)  # noqa: SLF001 - fence seam
+            observed_locked.append(entry is not None and entry.lock.locked())
+            return original_note_out(row)
+
+        monkeypatch.setattr(therapist_api, "_note_out", observe_note_out)
+        created = await client.post(
+            f"/api/therapist/patients/{patient.user_id}/notes",
+            headers=th.headers,
+            json={
+                "client_note_id": "response-fence",
+                "blob": th.encrypt_note(patient, "response-fence", "first"),
+            },
+        )
+        assert created.status_code == 201
+        updated = await client.patch(
+            f"/api/therapist/notes/{created.json()['id']}",
+            headers=th.headers,
+            json={"blob": th.encrypt_note(patient, "response-fence", "second")},
+        )
+        assert updated.status_code == 200
+        assert observed_locked == [True, True]
 
     async def test_general_note_without_pattern(self, client):
         patient, th = await self._shared(client)
@@ -683,6 +1014,60 @@ class TestNotes:
         ).json()
         assert len(listed) == 1
         assert th.decrypt_note(patient, "same-id", listed[0]["blob"])["text"] == "two"
+
+    async def test_list_byte_budget_requires_opt_in_and_returns_continuation(self, client):
+        """A count-bounded page must not serialize a chart-sized response.
+
+        Two individually valid, near-half-budget notes fit within the
+        per-note input ceiling but not in the same 2 MiB response page.  The
+        A legacy portal's count-only request fails loudly instead of receiving
+        a short page it would mistake for complete history.  An opted-in
+        portal gets an advancing continuation and can retrieve both.
+        """
+        from app.api.therapist import NOTES_PAGE_BLOB_BYTES
+
+        patient, th = await self._shared(client)
+        raw_blob = b"x" * (NOTES_PAGE_BLOB_BYTES // 2 + 1)
+        created = utcnow()
+        app = client._transport.app  # noqa: SLF001 — test DB setup
+        async with app.state.sessionmaker() as session:
+            for index in range(2):
+                stamp = created + timedelta(microseconds=index)
+                session.add(
+                    TherapistNote(
+                        therapist_id=th.user_id,
+                        user_id=patient.user_id,
+                        client_note_id=f"large-{index}",
+                        blob=raw_blob,
+                        created_at=stamp,
+                        updated_at=stamp,
+                    )
+                )
+            await session.commit()
+
+        legacy = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/notes?limit=100",
+            headers=th.headers,
+        )
+        assert legacy.status_code == 413
+        assert legacy.json()["code"] == "payload_too_large"
+
+        first = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/notes?limit=100&page_bytes={NOTES_PAGE_BLOB_BYTES}",
+            headers=th.headers,
+        )
+        assert first.status_code == 200, first.text
+        assert [row["client_note_id"] for row in first.json()] == ["large-0"]
+        assert first.headers["X-Next-Offset"] == "1"
+        assert len(base64.b64decode(first.json()[0]["blob"])) == len(raw_blob)
+
+        second = await client.get(
+            f"/api/therapist/patients/{patient.user_id}/notes?limit=100&offset=1&page_bytes={NOTES_PAGE_BLOB_BYTES}",
+            headers=th.headers,
+        )
+        assert second.status_code == 200, second.text
+        assert [row["client_note_id"] for row in second.json()] == ["large-1"]
+        assert "X-Next-Offset" not in second.headers
 
     async def test_notes_unknown_patient_404(self, client):
         _, th = await self._shared(client)
@@ -814,6 +1199,30 @@ class TestAuditAndCascades:
         await th.register(client)
         response = await client.request("DELETE", "/api/therapist/account", headers=th.headers)
         assert response.status_code == 422
+
+    async def test_therapist_can_delete_account_after_sharing_is_disabled(self, client, app):
+        """A feature shutdown must block sharing, never self-erasure.
+
+        The router used to carry the feature gate globally, leaving an
+        existing therapist with no reachable account-deletion endpoint once
+        an operator disabled sharing.  The verifier-protected deletion route
+        deliberately remains available while the data-sharing routes return
+        their feature-hidden 404.
+        """
+        th = TherapistEmulator("drshutdown", "pw")
+        await th.register(client)
+        app.state.settings.therapist_sharing_enabled = False
+
+        assert (
+            await client.post("/api/therapist/pairing-codes", headers=th.headers)
+        ).status_code == 404
+        response = await client.request(
+            "DELETE",
+            "/api/therapist/account",
+            headers={**th.headers, "X-Account-Verifier": th.auth_key_b64},
+        )
+        assert response.status_code == 204
+        assert (await client.get("/api/therapist/me", headers=th.headers)).status_code == 404
 
     async def test_export_carries_share_records(self, client):
         patient = ClientEmulator("exportshare", "pw")

@@ -23,6 +23,7 @@ vi.mock("../src/api/client", () => {
       getUserId: vi.fn(async () => "alice"),
       createEntry: vi.fn(async () => ({})),
     },
+    getBaseUrl: vi.fn(async () => "http://localhost:8000"),
   };
 });
 
@@ -69,13 +70,13 @@ describe("flushQueueOnReconnect", () => {
     await enqueue(entry(1));
     await flushQueueOnReconnect();
     expect(api.createEntry).not.toHaveBeenCalled();
-    expect(await queueLength()).toBe(1); // the entry waits for its owner
+    expect(await queueLength("alice")).toBe(1); // the entry waits for its owner
 
     // Empty queue: no upload, and the flush itself is skipped cheaply.
     // (Advance past the throttle window — this test's first call consumed it.)
     vi.advanceTimersByTime(11_000);
     vi.mocked(api.getUserId).mockResolvedValue("alice" as never);
-    await clearQueue();
+    await clearQueue("alice");
     vi.mocked(api.createEntry).mockClear();
     await flushQueueOnReconnect();
     expect(api.createEntry).not.toHaveBeenCalled();

@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildAad } from "../src/aad";
 import {
@@ -56,6 +56,47 @@ const toB64 = (bytes: Uint8Array): string => {
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary);
 };
+
+function expectWiped(bytes: Uint8Array): void {
+  expect([...bytes]).toEqual(new Array<number>(bytes.length).fill(0));
+}
+
+/** Capture the exact ArrayBuffer returned by WebCrypto decrypt. The portal
+ * wraps it in a Uint8Array, so a later fill(0) must also erase this view. */
+function captureDecryptBuffer(): { bytes: () => Uint8Array; restore: () => void } {
+  const nativeDecrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+  let captured: ArrayBuffer | null = null;
+  const spy = vi.spyOn(crypto.subtle, "decrypt").mockImplementation(
+    async (...args: Parameters<SubtleCrypto["decrypt"]>) => {
+      const result = await nativeDecrypt(...args);
+      captured = result;
+      return result;
+    },
+  );
+  return {
+    bytes: () => {
+      if (captured === null) throw new Error("expected WebCrypto decrypt to run");
+      return new Uint8Array(captured);
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
+/** The raw input view passed to importKey is the same mutable view the portal
+ * owns. Capturing it lets these tests prove finally blocks run after both a
+ * successful import and a rejected one. */
+function captureImportedKey(format: KeyFormat): { bytes: () => Uint8Array[]; restore: () => void } {
+  const nativeImportKey = crypto.subtle.importKey.bind(crypto.subtle);
+  const captured: Uint8Array[] = [];
+  const spy = vi.spyOn(crypto.subtle, "importKey").mockImplementation(
+    async (...args: Parameters<SubtleCrypto["importKey"]>) => {
+      const [actualFormat, keyData] = args;
+      if (actualFormat === format && keyData instanceof Uint8Array) captured.push(keyData);
+      return nativeImportKey(...args);
+    },
+  );
+  return { bytes: () => captured, restore: () => spy.mockRestore() };
+}
 
 describe("key schedule vectors", () => {
   for (const [i, v] of vectors.entries()) {
@@ -117,6 +158,58 @@ describe("wrap vectors — the portal unwrap path", () => {
       ).rejects.toThrow(TamperError);
     });
   }
+
+  it("zeroizes ECDH DER, shared-secret, and KEK input buffers on every unwrap path", async () => {
+    const v = wrapVectors[0]!;
+    const privateDer = unb64(v.therapist_priv_pkcs8);
+    const priv = await crypto.subtle.importKey(
+      "pkcs8",
+      privateDer,
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      ["deriveBits"],
+    );
+    privateDer.fill(0);
+
+    // The SPKI view belongs to the portal during unwrap and is scrubbed as
+    // soon as WebCrypto has made its public-key handle.
+    const publicInput = captureImportedKey("spki");
+    try {
+      const dataKey = await unwrapPatientDataKey(
+        priv,
+        v.ephemeral_pub_spki,
+        v.wrapped,
+        v.user_id,
+        v.therapist_id,
+        v.therapist_pub_spki,
+      );
+      dataKey.fill(0);
+      expect(publicInput.bytes()).toHaveLength(1);
+      publicInput.bytes().forEach(expectWiped);
+    } finally {
+      publicInput.restore();
+    }
+
+    // HKDF imports the ECDH shared secret and AES imports the derived KEK.
+    // A rejected authenticated decrypt must still run the same finally wipe.
+    const secretInputs = captureImportedKey("raw");
+    try {
+      await expect(
+        unwrapPatientDataKey(
+          priv,
+          v.ephemeral_pub_spki,
+          v.wrapped,
+          "different-patient",
+          v.therapist_id,
+          v.therapist_pub_spki,
+        ),
+      ).rejects.toThrow(TamperError);
+      expect(secretInputs.bytes()).toHaveLength(2);
+      secretInputs.bytes().forEach(expectWiped);
+    } finally {
+      secretInputs.restore();
+    }
+  });
 });
 
 describe("AAD canonicalization", () => {
@@ -166,6 +259,40 @@ describe("therapist key custody", () => {
     const unlocked = await unlockWrapPrivateKey(keys.wrapKek, sealed, "drportal");
     expect(unlocked.algorithm.name).toBe("ECDH");
   });
+
+  it("zeroizes decrypted PKCS#8 bytes after both import outcomes", async () => {
+    const master = await deriveMasterKey("portal-pass-3", crypto.getRandomValues(new Uint8Array(16)));
+    const keys = await derivePortalKeys(master);
+    const pair = await generateTherapistKeyPair();
+    const sealed = await sealPrivateKeyForUpload(keys.wrapKek, pair.privateKeyPkcs8B64, "drportal");
+
+    const successInput = captureImportedKey("pkcs8");
+    try {
+      await unlockWrapPrivateKey(keys.wrapKek, sealed, "drportal");
+      expect(successInput.bytes()).toHaveLength(1);
+      successInput.bytes().forEach(expectWiped);
+    } finally {
+      successInput.restore();
+    }
+
+    // It decrypts successfully, then importKey rejects the deliberately
+    // malformed DER. The raw decrypted buffer must not survive that error.
+    const malformedBlob = await encrypt(
+      keys.wrapKek,
+      new Uint8Array([1, 2, 3]),
+      buildAad("therapist-key", "drportal"),
+    );
+    const failureInput = captureImportedKey("pkcs8");
+    try {
+      await expect(
+        unlockWrapPrivateKey(keys.wrapKek, toB64(malformedBlob), "drportal"),
+      ).rejects.toThrow();
+      expect(failureInput.bytes()).toHaveLength(1);
+      failureInput.bytes().forEach(expectWiped);
+    } finally {
+      failureInput.restore();
+    }
+  });
 });
 
 describe("notes", () => {
@@ -176,6 +303,31 @@ describe("notes", () => {
     const text = await decryptNote(noteKey, "t1", "u1", "note-1", sealed.blobB64);
     expect(text).toBe("Session 42: steady progress.");
     await expect(decryptNote(noteKey, "t1", "u1", "note-2", sealed.blobB64)).rejects.toThrow(TamperError);
+  });
+
+  it("wipes raw note plaintext after parsing and after a malformed payload", async () => {
+    const noteKey = crypto.getRandomValues(new Uint8Array(32));
+    const good = await encryptNote(noteKey, "t1", "u1", "note-1", "private session note");
+    const goodPlain = captureDecryptBuffer();
+    try {
+      await expect(decryptNote(noteKey, "t1", "u1", "note-1", good.blobB64)).resolves.toBe("private session note");
+      expectWiped(goodPlain.bytes());
+    } finally {
+      goodPlain.restore();
+    }
+
+    const malformed = await encrypt(
+      noteKey,
+      new TextEncoder().encode('{"v":1}'),
+      buildAad("note", "t1", "u1", "bad-note"),
+    );
+    const badPlain = captureDecryptBuffer();
+    try {
+      await expect(decryptNote(noteKey, "t1", "u1", "bad-note", toB64(malformed))).rejects.toThrow(/malformed/);
+      expectWiped(badPlain.bytes());
+    } finally {
+      badPlain.restore();
+    }
   });
 });
 
@@ -210,6 +362,55 @@ describe("payload decryption helpers", () => {
     await expect(
       decryptEntry(dataKey, userId, { client_entry_id: "e-2", blob: toB64(badBlob) }),
     ).rejects.toThrow(/malformed/);
+  });
+
+  it("wipes decrypted insights and entry plaintext on success and validation errors", async () => {
+    const dataKey = crypto.getRandomValues(new Uint8Array(32));
+    const userId = "user-wipe";
+    const insightsBlob = await encrypt(
+      dataKey,
+      new TextEncoder().encode('{"stats":{"patterns":[]}}'),
+      buildAad("insights", userId, "patterns"),
+    );
+    const insightsPlain = captureDecryptBuffer();
+    try {
+      await expect(decryptInsights(dataKey, userId, toB64(insightsBlob))).resolves.toEqual({
+        stats: { patterns: [] },
+      });
+      expectWiped(insightsPlain.bytes());
+    } finally {
+      insightsPlain.restore();
+    }
+
+    const entryBlob = await encrypt(
+      dataKey,
+      new TextEncoder().encode('{"v":1,"text":"private entry"}'),
+      buildAad("entry", userId, "entry-good"),
+    );
+    const entryPlain = captureDecryptBuffer();
+    try {
+      await expect(
+        decryptEntry(dataKey, userId, { client_entry_id: "entry-good", blob: toB64(entryBlob) }),
+      ).resolves.toMatchObject({ text: "private entry" });
+      expectWiped(entryPlain.bytes());
+    } finally {
+      entryPlain.restore();
+    }
+
+    const malformedBlob = await encrypt(
+      dataKey,
+      new TextEncoder().encode('{"v":1}'),
+      buildAad("entry", userId, "entry-bad"),
+    );
+    const malformedPlain = captureDecryptBuffer();
+    try {
+      await expect(
+        decryptEntry(dataKey, userId, { client_entry_id: "entry-bad", blob: toB64(malformedBlob) }),
+      ).rejects.toThrow(/malformed/);
+      expectWiped(malformedPlain.bytes());
+    } finally {
+      malformedPlain.restore();
+    }
   });
 });
 

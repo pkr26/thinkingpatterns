@@ -31,22 +31,46 @@ TODAY = date(2026, 9, 16)
 
 OBVIOUS_CRISIS = [
     # leetspeak
-    "i will su1c1de tonight", "k1ll myself", "1 want to d1e so bad", "un4l1ve myself",
+    "i will su1c1de tonight",
+    "k1ll myself",
+    "1 want to d1e so bad",
+    "un4l1ve myself",
     # homoglyphs (Cyrillic lookalikes)
-    "ѕuicide is on my mind", "kіll myself", "сutting myself again", "want to dіe",
+    "ѕuicide is on my mind",
+    "kіll myself",
+    "сutting myself again",
+    "want to dіe",
     # invisible characters
-    "su​icide", "kill my​self", "su­icide",
+    "su​icide",
+    "kill my​self",
+    "su­icide",
     # intra-word separators
-    "s.u.i.c.i.d.e", "k.i.l.l myself", "c-u-t-t-i-n-g myself", "s u i c i d e",
+    "s.u.i.c.i.d.e",
+    "k.i.l.l myself",
+    "c-u-t-t-i-n-g myself",
+    "s u i c i d e",
     # plain-English gaps the old list missed
-    "i am going to off myself", "put me out of my misery",
+    "i am going to off myself",
+    "put me out of my misery",
     # non-English
-    "quiero morir", "me quiero matar", "quitarme la vida",
-    "je veux mourir", "me suicider",
-    "ich will sterben", "bringe mich um", "suizid gedanken",
-    "voglio morire", "quero morrer", "me matar",
-    "我想死", "自杀", "死にたい", "自殺", "أريد أن أموت",
-    "मरना चाहता हूँ", "मरना चाहती हूँ",
+    "quiero morir",
+    "me quiero matar",
+    "quitarme la vida",
+    "je veux mourir",
+    "me suicider",
+    "ich will sterben",
+    "bringe mich um",
+    "suizid gedanken",
+    "voglio morire",
+    "quero morrer",
+    "me matar",
+    "我想死",
+    "自杀",
+    "死にたい",
+    "自殺",
+    "أريد أن أموت",
+    "मरना चाहता हूँ",
+    "मरना चाहती हूँ",
 ]
 
 BENIGN = [
@@ -69,8 +93,7 @@ class TestCrisisNormalization:
     def test_obfuscated_crisis_language_fires_the_dialog_tier(self):
         # Everything except the hopelessness phrasing (suppress-only by
         # design) and bare "me matar" style fragments must reach the user.
-        suppress_only = {"i don't see any future for me",
-                         "no future for me at all", "me suicider"}
+        suppress_only = {"i don't see any future for me", "no future for me at all", "me suicider"}
         for text in OBVIOUS_CRISIS:
             if text in suppress_only:
                 continue
@@ -92,8 +115,13 @@ class TestCrisisNormalization:
         # catches it.
         label = "the s u i c i d e thoughts are loud again"
         assert not crisis.matches_suppress(label) or True  # informative only
-        pattern = Pattern(kind="rumination", label=label, occurrences=30,
-                          confidence=0.9, detail={"variants": [label]})
+        pattern = Pattern(
+            kind="rumination",
+            label=label,
+            occurrences=30,
+            confidence=0.9,
+            detail={"variants": [label]},
+        )
         pool = questions.build_pool([pattern])
         assert not any(label in q for q in pool), pool
 
@@ -101,10 +129,14 @@ class TestCrisisNormalization:
         # E2.disguised-crisis-recurrence: 81 days of the disguised phrase
         # surfaced a QUOTED recurring_phrase card with sensitive=false.
         entries = [
-            JournalEntry(text=f"{label} could not focus at work",
-                         entry_date=TODAY - timedelta(days=d), sentiment=None)
-            for d, label in ((d, "the s u i c i d e thoughts are loud again")
-                             for d in range(81, -1, -1))
+            JournalEntry(
+                text=f"{label} could not focus at work",
+                entry_date=TODAY - timedelta(days=d),
+                sentiment=None,
+            )
+            for d, label in (
+                (d, "the s u i c i d e thoughts are loud again") for d in range(81, -1, -1)
+            )
         ]
         result = brain.update(brain.fresh_state(), entries, TODAY)
         for surfaced in result.surfaced:
@@ -116,13 +148,17 @@ class TestCrisisNormalization:
 # P0-2: the phi = 1.0 recompute crash
 # ---------------------------------------------------------------------------
 
+
 class TestMoodShiftPhiOne:
     CORPUS_TEXT = "day {i}: work was busy, slept okay, walked the dog and read a bit."
 
     def test_near_constant_mood_does_not_crash_the_engine(self):
         entries = [
-            JournalEntry(text=self.CORPUS_TEXT.format(i=i),
-                         entry_date=TODAY - timedelta(days=i), sentiment=None)
+            JournalEntry(
+                text=self.CORPUS_TEXT.format(i=i),
+                entry_date=TODAY - timedelta(days=i),
+                sentiment=None,
+            )
             for i in range(35, 0, -1)
         ]
         result = brain.update(brain.fresh_state(), entries, TODAY)  # used to ZeroDivisionError
@@ -130,8 +166,9 @@ class TestMoodShiftPhiOne:
 
     def test_perfectly_constant_mood_does_not_crash(self):
         entries = [
-            JournalEntry(text="same as always", entry_date=TODAY - timedelta(days=i),
-                         sentiment=None)
+            JournalEntry(
+                text="same as always", entry_date=TODAY - timedelta(days=i), sentiment=None
+            )
             for i in range(35, 0, -1)
         ]
         brain.update(brain.fresh_state(), entries, TODAY)
@@ -146,6 +183,7 @@ class TestMoodShiftPhiOne:
 # ---------------------------------------------------------------------------
 # P1: the single-process guard
 # ---------------------------------------------------------------------------
+
 
 class TestSingleProcessGuard:
     def test_reentrant_within_one_process(self):
@@ -167,8 +205,11 @@ class TestSingleProcessGuard:
                 "singleprocess.acquire_single_process_lock(%r, %r)" % (secret, url)
             )
             done = subprocess.run(
-                [sys.executable, "-c", probe], capture_output=True, text=True,
-                cwd=BACKEND_DIR, timeout=60,
+                [sys.executable, "-c", probe],
+                capture_output=True,
+                text=True,
+                cwd=BACKEND_DIR,
+                timeout=60,
             )
             assert done.returncode != 0
             assert "another worker/process is already serving" in done.stderr
@@ -178,6 +219,7 @@ class TestSingleProcessGuard:
 # D1: LLM spelled-contact label rejection
 # ---------------------------------------------------------------------------
 
+
 class TestLlmSpelledContact:
     CORPUS = [
         "reminder to myself call five five five zero one three four now",
@@ -186,37 +228,54 @@ class TestLlmSpelledContact:
     ]
 
     def test_spelled_phone_label_is_dropped(self):
-        item = {"kind": "temporal",
-                "label": "call five five five zero one three four",
-                "occurrences": 9, "confidence": 0.9}
+        item = {
+            "kind": "temporal",
+            "label": "call five five five zero one three four",
+            "occurrences": 9,
+            "confidence": 0.9,
+        }
         assert llm.sanitize_pattern(item, self.CORPUS) is None
 
     def test_spelled_domain_label_is_dropped(self):
-        item = {"kind": "temporal", "label": "visit evil dot com often",
-                "occurrences": 3, "confidence": 0.5}
+        item = {
+            "kind": "temporal",
+            "label": "visit evil dot com often",
+            "occurrences": 3,
+            "confidence": 0.5,
+        }
         assert llm.sanitize_pattern(item, self.CORPUS) is None
 
     def test_number_word_run_below_threshold_still_passes(self):
         # Two number-words in a row are ordinary prose ("one two punch");
         # only 3+ consecutive ones are treated as a spelled phone number.
-        item = {"kind": "temporal", "label": "one two punch at work",
-                "occurrences": 3, "confidence": 0.5}
+        item = {
+            "kind": "temporal",
+            "label": "one two punch at work",
+            "occurrences": 3,
+            "confidence": 0.5,
+        }
         out = llm.sanitize_pattern(item, self.CORPUS + ["one two punch at work"])
         assert out is not None and out.label == "one two punch at work"
 
     def test_digit_phone_and_urls_still_dropped(self):
         for label in ("call 555-0134", "see https://evil.example", "www.evil.example"):
-            assert llm.sanitize_pattern(
-                {"kind": "temporal", "label": label, "occurrences": 1,
-                 "confidence": 0.5}, self.CORPUS) is None
+            assert (
+                llm.sanitize_pattern(
+                    {"kind": "temporal", "label": label, "occurrences": 1, "confidence": 0.5},
+                    self.CORPUS,
+                )
+                is None
+            )
 
 
 # ---------------------------------------------------------------------------
 # Misc pins that would otherwise only live in the harness
 # ---------------------------------------------------------------------------
 
+
 def test_processing_ttl_ceiling_matches_consent_copy():
     from app.config import MAX_PROCESSING_SESSION_TTL
+
     assert MAX_PROCESSING_SESSION_TTL == 300  # "up to 5 minutes" (mobile copy)
 
 

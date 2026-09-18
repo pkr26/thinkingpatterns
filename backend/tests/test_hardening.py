@@ -42,9 +42,7 @@ async def test_hostile_bearer_tokens_are_401_not_500(client):
     # that can actually arrive over the wire are ASCII: oversized, padded,
     # dotted garbage. All must 401 cleanly, never 500.
     for bad in ("a" * 100_000, "....", "===.===", "...."):
-        response = await client.get(
-            "/api/entries", headers={"Authorization": f"Bearer {bad}"}
-        )
+        response = await client.get("/api/entries", headers={"Authorization": f"Bearer {bad}"})
         assert response.status_code == 401
 
 
@@ -57,9 +55,15 @@ async def test_oversized_blob_rejected_by_schema(client):
     # 1,125,001 raw bytes -> 1,500,004 b64 chars: over the per-field cap but
     # under the 2 MiB whole-body cap, so this pins the SCHEMA rejection.
     huge = base64.b64encode(b"x" * 1_125_001).decode()
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "big", "blob": huge, "entry_date": TODAY.isoformat(),
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "big",
+            "blob": huge,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert response.status_code == 422
 
 
@@ -74,11 +78,14 @@ async def test_oversized_data_key_rejected_by_schema(client):
 
 
 async def test_oversized_register_fields_rejected(client):
-    response = await client.post("/api/auth/register", json={
-        "username": "saltbomb",
-        "salt": base64.b64encode(b"s" * 200).decode(),
-        "verifier": base64.b64encode(b"v" * 32).decode(),
-    })
+    response = await client.post(
+        "/api/auth/register",
+        json={
+            "username": "saltbomb",
+            "salt": base64.b64encode(b"s" * 200).decode(),
+            "verifier": base64.b64encode(b"v" * 32).decode(),
+        },
+    )
     assert response.status_code == 422
 
 
@@ -91,13 +98,18 @@ async def test_inactive_user_cannot_login_or_use_api(client, app):
 
     from sqlalchemy import update
     from app.models import User
+
     async with app.state.sessionmaker() as session:
         await session.execute(update(User).where(User.id == emu.user_id).values(is_active=False))
         await session.commit()
 
-    login = await client.post("/api/auth/login", json={
-        "username": "suspended", "verifier": emu.auth_key_b64,
-    })
+    login = await client.post(
+        "/api/auth/login",
+        json={
+            "username": "suspended",
+            "verifier": emu.auth_key_b64,
+        },
+    )
     assert login.status_code == 401
 
     stale = await client.get("/api/entries", headers=emu.headers)
@@ -124,10 +136,12 @@ async def test_recompute_rate_limited(client, settings):
     await emu.create_entry(client, "one calm day", TODAY)
     token = await emu.open_processing_session(client)
     statuses = [
-        (await client.post(
-            "/api/insights/recompute",
-            headers={**emu.headers, "X-Processing-Token": token},
-        )).status_code
+        (
+            await client.post(
+                "/api/insights/recompute",
+                headers={**emu.headers, "X-Processing-Token": token},
+            )
+        ).status_code
         for _ in range(4)
     ]
     assert statuses[:2] == [200, 200]
@@ -172,7 +186,7 @@ def test_counter_keys_are_independent_across_window_sizes():
     assert counter.hit("a:short", 10, now=0.0).count == 1
     assert counter.hit("a:short", 10, now=9.0).count == 2
     assert counter.hit("a:short", 10, now=10.0).count == 1  # short window rolled over
-    assert counter.hit("b:long", 60, now=10.0).count == 1   # different key unaffected
+    assert counter.hit("b:long", 60, now=10.0).count == 1  # different key unaffected
 
 
 def test_counter_reports_usable_retry_after():
@@ -295,8 +309,12 @@ def test_llm_url_http_rejected_in_staging():
     # Not just production: ANY non-development environment sends journal
     # plaintext over TLS or not at all.
     with pytest.raises(RuntimeError, match="LLM_URL"):
-        Settings(environment="staging", token_secret="x" * 45,
-                 database_url="postgresql+asyncpg://u:p@h/db", llm_url="http://llm.internal/v1")
+        Settings(
+            environment="staging",
+            token_secret="x" * 45,
+            database_url="postgresql+asyncpg://u:p@h/db",
+            llm_url="http://llm.internal/v1",
+        )
 
 
 def test_llm_url_https_accepted():
@@ -305,12 +323,19 @@ def test_llm_url_https_accepted():
         database_url="postgresql+asyncpg://u:p@h/db",
         token_secret="x" * 48,
         llm_url="https://llm.example.com/v1",
+        llm_provider_name="Example LLM",
+        llm_data_retention="30 days",
+        llm_policy_version="2026-09",
     )
     assert s.llm_url == "https://llm.example.com/v1"
 
 
 def test_llm_url_loopback_http_allowed_only_in_development():
-    for url in ("http://localhost:11434/v1", "http://127.0.0.1:8080/v1"):
+    for url in (
+        "http://localhost:11434/v1",
+        "http://127.0.0.1:8080/v1",
+        "http://[::1]:8080/v1",
+    ):
         s = Settings(environment="development", llm_url=url)
         assert s.llm_url == url
     # Exact-host match: a lookalike host or a LAN address is not loopback.
@@ -319,8 +344,30 @@ def test_llm_url_loopback_http_allowed_only_in_development():
             Settings(environment="development", llm_url=url)
     # Loopback http does NOT leak into other environments.
     with pytest.raises(RuntimeError, match="LLM_URL"):
-        Settings(environment="staging", token_secret="x" * 45,
-                 database_url="postgresql+asyncpg://u:p@h/db", llm_url="http://localhost:11434/v1")
+        Settings(
+            environment="staging",
+            token_secret="x" * 45,
+            database_url="postgresql+asyncpg://u:p@h/db",
+            llm_url="http://localhost:11434/v1",
+        )
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "https://",
+        "https://provider.example:abc/v1",
+        "https://user:pass@provider.example/v1",
+        "https://provider.example/v1?alternate=1",
+        "https://provider.example/v1#fragment",
+    ),
+)
+def test_llm_url_rejects_malformed_or_ambiguous_endpoint_urls(url):
+    # The LLM target carries decrypted journal text. Fail during boot for a
+    # malformed authority or URL component that would otherwise make the
+    # configured /chat/completions target ambiguous.
+    with pytest.raises(RuntimeError, match="LLM_URL"):
+        Settings(environment="development", llm_url=url)
 
 
 # --- config: CORS defaults to no origins ---------------------------------------
@@ -328,6 +375,33 @@ def test_llm_url_loopback_http_allowed_only_in_development():
 
 def test_cors_origins_default_to_empty():
     assert Settings(environment="development").cors_origins == []
+
+
+def test_cors_origins_require_exact_secure_origins():
+    # A wildcard or a URL with userinfo/path/query is not an explicit Origin
+    # allowlist entry. Remote plaintext origins are equally unsafe; only
+    # exact local development hosts may use http.
+    for origins in (
+        ["*"],
+        ["http://web.example"],
+        ["https://user:pass@web.example"],
+        ["https://web.example/portal"],
+        ["https://web.example?next=bad"],
+        ["https://web.example:abc"],
+    ):
+        with pytest.raises(RuntimeError, match="cors_origins"):
+            Settings(environment="development", cors_origins=origins)
+
+    for origin in ("https://web.example", "http://localhost:5173", "http://[::1]:5173"):
+        assert Settings(environment="development", cors_origins=[origin]).cors_origins == [origin]
+
+    with pytest.raises(RuntimeError, match="cors_origins"):
+        Settings(
+            environment="production",
+            database_url="postgresql+asyncpg://u:p@h/db",
+            token_secret="x" * 48,
+            cors_origins=["http://localhost:5173"],
+        )
 
 
 async def test_no_cors_headers_by_default(client):
@@ -371,16 +445,20 @@ async def test_create_all_only_runs_in_development(monkeypatch):
     monkeypatch.setattr(main_mod, "build_engine", lambda url, **_: _Engine())
     monkeypatch.setattr(main_mod, "init_models", _init)
 
-    prod = main_mod.create_app(Settings(
-        environment="staging",
-        database_url="postgresql+asyncpg://u:p@h/db",
-        token_secret="x" * 48,
-    ))
+    prod = main_mod.create_app(
+        Settings(
+            environment="staging",
+            database_url="postgresql+asyncpg://u:p@h/db",
+            token_secret="x" * 48,
+        )
+    )
     async with prod.router.lifespan_context(prod):
         pass
     assert inited == []
 
-    dev = main_mod.create_app(Settings(environment="development", database_url="sqlite+aiosqlite://"))
+    dev = main_mod.create_app(
+        Settings(environment="development", database_url="sqlite+aiosqlite://")
+    )
     async with dev.router.lifespan_context(dev):
         pass
     assert len(inited) == 1
@@ -396,7 +474,9 @@ async def test_docs_hidden_in_any_non_development_env(monkeypatch, env):
     import httpx
     from app.main import create_app
 
-    monkeypatch.setattr("app.main.build_engine", lambda url, **_: None)  # pool kwargs accepted, engine unused
+    monkeypatch.setattr(
+        "app.main.build_engine", lambda url, **_: None
+    )  # pool kwargs accepted, engine unused
     settings = Settings(
         environment=env,
         database_url="postgresql+asyncpg://u:p@h/db",
@@ -430,9 +510,13 @@ async def test_duplicate_entry_after_queue_flush_is_409(client):
     emu = ClientEmulator("queuedup", "p")
     await emu.register(client)
     created = await emu.create_entry(client, "queued entry", TODAY, client_entry_id="dup-1")
-    replay = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "dup-1",
-        "blob": created["blob"],
-        "entry_date": TODAY.isoformat(),
-    })
+    replay = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "dup-1",
+            "blob": created["blob"],
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert replay.status_code == 409

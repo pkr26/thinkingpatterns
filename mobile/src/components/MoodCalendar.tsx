@@ -71,12 +71,12 @@ export function MoodCalendar({
       </View>
       <View style={styles.grid}>
         {WEEKDAY_LABELS.map((label, i) => (
-          <Text key={`${label}-${i}`} style={{ color: t.colors.muted, fontSize: 10, textAlign: "center", width: CELL }}>
+          <Text key={`${label}-${i}`} style={{ color: t.colors.muted, fontSize: 10, textAlign: "center", width: CELL_WIDTH }}>
             {label}
           </Text>
         ))}
         {cells.map((cell: CalendarDay, i) => {
-          if (cell.iso === null) return <View key={`blank-${i}`} style={{ width: CELL }} />;
+          if (cell.iso === null) return <View key={`blank-${i}`} style={{ width: CELL_WIDTH, minHeight: t.minTouch }} />;
           const journaled = journaledDays.has(cell.iso);
           const selected = selectedDay === cell.iso;
           const color = dotColor(cell.iso);
@@ -88,11 +88,13 @@ export function MoodCalendar({
                 {
                   backgroundColor: selected ? t.colors.primary : "transparent",
                   borderRadius: t.radius.sm,
-                  minHeight: 30,
+                  minHeight: t.minTouch,
                 },
               ]}
-              disabled={!journaled}
-              onPress={() => onSelectDay(selected ? null : cell.iso!)}
+              // A blank day is still a useful target: it clears a selected
+              // filter. Previously it was disabled, trapping a person in a
+              // day filter unless they found the selected day again.
+              onPress={() => onSelectDay(selected ? null : journaled ? cell.iso! : null)}
               accessibilityRole="button"
               accessibilityLabel={
                 journaled
@@ -119,12 +121,14 @@ export function MoodCalendar({
   );
 }
 
-const CELL = 38;
+/** Seven 44pt targets fit responsively instead of using a fixed 38pt grid
+ * that was too small for touch accessibility and overflowed narrow phones. */
+const CELL_WIDTH = "14.2857%";
 const styles = StyleSheet.create({
   card: { padding: 12, gap: 8 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  arrow: { paddingHorizontal: 12, paddingVertical: 4, minHeight: 32, justifyContent: "center" },
+  arrow: { paddingHorizontal: 12, paddingVertical: 4, minHeight: 44, minWidth: 44, justifyContent: "center", alignItems: "center" },
   grid: { flexDirection: "row", flexWrap: "wrap" },
-  day: { width: CELL, alignItems: "center", justifyContent: "center", gap: 1 },
+  day: { width: CELL_WIDTH, alignItems: "center", justifyContent: "center", gap: 1 },
   dot: { width: 4, height: 4, borderRadius: 2 },
 });

@@ -122,8 +122,8 @@ async def test_pairing_codes_and_sweep_share_one_prune_statement(client, monkeyp
     seen = []
     real = therapist_mod.access_log_prune_statement
 
-    def spy(now):
-        statement = real(now)
+    def spy(now, retention_days=730):
+        statement = real(now, retention_days)
         seen.append(statement)
         return statement
 

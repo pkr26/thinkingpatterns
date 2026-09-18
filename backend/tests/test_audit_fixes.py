@@ -42,22 +42,36 @@ async def test_inner_date_far_from_outer_is_rejected_not_500(client):
     days = daterange(31, T0)
     for i, d in enumerate(days):
         if i == 30:
-            body = {"v": 1, "text": "i cant sleep my mind wont stop",
-                    "sentiment": None, "created_at": "3000-01-01"}
-            blob = base64.b64encode(crypto.encrypt(
-                emu.data_key, json.dumps(body).encode(),
-                crypto.build_aad("entry", emu.user_id, f"e-inner-{i}"),
-            )).decode()
+            body = {
+                "v": 1,
+                "text": "i cant sleep my mind wont stop",
+                "sentiment": None,
+                "created_at": "3000-01-01",
+            }
+            blob = base64.b64encode(
+                crypto.encrypt(
+                    emu.data_key,
+                    json.dumps(body).encode(),
+                    crypto.build_aad("entry", emu.user_id, f"e-inner-{i}"),
+                )
+            ).decode()
         else:
             blob = emu.encrypt_entry("i cant sleep my mind wont stop", d, f"e-inner-{i}")
-        response = await client.post("/api/entries", headers=emu.headers, json={
-            "client_entry_id": f"e-inner-{i}", "blob": blob, "entry_date": d.isoformat(),
-        })
+        response = await client.post(
+            "/api/entries",
+            headers=emu.headers,
+            json={
+                "client_entry_id": f"e-inner-{i}",
+                "blob": blob,
+                "entry_date": d.isoformat(),
+            },
+        )
         assert response.status_code == 201, response.text
 
     token = await emu.open_processing_session(client)
-    response = await client.post("/api/insights/recompute",
-                                 headers={**emu.headers, "X-Processing-Token": token})
+    response = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     # Pre-fix: OverflowError escaping the handler -> 500, forever (the new
     # brain state never persisted, so every future recompute re-crashed).
     assert response.status_code == 400
@@ -90,29 +104,32 @@ async def test_matching_inner_date_still_analyzes(client):
 
 def test_staging_with_empty_secret_refuses_to_boot():
     with pytest.raises(RuntimeError, match="TOKEN_SECRET"):
-        Settings(environment="staging", token_secret="",
-                 database_url="sqlite+aiosqlite://")
+        Settings(environment="staging", token_secret="", database_url="sqlite+aiosqlite://")
 
 
 def test_env_value_is_normalized_case_and_whitespace():
     # "Production " must hit the production gates (SQLite rejection), not
     # sail past an exact-string comparison.
     with pytest.raises(RuntimeError, match="PostgreSQL"):
-        Settings(environment=" Production ", token_secret="x" * 45,
-                 database_url="sqlite+aiosqlite:///./x.db")
+        Settings(
+            environment=" Production ",
+            token_secret="x" * 45,
+            database_url="sqlite+aiosqlite:///./x.db",
+        )
     with pytest.raises(RuntimeError, match="at least 32"):
-        Settings(environment="PRODUCTION", token_secret="abc",
-                 database_url="postgresql+asyncpg://u:p@h/db")
+        Settings(
+            environment="PRODUCTION",
+            token_secret="abc",
+            database_url="postgresql+asyncpg://u:p@h/db",
+        )
 
 
 def test_numeric_env_ranges_abort_startup():
-    for bad in ({"token_ttl_seconds": 0}, {"auth_rate_window": 0},
-                {"unlock_threshold_days": -1}):
+    for bad in ({"token_ttl_seconds": 0}, {"auth_rate_window": 0}, {"unlock_threshold_days": -1}):
         with pytest.raises(RuntimeError, match="must be >= 1"):
             Settings(environment="development", database_url="sqlite+aiosqlite://", **bad)
     with pytest.raises(RuntimeError, match="must be >= 1024"):
-        Settings(environment="development", database_url="sqlite+aiosqlite://",
-                 max_body_bytes=10)
+        Settings(environment="development", database_url="sqlite+aiosqlite://", max_body_bytes=10)
 
 
 # --- finding: quota check-then-insert race ---------------------------------------------
@@ -128,10 +145,13 @@ async def test_concurrent_entry_creates_respect_quota(client, app):
 
     async def create(i: int):
         return await client.post(
-            "/api/entries", headers=emu.headers,
-            json={"client_entry_id": f"e-race-{i}",
-                  "blob": emu.encrypt_entry("x", today, f"e-race-{i}"),
-                  "entry_date": today.isoformat()},
+            "/api/entries",
+            headers=emu.headers,
+            json={
+                "client_entry_id": f"e-race-{i}",
+                "blob": emu.encrypt_entry("x", today, f"e-race-{i}"),
+                "entry_date": today.isoformat(),
+            },
         )
 
     responses = await asyncio.gather(*(create(i) for i in range(20)))
@@ -141,6 +161,33 @@ async def test_concurrent_entry_creates_respect_quota(client, app):
     # per-user lock serializes check+insert and the quota holds exactly.
     assert len(created) == 5, [r.status_code for r in responses]
     assert len(rejected) == 15
+
+
+async def test_replace_delete_race_is_serialized_and_never_500(client):
+    """An edit and delete of one entry have one linearizable outcome.
+
+    The mobile client normally avoids this overlap, but retries, two active
+    screens, or a hostile replay can create it.  Either mutation may win;
+    neither may surface SQLAlchemy's stale-row exception as a 500.
+    """
+    emu = ClientEmulator("entry-edit-delete-race", "pw-entry-race")
+    await emu.register(client)
+    entry = await emu.create_entry(client, "before race", date.today(), client_entry_id="e-race")
+
+    update, removal = await asyncio.gather(
+        client.put(
+            f"/api/entries/{entry['client_entry_id']}",
+            headers=emu.headers,
+            json={
+                "blob": emu.encrypt_entry("concurrent update", date.today(), "e-race"),
+                "entry_date": date.today().isoformat(),
+            },
+        ),
+        client.delete(f"/api/entries/{entry['client_entry_id']}", headers=emu.headers),
+    )
+    assert update.status_code in {200, 404}
+    assert removal.status_code in {204, 404}
+    assert 500 not in {update.status_code, removal.status_code}
 
 
 # --- finding: per-username login bucket semantics ---------------------------------------
@@ -156,20 +203,22 @@ async def test_unknown_name_flood_never_consumes_login_buckets(client, app):
     # consumed a login-name:<name> bucket; now nothing is recorded.
     # (7 floods + 2 more logins below keep us inside the per-IP auth limit.)
     for _ in range(7):
-        await client.post("/api/auth/login",
-                          json={"username": "no-such-user-anywhere", "verifier": wrong})
+        await client.post(
+            "/api/auth/login", json={"username": "no-such-user-anywhere", "verifier": wrong}
+        )
     counter: FixedWindowCounter = app.state.rate_counter
     assert not any(k.startswith("login-name:") for k in counter._hits)
 
-    # A failed verification for a REAL account still counts (brute-force
-    # throttle intact), and the count lives under the namespaced key.
-    await client.post("/api/auth/login",
-                      json={"username": emu.username, "verifier": wrong})
-    assert any(k.startswith(f"login-name:{emu.username}") for k in counter._hits)
+    # A failed verification for a REAL account is still IP-throttled, but it
+    # cannot create a name-scoped lockout that a distributed attacker spends
+    # on the legitimate user's behalf.
+    await client.post("/api/auth/login", json={"username": emu.username, "verifier": wrong})
+    assert not any(k.startswith(f"login-name:{emu.username}") for k in counter._hits)
 
     # And while under the limit, the legitimate user still gets in.
-    r = await client.post("/api/auth/login",
-                          json={"username": emu.username, "verifier": emu.auth_key_b64})
+    r = await client.post(
+        "/api/auth/login", json={"username": emu.username, "verifier": emu.auth_key_b64}
+    )
     assert r.status_code == 200
 
 
@@ -181,7 +230,7 @@ def test_eviction_prefers_single_hit_garbage_over_multi_hit_victim():
 
     counter = FixedWindowCounter()
     now = 1000.0
-    counter.hit("login-name:victim", 60, now=now)   # count 1
+    counter.hit("login-name:victim", 60, now=now)  # count 1
     counter.hit("login-name:victim", 60, now=now + 1)  # count 2
     for i in range(MAX_TRACKED_KEYS + 50):
         counter.hit(f"garbage-{i}", 60, now=now + 2)
@@ -219,9 +268,9 @@ def test_dynamics_detectors_carry_pvalues_into_the_family():
     for i in range(120):
         d = T0 - timedelta(days=119 - i)
         if i < 80:
-            r = rng.uniform(-0.03, 0.03)   # quiet iid baseline
+            r = rng.uniform(-0.03, 0.03)  # quiet iid baseline
         elif i < 90:
-            r = rng.uniform(-0.03, 0.03)   # buffer
+            r = rng.uniform(-0.03, 0.03)  # buffer
         else:
             prev = 0.9 * prev + rng.uniform(-0.06, 0.06)  # sticky + volatile
             r = prev * 3.0
@@ -262,16 +311,19 @@ def test_ewma_limits_are_autocorrelation_aware():
 
 def test_corpus_boilerplate_never_becomes_a_topic():
     # "unique day N" in every entry used to surface as topic:unique.
-    entries = [JournalEntry(f"unique day {i} again", T0 - timedelta(days=60 - i), None)
-               for i in range(31)]
+    entries = [
+        JournalEntry(f"unique day {i} again", T0 - timedelta(days=60 - i), None) for i in range(31)
+    ]
     result = brain.update(brain.load_state(None), entries, T0)
     assert not any(p.kind == "topic" for p in result.surfaced)
 
 
 def test_pattern_labels_are_capped_at_write_time():
     worry = "worry " * 100  # ~600-char sentence, within the clustering token cap
-    entries = [JournalEntry(worry + f"variant{i}", T0 - timedelta(days=k), -0.8)
-               for i, k in enumerate((30, 20, 10, 5, 2, 0))]
+    entries = [
+        JournalEntry(worry + f"variant{i}", T0 - timedelta(days=k), -0.8)
+        for i, k in enumerate((30, 20, 10, 5, 2, 0))
+    ]
     state = brain.update(brain.load_state(None), entries, T0).new_state
     assert state["patterns"], "the near-duplicate worry should cluster"
     for record in state["patterns"].values():
@@ -286,8 +338,7 @@ def test_phrase_clustering_is_bounded_on_adversarial_buckets():
     refs = []
     for i, d in enumerate(days * 5):
         token = "vary" + "a" * (i % 20 + 1) + "z" * (i % 7 + 1)
-        refs.append(phrases.SentenceRef(
-            text=f"everything is falling apart because {token}", day=d))
+        refs.append(phrases.SentenceRef(text=f"everything is falling apart because {token}", day=d))
     start = time.monotonic()
     phrases.near_duplicate_clusters(refs)
     assert time.monotonic() - start < 10.0
@@ -298,9 +349,13 @@ def test_phrase_clustering_is_bounded_on_adversarial_buckets():
 
 def test_llm_numeric_details_reject_nonfinite():
     from app.services.llm import sanitize_pattern
+
     kept = sanitize_pattern(
-        {"kind": "mood_shift", "label": "mood",
-         "detail": {"shift": float("inf"), "baseline": float("nan"), "current": 0.4}},
+        {
+            "kind": "mood_shift",
+            "label": "mood",
+            "detail": {"shift": float("inf"), "baseline": float("nan"), "current": 0.4},
+        },
         ["my mood today"],
     )
     assert kept is not None
@@ -310,10 +365,12 @@ def test_llm_numeric_details_reject_nonfinite():
 
 def test_llm_labels_are_corpus_grounded_and_url_free():
     from app.services.llm import sanitize_pattern
+
     corpus = ["work was heavy and sleep was short"]
     # Prompt-injected instruction label: rejected.
-    assert sanitize_pattern(
-        {"kind": "temporal", "label": "URGENT call 555-0134 now"}, corpus) is None
+    assert (
+        sanitize_pattern({"kind": "temporal", "label": "URGENT call 555-0134 now"}, corpus) is None
+    )
     # Ungrounded content word: rejected.
     assert sanitize_pattern({"kind": "temporal", "label": "guitar"}, corpus) is None
     # Grounded label passes.
@@ -323,8 +380,10 @@ def test_llm_labels_are_corpus_grounded_and_url_free():
 
 def test_llm_bool_occurrences_not_an_int():
     from app.services.llm import sanitize_pattern
+
     kept = sanitize_pattern(
-        {"kind": "temporal", "label": "work", "occurrences": True}, ["work day"])
+        {"kind": "temporal", "label": "work", "occurrences": True}, ["work day"]
+    )
     assert kept is not None and kept.occurrences == 0
 
 
@@ -364,11 +423,17 @@ def test_parse_entries_caps_text_totals():
         MAX_ANALYSIS_TOTAL_CHARS,
         _parse_entries,
     )
+
     plains, dates = [], []
     for _ in range(30):
         text = "word " * 90_000  # ~450 KB per entry; 30 entries >> the total cap
-        plains.append(bytearray(json.dumps(
-            {"v": 1, "text": text, "sentiment": None, "created_at": "2026-09-01"}).encode()))
+        plains.append(
+            bytearray(
+                json.dumps(
+                    {"v": 1, "text": text, "sentiment": None, "created_at": "2026-09-01"}
+                ).encode()
+            )
+        )
         dates.append(date(2026, 9, 1))
     entries = _parse_entries(plains, dates)
     assert all(len(e.text) <= MAX_ANALYSIS_TEXT_CHARS for e in entries)
@@ -377,8 +442,8 @@ def test_parse_entries_caps_text_totals():
 
 def test_parse_entries_rejects_bool_sentiment():
     from app.api.insights import _parse_entries
-    payload = json.dumps(
-        {"v": 1, "text": "x", "sentiment": True, "created_at": "2026-09-01"})
+
+    payload = json.dumps({"v": 1, "text": "x", "sentiment": True, "created_at": "2026-09-01"})
     with pytest.raises(ValueError):
         _parse_entries([bytearray(payload.encode())], [date(2026, 9, 1)])
 
@@ -415,12 +480,22 @@ def test_parse_entries_total_budget_truncates_oldest():
         MAX_ANALYSIS_TOTAL_CHARS,
         _parse_entries,
     )
+
     n = MAX_ANALYSIS_TOTAL_CHARS // MAX_ANALYSIS_TEXT_CHARS + 1  # 101
     plains, dates = [], []
     for _ in range(n):
-        plains.append(bytearray(json.dumps(
-            {"v": 1, "text": "x" * MAX_ANALYSIS_TEXT_CHARS,
-             "sentiment": None, "created_at": "2026-09-01"}).encode()))
+        plains.append(
+            bytearray(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "text": "x" * MAX_ANALYSIS_TEXT_CHARS,
+                        "sentiment": None,
+                        "created_at": "2026-09-01",
+                    }
+                ).encode()
+            )
+        )
         dates.append(date(2026, 9, 1))
     entries = _parse_entries(plains, dates)
     assert sum(len(e.text) for e in entries) <= MAX_ANALYSIS_TOTAL_CHARS
@@ -432,6 +507,7 @@ async def test_recompute_over_total_corpus_budget_returns_200(client):
     # End-to-end: >100 entries of 20k chars each exceed the 2M total budget
     # after the per-entry cap, so the recompute must truncate, not 500.
     from app.api.insights import MAX_ANALYSIS_TEXT_CHARS, MAX_ANALYSIS_TOTAL_CHARS
+
     emu = ClientEmulator("bigcorpus", "pw-big-corpus")
     await emu.register(client)
     await emu.backdate_account(client, days=120)
@@ -439,7 +515,9 @@ async def test_recompute_over_total_corpus_budget_returns_200(client):
     days = daterange(40, date.today())  # 40 active days >= the 30-day threshold
     for i in range(n):
         await emu.create_entry(
-            client, "x" * MAX_ANALYSIS_TEXT_CHARS, days[i % len(days)],
+            client,
+            "x" * MAX_ANALYSIS_TEXT_CHARS,
+            days[i % len(days)],
             client_entry_id=f"e-big-{i}",
         )
     result = await emu.recompute(client)
@@ -494,21 +572,31 @@ async def test_recompute_zeroizes_api_layer_data_key_on_error(client, monkeypatc
         if i == 30:
             # Encrypted under the WRONG key: decryption fails authentication,
             # driving the 400 path that must still scrub the data key.
-            blob = base64.b64encode(crypto.encrypt(
-                bytes(32),
-                json.dumps({"v": 1, "text": "broken", "sentiment": None,
-                            "created_at": d.isoformat()}).encode(),
-                crypto.build_aad("entry", emu.user_id, "e-tampered"),
-            )).decode()
-            response = await client.post("/api/entries", headers=emu.headers, json={
-                "client_entry_id": "e-tampered", "blob": blob, "entry_date": d.isoformat(),
-            })
+            blob = base64.b64encode(
+                crypto.encrypt(
+                    bytes(32),
+                    json.dumps(
+                        {"v": 1, "text": "broken", "sentiment": None, "created_at": d.isoformat()}
+                    ).encode(),
+                    crypto.build_aad("entry", emu.user_id, "e-tampered"),
+                )
+            ).decode()
+            response = await client.post(
+                "/api/entries",
+                headers=emu.headers,
+                json={
+                    "client_entry_id": "e-tampered",
+                    "blob": blob,
+                    "entry_date": d.isoformat(),
+                },
+            )
             assert response.status_code == 201, response.text
         else:
             await emu.create_entry(client, "an ordinary day with work and sleep", d)
     token = await emu.open_processing_session(client)
-    response = await client.post("/api/insights/recompute",
-                                 headers={**emu.headers, "X-Processing-Token": token})
+    response = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     assert response.status_code == 400
     assert captured, "API-layer data key was never zeroized on the error path"
     assert all(all(byte == 0 for byte in buf) for buf in captured)
@@ -538,14 +626,18 @@ def test_phrase_detection_keeps_recent_entries_when_capped(monkeypatch):
     # MinHash work tiny while exercising the same branch.
     monkeypatch.setattr(brain, "MAX_WINDOW_SENTENCES", 50)
     window = [
-        JournalEntry(text=f"old entry number {i} had nothing repeat.",
-                     entry_date=T0 - timedelta(days=120 - i), sentiment=None)
+        JournalEntry(
+            text=f"old entry number {i} had nothing repeat.",
+            entry_date=T0 - timedelta(days=120 - i),
+            sentiment=None,
+        )
         for i in range(60)
     ]
     phrase = "i keep replaying that conversation in my head"
     for offset in (14, 10, 5, 0):  # 4 distinct days, 14-day span: qualifies
-        window.append(JournalEntry(text=phrase + ".",
-                                   entry_date=T0 - timedelta(days=offset), sentiment=None))
+        window.append(
+            JournalEntry(text=phrase + ".", entry_date=T0 - timedelta(days=offset), sentiment=None)
+        )
     signals = brain._detect_phrases(brain._phrase_clusters(window))
     assert any("replaying that conversation" in s.label for s in signals)
 
@@ -561,20 +653,37 @@ def test_revived_pattern_restarts_confirmation_clock(stale_state):
 
     store = brain.fresh_state()
     store["patterns"]["p-revive"] = brain.StoredPattern(
-        pid="p-revive", kind="temporal", label="sunday dread",
-        first_seen=old_first, last_seen=last,
-        first_qualified=old_first, last_qualified=last,
-        occurrences=4, state=stale_state,
-        qualification_days=[old_first], evidence_dates=[old_first],
-        feedback={}, detail={},
+        pid="p-revive",
+        kind="temporal",
+        label="sunday dread",
+        first_seen=old_first,
+        last_seen=last,
+        first_qualified=old_first,
+        last_qualified=last,
+        occurrences=4,
+        state=stale_state,
+        qualification_days=[old_first],
+        evidence_dates=[old_first],
+        feedback={},
+        detail={},
     )
 
     def qualify(day: date) -> None:
-        brain._merge_lifecycle(store, [brain._Signal(
-            pid="p-revive", kind="temporal", label="sunday dread",
-            occurrences=4, pvalue=None, detail={},
-            evidence_days=[day - timedelta(days=1), day],
-        )], day)
+        brain._merge_lifecycle(
+            store,
+            [
+                brain._Signal(
+                    pid="p-revive",
+                    kind="temporal",
+                    label="sunday dread",
+                    occurrences=4,
+                    pvalue=None,
+                    detail={},
+                    evidence_days=[day - timedelta(days=1), day],
+                )
+            ],
+            day,
+        )
 
     qualify(today)
     record = store["patterns"]["p-revive"]
@@ -623,10 +732,12 @@ async def test_concurrent_recomputes_for_one_user_serialize(client, monkeypatch)
     token1 = await emu.open_processing_session(client)
     token2 = await emu.open_processing_session(client)
     r1, r2 = await asyncio.gather(
-        client.post("/api/insights/recompute",
-                    headers={**emu.headers, "X-Processing-Token": token1}),
-        client.post("/api/insights/recompute",
-                    headers={**emu.headers, "X-Processing-Token": token2}),
+        client.post(
+            "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token1}
+        ),
+        client.post(
+            "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token2}
+        ),
     )
     assert r1.status_code == 200, r1.text
     assert r2.status_code == 200, r2.text
@@ -660,17 +771,17 @@ async def test_user_locks_never_evict_a_lock_with_waiters():
     t2 = asyncio.create_task(waiter())
     await entered.wait()
     for _ in range(1000):
-        if locks._locks["k"][1] == 2:  # holder + parked waiter
+        if locks._locks["k"].refs == 2:  # holder + parked waiter
             break
         await asyncio.sleep(0.001)
-    assert locks._locks["k"][1] == 2
-    original = locks._locks["k"][0]
+    assert locks._locks["k"].refs == 2
+    original = locks._locks["k"].lock
     # Capacity pressure while the waiter is parked: the waited-on lock must
     # survive (evicting it would orphan the waiter and let the next hold("k")
     # mint a second lock for the same key).
     async with locks.hold("other"):
         pass
-    assert locks._locks["k"][0] is original
+    assert locks._locks["k"].lock is original
     release.set()
     await asyncio.gather(t1, t2)
     assert acquired == [original]
@@ -700,17 +811,18 @@ async def test_list_entries_pagination_has_stable_total_order(client, app):
     await emu.register(client)
     day = date.today()
     for i in range(5):
-        await emu.create_entry(client, f"page order entry {i}", day,
-                               client_entry_id=f"e-page-{i}")
+        await emu.create_entry(client, f"page order entry {i}", day, client_entry_id=f"e-page-{i}")
     # Identical (entry_date, received_at): only the id tiebreaker orders these.
     async with app.state.sessionmaker() as s:
-        await s.execute(sql_update(Entry).values(
-            received_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+        await s.execute(
+            sql_update(Entry).values(received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        )
         await s.commit()
 
     async def fetch(offset: int, limit: int) -> list[str]:
-        response = await client.get("/api/entries", headers=emu.headers,
-                                    params={"offset": offset, "limit": limit})
+        response = await client.get(
+            "/api/entries", headers=emu.headers, params={"offset": offset, "limit": limit}
+        )
         assert response.status_code == 200, response.text
         return [row["id"] for row in response.json()]
 
@@ -733,14 +845,16 @@ async def test_load_rows_has_stable_total_order(client, app):
     await emu.register(client)
     day = date.today()
     for i in range(5):
-        await emu.create_entry(client, f"corpus order entry {i}", day,
-                               client_entry_id=f"e-corpus-{i}")
+        await emu.create_entry(
+            client, f"corpus order entry {i}", day, client_entry_id=f"e-corpus-{i}"
+        )
     # Identical (entry_date, received_at): only the id tiebreaker orders these.
     # Without it, which entry the 2M-char corpus budget truncates is
     # DB-arbitrary and can flip between recomputes.
     async with app.state.sessionmaker() as s:
-        await s.execute(sql_update(Entry).values(
-            received_at=datetime(2026, 1, 1, tzinfo=timezone.utc)))
+        await s.execute(
+            sql_update(Entry).values(received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        )
         await s.commit()
         rows = await _load_rows(s, emu.user_id, limit=10, blob_budget=8 * 1024 * 1024)
     # Entry ids are random uuid hex, so ascending id order can only come from
@@ -763,8 +877,7 @@ async def test_load_rows_sql_bounds_to_the_most_recent_n(client, app):
     # 6 entries on 6 distinct days; the limit keeps the NEWEST 4.
     for offset in range(6, 0, -1):
         d = day - timedelta(days=offset)
-        await emu.create_entry(client, f"day minus {offset}", d,
-                               client_entry_id=f"e-cap-{offset}")
+        await emu.create_entry(client, f"day minus {offset}", d, client_entry_id=f"e-cap-{offset}")
     async with app.state.sessionmaker() as s:
         rows = await _load_rows(s, emu.user_id, limit=4, blob_budget=8 * 1024 * 1024)
     dates = [row.entry_date for row in rows]

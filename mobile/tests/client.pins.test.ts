@@ -57,7 +57,7 @@ describe("client pins: session storage key names", () => {
 });
 
 describe("client pins: origin-bound local state on server switch", () => {
-  it("queue quarantine/rejected stores are wiped with the origin, unrelated keys survive", async () => {
+  it("old unscoped queue bytes are preserved for safe migration; unrelated keys survive", async () => {
     await setBaseUrl("https://old.example.com");
     await storage.setItem("@mindpattern/queue_quarantine", "q");
     await storage.setItem("@mindpattern/queue_rejected", "r");
@@ -65,11 +65,11 @@ describe("client pins: origin-bound local state on server switch", () => {
 
     expect(await setBaseUrl("https://new.example.com")).toBeNull();
 
-    // The queue's quarantine/rejected markers belong to the old origin: one
-    // server's poisoning must not steer the next server's flush.
-    expect(await storage.getItem("@mindpattern/queue_quarantine")).toBeNull();
-    expect(await storage.getItem("@mindpattern/queue_rejected")).toBeNull();
-    // …while foreign keys are untouched (the filter is a whitelist).
+    // Queue v2 owns scoped keys itself. Old global bytes are deliberately
+    // retained until its migration can quarantine them rather than guessing
+    // they belong to this new server.
+    expect(await storage.getItem("@mindpattern/queue_quarantine")).toBe("q");
+    expect(await storage.getItem("@mindpattern/queue_rejected")).toBe("r");
     expect(await storage.getItem("@mindpattern/unrelated")).toBe("keep-me");
   });
 
@@ -86,14 +86,15 @@ describe("client pins: origin-bound local state on server switch", () => {
 });
 
 describe("client pins: first URL save", () => {
-  it("saving a base URL with NO previous one keeps the stored session (no phantom origin change)", async () => {
+  it("treats the implicit localhost default as a real origin and wipes its session before a first remote URL save", async () => {
     await api.setSession("tok-keep", "u-1", "alice");
     expect(await api.isLoggedIn()).toBe(true);
-    // First-ever save: previous === null is NOT an origin change — the
-    // session must survive it (originChanged would be forced true otherwise).
+    // `previous === null` means the active origin was DEFAULT_BASE_URL. A
+    // first save to a remote host is therefore a real origin change; keeping
+    // the localhost token created a bearer leak window in older clients.
     expect(await setBaseUrl("https://first.example.com")).toBeNull();
-    expect(await api.isLoggedIn()).toBe(true);
-    expect(await api.getUserId()).toBe("u-1");
+    expect(await api.isLoggedIn()).toBe(false);
+    expect(await api.getUserId()).toBeNull();
   });
 });
 

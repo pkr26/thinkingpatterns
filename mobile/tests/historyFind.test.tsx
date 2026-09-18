@@ -100,8 +100,9 @@ describe("MoodCalendar", () => {
     expect(onSelectDay).toHaveBeenCalledWith(day);
   });
 
-  it("blank days are disabled (no entry to filter to)", async () => {
-    const root = await calendar();
+  it("a blank day clears a selected filter instead of trapping the person in it", async () => {
+    const onSelectDay = vi.fn();
+    const root = await calendar({ onSelectDay, selectedDay: "2026-09-01" });
     const blank = root.root.findAll((n) => n.props?.accessibilityLabel === "not-a-real-label");
     expect(blank).toHaveLength(0);
     // Every enabled day button carries an ISO accessibility label.
@@ -110,5 +111,11 @@ describe("MoodCalendar", () => {
       .map((n) => n.props.accessibilityLabel as string)
       .filter((l) => /\d{4}-\d{2}-\d{2}/.test(l));
     expect(labels.length).toBeGreaterThan(20);
+    const blankDay = root.root.findAll(
+      (n) => typeof n.props?.accessibilityLabel === "string" && n.props.accessibilityLabel.endsWith(", no entry") && typeof n.props?.onPress === "function",
+    )[0];
+    expect(blankDay).toBeDefined();
+    blankDay!.props.onPress();
+    expect(onSelectDay).toHaveBeenCalledWith(null);
   });
 });

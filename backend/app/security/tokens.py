@@ -56,9 +56,7 @@ def verify_token(token: str, secret: str, now: float | None = None) -> dict:
         signature_bytes = signature.encode("ascii")
     except (ValueError, UnicodeEncodeError) as exc:
         raise TokenError("malformed token") from exc
-    expected = _b64url_encode(
-        hmac.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).digest()
-    )
+    expected = _b64url_encode(hmac.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).digest())
     if not hmac.compare_digest(signature_bytes, expected.encode("ascii")):
         raise TokenError("bad signature")
     try:

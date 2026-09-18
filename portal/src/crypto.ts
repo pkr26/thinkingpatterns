@@ -27,6 +27,14 @@ export const KEY_SIZE = 32;
 /** Byte buffers are always ArrayBuffer-backed: WebCrypto's BufferSource
  * rejects the ArrayBufferLike default of a bare Uint8Array annotation. */
 export type Bytes = Uint8Array<ArrayBuffer>;
+
+/** Best-effort erasure for buffers this module owns.  WebCrypto key handles
+ * are deliberately non-extractable and cannot be overwritten; byte arrays
+ * decoded, derived, or decrypted transiently can and must be. */
+function zeroize(...buffers: Array<Uint8Array | null | undefined>): void {
+  for (const buffer of buffers) buffer?.fill(0);
+}
+
 const AUTH_INFO = new TextEncoder().encode("mindpattern/auth/v1");
 const PORTAL_WRAP_INFO = new TextEncoder().encode("mindpattern/portal-wrap/v1");
 const PORTAL_NOTES_INFO = new TextEncoder().encode("mindpattern/portal-notes/v1");
@@ -74,7 +82,13 @@ export async function derivePortalKeys(
     hkdf(master, ZERO_SALT, PORTAL_WRAP_INFO, KEY_SIZE),
     hkdf(master, ZERO_SALT, PORTAL_NOTES_INFO, KEY_SIZE),
   ]);
-  return { authKeyB64: b64(auth), wrapKek, noteKey };
+  try {
+    return { authKeyB64: b64(auth), wrapKek, noteKey };
+  } finally {
+    // The string form is needed for the authentication request, but the
+    // raw derived verifier has no reason to survive alongside it.
+    zeroize(auth);
+  }
 }
 
 // --- AES-256-GCM envelope: nonce(12) || ct || tag — backend crypto.py ------
@@ -142,8 +156,27 @@ export async function unlockWrapPrivateKey(
   username: string,
 ): Promise<CryptoKey> {
   const { buildAad } = await import("./aad");
-  const pkcs8 = await decrypt(wrapKek, unb64(keyBlobB64), buildAad(THERAPIST_KEY_CONTEXT, username));
-  return subtle().importKey("pkcs8", pkcs8, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+  let encrypted: Bytes | null = null;
+  let pkcs8: Bytes | null = null;
+  try {
+    encrypted = unb64(keyBlobB64);
+    pkcs8 = await decrypt(
+      wrapKek,
+      encrypted,
+      buildAad(THERAPIST_KEY_CONTEXT, username),
+    );
+    // `false` makes the resulting CryptoKey non-extractable. Once WebCrypto
+    // owns that handle, the raw PKCS#8 copy must not stay in JS memory.
+    return await subtle().importKey(
+      "pkcs8",
+      pkcs8,
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      ["deriveBits"],
+    );
+  } finally {
+    zeroize(encrypted, pkcs8);
+  }
 }
 
 /** The portal-side unwrap of a patient's data key: ECDH against the
@@ -158,15 +191,40 @@ export async function unwrapPatientDataKey(
   therapistPubSpkiB64: string,
 ): Promise<Bytes> {
   const { buildAad } = await import("./aad");
-  const ephDer = unb64(ephemeralPubSpkiB64);
-  const thDer = unb64(therapistPubSpkiB64);
-  const ephPub = await subtle().importKey("spki", ephDer, { name: "ECDH", namedCurve: "P-256" }, false, []);
-  const sharedBits = await subtle().deriveBits({ name: "ECDH", public: ephPub }, therapistPrivateKey, 256);
-  const salt = new Uint8Array(new ArrayBuffer(ephDer.length + thDer.length));
-  salt.set(ephDer, 0);
-  salt.set(thDer, ephDer.length);
-  const kek = await hkdf(new Uint8Array(sharedBits), salt, WRAP_INFO, KEY_SIZE);
-  return decrypt(kek, unb64(wrappedKeyB64), buildAad(WRAP_CONTEXT, userId, therapistId));
+  let ephDer: Bytes | null = null;
+  let thDer: Bytes | null = null;
+  let wrapped: Bytes | null = null;
+  let salt: Bytes | null = null;
+  let shared: Bytes | null = null;
+  let kek: Bytes | null = null;
+  try {
+    ephDer = unb64(ephemeralPubSpkiB64);
+    thDer = unb64(therapistPubSpkiB64);
+    wrapped = unb64(wrappedKeyB64);
+    const ephPub = await subtle().importKey(
+      "spki",
+      ephDer,
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      [],
+    );
+    const sharedBits = await subtle().deriveBits(
+      { name: "ECDH", public: ephPub },
+      therapistPrivateKey,
+      256,
+    );
+    shared = new Uint8Array(sharedBits);
+    salt = new Uint8Array(new ArrayBuffer(ephDer.length + thDer.length));
+    salt.set(ephDer, 0);
+    salt.set(thDer, ephDer.length);
+    kek = await hkdf(shared, salt, WRAP_INFO, KEY_SIZE);
+    return await decrypt(kek, wrapped, buildAad(WRAP_CONTEXT, userId, therapistId));
+  } finally {
+    // ephDer/thDer/salt are public inputs, while shared/kek are secret; wipe
+    // all module-owned buffers to keep the simple lifecycle auditable. The
+    // returned patient data key remains the caller's responsibility.
+    zeroize(ephDer, thDer, wrapped, salt, shared, kek);
+  }
 }
 
 // --- notes ---------------------------------------------------------------------
@@ -185,12 +243,16 @@ export async function encryptNote(
 ): Promise<NoteSealed> {
   const { buildAad } = await import("./aad");
   const payload = new TextEncoder().encode(JSON.stringify({ v: 1, text })) as Bytes;
-  const blob = await encrypt(
-    noteKey,
-    payload,
-    buildAad(NOTE_CONTEXT, therapistId, userId, clientNoteId),
-  );
-  return { clientNoteId, blobB64: b64(blob) };
+  try {
+    const blob = await encrypt(
+      noteKey,
+      payload,
+      buildAad(NOTE_CONTEXT, therapistId, userId, clientNoteId),
+    );
+    return { clientNoteId, blobB64: b64(blob) };
+  } finally {
+    zeroize(payload);
+  }
 }
 
 export async function decryptNote(
@@ -201,14 +263,21 @@ export async function decryptNote(
   blobB64: string,
 ): Promise<string> {
   const { buildAad } = await import("./aad");
-  const plain = await decrypt(
-    noteKey,
-    unb64(blobB64),
-    buildAad(NOTE_CONTEXT, therapistId, userId, clientNoteId),
-  );
-  const payload = JSON.parse(new TextDecoder().decode(plain)) as { v?: number; text?: string };
-  if (typeof payload.text !== "string") throw new Error("note payload malformed");
-  return payload.text;
+  let encrypted: Bytes | null = null;
+  let plain: Bytes | null = null;
+  try {
+    encrypted = unb64(blobB64);
+    plain = await decrypt(
+      noteKey,
+      encrypted,
+      buildAad(NOTE_CONTEXT, therapistId, userId, clientNoteId),
+    );
+    const payload = JSON.parse(new TextDecoder().decode(plain)) as { v?: number; text?: string };
+    if (typeof payload.text !== "string") throw new Error("note payload malformed");
+    return payload.text;
+  } finally {
+    zeroize(encrypted, plain);
+  }
 }
 
 // --- shared payload decryption ---------------------------------------------------
@@ -232,8 +301,15 @@ export async function decryptInsights(
   };
 }> {
   const { buildAad } = await import("./aad");
-  const plain = await decrypt(dataKey, unb64(blobB64), buildAad("insights", userId, "patterns"));
-  return decodeJson(plain) as { stats: { patterns: PatternPayload[] } };
+  let encrypted: Bytes | null = null;
+  let plain: Bytes | null = null;
+  try {
+    encrypted = unb64(blobB64);
+    plain = await decrypt(dataKey, encrypted, buildAad("insights", userId, "patterns"));
+    return decodeJson(plain) as { stats: { patterns: PatternPayload[] } };
+  } finally {
+    zeroize(encrypted, plain);
+  }
 }
 
 export async function decryptEntry(
@@ -242,10 +318,17 @@ export async function decryptEntry(
   entry: { client_entry_id: string; blob: string },
 ): Promise<{ text: string; created_at?: string; sentiment?: number | null }> {
   const { buildAad } = await import("./aad");
-  const plain = await decrypt(dataKey, unb64(entry.blob), buildAad("entry", userId, entry.client_entry_id));
-  const payload = decodeJson(plain) as { text?: string };
-  if (typeof payload.text !== "string") throw new Error("entry payload malformed");
-  return payload as { text: string };
+  let encrypted: Bytes | null = null;
+  let plain: Bytes | null = null;
+  try {
+    encrypted = unb64(entry.blob);
+    plain = await decrypt(dataKey, encrypted, buildAad("entry", userId, entry.client_entry_id));
+    const payload = decodeJson(plain) as { text?: string };
+    if (typeof payload.text !== "string") throw new Error("entry payload malformed");
+    return payload as { text: string };
+  } finally {
+    zeroize(encrypted, plain);
+  }
 }
 
 /** One surfaced pattern, as the brain's encrypted payload carries it
@@ -281,13 +364,17 @@ export async function generateTherapistKeyPair(): Promise<{
   ]);
   const spki = new Uint8Array(await subtle().exportKey("spki", pair.publicKey));
   const pkcs8 = new Uint8Array(await subtle().exportKey("pkcs8", pair.privateKey));
-  return {
-    publicKeySpkiB64: b64(spki),
-    // Sealed for upload by sealPrivateKeyForUpload once the password-derived
-    // KEK exists (the raw private key never leaves the browser unencrypted).
-    privateKeyPkcs8B64: b64(pkcs8),
-    privateKey: pair.privateKey,
-  };
+  try {
+    return {
+      publicKeySpkiB64: b64(spki),
+      // Sealed for upload by sealPrivateKeyForUpload once the password-derived
+      // KEK exists (the raw private key never leaves the browser unencrypted).
+      privateKeyPkcs8B64: b64(pkcs8),
+      privateKey: pair.privateKey,
+    };
+  } finally {
+    zeroize(spki, pkcs8);
+  }
 }
 
 export async function sealPrivateKeyForUpload(
@@ -296,12 +383,18 @@ export async function sealPrivateKeyForUpload(
   username: string,
 ): Promise<string> {
   const { buildAad } = await import("./aad");
-  const blob = await encrypt(
-    wrapKek,
-    unb64(privateKeyPkcs8B64),
-    buildAad(THERAPIST_KEY_CONTEXT, username),
-  );
-  return b64(blob);
+  let pkcs8: Bytes | null = null;
+  try {
+    pkcs8 = unb64(privateKeyPkcs8B64);
+    const blob = await encrypt(
+      wrapKek,
+      pkcs8,
+      buildAad(THERAPIST_KEY_CONTEXT, username),
+    );
+    return b64(blob);
+  } finally {
+    zeroize(pkcs8);
+  }
 }
 
 /** Human-verifiable fingerprint of a P-256 SPKI public key: SHA-256 over

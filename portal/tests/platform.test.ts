@@ -40,4 +40,14 @@ describe("platform seam", () => {
     localStore.set("k", "v");
     expect(localStore.get("k")).toBe("v");
   });
+
+  it("removes only a requested metadata namespace", () => {
+    localStore.set("mindpattern.lastVisit.t1.u1", "today");
+    localStore.set("mindpattern.lastVisit.t1.u2", "today");
+    localStore.set("other.application.key", "keep");
+    localStore.removePrefix("mindpattern.lastVisit.t1.");
+    expect(localStore.get("mindpattern.lastVisit.t1.u1")).toBeNull();
+    expect(localStore.get("mindpattern.lastVisit.t1.u2")).toBeNull();
+    expect(localStore.get("other.application.key")).toBe("keep");
+  });
 });

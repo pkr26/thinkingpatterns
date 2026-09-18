@@ -18,15 +18,15 @@ observation shows you its evidence.**
 | `RESEARCH.md` | The industry/clinical-research audit behind the engine: every detector mapped to its citation |
 | `CHANGELOG.md` | Release notes, plus the running log of the audit/remediation waves |
 | `backend/` | FastAPI service (Python 3.12+): entry sync, secure processing session, stateful deterministic "mini-brain" v3 (see below), 30-day threshold, daily questions |
-| `backend/tests/` | 903-test suite (+ 1 Postgres-gated skip): unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions + the promoted crisis/AAD corpora |
+| `backend/tests/` | Unit + API integration + crypto vectors + production-hardening, adversarial red-team, and remediation-regression suites |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
-| `mobile/` | React Native (iOS/Android) client: encrypted journal with entry history (read/edit/delete), one-tap mood check-in, day-1 reflective questions, evidence-view pattern cards, crisis resources, first-run onboarding + offline privacy policy, dark/light theme, "Share with my therapist" (pairing-code consent, wrapped-key grant, revoke), persistent bottom navigation, readable Markdown export, history search + mood calendar, question feedback ("did this land?"), energy/sleep/tag check-ins, theme override, haptics, prompt chips |
+| `mobile/` | React Native (iOS/Android) client: encrypted journal with atomic entry edits, history search + mood calendar, one-tap mood check-in, reflective questions, evidence-view pattern cards, crisis resources, therapist sharing, and scoped offline sync. Export is deliberately disabled pending a reviewed native streaming-to-file implementation. |
 | `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes (editable, searchable, templates), the "since your last review" delta anchored to an explicit Mark-reviewed action, printable session summaries, caseload triage scan, mood sparklines, 401-expiry + idle auto-lock — read-only by construction |
 | `shared/vectors.json` | Cross-platform crypto vectors (backend ⇄ mobile ⇄ portal), including non-ASCII AAD cases and the therapist wrap (ECDH→HKDF→AES-GCM) constructions |
 | `shared/crisis_phrases.json` | Cross-platform crisis-language contract (client dialog tier + server suppression tier), consumed by both platforms |
 | `shared/generic_questions.json` | Pre-threshold reflective question pool (embedded copies pinned to it by tests) |
-| `docker-compose.yml` | postgres + api for local dev (+ optional profile-gated backup service) |
+| `docker-compose.yml` / `docker-compose.dev.yml` | digest-pinned production deployment contract / explicit local source-build overlay (+ optional profile-gated backup service) |
 | `LICENSE` | MIT |
 
 ## The mini-brain v3 — pattern kinds and their evidence
@@ -82,7 +82,7 @@ deterministic and self-contained. The lexicon is curated: context-dependent
 words ("kind", "fed", "present") were removed after measurement, and
 "hardly"/"barely" are negation-only (VADER's treatment — never downtoners).
 
-**Honesty guarantees, enforced by 903 backend tests:** base-rate correction
+**Honesty guarantees, enforced by the backend regression suite:** base-rate correction
 (a Sunday-heavy journaler gets no fake "everything happens on Sundays"),
 one Benjamini–Hochberg FDR family per run spanning every statistical claim
 — every testable candidate's p-value is computed **pre-gate** and the
@@ -212,15 +212,15 @@ anything:
    See "Sharing with a therapist" above for the full lifecycle, including
    the honest revocation limit: revocation ends ACCESS, it cannot unread
    what a browser already decrypted.
-10. **Transport & ops hardening.** Non-development boots with OpenAPI/docs disabled and refuses the dev token secret and SQLite in every non-development environment (fail-closed). Every response — including 500s and 413s — carries `nosniff`/`DENY`/`no-referrer`/`no-store` plus HSTS (`strict-transport-security: max-age=31536000; includeSubDomains`). Request bodies are capped at 2 MiB **before** parsing; validation errors never echo input. Rate limiting covers auth, entries, processing, reads, deletes; behind a proxy it uses the rightmost `X-Forwarded-For` across **all** header lines; the counter's memory is bounded. Access logs are disabled in the image. Export is streamed. Per-account quotas bound storage and recompute cost.
+10. **Transport & ops hardening.** Non-development boots with OpenAPI/docs disabled and refuses the dev token secret and SQLite in every non-development environment (fail-closed). Every response — including 500s, 413s, and slow-body timeouts — carries `nosniff`/`DENY`/`no-referrer`/`no-store` plus HSTS (`strict-transport-security: max-age=31536000; includeSubDomains`). Request bodies are capped at 2 MiB and have a bounded complete-read deadline before parsing; validation errors never echo input. Ciphertext-list pages are byte-bounded and use explicit continuation headers, so an oversized journal cannot turn one screen request into an unbounded response. Rate limiting covers auth, entries, processing, reads, and deletes. Forwarded client addresses are accepted only when the raw socket peer matches an explicit proxy allowlist; Uvicorn proxy-header rewriting remains disabled. Access logs are disabled in the image. Server export is streamed, while the mobile UI keeps export disabled until native streaming-to-file is reviewed. Per-account quotas bound storage and recompute cost.
 
-The mobile client keeps derived keys memory-only: after an app restart the session token is still valid but the key vault is locked behind an unlock screen, and navigation is tri-state (no login-flash race). The session token itself is stored AES-256-GCM-encrypted under a random per-install device key (`mobile/src/secureStore.ts`) — stated plainly: that device key currently also lives in AsyncStorage as a documented fallback pending react-native-keychain, so device backups include both the key and the ciphertext it protects, and a fully-controlled device attacker recovers the session. Keychain/Keystore custody is the fix (checklist in `mobile/README.md`). The offline sync queue is account-bound by mechanism; server error text is sanitized before reaching dialogs, and the app switcher sees only a blank shield. Sync is deliberately **push-only**: v1 is a single-device-writer design — entries push up, and the History screen pulls this account's entries back (same-device restore, new device). There is no multi-device conflict model.
+The mobile client keeps derived keys memory-only: after an app restart the session token is still valid but the key vault is locked behind an unlock screen, and navigation is tri-state (no login-flash race). The session token itself is AES-256-GCM-encrypted under a random per-install device key held only by iOS Keychain/Android Keystore through `react-native-keychain`; there is no AsyncStorage key fallback. If that native secure-storage seam is unavailable, sign-in fails closed. The offline sync queue is scoped to both API origin and account; server error text is sanitized before reaching dialogs, and the app switcher sees only a blank shield. Sync is deliberately **push-only**: v1 is a single-device-writer design — entries push up, and the History screen pulls this account's entries back (same-device restore, new device). There is no multi-device conflict model.
 
 ## API surface & error contract
 
 All routes mount under **`/api/v1`** (canonical); the same routers are also served under **`/api`** as a deprecated legacy alias for existing clients. `GET /api/v1/meta` returns `{unlock_days, llm_available, api_version, version}` — `api_version` is how a client discovers the canonical base. Alongside `GET /healthz` (liveness only, no DB touch), **`GET /readyz`** runs `SELECT 1` against the database and answers 503 when it fails — that is the probe to gate deploys on. `DELETE /api/v1/account` takes the verifier in the **`X-Account-Verifier`** header (a JSON body is still accepted as a deprecated fallback — DELETE bodies are unreliable across clients and proxies).
 
-Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes: `unauthorized`, `invalid_credentials`, `processing_session_required`, `processing_session_invalid`, `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `conflict`, `account_deleted` (410 — the account was deleted mid-request), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `internal_error`, `service_unavailable`.
+Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes: `unauthorized`, `invalid_credentials`, `processing_session_required`, `processing_session_invalid`, `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `request_timeout` (408), `conflict`, `account_deleted` (410 — the account was deleted mid-request), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `internal_error`, `service_unavailable`.
 
 ## Running
 
@@ -230,27 +230,35 @@ Every error response is one envelope: **`{"detail": <human string>, "code": <sna
 # every local non-Docker command below opts into development explicitly.
 cd backend
 python3 -m venv .venv && source .venv/bin/activate   # or: uv venv
-pip install -r requirements.lock.txt                  # pinned set the suite ran against
+python -m pip install --require-hashes -r requirements.dev.lock.txt
 MINDPATTERN_ENV=development uvicorn app.main:app --reload   # http://localhost:8000/docs
 
-# Full stack (postgres + api)
+# Full stack from local source (postgres + API). The production compose file
+# deliberately has no source builds; the explicit overlay below is required
+# for local work only. See deploy/README.md for digest-pinned production.
 cat > .env <<EOF
 MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)
 POSTGRES_PASSWORD=$(openssl rand -hex 16)
+BACKUP_KEY=$(openssl rand -base64 32)
+MINDPATTERN_API_IMAGE=mindpattern-api:local
+MINDPATTERN_BACKUP_IMAGE=mindpattern-backup:local
 EOF
-docker compose up --build
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 # Optional backups — profile-gated, never started by a plain `up`:
-docker compose --profile backups up -d backup
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.dev.yml \
+  --profile backups up -d backup
 # Daily pg_dump -Fc into the pgbackups volume. BACKUP_RETENTION_DAYS
 # (default 35) IS the deletion promise against backups — set it to the
 # expiry you actually promise users, encrypt the dumps (they carry the
 # full metadata set), and rehearse `pg_restore` before you need it.
 
-# Mobile (source; native projects are generated with the RN toolchain)
-cd mobile && npm install && npm run ios   # or android; point Settings at your API
+# Mobile source (native projects are currently absent; see release preflight)
+cd mobile && npm ci
 
-# Mobile tests: 1,203 tests across 60 files — real crypto modules against shared vectors + queue/client/screen regressions
+# Mobile tests — real crypto modules against shared vectors + queue/client/screen regressions
 cd mobile && npm test
 
 # Cross-platform crypto check over the REAL compiled modules
@@ -275,8 +283,9 @@ Schema changes ship as Alembic revisions (`backend/alembic/`) — the tree
 now carries multiple revisions, so adoption below matters. The container
 entrypoint runs `alembic upgrade head` against `MINDPATTERN_DB_URL` **before
 starting uvicorn** (retrying 5× at 3s intervals, then failing closed — a
-container must not serve against an unmigrated schema), so
-`docker compose up --build` is always migrated; the app's startup
+container must not serve against an unmigrated schema). Both the local
+source-build command above and the production command in `deploy/README.md`
+run this migration gate before serving. The app's startup
 `create_all` runs only with `MINDPATTERN_ENV=development` (dev/test), never
 in a deployed container. On Postgres, the migration session takes a
 session-level advisory lock (`pg_advisory_lock(727272)`) with
@@ -303,7 +312,7 @@ transaction); and the connection pool is env-configurable
 ```bash
 cd backend
 
-.venv/bin/python -m pytest                     # full suite (903 passed + 1 Postgres-gated skip, ~60s, includes 600k-iter vectors)
+.venv/bin/python -m pytest                     # full suite (includes 600k-iteration vectors)
 .venv/bin/python -m pytest -m "not slow"      # fast path (what mutmut uses)
 
 # The same suite against real Postgres (what CI's backend-postgres job does):
@@ -316,15 +325,18 @@ PATH="$PWD/../.venv/bin:$PATH" ../.venv/bin/mutmut run
 ../.venv/bin/mutmut show <id>                 # inspect a mutant
 ```
 
-CI (`.github/workflows/ci.yml`) runs seven jobs: the backend suite on a
+CI (`.github/workflows/ci.yml`) runs eight jobs: the backend suite on a
 Python 3.12 + 3.14 matrix (97% coverage floor), the same suite against real
 Postgres (`backend-postgres`, via `MINDPATTERN_TEST_DB_URL`), the mobile
-suite (typecheck + 98% per-file coverage thresholds), contract gates
+and portal suites (typecheck, tests, production build, and hard dependency
+audits), contract gates
 (`probe_brain.py` must go 9/9; `verify_vectors.mjs` over the real compiled
 modules), a Docker job (image build + compose boot asserting `/healthz`,
-`/readyz`, and `alembic current` at head), lint (ruff gate; mypy advisory
-until the remaining errors are fixed), and supply-chain (pip-audit gate on
-the pinned lock file; npm audit advisory until the Metro chain is fixed).
+`/readyz`, `alembic current` at head, and a verified authenticated backup
+restore), lint (ruff check + formatting + mypy), and supply-chain
+(`pip-audit` on the pinned lock file). The release workflow repeats these
+gates before publishing multi-architecture images; prerelease tags never
+move the `latest` image tag.
 Deep mutation testing runs weekly via `.github/workflows/mutation.yml`
 (scheduled, resumable cache, results artifact — deliberately not a PR
 gate), and Dependabot watches pip, npm, github-actions, and docker.
@@ -339,24 +351,27 @@ gate), and Dependabot watches pip, npm, github-actions, and docker.
 | `MINDPATTERN_TOKEN_SECRET` | dev default | HMAC secret for session tokens — must be set outside development (≥ 32 chars, or the app refuses to boot) |
 | `MINDPATTERN_UNLOCK_DAYS` | `30` | Pattern-revelation threshold |
 | `MINDPATTERN_PROCESSING_TTL` | `300` | Processing-session key lifetime (seconds); sessions are single-use |
-| `MINDPATTERN_LLM_URL` | unset | OpenAI-compatible endpoint for the optional LLM analyzer; per-user consent still required; unset = deterministic mini-brain |
-| `MINDPATTERN_AUTH_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Fixed-window rate limits (auth, salt lookups; also per-username buckets on register/login) |
+| `MINDPATTERN_LLM_URL` | unset | HTTPS OpenAI-compatible endpoint for the optional LLM analyzer (exact loopback HTTP only in development); per-user consent still required; unset = deterministic mini-brain |
+| `MINDPATTERN_AUTH_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Fixed-window rate limits for auth and salt lookups; registration conflicts also use a per-username bucket (login intentionally does not, so an attacker cannot spend a victim's lockout budget) |
 | `MINDPATTERN_ENTRIES_RATE_LIMIT` / `_WINDOW` | `120` / `60` | Entry creation rate limit |
 | `MINDPATTERN_PROCESSING_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Processing sessions + recompute rate limit |
 | `MINDPATTERN_READ_RATE_LIMIT` / `_WINDOW` | `300` / `60` | Authenticated read/delete endpoints |
 | `MINDPATTERN_EXPORT_RATE_LIMIT` / `_WINDOW` | `5` / `60` | Export endpoint rate limit |
 | `MINDPATTERN_MAX_BODY_BYTES` | `2097152` | Whole-request body cap (413 before parsing) |
+| `MINDPATTERN_BODY_READ_TIMEOUT` | `30` | Total seconds allowed to receive one request body (408 on timeout; 120-second maximum) |
 | `MINDPATTERN_MAX_ENTRIES_PER_USER` | `10000` | Per-account entry quota (413 when exceeded) |
 | `MINDPATTERN_MAX_USER_BLOB_BYTES` | `268435456` | Per-account total ciphertext quota |
 | `MINDPATTERN_RECOMPUTE_ENTRY_LIMIT` | `2000` | Most-recent entries analyzed per recompute (threshold still counts all days) |
 | `MINDPATTERN_DB_POOL_SIZE` / `_MAX_OVERFLOW` / `_POOL_TIMEOUT` | `5` / `10` / `30` | Connection pool sizing (`_MAX_OVERFLOW=0` is a legitimate hard cap) |
-| `MINDPATTERN_CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins for browser clients; empty = no CORS headers (fail-closed) |
-| `MINDPATTERN_TRUST_PROXY_HEADERS` | `0` | `1` = rate-limit by rightmost `X-Forwarded-For` across all header lines (only behind a trusted reverse proxy; run uvicorn with `--proxy-headers`) |
+| `MINDPATTERN_CORS_ORIGINS` | *(empty)* | Comma-separated exact HTTPS origins for browser clients (exact loopback HTTP only in development); empty = no CORS headers (fail-closed) |
+| `MINDPATTERN_TRUST_PROXY_HEADERS` | `0` | `1` enables sanitized `X-Forwarded-For` client identity only after the direct peer matches `MINDPATTERN_TRUSTED_PROXY_IPS`; do **not** use Uvicorn `--proxy-headers` |
+| `MINDPATTERN_TRUSTED_PROXY_IPS` | *(empty)* | Required comma-separated direct proxy IP/CIDR allowlist when trusting forwarding headers |
+| `MINDPATTERN_ACCESS_LOG_RETENTION_DAYS` | `730` | Therapist/patient access-audit metadata retention (1–3650 days) |
 | `MINDPATTERN_TEST_DB_URL` | unset | Test-only: runs the pytest suite against an external DB (CI's Postgres job uses it); non-SQLite URLs must contain `test` in the database name |
 
 Invalid numeric values abort startup instead of silently falling back, and
 numeric settings carry upper bounds (token TTL ≤ 30 days,
-processing-session TTL ≤ 3600 s, rate windows ≤ 3600 s, rate limits ≤
+processing-session TTL ≤ 300 s, request-body deadline ≤ 120 s, rate windows ≤ 3600 s, rate limits ≤
 100 000/window).
 
 ## Deletion & retention scope (read this before operating)
@@ -517,10 +532,12 @@ A second multi-pass adversarial audit found and this pass fixed:
   crafted 400 KB corpus cost 127 s of pairwise comparison, now bounded);
   recomputes run on a dedicated capacity limiter so they cannot starve
   login scrypt on the shared thread pool.
-* **Rate limiting:** login per-username buckets count only failed
-  verifications (anonymous garbage floods can no longer lock a victim
-  out; unknown names never consume buckets); IPv6 clients aggregate to
-  /64; eviction prefers single-hit garbage over active multi-hit buckets.
+* **Rate limiting:** registration's per-username bucket counts only real
+  name conflicts (anonymous garbage probes cannot lock out a prospective
+  user); login remains source-rate-limited rather than name-locked so a
+  distributed attacker cannot spend a victim's lockout budget. IPv6 clients
+  aggregate to /64; eviction prefers single-hit garbage over active
+  multi-hit buckets.
 * **Integrity:** SQLite enforces foreign keys (`PRAGMA foreign_keys=ON`),
   so `ondelete=CASCADE` is real and post-deletion stragglers become
   orphan-proof; only unique-constraint failures map to 409; processing
@@ -542,10 +559,10 @@ A second multi-pass adversarial audit found and this pass fixed:
   redirects are refused.
 * `probe_brain.py` now exits non-zero on any FAIL (it can gate CI).
 
-Test status at HEAD (2026-09-17 exhaustive-audit wave): backend
-**903 passed** (+ 1 Postgres-gated skip), probe 9/9, mobile **1,203
-passed** (60 files), portal **90 passed**, cross-platform crypto vectors
-green.
+The CI workflows are the current source of truth for test totals: they run
+the backend matrix plus PostgreSQL, the 9/9 brain probe, mobile and portal
+type/test/build/audit gates, and cross-platform crypto vectors from clean
+dependency installs.
 
 ## License
 

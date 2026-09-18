@@ -10,7 +10,7 @@
  * further from support.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { api } from "../api/client";
 import { useSession } from "../store";
 import { useTheme } from "../theme";
@@ -83,10 +83,14 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
   const panel = PANELS[index]!;
 
   return (
-    <View
-      style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxl, gap: 18 }]}
-      onTouchStart={touchActivity}
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.colors.bg }}
+      contentContainerStyle={{ flexGrow: 1, paddingBottom: t.spacing.xxxl }}
     >
+      <View
+        style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxl, gap: 18 }]}
+        onTouchStart={touchActivity}
+      >
       <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
         {index + 1} of {PANELS.length}
       </Text>
@@ -116,7 +120,8 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
         accessibilityLabel={last ? "I understand — start writing" : `Continue to panel ${index + 2} of ${PANELS.length}`}
       />
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
-    </View>
+      </View>
+    </ScrollView>
   );
 }
 

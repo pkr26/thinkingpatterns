@@ -1,0 +1,20 @@
+# Local development overlay only.  Always combine it with docker-compose.yml:
+#
+#   docker compose --env-file .env \
+#     -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# The base compose file intentionally contains no source builds so a
+# production deployment can only consume release-image references.  These
+# two `build` stanzas are therefore kept in a separate, explicit overlay.
+# `.env` still needs the two image variables because Compose expands the base
+# file before it applies this overlay; use the local tags shown in README.md.
+services:
+  api:
+    build:
+      context: ./backend
+    image: ${MINDPATTERN_API_IMAGE:?set MINDPATTERN_API_IMAGE to mindpattern-api:local for the development overlay}
+
+  backup:
+    build:
+      context: ./backup
+    image: ${MINDPATTERN_BACKUP_IMAGE:?set MINDPATTERN_BACKUP_IMAGE to mindpattern-backup:local for the development overlay}

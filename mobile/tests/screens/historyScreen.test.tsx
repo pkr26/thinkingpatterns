@@ -13,8 +13,8 @@ import React from "react";
 import { Alert, BackHandler } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
-  const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  const { makeApiMock, ApiError, ENTRY_PAGE_BYTES } = await import("../helpers/apiMock");
+  return { ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
 });
 
 const touchActivity = vi.fn();
@@ -240,6 +240,146 @@ describe("HistoryScreen list", () => {
     expect(touchActivity).toHaveBeenCalled();
   });
 
+  it("uses the server's byte-page continuation to load older history", async () => {
+    const first = entryRow("e-2026-09-03-first", "first page", "2026-09-03");
+    const second = entryRow("e-2026-09-02-second", "second page", "2026-09-02");
+    vi.mocked(api.listEntriesPage)
+      .mockResolvedValueOnce({ entries: [first], nextOffset: 1, revision: null } as never)
+      .mockResolvedValueOnce({ entries: [second], nextOffset: null, revision: null } as never);
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenCalledWith({ limit: 100, offset: 0, pageBytes: 2 * 1024 * 1024 });
+    expect(textOf(root)).toContain("Load older entries");
+
+    await pressLabel(root, "Load older entries");
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenLastCalledWith({ limit: 100, offset: 1, pageBytes: 2 * 1024 * 1024 });
+    expect(textOf(root)).toContain("second page");
+    expect(textOf(root)).not.toContain("Load older entries");
+  });
+
+  it("carries a modern snapshot revision exactly across an older-page request", async () => {
+    const revision = "9223372036854775807";
+    const first = entryRow("e-2026-09-03-snapshot", "newer snapshot", "2026-09-03");
+    const second = entryRow("e-2026-09-02-snapshot", "older snapshot", "2026-09-02");
+    vi.mocked(api.listEntriesPage)
+      .mockResolvedValueOnce({ entries: [first], nextOffset: 1, revision } as never)
+      .mockResolvedValueOnce({ entries: [second], nextOffset: null, revision } as never);
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(1, {
+      limit: 100,
+      offset: 0,
+      pageBytes: 2 * 1024 * 1024,
+    });
+
+    await pressLabel(root, "Load older entries");
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(2, {
+      limit: 100,
+      offset: 1,
+      pageBytes: 2 * 1024 * 1024,
+      expectedRevision: revision,
+    });
+    expect(textOf(root)).toContain("older snapshot");
+  });
+
+  it("restarts cleanly from page one when the snapshot changes while loading older history", async () => {
+    const stale = entryRow("e-2026-09-03-stale", "stale snapshot", "2026-09-03");
+    const fresh = entryRow("e-2026-09-04-fresh", "fresh snapshot", "2026-09-04");
+    vi.mocked(api.listEntriesPage)
+      .mockResolvedValueOnce({ entries: [stale], nextOffset: 1, revision: "5" } as never)
+      .mockRejectedValueOnce(new ApiError(409, "entries changed while paging", "collection_changed"))
+      .mockResolvedValueOnce({ entries: [fresh], nextOffset: null, revision: "6" } as never);
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Load older entries");
+    await flush();
+    await flush();
+
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(2, {
+      limit: 100,
+      offset: 1,
+      pageBytes: 2 * 1024 * 1024,
+      expectedRevision: "5",
+    });
+    // A fresh first page deliberately starts without expected_revision and
+    // replaces, rather than appends to, the invalidated snapshot.
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(3, {
+      limit: 100,
+      offset: 0,
+      pageBytes: 2 * 1024 * 1024,
+    });
+    expect(textOf(root)).toContain("fresh snapshot");
+    expect(textOf(root)).not.toContain("stale snapshot");
+    expect(textOf(root)).toContain("Reloading the latest history from the start.");
+  });
+
+  it("uses the full-page legacy fallback continuation to load older history", async () => {
+    const fullLegacyPage = Array.from({ length: 100 }, (_, index) =>
+      entryRow(
+        `e-2026-09-${String((index % 28) + 1).padStart(2, "0")}-legacy-${index}`,
+        `legacy page ${index}`,
+        `2026-09-${String((index % 28) + 1).padStart(2, "0")}`,
+      ),
+    );
+    const older = entryRow("e-2026-08-01-legacy-next", "legacy next page", "2026-08-01");
+    // This is the typed result from listEntriesPage's safe compatibility
+    // fallback: old servers omit X-Next-Offset on an exactly-full page.
+    vi.mocked(api.listEntriesPage)
+      .mockResolvedValueOnce({ entries: fullLegacyPage, nextOffset: 100, revision: null } as never)
+      .mockResolvedValueOnce({ entries: [older], nextOffset: null, revision: null } as never);
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Show older entries (50 more)");
+    await flush();
+    expect(textOf(root)).toContain("Load older entries");
+
+    await pressLabel(root, "Load older entries");
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenLastCalledWith({ limit: 100, offset: 100, pageBytes: 2 * 1024 * 1024 });
+    expect(textOf(root)).toContain("legacy next page");
+  });
+
+  it("caps manual history downloads and clearly says when more remains on the server", async () => {
+    const pages = Array.from({ length: 5 }, (_, index) => ({
+      entries: [entryRow(`e-2026-09-0${index + 1}-cap`, `cap page ${index + 1}`, `2026-09-0${index + 1}`)],
+      // A continuation after page five proves the screen's own cap, rather
+      // than server completion, stopped any further plaintext accumulation.
+      nextOffset: index + 1,
+    }));
+    vi.mocked(api.listEntriesPage).mockImplementation(async () => pages.shift() as never);
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    let staleLoadOlder: (() => unknown) | undefined;
+    for (let page = 0; page < 4; page++) {
+      if (page === 3) {
+        staleLoadOlder = root.root.find(
+          (node) => node.props.accessibilityLabel === "Load older encrypted journal entries",
+        ).props.onPress as () => unknown;
+      }
+      await pressLabel(root, "Load older entries");
+      await flush();
+    }
+
+    expect(api.listEntriesPage).toHaveBeenCalledTimes(5);
+    expect(textOf(root)).toContain("safe download limit (500 entries or 5 pages)");
+    expect(textOf(root)).toContain("More encrypted history remains on the server.");
+    expect(textOf(root)).not.toContain("Load older entries");
+    // Even a stale native tap handler from the just-hidden control cannot
+    // start a sixth request before React finishes committing the cap state.
+    await act(async () => {
+      staleLoadOlder?.();
+    });
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenCalledTimes(5);
+  });
+
   it("a tampered blob is skipped and honestly counted (singular and plural)", async () => {
     vi.mocked(api.listEntries).mockResolvedValue([
       entryRow("e-2026-09-03-bbb", "readable", "2026-09-03"),
@@ -461,14 +601,14 @@ describe("HistoryScreen delete", () => {
   });
 });
 
-describe("HistoryScreen edit (replace: delete + create)", () => {
+describe("HistoryScreen edit (atomic replacement)", () => {
   const oneEntry = (sentiment: Sentiment = null) => {
     vi.mocked(api.listEntries).mockResolvedValue([
       entryRow("e-2026-09-03-bbb", "original words", "2026-09-03", sentiment),
     ] as never);
   };
 
-  it("deletes the old id and creates the update under a FRESH id — same date, chosen mood preserved", async () => {
+  it("atomically replaces the stable id — same date and chosen mood are preserved", async () => {
     oneEntry(-1);
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
@@ -479,14 +619,13 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     });
     await pressLabel(root, "Save changes");
     await flush();
-    // Replace order: delete BEFORE create — a failed create can't leave two copies.
-    expect(api.deleteEntry).toHaveBeenCalledWith("e-2026-09-03-bbb");
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
-    const [newId, blob, date] = vi.mocked(api.createEntry).mock.calls[0] as unknown as [string, string, string];
-    expect(newId).not.toBe("e-2026-09-03-bbb");
-    expect(newId).toMatch(/^e-2026-09-03-/);
+    expect(api.deleteEntry).not.toHaveBeenCalled();
+    expect(api.createEntry).not.toHaveBeenCalled();
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    const [updatedId, blob, date] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
+    expect(updatedId).toBe("e-2026-09-03-bbb");
     expect(date).toBe("2026-09-03");
-    const payload = decryptEntry({ dataKey }, "user-1", newId, blob);
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
     expect(payload.text).toBe("revised words");
     expect(payload.sentiment).toBe(-1); // the day's explicit pick survived the edit
     // Detail shows the update; the device-local log kept the chosen value.
@@ -519,8 +658,7 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     await openEditor(root, "original words");
     await pressLabel(root, "Save changes");
     await flush();
-    expect(api.deleteEntry).not.toHaveBeenCalled();
-    expect(api.createEntry).not.toHaveBeenCalled();
+    expect(api.updateEntry).not.toHaveBeenCalled();
     expect(textOf(root)).toContain("Edit this entry"); // detail again
   });
 
@@ -536,7 +674,7 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     expect(touchableByLabel(root, "Save changes").props.disabled).toBe(true);
     await pressLabel(root, "Cancel");
     expect(textOf(root)).toContain("original words");
-    expect(api.deleteEntry).not.toHaveBeenCalled();
+    expect(api.updateEntry).not.toHaveBeenCalled();
   });
 
   it("the editor enforces the same 100k cap as the Entry screen", async () => {
@@ -550,12 +688,12 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     await pressLabel(root, "Save changes");
     await flush();
     expect(Alert.alert).toHaveBeenCalledWith("Entry too long", expect.stringContaining("100,000"));
-    expect(api.deleteEntry).not.toHaveBeenCalled();
+    expect(api.updateEntry).not.toHaveBeenCalled();
   });
 
-  it("an offline edit changes nothing and says so (deletes can't be queued)", async () => {
+  it("an offline edit keeps both the original and the typed replacement", async () => {
     oneEntry();
-    vi.mocked(api.deleteEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.updateEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     const editor = await openEditor(root, "original words");
@@ -565,14 +703,15 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     await pressLabel(root, "Save changes");
     await flush();
     expect(lastAlert()[0]).toBe("Needs a connection");
-    expect(lastAlert()[1]).toContain("can't run offline");
-    expect(lastAlert()[1]).toContain("nothing was changed");
+    expect(lastAlert()[1]).toContain("original entry");
+    expect(lastAlert()[1]).toContain("text are both still safe");
     expect(api.createEntry).not.toHaveBeenCalled();
+    expect(api.deleteEntry).not.toHaveBeenCalled();
   });
 
-  it("a 404 on the delete step means a previous attempt finished it — the save proceeds", async () => {
+  it("a 404 from atomic replacement preserves the draft and original", async () => {
     oneEntry();
-    vi.mocked(api.deleteEntry).mockRejectedValue(new ApiError(404, "already gone"));
+    vi.mocked(api.updateEntry).mockRejectedValue(new ApiError(404, "already gone"));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     const editor = await openEditor(root, "original words");
@@ -581,13 +720,15 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     });
     await pressLabel(root, "Save changes");
     await flush();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
-    expect(textOf(root)).toContain("Updated ✓");
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    expect(api.createEntry).not.toHaveBeenCalled();
+    expect(lastAlert()[0]).toBe("Could not update");
+    expect(lastAlert()[1]).toContain("original entry is unchanged");
   });
 
-  it("a failed create after the old version was removed keeps the text and says exactly what happened", async () => {
+  it("a failed atomic replacement keeps the text and never removes the old version", async () => {
     oneEntry();
-    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.updateEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     const editor = await openEditor(root, "original words");
@@ -596,17 +737,17 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     });
     await pressLabel(root, "Save changes");
     await flush();
-    expect(lastAlert()[0]).toBe("Old version removed — update not saved");
-    expect(lastAlert()[1]).toContain("Your text is still on this screen; try again to finish.");
+    expect(lastAlert()[0]).toBe("Needs a connection");
+    expect(lastAlert()[1]).toContain("original entry and this text are both still safe");
     // The editor stayed open with the text — a retry is one tap away.
     const { TextInput } = await import("react-native");
     const stillOpen = root.root.findAllByType(TextInput).find((n) => n.props.accessibilityLabel === "Edit entry");
     expect(stillOpen?.props.value).toBe("revised words");
   });
 
-  it("a delete-step server failure surfaces calm copy", async () => {
+  it("an atomic replacement server failure surfaces calm copy", async () => {
     oneEntry();
-    vi.mocked(api.deleteEntry).mockRejectedValue(new ApiError(500, "boom"));
+    vi.mocked(api.updateEntry).mockRejectedValue(new ApiError(500, "boom"));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     const editor = await openEditor(root, "original words");
@@ -616,7 +757,9 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
     await pressLabel(root, "Save changes");
     await flush();
     expect(lastAlert()[0]).toBe("Could not update");
-    expect(lastAlert()[1]).toBe("The server hit a problem — try again in a moment.");
+    expect(lastAlert()[1]).toContain("The server hit a problem — try again in a moment.");
+    expect(lastAlert()[1]).toContain("original entry is unchanged");
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
     expect(api.createEntry).not.toHaveBeenCalled();
   });
 
@@ -677,8 +820,8 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
 
   it("a double-tap on Save changes saves once (the busy guard)", async () => {
     oneEntry();
-    let resolveDelete!: (v: unknown) => void;
-    vi.mocked(api.deleteEntry).mockImplementation(() => new Promise((resolve) => (resolveDelete = resolve)));
+    let resolveUpdate!: (v: unknown) => void;
+    vi.mocked(api.updateEntry).mockImplementation(() => new Promise((resolve) => (resolveUpdate = resolve)));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     const editor = await openEditor(root, "original words");
@@ -691,10 +834,11 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
       void (btn.props as { onPress: () => unknown }).onPress?.();
       void (btn.props as { onPress: () => unknown }).onPress?.();
     });
-    await act(async () => resolveDelete({}));
+    await act(async () => resolveUpdate({}));
     await flush();
-    expect(api.deleteEntry).toHaveBeenCalledTimes(1);
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    expect(api.deleteEntry).not.toHaveBeenCalled();
+    expect(api.createEntry).not.toHaveBeenCalled();
   });
 
   it("a blank draft fired straight through the handler is a no-op", async () => {
@@ -711,7 +855,7 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
       void (btn.props as { onPress: () => unknown }).onPress?.(); // leaked press past the disabled control
     });
     await flush();
-    expect(api.deleteEntry).not.toHaveBeenCalled();
+    expect(api.updateEntry).not.toHaveBeenCalled();
     expect(api.createEntry).not.toHaveBeenCalled();
   });
 
@@ -748,7 +892,7 @@ describe("HistoryScreen edit (replace: delete + create)", () => {
       await pressLabel(root, "Save changes");
       await flush();
       expect(textOf(root)).toContain("Updated ✓");
-      expect(api.createEntry).toHaveBeenCalledTimes(1);
+      expect(api.updateEntry).toHaveBeenCalledTimes(1);
     } finally {
       storage.setItem = original;
     }

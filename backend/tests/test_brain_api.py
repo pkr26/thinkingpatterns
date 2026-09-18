@@ -17,8 +17,10 @@ from app.security import crypto
 from tests.helpers import ClientEmulator, daterange
 
 TODAY = date.today()
-WORK_ANXIOUS = ("Deadline at work monday, the boss piled on another project and a "
-                "late meeting. Anxious, stressed, dreading the presentation.")
+WORK_ANXIOUS = (
+    "Deadline at work monday, the boss piled on another project and a "
+    "late meeting. Anxious, stressed, dreading the presentation."
+)
 CALM = "Long walk by the river, felt calm and grateful. Cooked, ate well, slept deeply."
 
 
@@ -50,8 +52,9 @@ async def decrypt_brain_state(client, emu) -> dict:
             .first()
         )
     assert row is not None, "recompute must persist the encrypted brain state"
-    plain = crypto.decrypt(emu.data_key, bytes(row.blob),
-                            crypto.build_aad("insights", emu.user_id, "brain"))
+    plain = crypto.decrypt(
+        emu.data_key, bytes(row.blob), crypto.build_aad("insights", emu.user_id, "brain")
+    )
     return json.loads(plain.decode("utf-8"))
 
 
@@ -149,7 +152,8 @@ async def test_corrupt_brain_state_degrades_to_amnesia(client):
             .first()
         )
         row.blob = crypto.encrypt(
-            emu.data_key, b"{definitely not json",
+            emu.data_key,
+            b"{definitely not json",
             crypto.build_aad("insights", emu.user_id, "brain"),
         )
         await session.commit()
@@ -179,7 +183,7 @@ async def test_tampered_brain_state_retries_without_it(client):
                 )
             )
             .scalars()
-                .first()
+            .first()
         )
         corrupted = bytearray(bytes(row.blob))
         corrupted[-1] ^= 1
@@ -215,8 +219,7 @@ async def test_malformed_entry_during_amnesia_retry_is_a_400(client):
         state_row = (
             (
                 await session.execute(
-                    select(Insight)
-                    .where(Insight.user_id == emu.user_id, Insight.kind == "brain")
+                    select(Insight).where(Insight.user_id == emu.user_id, Insight.kind == "brain")
                 )
             )
             .scalars()
@@ -247,7 +250,9 @@ async def test_malformed_entry_during_amnesia_retry_is_a_400(client):
     assert response.json()["code"] == "entry_payload_malformed"
 
 
-async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(client, settings, monkeypatch):
+async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(
+    client, settings, monkeypatch
+):
     # 2026-09-17 inversion: the model receives the brain's findings and may
     # only attach a sanitized NARRATIVE to them. A corpus-anchored phrase
     # the BRAIN did not surface is still model minting — dropped. The
@@ -262,15 +267,24 @@ async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(client, se
         posted.append(payload)
         user = json.loads(payload["messages"][1]["content"])
         findings = user.get("findings", [])
-        model_output = {"patterns": [
-            # Narrate the brain's top finding (whatever it is).
-            {"kind": findings[0]["kind"] if findings else "recurring_phrase",
-             "label": findings[0]["label"] if findings else "nothing",
-             "narrative": "One steady shape in your weeks, in your own words."},
-            # Model fiction: a phrase nowhere in the corpus — must drop.
-            {"kind": "recurring_phrase", "label": "never wrote this at all",
-             "occurrences": 5, "confidence": 0.9, "detail": {}},
-        ]}
+        model_output = {
+            "patterns": [
+                # Narrate the brain's top finding (whatever it is).
+                {
+                    "kind": findings[0]["kind"] if findings else "recurring_phrase",
+                    "label": findings[0]["label"] if findings else "nothing",
+                    "narrative": "One steady shape in your weeks, in your own words.",
+                },
+                # Model fiction: a phrase nowhere in the corpus — must drop.
+                {
+                    "kind": "recurring_phrase",
+                    "label": "never wrote this at all",
+                    "occurrences": 5,
+                    "confidence": 0.9,
+                    "detail": {},
+                },
+            ]
+        }
         return {"choices": [{"message": {"content": json.dumps(model_output)}}]}
 
     monkeypatch.setattr(LLMAnalyzer, "_post", fake_post)
@@ -279,8 +293,11 @@ async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(client, se
     await emu.register(client)
     await emu.backdate_account(client, days=72)
     # Explicit, re-authenticated consent — the LLM path is opt-in.
-    await client.put("/api/account/llm-consent", headers=emu.headers,
-                     json={"enabled": True, "verifier": emu.auth_key_b64})
+    await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
 
     await seed(client, emu, days=70)
     # Two recomputes at the replication cadence: statistical kinds surface
@@ -297,22 +314,28 @@ async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(client, se
     patterns = insights["stats"]["patterns"]
     labels = [p["label"] for p in patterns]
     assert "never wrote this at all" not in labels
-    assert any(p.get("detail", {}).get("narrative") == "One steady shape in your weeks, in your own words."
-               for p in patterns), labels
+    assert any(
+        p.get("detail", {}).get("narrative") == "One steady shape in your weeks, in your own words."
+        for p in patterns
+    ), labels
 
 
 async def seed_extra_day(client, emu):
     """One more dated entry: gives evidence-date kinds their NEW evidence
     day on the second recompute (the replication gate)."""
     from datetime import date as date_type, timedelta
+
     last = date_type.today()
     text = "cooked ate well slept deeply long walk by the river felt calm and grateful"
     blob = emu.encrypt_entry(text, last, f"e-extra-{last.isoformat()}", None)
     response = await client.post(
         "/api/entries",
         headers=emu.headers,
-        json={"client_entry_id": f"e-extra-{last.isoformat()}", "blob": blob,
-              "entry_date": last.isoformat()},
+        json={
+            "client_entry_id": f"e-extra-{last.isoformat()}",
+            "blob": blob,
+            "entry_date": last.isoformat(),
+        },
     )
     assert response.status_code in (201, 409), response.text
 
@@ -330,11 +353,7 @@ async def test_baseline_still_stores_no_brain_state(client):
     app = client._transport.app  # noqa: SLF001 — test reachability into state
     async with app.state.sessionmaker() as session:
         rows = (
-            (
-                await session.execute(
-                    select(Insight).where(Insight.user_id == emu.user_id)
-                )
-            )
+            (await session.execute(select(Insight).where(Insight.user_id == emu.user_id)))
             .scalars()
             .all()
         )

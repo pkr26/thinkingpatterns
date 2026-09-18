@@ -1,0 +1,47 @@
+/** Static-host defenses are easy to accidentally drop during a deployment
+ * refactor, so pin the security policy files as part of the portal suite. */
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const portalRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+describe("static-host security policy", () => {
+  it("ships CSP and privacy headers both as a page fallback and static-host config", async () => {
+    const [html, headers, nginx] = await Promise.all([
+      readFile(resolve(portalRoot, "index.html"), "utf8"),
+      readFile(resolve(portalRoot, "public/_headers"), "utf8"),
+      readFile(resolve(portalRoot, "../deploy/nginx/mindpattern.conf.example"), "utf8"),
+    ]);
+    for (const source of [html, headers]) {
+      expect(source).toContain("Content-Security-Policy");
+      expect(source).toContain("default-src 'self'");
+      expect(source).toContain("frame-ancestors 'none'");
+      expect(source).toContain("connect-src 'self';");
+    }
+    expect(html).toContain('name="referrer" content="no-referrer"');
+    expect(headers).toContain("Referrer-Policy: no-referrer");
+    expect(headers).toContain("X-Content-Type-Options: nosniff");
+    expect(headers).toContain("Cache-Control: no-store");
+    expect(headers).toContain("Permissions-Policy:");
+    expect(headers).toContain("Cross-Origin-Opener-Policy: same-origin");
+    expect(headers).toContain("Cross-Origin-Resource-Policy: same-origin");
+    // `_headers` is the production static-host contract (not Vite's local
+    // HTTP dev server), so its HSTS policy must match the TLS nginx template.
+    expect(headers).toContain("Strict-Transport-Security: max-age=31536000; includeSubDomains");
+    // Nginx's response CSP intersects with the portal policy. React's
+    // dynamic theme deliberately uses style attributes, so dropping this
+    // token at the edge would make a successful deploy render unstyled.
+    expect(nginx).toContain("style-src 'self' 'unsafe-inline'");
+    expect(nginx).toContain("connect-src 'self'");
+    expect(nginx).toContain('add_header Cache-Control "no-store" always;');
+    expect(nginx).toContain('add_header Cross-Origin-Resource-Policy "same-origin" always;');
+    expect(nginx).toContain(
+      'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;',
+    );
+    expect(nginx).toContain("client_body_timeout 30s;");
+    expect(nginx).toContain("proxy_set_header Host portal.example.com;");
+    expect(nginx).not.toContain("https://$host");
+  });
+});

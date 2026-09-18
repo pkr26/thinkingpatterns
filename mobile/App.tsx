@@ -12,6 +12,18 @@ import { ThemeProvider, useTheme } from "./src/theme";
  * plain sight. An opaque overlay renders whenever the app is not active.
  */
 export default function App(): React.JSX.Element {
+  return (
+    <ThemeProvider>
+      <ThemedApp />
+    </ThemeProvider>
+  );
+}
+
+/** Kept below ThemeProvider so the app-switcher shield tracks an explicit
+ * light/dark setting too. Calling useTheme above its provider meant the
+ * shield permanently followed only the OS, briefly flashing the wrong color
+ * when a user chose an override. */
+function ThemedApp(): React.JSX.Element {
   const t = useTheme();
   const [shielded, setShielded] = useState(AppState.currentState !== "active");
 
@@ -24,20 +36,18 @@ export default function App(): React.JSX.Element {
 
   return (
     <SafeAreaProvider>
-      <ThemeProvider>
       <SessionProvider>
         <NavigationContainer>
           <AppNavigator />
           {shielded && <View style={[styles.shield, { backgroundColor: t.colors.bg }]} pointerEvents="none" />}
         </NavigationContainer>
       </SessionProvider>
-      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   shield: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 });

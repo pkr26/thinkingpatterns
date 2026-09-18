@@ -38,15 +38,11 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-          cache-dependency-path: backend/requirements.lock.txt
+          cache-dependency-path: backend/requirements.dev.lock.txt
       - name: Install dependencies
         working-directory: backend
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.lock.txt
-          # Pins match ci.yml's test tooling; mutmut matches the version the
-          # last local campaign used (see reports/mutation_report.md).
-          pip install pytest==9.1.1 pytest-asyncio==1.4.0 pytest-cov==7.1.0 mutmut==2.4.4
+          python -m pip install --require-hashes -r requirements.dev.lock.txt
       - name: Restore mutmut progress cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

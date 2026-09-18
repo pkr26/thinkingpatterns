@@ -7,6 +7,7 @@ payloads) — they close the gaps mutation testing would otherwise hide in.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -73,8 +74,13 @@ async def _simple_app(scope, receive, send):
                 break
         else:
             break
-    await send({"type": "http.response.start", "status": 200,
-                "headers": [(b"content-type", b"application/json")]})
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"application/json")],
+        }
+    )
     await send({"type": "http.response.body", "body": b"{}"})
 
 
@@ -93,14 +99,122 @@ async def test_middleware_passes_non_http_scopes_through_untouched():
 
 async def test_middleware_rejects_non_numeric_content_length():
     wrapped = HardeningMiddleware(_simple_app, max_body_bytes=100)
+    for malformed in (b"not-a-number", b"+1", b"1_000", b" 1", b"1 ", b"\xef\xbc\x91"):
+        sent = await _call_asgi(wrapped, _http_scope([(b"content-length", malformed)]), [])
+        assert sent[0]["status"] == 400
+        assert json.loads(sent[1]["body"])["detail"] == "invalid content-length"
+        # Even middleware-generated errors carry the security headers.
+        header_names = {name for name, _ in sent[0]["headers"]}
+        assert b"cache-control" in header_names
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [(b"content-length", b"0"), (b"content-length", b"10")],
+        [(b"content-length", b"10"), (b"content-length", b"0")],
+        # Reject even equal duplicates: different intermediaries normalize
+        # these differently, so the JSON API keeps one unambiguous framing.
+        [(b"content-length", b"0"), (b"content-length", b"0")],
+    ],
+)
+async def test_middleware_rejects_ambiguous_message_framing_before_routing(headers):
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    wrapped = HardeningMiddleware(app, max_body_bytes=10)
     sent = await _call_asgi(
-        wrapped, _http_scope([(b"content-length", b"not-a-number")]), []
+        wrapped,
+        _http_scope(headers),
+        [{"type": "http.request", "body": b"", "more_body": False}],
     )
+    assert called is False
     assert sent[0]["status"] == 400
-    assert json.loads(sent[1]["body"])["detail"] == "invalid content-length"
-    # Even middleware-generated errors carry the security headers.
-    header_names = {name for name, _ in sent[0]["headers"]}
-    assert b"cache-control" in header_names
+    assert json.loads(sent[1]["body"]) == {
+        "detail": "invalid content-length",
+        "code": "bad_request",
+    }
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        [(b"content-length", b"0"), (b"transfer-encoding", b"chunked")],
+        [(b"transfer-encoding", b"gzip, chunked")],
+        [(b"transfer-encoding", b"chunked"), (b"transfer-encoding", b"chunked")],
+    ],
+)
+async def test_middleware_rejects_ambiguous_transfer_encoding_before_routing(headers):
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    wrapped = HardeningMiddleware(app, max_body_bytes=10)
+    sent = await _call_asgi(
+        wrapped,
+        _http_scope(headers),
+        [{"type": "http.request", "body": b"", "more_body": False}],
+    )
+    assert called is False
+    assert sent[0]["status"] == 400
+    assert json.loads(sent[1]["body"]) == {
+        "detail": "ambiguous request framing",
+        "code": "bad_request",
+    }
+
+
+async def test_middleware_accepts_normalized_chunked_body():
+    wrapped = HardeningMiddleware(_simple_app, max_body_bytes=10)
+    sent = await _call_asgi(
+        wrapped,
+        _http_scope([(b"transfer-encoding", b"chunked")]),
+        [{"type": "http.request", "body": b"ok", "more_body": False}],
+    )
+    assert sent[0]["status"] == 200
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+async def test_middleware_caps_unframed_bodies_for_every_http_method(method):
+    """HTTP/2 bodies need not carry Content-Length or Transfer-Encoding."""
+    called = False
+
+    async def app(scope, receive, send):
+        nonlocal called
+        called = True
+
+    wrapped = HardeningMiddleware(app, max_body_bytes=10)
+    sent = await _call_asgi(
+        wrapped,
+        _http_scope([], method=method),
+        [{"type": "http.request", "body": b"x" * 11, "more_body": False}],
+    )
+    assert called is False
+    assert sent[0]["status"] == 413
+    assert json.loads(sent[1]["body"])["code"] == "payload_too_large"
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+async def test_middleware_replays_legitimate_empty_bodies_for_safe_methods(method):
+    received: list[dict] = []
+
+    async def app(scope, receive, send):
+        received.append(await receive())
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    wrapped = HardeningMiddleware(app, max_body_bytes=10)
+    sent = await _call_asgi(
+        wrapped,
+        _http_scope([], method=method),
+        [{"type": "http.request", "body": b"", "more_body": False}],
+    )
+    assert sent[0]["status"] == 200
+    assert received == [{"type": "http.request", "body": b"", "more_body": False}]
 
 
 async def test_middleware_converts_streamed_overflow_into_413():
@@ -126,7 +240,7 @@ async def test_middleware_converts_streamed_overflow_into_413():
     assert json.loads(sent[1]["body"])["detail"] == "request body too large"
 
 
-async def test_middleware_lets_a_responding_app_win_after_overflow():
+async def test_middleware_rejects_before_a_responding_app_can_win_after_overflow():
     wrapped = HardeningMiddleware(_simple_app, max_body_bytes=10)
     sent = await _call_asgi(
         wrapped,
@@ -136,11 +250,65 @@ async def test_middleware_lets_a_responding_app_win_after_overflow():
             {"type": "http.request", "body": b"b" * 6, "more_body": False},
         ],
     )
-    # The app observed the disconnect and still answered 200 — that answer
-    # stands (security headers stamped on it).
-    assert sent[0]["status"] == 200
+    # The middleware drains and validates the complete request before the
+    # app is called, so an app cannot turn an oversized chunked body into a
+    # successful response after seeing an artificial disconnect.
+    assert sent[0]["status"] == 413
     header_names = {name for name, _ in sent[0]["headers"]}
     assert b"x-frame-options" in header_names
+
+
+async def test_middleware_rejects_chunked_body_even_when_app_never_reads_it():
+    """Body-ignoring routes used to bypass the streaming-only counter."""
+
+    called = False
+
+    async def ignores_body(scope, receive, send):
+        nonlocal called
+        called = True
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    wrapped = HardeningMiddleware(ignores_body, max_body_bytes=10)
+    sent = await _call_asgi(
+        wrapped,
+        _http_scope([]),
+        [
+            {"type": "http.request", "body": b"a" * 6, "more_body": True},
+            {"type": "http.request", "body": b"b" * 6, "more_body": False},
+        ],
+    )
+    assert called is False
+    assert sent[0]["status"] == 413
+
+
+async def test_middleware_times_out_an_incomplete_body_before_routing():
+    """Pre-dispatch buffering must not turn a slowloris into an endless task."""
+    called = False
+
+    async def unreachable(scope, receive, send):
+        nonlocal called
+        called = True
+
+    async def stalled_receive():
+        # The outer wait_for below keeps this regression test bounded if the
+        # middleware timeout is removed by a future change.
+        await asyncio.sleep(1)
+        return {"type": "http.request", "body": b"x", "more_body": True}
+
+    sent: list[dict] = []
+
+    async def send(message):
+        sent.append(message)
+
+    wrapped = HardeningMiddleware(unreachable, max_body_bytes=10, body_read_timeout_seconds=0.01)
+    await asyncio.wait_for(wrapped(_http_scope([]), stalled_receive, send), timeout=0.2)
+    assert called is False
+    assert sent[0]["status"] == 408
+    assert json.loads(sent[1]["body"]) == {
+        "detail": "request body timed out",
+        "code": "request_timeout",
+    }
 
 
 async def test_middleware_maps_recursion_error_to_400():
@@ -163,7 +331,9 @@ async def test_middleware_recursion_error_after_overflow_is_413():
 
     wrapped = HardeningMiddleware(overflow_then_explode, max_body_bytes=4)
     sent = await _call_asgi(
-        wrapped, _http_scope([]), [{"type": "http.request", "body": b"toolarge", "more_body": False}]
+        wrapped,
+        _http_scope([]),
+        [{"type": "http.request", "body": b"toolarge", "more_body": False}],
     )
     assert sent[0]["status"] == 413
 
@@ -176,7 +346,9 @@ async def test_middleware_overflow_disconnect_surfaces_as_413_not_500():
 
     wrapped = HardeningMiddleware(disconnects, max_body_bytes=4)
     sent = await _call_asgi(
-        wrapped, _http_scope([]), [{"type": "http.request", "body": b"toolarge", "more_body": False}]
+        wrapped,
+        _http_scope([]),
+        [{"type": "http.request", "body": b"toolarge", "more_body": False}],
     )
     assert sent[0]["status"] == 413
     assert json.loads(sent[1]["body"])["detail"] == "request body too large"
@@ -201,9 +373,7 @@ async def test_middleware_unhandled_exception_is_headered_500():
 
 def test_verify_token_rejects_signed_but_non_json_body():
     body = _b64url_encode(b"definitely not json")
-    signature = _b64url_encode(
-        hmac.new(b"secret", body.encode("ascii"), hashlib.sha256).digest()
-    )
+    signature = _b64url_encode(hmac.new(b"secret", body.encode("ascii"), hashlib.sha256).digest())
     with pytest.raises(TokenError, match="^malformed payload$"):
         verify_token(f"{body}.{signature}", "secret")
 
@@ -290,7 +460,9 @@ def test_build_engine_selects_pooling_by_database_kind(monkeypatch):
         "max_overflow": 10,
         "pool_timeout": 30,
     }
-    db_module.build_engine("postgresql+asyncpg://u:p@host:5432/db", pool_size=9, max_overflow=2, pool_timeout=7)
+    db_module.build_engine(
+        "postgresql+asyncpg://u:p@host:5432/db", pool_size=9, max_overflow=2, pool_timeout=7
+    )
     assert calls[1][1]["pool_size"] == 9
     assert calls[1][1]["max_overflow"] == 2
     assert calls[1][1]["pool_timeout"] == 7
@@ -314,7 +486,11 @@ async def test_create_entry_rejects_non_base64_blob(client):
     response = await client.post(
         "/api/entries",
         headers=emu.headers,
-        json={"client_entry_id": "e-bad-b64", "blob": "!!!not base64!!!", "entry_date": date.today().isoformat()},
+        json={
+            "client_entry_id": "e-bad-b64",
+            "blob": "!!!not base64!!!",
+            "entry_date": date.today().isoformat(),
+        },
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "blob must be base64"
@@ -419,8 +595,9 @@ async def test_delete_account_for_deactivated_account_is_404(client, app):
         user = await session.get(User, emu.user_id)
         assert user is not None and not user.is_active
 
-    request = Request({"type": "http", "headers": [], "method": "DELETE",
-                       "path": "/api/account", "app": app})
+    request = Request(
+        {"type": "http", "headers": [], "method": "DELETE", "path": "/api/account", "app": app}
+    )
     with pytest.raises(HTTPException) as excinfo:
         await delete_account(
             body=AccountDeleteRequest(verifier=emu.auth_key_b64),
@@ -450,12 +627,14 @@ async def test_recompute_rejects_non_string_text(client):
 
     # One entry whose *plaintext* (validly encrypted) has text as a number.
     entry_id = "e-bad-text"
-    payload = json.dumps({"v": 1, "text": 42, "sentiment": None,
-                          "created_at": date.today().isoformat()}).encode()
+    payload = json.dumps(
+        {"v": 1, "text": 42, "sentiment": None, "created_at": date.today().isoformat()}
+    ).encode()
     aad = crypto.build_aad("entry", emu.user_id or "", entry_id)
     blob = base64.b64encode(crypto.encrypt(emu.data_key, payload, aad)).decode()
     response = await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": entry_id, "blob": blob, "entry_date": date.today().isoformat()},
     )
     assert response.status_code == 201
@@ -474,12 +653,14 @@ async def test_recompute_rejects_non_numeric_sentiment(client):
     await _seed_threshold_corpus(client, emu)
 
     entry_id = "e-bad-sentiment"
-    payload = json.dumps({"v": 1, "text": "fine day", "sentiment": "high",
-                          "created_at": date.today().isoformat()}).encode()
+    payload = json.dumps(
+        {"v": 1, "text": "fine day", "sentiment": "high", "created_at": date.today().isoformat()}
+    ).encode()
     aad = crypto.build_aad("entry", emu.user_id or "", entry_id)
     blob = base64.b64encode(crypto.encrypt(emu.data_key, payload, aad)).decode()
     response = await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": entry_id, "blob": blob, "entry_date": date.today().isoformat()},
     )
     assert response.status_code == 201
@@ -500,7 +681,8 @@ async def test_recompute_with_wrong_data_key_is_tampering(client):
     # Open the processing session with a key that did NOT encrypt the entries.
     stranger_key = os.urandom(32)
     opened = await client.post(
-        "/api/processing/sessions", headers=emu.headers,
+        "/api/processing/sessions",
+        headers=emu.headers,
         json={"data_key": base64.b64encode(stranger_key).decode()},
     )
     assert opened.status_code == 201

@@ -37,6 +37,7 @@ vi.mock("../../src/offlineQueue", () => ({
   rejectedEntryCount: vi.fn(async () => 0),
   requeueRejected: vi.fn(async () => 0),
   quarantinedQueueExists: vi.fn(async () => false),
+  hasLegacyQueueRecovery: vi.fn(async () => false),
 }));
 
 const signOut = vi.fn(async () => {});
@@ -135,7 +136,7 @@ describe("SettingsScreen chrome", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     // First paint: blank URL field, buttons enabled (not busy).
     expect((inputByPlaceholder(root, "https://your-server:8000").props as { value: string }).value).toBe("");
-    expect(touchableByLabel(root, "Export my data (encrypted)").props.disabled).toBe(false);
+    expect(textOf(root)).toContain("Why export is unavailable");
     expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(false);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
@@ -168,26 +169,15 @@ describe("SettingsScreen chrome", () => {
     expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 }); // help surface
   });
 
-  it("shows the insecure-HTTP dialog even before stored consent resolves", async () => {
-    const { getBaseUrl: gb } = await import("../../src/api/client");
-    vi.mocked(gb).mockImplementation(async () => "http://nas.lan:8000");
-    let resolveConsent!: (v: string | null) => void;
-    vi.mocked(getInsecureConsentUrl).mockImplementation(
-      () => new Promise((resolve) => (resolveConsent = resolve as (v: string | null) => void)),
-    );
+  it("hands cleartext URLs directly to the fail-closed client without a consent dialog", async () => {
+    vi.mocked(setBaseUrl).mockResolvedValue("This server uses plain HTTP. Use HTTPS.");
     const root = await render(<SettingsScreen navigation={nav} />);
-    await pressLabel(root, "Save server URL");
-    // Consent is UNKNOWN yet (promise pending) — the warning must still fire.
-    expect(lastAlert()[0]).toBe("Insecure server");
-    expect(lastAlert()[2]).toEqual([
-      { text: "Cancel", style: "cancel" },
-      { text: "Allow insecure HTTP", style: "destructive", onPress: expect.any(Function) },
-    ]);
-    const { act } = await import("../helpers/rtr");
-    await act(async () => {
-      resolveConsent(false);
-    });
     await flush();
+    await typeInto(root, "https://your-server:8000", "http://nas.lan:8000");
+    await pressLabel(root, "Save server URL");
+    expect(setBaseUrl).toHaveBeenCalledWith("http://nas.lan:8000");
+    expect(Alert.alert).toHaveBeenCalledWith("Could not save server", expect.stringContaining("plain HTTP"));
+    expect(Alert.alert).not.toHaveBeenCalledWith("Insecure server", expect.any(String), expect.anything());
   });
 
   it("shows the LLM switch off before the stored consent resolves", async () => {
@@ -273,36 +263,25 @@ describe("server URL policy", () => {
     expect(setBaseUrl).not.toHaveBeenCalled();
   });
 
-  it("demands explicit consent for plain-HTTP servers", async () => {
+  it("delegates remote plain-HTTP rejection to the client with no consent bypass", async () => {
+    vi.mocked(setBaseUrl).mockResolvedValue("This server uses plain HTTP. Use HTTPS.");
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await typeInto(root, "https://your-server:8000", "http://nas.lan:8000");
     await pressLabel(root, "Save server URL");
 
-    expect(setBaseUrl).not.toHaveBeenCalled();
-    expect(lastAlert()[0]).toBe("Insecure server");
-    const [, message] = lastAlert();
-    expect(message).toContain("plain HTTP");
-    expect(lastAlert()[2]?.map((b) => b.text)).toEqual(["Cancel", "Allow insecure HTTP"]);
-
-    await pressAlertButton("Cancel");
-    expect(setBaseUrl).not.toHaveBeenCalled();
-
-    // H4: consent saves IMMEDIATELY for this exact URL — it can never
-    // linger in state to bless a different cleartext server later.
-    await pressLabel(root, "Save server URL");
-    await pressAlertButton("Allow insecure HTTP");
-    expect(setBaseUrl).toHaveBeenCalledWith("http://nas.lan:8000", { allowInsecure: true });
-    expect(Alert.alert).toHaveBeenCalledWith("Saved", "Server URL updated (http://nas.lan:8000).");
+    expect(setBaseUrl).toHaveBeenCalledWith("http://nas.lan:8000");
+    expect(lastAlert()[0]).toBe("Could not save server");
+    expect(lastAlert()[1]).toContain("plain HTTP");
+    expect(Alert.alert).not.toHaveBeenCalledWith("Insecure server", expect.any(String), expect.anything());
   });
 
-  it("reports save errors from the consented save", async () => {
+  it("reports a cleartext rejection from the client", async () => {
     vi.mocked(setBaseUrl).mockImplementation(async () => "Enter a full URL like https://your-server:8000");
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await typeInto(root, "https://your-server:8000", "http://nas.lan:8000");
     await pressLabel(root, "Save server URL");
-    await pressAlertButton("Allow insecure HTTP");
     expect(Alert.alert).toHaveBeenCalledWith("Could not save server", expect.stringContaining("full URL"));
   });
 
@@ -313,7 +292,7 @@ describe("server URL policy", () => {
     await typeInto(root, "https://your-server:8000", "https://sync.example.com");
     await pressLabel(root, "Save server URL");
     await flush();
-    expect(setBaseUrl).toHaveBeenCalledWith("https://sync.example.com", { allowInsecure: false });
+    expect(setBaseUrl).toHaveBeenCalledWith("https://sync.example.com");
     expect(Alert.alert).toHaveBeenCalledWith("Could not save server", "connection refused");
   });
 
@@ -322,17 +301,17 @@ describe("server URL policy", () => {
     await flush();
     await typeInto(root, "https://your-server:8000", "https://api.example.com");
     await pressLabel(root, "Save server URL");
-    expect(setBaseUrl).toHaveBeenCalledWith("https://api.example.com", { allowInsecure: false });
+    expect(setBaseUrl).toHaveBeenCalledWith("https://api.example.com");
     expect(Alert.alert).toHaveBeenCalledWith("Saved", expect.any(String));
   });
 
-  it("saves an insecure URL without the dialog when THIS url was already consented to", async () => {
+  it("does not revive a stored insecure-consent exception", async () => {
     vi.mocked(getInsecureConsentUrl).mockImplementation(async () => "http://nas.lan:8000");
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await typeInto(root, "https://your-server:8000", "http://nas.lan:8000");
     await pressLabel(root, "Save server URL");
-    expect(setBaseUrl).toHaveBeenCalledWith("http://nas.lan:8000", { allowInsecure: true });
+    expect(setBaseUrl).toHaveBeenCalledWith("http://nas.lan:8000");
     expect(Alert.alert).not.toHaveBeenCalledWith("Insecure server", expect.any(String), expect.anything());
   });
 
@@ -422,103 +401,18 @@ describe("LLM consent toggle", () => {
   });
 });
 
-describe("encrypted export", () => {
-  it("flushes the queue, exports and shares the bundle (and can repeat)", async () => {
-    vi.mocked(api.exportAccount).mockResolvedValue({ entries: [{}], insights: [{}] } as never);
+describe("export safety gate", () => {
+  it("fails closed before fetching or sharing a potentially large account", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-
-    expect(flushQueue).toHaveBeenCalledWith("user-1");
-    expect(Share.share).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "MindPattern export (encrypted)" }),
-    );
+    await pressLabel(root, "Why export is unavailable");
     expect(Alert.alert).toHaveBeenCalledWith(
-      "Exported",
-      "1 entries and 1 insights (encrypted). Keep it safe — it is only decryptable with your password (see tools/decrypt_export.mjs).",
+      "Export unavailable in this build",
+      expect.stringContaining("verified secure file-export component"),
     );
-
-    // busy was reset: a second export works immediately.
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(api.exportAccount).toHaveBeenCalledTimes(2);
-  });
-
-  it("skips the flush when no user id is stored, still exports", async () => {
-    vi.mocked(api.getUserId).mockResolvedValue(null);
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
+    expect(api.exportAccount).not.toHaveBeenCalled();
     expect(flushQueue).not.toHaveBeenCalled();
-    expect(Share.share).toHaveBeenCalledTimes(1);
-  });
-
-  // M7: a failed share must never look like a successful export — the
-  // old bare catch dismissed EVERY failure (incl. size-limit aborts)
-  // without telling the user anything.
-  it("a failed share sheet reports 'Export did not complete'", async () => {
-    vi.mocked(Share.share).mockRejectedValue(new Error("TransactionTooLarge"));
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export did not complete", expect.stringContaining("Nothing left the device"));
-  });
-
-  it("a user-dismissed share sheet (dismissedAction) stays quiet", async () => {
-    vi.mocked(Share.share).mockResolvedValue({ action: "dismissedAction" } as never);
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).not.toHaveBeenCalledWith(expect.any(String), expect.anything());
-  });
-
-  it("refuses oversized exports with an honest message instead of a dead share sheet", async () => {
-    const huge = Array.from({ length: 400 }, () => ({ blob: "x".repeat(10_000) }));
-    vi.mocked(api.exportAccount).mockResolvedValue({ entries: huge, insights: [] } as never);
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export too large", expect.stringContaining("share sheet"));
     expect(Share.share).not.toHaveBeenCalled();
-  });
-
-  it("surfaces export failures with calm copy (status-mapped for ApiError)", async () => {
-    const { ApiError } = await import("../../src/api/client");
-    vi.mocked(api.exportAccount).mockRejectedValue(new ApiError(429, "rate_limited", "rate_limited", 5_000));
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "Too many attempts — wait a moment, then try again.");
-    // A plain library Error degrades to the fallback sentence, never an echo.
-    vi.mocked(api.exportAccount).mockRejectedValue(new Error("rate limited"));
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "Something went wrong — try again.");
-  });
-
-  it("falls back to calm copy for non-Error export failures", async () => {
-    vi.mocked(api.exportAccount).mockRejectedValue("nope" as never);
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Export failed", "Something went wrong — try again.");
-  });
-
-  it("keeps working when the pre-export flush itself fails", async () => {
-    vi.mocked(flushQueue).mockRejectedValue(new Error("storage corrupted"));
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Share.share).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -708,24 +602,10 @@ describe("sign out", () => {
     expect(await storage.getItem("@mindpattern/queue")).toBe("[]");
   });
 
-  it("disables destructive actions while an export is busy", async () => {
-    let resolveExport: ((v: unknown) => void) | undefined;
-    vi.mocked(api.exportAccount).mockImplementation(
-      () => new Promise((resolve) => (resolveExport = resolve)),
-    );
+  it("keeps destructive controls available while the export safety explanation is shown", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    const { firePress } = await import("../helpers/rtr");
-    await firePress(root, "Export my data (encrypted)");
-    expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(true);
-    expect(touchableByLabel(root, "Export my data (encrypted)").props.disabled).toBe(true);
-
-    const { act } = await import("../helpers/rtr");
-    await flush(); // let exportAccount get called and the deferred be created
-    await act(async () => {
-      resolveExport?.({});
-    });
-    await flush();
+    await pressLabel(root, "Why export is unavailable");
     expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(false);
   });
 });
@@ -958,8 +838,8 @@ describe("About and Advanced sections", () => {
     expect(iAbout).toBeGreaterThanOrEqual(0);
     expect(iAdvanced).toBeGreaterThan(iAbout);
     expect(iSaveUrl).toBeGreaterThan(iAdvanced);
-    // And the consumer actions come first: export precedes About.
-    expect(texts.findIndex((t) => t.includes("Export my data"))).toBeLessThan(iAbout);
+    // The safe export explanation remains with consumer actions before About.
+    expect(texts.findIndex((t) => t.includes("Why export is unavailable"))).toBeLessThan(iAbout);
   });
 });
 
@@ -1022,22 +902,20 @@ describe("recovered entries surface — edge branches", () => {
     );
   });
 
-  it("ignores the recovery tap while another action is busy", async () => {
+  it("ignores a second recovery tap while recovery is already busy", async () => {
     vi.mocked(rejectedEntryCount).mockResolvedValue(1);
-    let resolveExport: ((v: unknown) => void) | undefined;
-    vi.mocked(api.exportAccount).mockImplementation(
-      () => new Promise((resolve) => (resolveExport = resolve)),
+    let resolveRequeue: ((v: number) => void) | undefined;
+    vi.mocked(requeueRejected).mockImplementation(
+      () => new Promise((resolve) => (resolveRequeue = resolve)),
     );
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const { firePress, act } = await import("../helpers/rtr");
-    await firePress(root, "Export my data (encrypted)");
-    await flush();
-    await pressLabel(root, "Try syncing them again");
-    await flush();
-    expect(requeueRejected).not.toHaveBeenCalled();
+    await firePress(root, "Try syncing them again");
+    await firePress(root, "Try syncing them again");
+    expect(requeueRejected).toHaveBeenCalledTimes(1);
     await act(async () => {
-      resolveExport?.({});
+      resolveRequeue?.(1);
     });
     await flush();
   });

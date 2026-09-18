@@ -100,8 +100,10 @@ class TestWelchTest:
         assert p == 1.0
 
     def test_separated_groups_significant(self):
-        t, p = statsig.welch_test([0.1, 0.2, 0.15, 0.05, 0.2, 0.1, 0.05, 0.15],
-                                  [0.9, 0.8, 0.85, 0.95, 0.9, 0.85, 0.8, 0.9])
+        t, p = statsig.welch_test(
+            [0.1, 0.2, 0.15, 0.05, 0.2, 0.1, 0.05, 0.15],
+            [0.9, 0.8, 0.85, 0.95, 0.9, 0.85, 0.8, 0.9],
+        )
         assert t < -5
         assert p < 1e-3
 
@@ -119,7 +121,9 @@ class TestWelchTest:
         t, p = statsig.welch_test([1.0] * 8, [0.0] * 8, variance_floor=0.05)
         assert t == 0.0 and p == 1.0
         # One-sided constant vs genuinely noisy still measures separation.
-        t, p = statsig.welch_test([1.0] * 8, [-0.6, 0.8, -0.4, 0.9, -0.7, 0.8, -0.5, 0.7], variance_floor=0.05)
+        t, p = statsig.welch_test(
+            [1.0] * 8, [-0.6, 0.8, -0.4, 0.9, -0.7, 0.8, -0.5, 0.7], variance_floor=0.05
+        )
         assert abs(t) > 2 and p < 0.05
 
 
@@ -162,7 +166,7 @@ class TestEffectiveSampleSize:
         # The lag-1 estimate itself is capped at 0.9 (beyond that the
         # formula is explosive); the n floor binds for tiny samples.
         assert statsig.effective_sample_size(100, 0.999) == pytest.approx(100 * 0.1 / 1.9)
-        assert statsig.effective_sample_size(4, 0.5) == 3.0      # floor above n
+        assert statsig.effective_sample_size(4, 0.5) == 3.0  # floor above n
 
 
 class TestFisherZDifference:

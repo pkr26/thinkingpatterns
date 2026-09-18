@@ -4,34 +4,28 @@
  * AsyncStorage is an unencrypted plist/SQLite file on both platforms: a
  * forensic tool, an ADB/iTunes backup, or a malicious sideloaded app used
  * to read the bearer token verbatim. This wrapper AES-256-GCM-encrypts
- * every stored value under a random per-install key, so a backup contains
- * only ciphertext and the token can no longer be lifted by grepping.
+ * every stored value under a random per-install key. That key is held in
+ * iOS Keychain / Android Keystore through react-native-keychain, with an
+ * "this device only" iOS accessibility class. A backup therefore contains
+ * ciphertext but not the key needed to open it.
  *
- * HONEST limitations, stated plainly:
- *  - The per-install device key lives in AsyncStorage too, and device
- *    backups therefore include BOTH the key and the ciphertext it
- *    protects. A fully-controlled device attacker recovers the session.
- *  - The complete fix is Keychain/Keystore custody of the device key
- *    (kSecAttrAccessible...ThisDeviceOnly / StrongBox) via
- *    react-native-keychain — pending native integration. The
- *    AsyncStorage device-key backend below is explicitly a FALLBACK.
- *
- * The seam: all encryption, envelope and key-caching logic lives in this
- * module; raw persistence (device key custody + value storage) sits
- * behind SecureStoreBackend. Swapping in react-native-keychain later
- * changes ONLY the backend — callers keep using `secureStore` unchanged.
+ * There is intentionally NO runtime AsyncStorage fallback for the device
+ * key. If native Keychain/Keystore is not linked or unavailable, sign-in
+ * fails closed instead of creating a recoverable session secret in a file.
+ * Tests can inject a backend with setSecureStoreBackend; production code
+ * never selects an insecure backend.
  *
  * Storage schema: values are a versioned envelope { v: 1, c: <base64
  * ciphertext> }; legacy bare-base64 ciphertext migrates transparently on
  * read (read-through, the moodLog idiom). Corrupt payloads read as absent.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Keychain from "react-native-keychain";
 import { decrypt, encrypt } from "./crypto/envelope";
 import { engine } from "./crypto/engine";
 
-/** Raw persistence behind the encrypted facade. A future
- *  react-native-keychain backend re-implements readDeviceKey/
- *  writeDeviceKey with hardware-backed custody; value storage may stay. */
+/** Raw persistence behind the encrypted facade. Value ciphertext can stay
+ * in AsyncStorage; the device key itself must be hardware/OS-keystore held. */
 export interface SecureStoreBackend {
   /** The per-install device key, base64 — null when never generated. */
   readDeviceKey(): Promise<string | null>;
@@ -41,25 +35,45 @@ export interface SecureStoreBackend {
   removeItem(key: string): Promise<void>;
 }
 
-const DEVICE_KEY_STORAGE = "@mindpattern/device_k";
+/** Old clients used this AsyncStorage key. It is read once only to migrate a
+ * valid key into Keychain, then removed. New releases never write it. */
+const LEGACY_DEVICE_KEY_STORAGE = "@mindpattern/device_k";
+const KEYCHAIN_SERVICE = "com.mindpattern.session-device-key.v1";
+const KEYCHAIN_USERNAME = "mindpattern-device-key";
 
-/** The fallback backend: everything in AsyncStorage, device key included.
- *  See the header — backups currently include key and ciphertext. */
-const asyncStorageBackend: SecureStoreBackend = {
-  readDeviceKey: () => AsyncStorage.getItem(DEVICE_KEY_STORAGE),
-  writeDeviceKey: (keyB64) => AsyncStorage.setItem(DEVICE_KEY_STORAGE, keyB64),
+/** Keychain / Keystore-backed custody. `WHEN_UNLOCKED_THIS_DEVICE_ONLY`
+ * prevents iOS migration/backups from carrying the data key to another
+ * device. Android's implementation uses the Android Keystore. We do not
+ * demand hardware-only security level: many legitimate Android devices lack
+ * StrongBox, while Keystore-backed software storage is still materially
+ * safer than a plaintext app database. */
+const keychainBackend: SecureStoreBackend = {
+  async readDeviceKey(): Promise<string | null> {
+    const credentials = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
+    if (!credentials) return null;
+    if (credentials.username !== KEYCHAIN_USERNAME) return null;
+    return credentials.password;
+  },
+  async writeDeviceKey(keyB64: string): Promise<void> {
+    const result = await Keychain.setGenericPassword(KEYCHAIN_USERNAME, keyB64, {
+      service: KEYCHAIN_SERVICE,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+    if (!result) throw new Error("device secure storage rejected the session key");
+  },
   getItem: (key) => AsyncStorage.getItem(key),
   setItem: (key, value) => AsyncStorage.setItem(key, value),
   removeItem: (key) => AsyncStorage.removeItem(key),
 };
 
-let backend: SecureStoreBackend = asyncStorageBackend;
+let backend: SecureStoreBackend = keychainBackend;
 
-/** Backend swap seam (tests, and the future keychain integration). Passing
- *  null restores the AsyncStorage fallback. The key cache is dropped so a
- *  backend with different key custody never serves a stale device key. */
+/** Backend swap seam for tests. Passing null restores the production
+ * Keychain/Keystore backend — never an insecure file-backed key. The key
+ * cache is dropped so a backend with different custody never serves a stale
+ * device key. */
 export function setSecureStoreBackend(next: SecureStoreBackend | null): void {
-  backend = next ?? asyncStorageBackend;
+  backend = next ?? keychainBackend;
   cachedKey = null;
   keyPromise = null;
 }
@@ -73,7 +87,24 @@ let cachedKey: Buffer | null = null;
 let keyPromise: Promise<Buffer> | null = null;
 
 async function loadDeviceKey(): Promise<Buffer> {
-  const raw = await backend.readDeviceKey();
+  let raw = await backend.readDeviceKey();
+  // One-way migration from versions that stored the device key beside the
+  // ciphertext. Do not remove the legacy bytes until Keychain durably takes
+  // them; a Keychain failure then fails closed without destroying an active
+  // user's still-recoverable session.
+  if (raw === null && backend === keychainBackend) {
+    const legacy = await AsyncStorage.getItem(LEGACY_DEVICE_KEY_STORAGE);
+    const legacyKey = legacy ? Buffer.from(legacy, "base64") : null;
+    if (legacy && legacyKey?.length === 32) {
+      await backend.writeDeviceKey(legacy);
+      await AsyncStorage.removeItem(LEGACY_DEVICE_KEY_STORAGE);
+      raw = legacy;
+    } else if (legacy) {
+      // It cannot decrypt a valid envelope, so retaining even malformed
+      // key-like bytes in a plaintext store only creates a future leak.
+      await AsyncStorage.removeItem(LEGACY_DEVICE_KEY_STORAGE);
+    }
+  }
   const stored = raw ? Buffer.from(raw, "base64") : null;
   // A stored key must be exactly 32 bytes; anything else is corrupt, so
   // treat it as absent and re-derive — otherwise every setItem throws and

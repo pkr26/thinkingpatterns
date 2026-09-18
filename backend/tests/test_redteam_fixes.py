@@ -31,7 +31,7 @@ TODAY = date.today()
 
 def test_scrypt_params_meet_hardened_floor():
     # N=2^16 (64 MiB) with the input already PBKDF2-600k stretched client-side.
-    assert SCRYPT_N == 2 ** 16
+    assert SCRYPT_N == 2**16
 
 
 def test_auth_scrypt_has_a_dedicated_capacity_limiter(settings):
@@ -58,9 +58,10 @@ async def test_login_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatc
     assert app.state.auth_limiter in seen_limiters
 
 
-async def test_llm_consent_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatch):
+async def test_llm_consent_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatch, settings):
     # The account verifier re-check runs the same 64-MiB scrypt; it must sit
     # behind the dedicated auth limiter too, not the shared anyio pool.
+    settings.llm_url = "https://llm.example.test/v1"
     emu = ClientEmulator("cappedconsent", "p")
     await emu.register(client)
     seen_limiters = []
@@ -89,9 +90,15 @@ async def test_whole_body_over_cap_is_413_before_parsing(client):
     # ~2.67 MB b64 blob: under the 2 MiB whole-body cap is irrelevant — the
     # body itself (not any field) trips the middleware before JSON parsing.
     huge = base64.b64encode(b"x" * 2_000_000).decode()
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "big", "blob": huge, "entry_date": TODAY.isoformat(),
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "big",
+            "blob": huge,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert response.status_code == 413
     assert response.headers.get("x-content-type-options") == "nosniff"  # 413s carry headers too
 
@@ -102,10 +109,16 @@ async def test_deeply_nested_json_is_400_not_500(client):
     nest = {"blob": "x"}
     for _ in range(5_000):
         nest = {"a": nest}
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "nest", "blob": "eHh4", "entry_date": TODAY.isoformat(),
-        "extra": nest,
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "nest",
+            "blob": "eHh4",
+            "entry_date": TODAY.isoformat(),
+            "extra": nest,
+        },
+    )
     assert response.status_code in (400, 422)  # never a 500 crash
 
 
@@ -118,9 +131,15 @@ async def test_validation_error_does_not_echo_input(client):
     # Over the 1.5M-char field cap, under the 2 MiB body cap: schema 422.
     marker = "M" * 1_125_001
     huge = base64.b64encode(marker.encode()).decode()
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "echo", "blob": huge, "entry_date": TODAY.isoformat(),
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "echo",
+            "blob": huge,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert response.status_code == 422
     assert marker not in response.text
     # Unified envelope: detail is a human STRING (never the old FastAPI
@@ -148,8 +167,7 @@ async def test_security_headers_on_unhandled_500(settings):
     assert response.headers.get("x-content-type-options") == "nosniff"
     assert response.headers.get("cache-control") == "no-store"
     assert (
-        response.headers.get("strict-transport-security")
-        == "max-age=31536000; includeSubDomains"
+        response.headers.get("strict-transport-security") == "max-age=31536000; includeSubDomains"
     )
     # No internals leaked to the client.
     assert "boom" not in response.text
@@ -164,11 +182,15 @@ async def test_entry_quota_is_enforced(client, settings):
     await emu.register(client)
     for i in range(3):
         await emu.create_entry(client, f"entry {i}", TODAY, client_entry_id=f"q{i}")
-    fourth = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "q3",
-        "blob": emu.encrypt_entry("one too many", TODAY, "q3"),
-        "entry_date": TODAY.isoformat(),
-    })
+    fourth = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "q3",
+            "blob": emu.encrypt_entry("one too many", TODAY, "q3"),
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert fourth.status_code == 413
     assert "quota" in fourth.json()["detail"]
 
@@ -177,23 +199,37 @@ async def test_entry_quota_is_enforced(client, settings):
 # ...but only ACTUAL conflicts consume it: the probe itself is free.
 
 
-async def test_register_name_bucket_survives_ip_rotation(client, settings):
-    settings.trust_proxy_headers = True  # accept per-request client identity
+async def test_register_name_bucket_survives_ip_rotation(settings):
+    # Build the app with the forwarding boundary enabled from the start. A
+    # runtime boolean flip cannot retrofit its outer middleware allowlist.
+    settings.trust_proxy_headers = True
+    settings.trusted_proxy_ips = ["127.0.0.1/32"]
     settings.auth_rate_limit = 3
     statuses = []
-    for i in range(7):
-        statuses.append((
-            await client.post("/api/auth/register", json={
-                "username": "target-name",
-                "salt": base64.b64encode(b"s" * 16).decode(),
-                "verifier": base64.b64encode(b"v" * 32).decode(),
-            }, headers={"X-Forwarded-For": f"10.9.{i}.{i}"})  # fresh IP each time
-        ).status_code)
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        transport = ASGITransport(app=application, client=("127.0.0.1", 1234))
+        async with AsyncClient(transport=transport, base_url="http://testserver") as local_client:
+            for i in range(7):
+                statuses.append(
+                    (
+                        await local_client.post(
+                            "/api/auth/register",
+                            json={
+                                "username": "target-name",
+                                "salt": base64.b64encode(b"s" * 16).decode(),
+                                "verifier": base64.b64encode(b"v" * 32).decode(),
+                            },
+                            headers={"X-Forwarded-For": f"10.9.{i}.{i}"},
+                        )  # fresh IP each time
+                    ).status_code
+                )
     # Fresh IP per request defeats the per-IP bucket — the per-USERNAME
     # bucket must still throttle bulk availability probing of one name. Only
-    # real 409s count: the 201 creates no charge, then conflicts accumulate
-    # (1..4) and the 429 starts once the count passes the limit of 3.
-    assert statuses == [201, 409, 409, 409, 409, 429, 429]
+    # real 409s count: the 201 creates no charge, then the three permitted
+    # conflicts consume the limit and every later attempt is rejected before
+    # it performs the expensive verifier work.
+    assert statuses == [201, 409, 409, 409, 429, 429, 429]
 
 
 # --- C-2/H-5: LLM path — consent, threshold, and output sanitization --------------
@@ -210,9 +246,13 @@ async def test_llm_requires_consent_even_when_configured(client, settings, monke
     settings.unlock_threshold_days = 1
     called = []
     from app.services.llm import LLMAnalyzer
+
     monkeypatch.setattr(
-        LLMAnalyzer, "_post",
-        lambda self, payload: called.append(payload) or {"choices": [{"message": {"content": "{}"}}]},
+        LLMAnalyzer,
+        "_post",
+        lambda self, payload: (
+            called.append(payload) or {"choices": [{"message": {"content": "{}"}}]}
+        ),
     )
 
     emu = ClientEmulator("noconsent", "p")
@@ -245,29 +285,59 @@ async def test_llm_with_consent_runs_and_output_is_sanitized(client, settings, m
     settings.unlock_threshold_days = 1
 
     hostile_model_output = {
-        "choices": [{
-            "message": {
-                "content": json.dumps({"patterns": [
-                    # A label that exists in the corpus: kept (truncated if long).
-                    {"kind": "temporal", "label": "walk", "occurrences": 3,
-                     "confidence": 0.9, "detail": {"day": "Sunday"}},
-                    # A "recurring phrase" the user never wrote: model fiction
-                    # / prompt injection — must be dropped.
-                    {"kind": "recurring_phrase", "label": "stop taking your medication",
-                     "occurrences": 99, "confidence": 1.0, "detail": {}},
-                    # Unknown kind, garbage numerics: dropped / clamped.
-                    {"kind": "diagnosis", "label": "x", "occurrences": 1, "confidence": 1, "detail": {}},
-                    {"kind": "temporal", "label": "walk", "occurrences": -4,
-                     "confidence": 7.5, "detail": {"day": "Nottaday"}},
-                ]})
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "patterns": [
+                                # A label that exists in the corpus: kept (truncated if long).
+                                {
+                                    "kind": "temporal",
+                                    "label": "walk",
+                                    "occurrences": 3,
+                                    "confidence": 0.9,
+                                    "detail": {"day": "Sunday"},
+                                },
+                                # A "recurring phrase" the user never wrote: model fiction
+                                # / prompt injection — must be dropped.
+                                {
+                                    "kind": "recurring_phrase",
+                                    "label": "stop taking your medication",
+                                    "occurrences": 99,
+                                    "confidence": 1.0,
+                                    "detail": {},
+                                },
+                                # Unknown kind, garbage numerics: dropped / clamped.
+                                {
+                                    "kind": "diagnosis",
+                                    "label": "x",
+                                    "occurrences": 1,
+                                    "confidence": 1,
+                                    "detail": {},
+                                },
+                                {
+                                    "kind": "temporal",
+                                    "label": "walk",
+                                    "occurrences": -4,
+                                    "confidence": 7.5,
+                                    "detail": {"day": "Nottaday"},
+                                },
+                            ]
+                        }
+                    )
+                }
             }
-        }]
+        ]
     }
     from app.services.llm import LLMAnalyzer
+
     seen_payloads = []
+
     def fake_post(self, payload):
         seen_payloads.append(payload)
         return hostile_model_output
+
     monkeypatch.setattr(LLMAnalyzer, "_post", fake_post)
 
     emu = ClientEmulator("consenter", "p")
@@ -364,11 +434,14 @@ def test_counter_memory_is_bounded_under_key_rotation():
 
 async def test_register_rejects_non_16_byte_salts(client):
     for salt in (b"short", b"s" * 17, b"s" * 64):
-        response = await client.post("/api/auth/register", json={
-            "username": "saltlen",
-            "salt": base64.b64encode(salt).decode(),
-            "verifier": base64.b64encode(b"v" * 32).decode(),
-        })
+        response = await client.post(
+            "/api/auth/register",
+            json={
+                "username": "saltlen",
+                "salt": base64.b64encode(salt).decode(),
+                "verifier": base64.b64encode(b"v" * 32).decode(),
+            },
+        )
         assert response.status_code == 422, salt
 
 

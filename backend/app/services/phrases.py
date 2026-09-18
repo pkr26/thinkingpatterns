@@ -109,9 +109,7 @@ def signature(tokens: list[str]) -> list[int]:
     hashes = [_shingle_hash(s) for s in shingles(tokens)]
     if not hashes:
         return [0] * NUM_PERM
-    return [
-        min(((a * h + b) % MERSENNE) for h in hashes) for a, b in _HASH_PARAMS
-    ]
+    return [min(((a * h + b) % MERSENNE) for h in hashes) for a, b in _HASH_PARAMS]
 
 
 def estimated_jaccard(sig1: list[int], sig2: list[int]) -> float:

@@ -20,10 +20,11 @@ def weekday(n: int) -> date:
     return BASE + timedelta(weeks=n, days=3)  # Wednesdays
 
 
-WORK_ANXIOUS = ("Big deadline at work on monday and the boss wants the presentation "
-                "revised. I feel anxious and stressed about this project.")
-CALM_DAY = ("Walked by the river, felt calm and grateful. Cooked a nice meal and "
-            "slept well.")
+WORK_ANXIOUS = (
+    "Big deadline at work on monday and the boss wants the presentation "
+    "revised. I feel anxious and stressed about this project."
+)
+CALM_DAY = "Walked by the river, felt calm and grateful. Cooked a nice meal and slept well."
 
 
 def make_sunday_work_corpus(weeks=5):
@@ -62,7 +63,9 @@ class TestTemporalPattern:
     def test_sunday_work_anxiety_detected(self):
         analysis = analyze(make_sunday_work_corpus())
         temporal = [p for p in analysis.patterns if p.kind == "temporal" and p.label == "work"]
-        assert temporal, f"expected temporal work pattern, got {[p.label for p in analysis.patterns]}"
+        assert temporal, (
+            f"expected temporal work pattern, got {[p.label for p in analysis.patterns]}"
+        )
         pattern = temporal[0]
         assert pattern.occurrences == 5
         assert pattern.detail["day"] == "Sunday"
@@ -144,7 +147,9 @@ class TestRecurringPhrase:
     def test_two_mentions_not_enough(self):
         entries = [
             JournalEntry(text="i just want to disappear from it all", entry_date=BASE),
-            JournalEntry(text="i just want to disappear from it all", entry_date=BASE + timedelta(weeks=2)),
+            JournalEntry(
+                text="i just want to disappear from it all", entry_date=BASE + timedelta(weeks=2)
+            ),
         ]
         assert recurring_phrases(entries) == []
 
@@ -190,17 +195,17 @@ class TestAnalysisShape:
 
     def test_pattern_cap(self):
         assert patterns.MAX_PATTERNS <= 20
-        entries = [
-            JournalEntry(text=WORK_ANXIOUS, entry_date=sunday(i)) for i in range(6)
-        ]
+        entries = [JournalEntry(text=WORK_ANXIOUS, entry_date=sunday(i)) for i in range(6)]
         assert len(analyze(entries).patterns) <= patterns.MAX_PATTERNS
 
     def test_to_dict_roundtrip_fields(self):
         analysis = analyze(make_sunday_work_corpus())
         payload = analysis.to_dict()
         assert payload["total_entries"] == 10
-        assert all(set(p) == {"kind", "label", "occurrences", "confidence", "detail"}
-                   for p in payload["patterns"])
+        assert all(
+            set(p) == {"kind", "label", "occurrences", "confidence", "detail"}
+            for p in payload["patterns"]
+        )
 
     def test_confidence_bounded(self):
         analysis = analyze(make_sunday_work_corpus(weeks=6))

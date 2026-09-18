@@ -39,8 +39,9 @@ def _run(corpus: list[JournalEntry], today: date, prior: dict | None = None) -> 
     return brain.update(state, corpus, today)
 
 
-def _run_twice(corpus: list[JournalEntry], today: date,
-               extended: list[JournalEntry] | None = None) -> brain.BrainUpdate:
+def _run_twice(
+    corpus: list[JournalEntry], today: date, extended: list[JournalEntry] | None = None
+) -> brain.BrainUpdate:
     """Qualify + surface, at the cadence the replication gate demands.
 
     Window-stat kinds (mood_shift, inertia, instability) need
@@ -50,8 +51,9 @@ def _run_twice(corpus: list[JournalEntry], today: date,
     day) when pinning those.
     """
     first = _run(corpus, today)
-    return _run(extended if extended is not None else corpus,
-                today + timedelta(days=2), first.new_state)
+    return _run(
+        extended if extended is not None else corpus, today + timedelta(days=2), first.new_state
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -80,8 +82,9 @@ class TestLanguageGate:
             assert garbage not in labels
         assert all(p.kind != "topic" for p in result.surfaced), labels
         # Text-derived mood is unreliable -> no mood-level claims either.
-        assert all(p.kind not in ("mood_shift", "inertia", "instability")
-                   for p in result.surfaced), labels
+        assert all(
+            p.kind not in ("mood_shift", "inertia", "instability") for p in result.surfaced
+        ), labels
 
     def test_french_journal_surfaces_no_garbage(self):
         result = _run_twice(self._non_english_corpus(FRENCH_FILLER), T0)
@@ -92,13 +95,15 @@ class TestLanguageGate:
         # Explicit tags are the user's own report: a planted, tagged
         # downward shift MUST still surface even in German text.
         corpus = [
-            JournalEntry(GERMAN_FILLER, T0 - timedelta(days=ago),
-                         sentiment=0.3 if ago > 60 else -0.45)
+            JournalEntry(
+                GERMAN_FILLER, T0 - timedelta(days=ago), sentiment=0.3 if ago > 60 else -0.45
+            )
             for ago in range(120, 0, -1)
         ]
         result = _run_twice(corpus, T0)
-        assert any(p.kind == "mood_shift" and p.detail.get("direction") == "lower"
-                   for p in result.surfaced)
+        assert any(
+            p.kind == "mood_shift" and p.detail.get("direction") == "lower" for p in result.surfaced
+        )
 
     def test_english_journal_passes_the_gate(self):
         english = (
@@ -117,6 +122,7 @@ class TestLanguageGate:
 # 1b. digit-bearing tags (2026-09-17 exhaustive-audit regression)
 # ---------------------------------------------------------------------------
 
+
 class TestUnmappedDigitTags:
     """A tag like "grade6test" rides the theme machinery verbatim and can
     become a surfaced pattern label. The crisis interlock then runs the
@@ -134,16 +140,24 @@ class TestUnmappedDigitTags:
         d = until - timedelta(days=119)
         while d <= until:
             if d.weekday() == 6:
-                entries.append(JournalEntry(
-                    text="rough day, drained and flat", entry_date=d,
-                    sentiment=-0.8, tags=("grade6test",)))
+                entries.append(
+                    JournalEntry(
+                        text="rough day, drained and flat",
+                        entry_date=d,
+                        sentiment=-0.8,
+                        tags=("grade6test",),
+                    )
+                )
             elif d.weekday() == 3:
-                entries.append(JournalEntry(
-                    text="another rough one", entry_date=d,
-                    sentiment=-0.7, tags=("grade6test",)))
+                entries.append(
+                    JournalEntry(
+                        text="another rough one", entry_date=d, sentiment=-0.7, tags=("grade6test",)
+                    )
+                )
             else:
-                entries.append(JournalEntry(
-                    text="steady ordinary day", entry_date=d, sentiment=0.5))
+                entries.append(
+                    JournalEntry(text="steady ordinary day", entry_date=d, sentiment=0.5)
+                )
             d += timedelta(days=1)
         return entries
 
@@ -151,8 +165,7 @@ class TestUnmappedDigitTags:
         state = brain.load_state(None)
         # Four recompute days, each corpus adding fresh tagged evidence —
         # the cadence that crashed on the second run before the fix.
-        for run_day in (T0 - timedelta(days=6), T0 - timedelta(days=4),
-                        T0 - timedelta(days=2), T0):
+        for run_day in (T0 - timedelta(days=6), T0 - timedelta(days=4), T0 - timedelta(days=2), T0):
             result = brain.update(state, self._corpus(run_day), run_day)
             state = result.new_state
         # If a digit-bearing label surfaced, it must carry the sensitive
@@ -164,6 +177,7 @@ class TestUnmappedDigitTags:
 # ---------------------------------------------------------------------------
 # 2. Brown-Forsythe instability
 # ---------------------------------------------------------------------------
+
 
 class TestBrownForsythe:
     def test_equal_spreads_are_not_a_claim(self):
@@ -201,6 +215,7 @@ class TestBrownForsythe:
 # ---------------------------------------------------------------------------
 # 3. Day-level temporal counting
 # ---------------------------------------------------------------------------
+
 
 class TestTemporalDayDedup:
     def _clustered_sunday_corpus(self) -> tuple[list[JournalEntry], set[date]]:
@@ -259,19 +274,25 @@ class TestTemporalDayDedup:
 # 4. EWMA baseline re-anchor
 # ---------------------------------------------------------------------------
 
+
 class TestMoodShiftReanchor:
-    def _shifted_corpus(self, shift_days_ago: int = 60, total: int = 120,
-                        end: date = T0) -> list[JournalEntry]:
+    def _shifted_corpus(
+        self, shift_days_ago: int = 60, total: int = 120, end: date = T0
+    ) -> list[JournalEntry]:
         return [
-            JournalEntry("mood day", end - timedelta(days=ago),
-                         sentiment=0.3 if ago > shift_days_ago else -0.45)
+            JournalEntry(
+                "mood day",
+                end - timedelta(days=ago),
+                sentiment=0.3 if ago > shift_days_ago else -0.45,
+            )
             for ago in range(total, 0, -1)
         ]
 
     def test_the_shift_itself_still_surfaces_first(self):
         result = _run_twice(self._shifted_corpus(), T0)
-        assert any(p.kind == "mood_shift" and p.detail.get("direction") == "lower"
-                   for p in result.surfaced)
+        assert any(
+            p.kind == "mood_shift" and p.detail.get("direction") == "lower" for p in result.surfaced
+        )
 
     def test_an_established_shift_stops_requalifying(self):
         # The shift is flagged around T0-35 (first_seen). A month later
@@ -293,28 +314,34 @@ class TestMoodShiftReanchor:
         for offset in (0, 2, 4, 6):
             state = _run(later_corpus, T0 + timedelta(days=offset), state).new_state
         rec = state["patterns"].get(stored[0].pid)
-        assert rec is None or rec.last_qualified == last_qualified_before, \
+        assert rec is None or rec.last_qualified == last_qualified_before, (
             "an established, still-stable shift must stop re-qualifying"
+        )
 
         # Contrast: with the anchor disabled, the same runs keep
         # re-qualifying the months-old drop (this is the pre-fix behavior).
         import pytest
         from app.services import brain as brain_mod
+
         state = prior
         for offset in (0, 2, 4, 6):
             with pytest.MonkeyPatch.context() as mp:
                 mp.setattr(brain_mod, "_mood_reanchor_day", lambda store, today: None)
                 state = _run(later_corpus, T0 + timedelta(days=offset), state).new_state
         rec = state["patterns"].get(stored[0].pid)
-        assert rec is not None and rec.last_qualified > last_qualified_before, \
+        assert rec is not None and rec.last_qualified > last_qualified_before, (
             "without the anchor the old shift would keep re-qualifying (control)"
+        )
 
     def test_reanchor_is_idempotent_across_dump_load(self):
         prior = _run_twice(self._shifted_corpus(), T0).new_state
         anchor = brain._mood_reanchor_day(prior, T0 + timedelta(days=30))
         assert anchor is not None
-        again = brain.update(brain.load_state(brain.dump_state(prior)),
-                             self._shifted_corpus(), T0 + timedelta(days=30))
+        again = brain.update(
+            brain.load_state(brain.dump_state(prior)),
+            self._shifted_corpus(),
+            T0 + timedelta(days=30),
+        )
         assert brain._mood_reanchor_day(again.new_state, T0 + timedelta(days=30)) == anchor
 
     def test_a_fresh_shift_is_not_prematurely_anchored_away(self):
@@ -322,15 +349,20 @@ class TestMoodShiftReanchor:
         # must still see it while it genuinely is "lately".
         prior = None
         for offset in range(4):
-            prior = _run(self._shifted_corpus(shift_days_ago=40, total=80),
-                         T0 + timedelta(days=offset), prior).new_state
-        assert any(rec.kind == "mood_shift" for rec in prior["patterns"].values()), \
+            prior = _run(
+                self._shifted_corpus(shift_days_ago=40, total=80),
+                T0 + timedelta(days=offset),
+                prior,
+            ).new_state
+        assert any(rec.kind == "mood_shift" for rec in prior["patterns"].values()), (
             "a young shift must remain visible while it is still 'lately'"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Cross-cutting: determinism of the new paths
 # ---------------------------------------------------------------------------
+
 
 def test_language_gate_is_deterministic():
     corpus = [JournalEntry(GERMAN_FILLER, T0 - timedelta(days=ago)) for ago in range(70, 0, -1)]
@@ -363,17 +395,28 @@ class TestAuditRemediation2026_09_17:
             for ago in range(70, 0, -1)
         ]
         result = self._run(spanish)
-        assert all(p.kind not in ("rumination", "mood_shift", "topic",
-                                  "mood_correlation", "instability", "inertia")
-                   for p in result.surfaced), [p.kind for p in result.surfaced]
+        assert all(
+            p.kind
+            not in (
+                "rumination",
+                "mood_shift",
+                "topic",
+                "mood_correlation",
+                "instability",
+                "inertia",
+            )
+            for p in result.surfaced
+        ), [p.kind for p in result.surfaced]
 
     def test_sentence_initial_words_are_not_person_candidates(self):
         # Telegram-style fragments: every fragment starts capitalized, but
         # only the entry's first token and post-terminator tokens are
         # sentence starts — none of these are names.
         entries = [
-            JournalEntry("Woke tired. Netflix til late. Regret nothing. Stayed in bed.",
-                         T0 - timedelta(days=ago))
+            JournalEntry(
+                "Woke tired. Netflix til late. Regret nothing. Stayed in bed.",
+                T0 - timedelta(days=ago),
+            )
             for ago in range(20, 0, -1)
         ]
         assert brain._person_candidates(entries) == set()
@@ -387,10 +430,17 @@ class TestAuditRemediation2026_09_17:
         assert brain._mentions_name("Bill called again", "bill")
 
     def test_emoji_valence_counts_per_occurrence(self):
-        one = [JournalEntry("words about the day and one \U0001f62d here",
-                            T0 - timedelta(days=ago)) for ago in range(60, 0, -1)]
-        five = [JournalEntry("words about the day and one \U0001f62d\U0001f62d\U0001f62d\U0001f62d\U0001f62d here",
-                             T0 - timedelta(days=ago)) for ago in range(60, 0, -1)]
+        one = [
+            JournalEntry("words about the day and one \U0001f62d here", T0 - timedelta(days=ago))
+            for ago in range(60, 0, -1)
+        ]
+        five = [
+            JournalEntry(
+                "words about the day and one \U0001f62d\U0001f62d\U0001f62d\U0001f62d\U0001f62d here",
+                T0 - timedelta(days=ago),
+            )
+            for ago in range(60, 0, -1)
+        ]
         a = brain.update(brain.load_state(None), one, T0)
         b = brain.update(brain.load_state(None), five, T0)
         # Five sobs carry more weight than one; before the fix both scored

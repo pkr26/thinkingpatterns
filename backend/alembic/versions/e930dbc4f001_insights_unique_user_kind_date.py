@@ -17,6 +17,7 @@ Revises: 73031d06d71b
 Create Date: 2026-09-07 12:00:00.000000
 
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -25,19 +26,19 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e930dbc4f001'
-down_revision: str | Sequence[str] | None = '73031d06d71b'
+revision: str = "e930dbc4f001"
+down_revision: str | Sequence[str] | None = "73031d06d71b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table('insights') as batch_op:
+    with op.batch_alter_table("insights") as batch_op:
         batch_op.create_unique_constraint(
-            'uq_insights_user_kind_date', ['user_id', 'kind', 'for_date']
+            "uq_insights_user_kind_date", ["user_id", "kind", "for_date"]
         )
 
 
 def downgrade() -> None:
-    with op.batch_alter_table('insights') as batch_op:
-        batch_op.drop_constraint('uq_insights_user_kind_date', type_='unique')
+    with op.batch_alter_table("insights") as batch_op:
+        batch_op.drop_constraint("uq_insights_user_kind_date", type_="unique")

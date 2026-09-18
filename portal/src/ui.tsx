@@ -75,6 +75,7 @@ export function Field(props: {
   onChange: (value: string) => void;
   type?: string;
   placeholder?: string;
+  autoComplete?: string;
 }): React.JSX.Element {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 4, color: theme.muted, fontSize: 12, fontWeight: 700 }}>
@@ -83,6 +84,7 @@ export function Field(props: {
         type={props.type ?? "text"}
         value={props.value}
         placeholder={props.placeholder}
+        autoComplete={props.autoComplete}
         onChange={(e) => props.onChange(e.target.value)}
         style={{
           backgroundColor: theme.cardDeep,

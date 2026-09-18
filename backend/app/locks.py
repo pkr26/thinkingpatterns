@@ -11,6 +11,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+
+
+@dataclass
+class _LockEntry:
+    lock: asyncio.Lock
+    refs: int = 0
 
 
 class UserLocks:
@@ -32,24 +39,87 @@ class UserLocks:
     """
 
     def __init__(self, max_keys: int = 10_000) -> None:
-        # key -> [lock, live holders+waiters]
-        self._locks: dict[str, list] = {}
+        if max_keys < 1:
+            raise ValueError("max_keys must be positive")
+        # key -> dedicated lock plus live holder/waiter count.
+        self._locks: dict[str, _LockEntry] = {}
         self._max_keys = max_keys
+        # When every per-key entry is live we cannot evict one without
+        # splitting a key's critical section. New keys share this fallback
+        # lock until its users drain; that preserves correctness AND the hard
+        # registry cap, at the cost of temporary serialization under an
+        # adversarial unique-key flood.
+        self._overflow_lock = asyncio.Lock()
+        self._overflow_refs = 0
 
     @asynccontextmanager
     async def hold(self, key: str) -> AsyncIterator[asyncio.Lock]:
         entry = self._locks.get(key)
+        use_overflow = False
         if entry is None:
-            if len(self._locks) >= self._max_keys:
-                for stale in [
-                    k for k, v in self._locks.items() if v[1] == 0
-                ][: len(self._locks) - self._max_keys + 1]:
+            # Once any fallback user is live, keep ALL absent keys on that
+            # same lock until it drains. Otherwise an overflow key could gain
+            # a fresh dedicated lock while a prior holder still uses the
+            # fallback, violating serialization for that key.
+            if self._overflow_refs:
+                use_overflow = True
+            elif len(self._locks) >= self._max_keys:
+                for stale in [k for k, v in self._locks.items() if v.refs == 0][
+                    : len(self._locks) - self._max_keys + 1
+                ]:
                     del self._locks[stale]
-            entry = [asyncio.Lock(), 0]
-            self._locks[key] = entry
-        entry[1] += 1
+                if len(self._locks) >= self._max_keys:
+                    use_overflow = True
+            if not use_overflow:
+                entry = _LockEntry(asyncio.Lock())
+                self._locks[key] = entry
+        if use_overflow:
+            self._overflow_refs += 1
+            try:
+                async with self._overflow_lock:
+                    yield self._overflow_lock
+            finally:
+                self._overflow_refs -= 1
+            return
+        # `entry` is non-None here: an absent key either became a dedicated
+        # entry above or returned through the overflow branch.
+        assert entry is not None
+        entry.refs += 1
         try:
-            async with entry[0]:
-                yield entry[0]
+            async with entry.lock:
+                yield entry.lock
         finally:
-            entry[1] -= 1
+            entry.refs -= 1
+
+
+# Cross-router lifecycle fence for operations that can cause plaintext to
+# leave the process. Insights holds it from the fresh consent read through
+# any external LLM dispatch; withdrawal/deletion holds it while revoking.
+# That makes the consent boundary linearizable rather than relying on a
+# stale ORM object loaded by authentication earlier in the request.
+lifecycle_locks = UserLocks()
+
+# Sharing has a separate lifecycle: a patient can revoke a therapist's
+# access while that therapist is fetching encrypted journal material.  The
+# sharing routers take a patient key while they re-check consent and assemble
+# a response, so a revoke/account deletion and a content read linearize at
+# one explicit boundary instead of returning data from a stale consent row.
+# Therapist-facing reads additionally take a therapist key first, which lets
+# therapist account deletion fence all of that account's active reads without
+# making unrelated patients contend with one another.
+sharing_locks = UserLocks()
+
+
+def sharing_therapist_lock_key(therapist_id: str) -> str:
+    """Key for work scoped to one therapist's sharing account.
+
+    Any operation that needs both sharing locks MUST acquire this key before
+    :func:`sharing_patient_lock_key`; the fixed order keeps a content read,
+    grant, and account deletion from forming a lock cycle.
+    """
+    return f"sharing-therapist:{therapist_id}"
+
+
+def sharing_patient_lock_key(user_id: str) -> str:
+    """Key for work scoped to one patient's shareable journal material."""
+    return f"sharing-patient:{user_id}"

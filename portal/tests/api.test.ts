@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, auth, clearSession, setSession } from "../src/api";
 import { normalizeBaseUrl } from "../src/views/LoginView";
 
-const jsonResponse = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
 
 beforeEach(() => {
   clearSession();
@@ -30,6 +33,14 @@ describe("normalizeBaseUrl", () => {
     expect(normalizeBaseUrl("not a url")).toBe("");
     expect(normalizeBaseUrl("")).toBe("");
   });
+
+  it("rejects insecure remote URLs, URL spoofing components, and non-web schemes", () => {
+    expect(normalizeBaseUrl("http://api.example.com")).toBe("");
+    expect(normalizeBaseUrl("https://user:password@api.example.com")).toBe("");
+    expect(normalizeBaseUrl("https://api.example.com/path?token=nope")).toBe("");
+    expect(normalizeBaseUrl("https://api.example.com/#fragment")).toBe("");
+    expect(normalizeBaseUrl("file:///tmp/api")).toBe("");
+  });
 });
 
 describe("authenticated requests", () => {
@@ -45,17 +56,263 @@ describe("authenticated requests", () => {
     expect(url).toBe("https://api.example.com/api/v1/therapist/patients");
     expect(init.method).toBe("GET");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
+    expect(init.redirect).toBe("error");
+    expect(init.credentials).toBe("omit");
+    expect(init.cache).toBe("no-store");
+    expect(init.referrerPolicy).toBe("no-referrer");
   });
 
-  it("builds entry queries with since/until/limit/offset", async () => {
+  it("rejects an unsafe session base before a bearer request can be made", () => {
+    expect(() => setSession("tok-1", "http://api.example.com")).toThrow(/HTTPS server URL/);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-origin response even if a non-browser fetch implementation follows a redirect", async () => {
     setSession("tok-1", "https://api.example.com");
+    const redirected = jsonResponse({ ok: true });
+    Object.defineProperty(redirected, "url", { value: "https://evil.example/api/v1/therapist/patients" });
+    vi.stubGlobal("fetch", vi.fn(async () => redirected));
+    await expect(api.patients()).rejects.toMatchObject({
+      status: 0,
+      message: "server redirected the request to a different origin",
+    });
+  });
+
+  it("aborts an in-flight authenticated request when the session is cleared", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        const abort = new Error("aborted");
+        abort.name = "AbortError";
+        reject(abort);
+      });
+    })));
+    const pending = api.patients();
+    clearSession();
+    await expect(pending).rejects.toMatchObject({ status: 0, message: "session ended" });
+  });
+
+  it("builds bounded entry queries with since/until/limit/offset", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])));
     await api.patientEntries("u1", { since: "2026-09-01", until: "2026-09-10", offset: 100 });
     const [url] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
     expect(url).toContain("/therapist/patients/u1/entries?");
     expect(url).toContain("since=2026-09-01");
     expect(url).toContain("until=2026-09-10");
     expect(url).toContain("offset=100");
-    expect(url).toContain("limit=500");
+    expect(url).toContain("limit=25");
+    expect(url).toContain("page_bytes=2097152");
+  });
+
+  it("returns an evidence page with a validated server continuation", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      id: `row-${index}`,
+      client_entry_id: `client-${index}`,
+      blob: "B==",
+      entry_date: "2026-09-01",
+      received_at: "2026-09-01T00:00:00Z",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(rows, 200, { "X-Next-Offset": "125" })));
+    await expect(api.patientEntries("u1", { offset: 100 })).resolves.toEqual({
+      entries: rows,
+      nextOffset: 125,
+    });
+  });
+
+  it("binds evidence continuations to one validated signed-64-bit snapshot revision", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const firstRows = Array.from({ length: 25 }, (_, index) => ({
+      id: `row-${index}`,
+      client_entry_id: `client-${index}`,
+      blob: "B==",
+      entry_date: "2026-09-01",
+      received_at: "2026-09-01T00:00:00Z",
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(jsonResponse(firstRows, 200, {
+          "X-Next-Offset": "25",
+          "X-Entries-Revision": "9223372036854775807",
+        }))
+        .mockResolvedValueOnce(jsonResponse([], 200, { "X-Entries-Revision": "9223372036854775807" })),
+    );
+
+    const first = await api.patientEntries("u1");
+    expect(first).toMatchObject({ nextOffset: 25, revision: "9223372036854775807" });
+    await expect(api.patientEntries("u1", { offset: 25, expectedRevision: first.revision })).resolves.toMatchObject({
+      nextOffset: null,
+      revision: "9223372036854775807",
+    });
+    const [url] = vi.mocked(fetch).mock.calls[1]! as [string, RequestInit];
+    expect(url).toContain("offset=25");
+    expect(url).toContain("expected_revision=9223372036854775807");
+  });
+
+  it("falls back only for headerless full pages from an older backend", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const entries = Array.from({ length: 25 }, (_, index) => ({
+      id: `row-${index}`,
+      client_entry_id: `client-${index}`,
+      blob: "B==",
+      entry_date: "2026-09-01",
+      received_at: "2026-09-01T00:00:00Z",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(entries)));
+    await expect(api.patientEntries("u1")).resolves.toMatchObject({
+      entries,
+      nextOffset: 25,
+      revision: undefined,
+    });
+
+    // A headerless short page is still the terminal response contract.
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(entries.slice(0, 24))));
+    await expect(api.patientEntries("u1")).resolves.toMatchObject({
+      nextOffset: null,
+    });
+
+    const notes = Array.from({ length: 100 }, (_, index) => ({
+      id: `note-${index}`,
+      client_note_id: `client-note-${index}`,
+      pattern_pid: null,
+      blob: "B==",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:00:00Z",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(notes)));
+    await expect(api.notes("u1")).resolves.toMatchObject({
+      notes,
+      nextOffset: 100,
+    });
+  });
+
+  it("rejects malformed, non-progressing, or oversized evidence page metadata", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const oneRow = [{
+      id: "row-1", client_entry_id: "client-1", blob: "B==",
+      entry_date: "2026-09-01", received_at: "2026-09-01T00:00:00Z",
+    }];
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(oneRow, 200, { "X-Next-Offset": "not-a-number" })));
+    await expect(api.patientEntries("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid evidence continuation",
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(oneRow, 200, { "X-Next-Offset": "25" })));
+    await expect(api.patientEntries("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid evidence continuation",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(Array.from({ length: 26 }, () => oneRow[0]))),
+    );
+    await expect(api.patientEntries("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid evidence page",
+    });
+  });
+
+  it("rejects invalid or changed snapshot revisions before they can steer a continuation", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse([], 200, { "X-Entries-Revision": "01" })),
+    );
+    await expect(api.patientEntries("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid evidence snapshot revision",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse([], 200, { "X-Entries-Revision": "8" })),
+    );
+    await expect(api.patientEntries("u1", { expectedRevision: "7" })).rejects.toMatchObject({
+      status: 0,
+      message: "server returned a changed evidence snapshot revision",
+    });
+
+    await expect(api.patientEntries("u1", { expectedRevision: "01" })).rejects.toMatchObject({
+      status: 0,
+      message: "invalid evidence snapshot revision",
+    });
+
+    await expect(api.patientEntries("u1", { expectedRevision: "9223372036854775808" })).rejects.toMatchObject({
+      status: 0,
+      message: "invalid evidence snapshot revision",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse([], 200, { "X-Entries-Revision": "9223372036854775808" })),
+    );
+    await expect(api.patientEntries("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid evidence snapshot revision",
+    });
+  });
+
+  it("builds bounded notes pages and encodes opaque path identifiers", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])));
+    await api.notes("user / one", { offset: 200 });
+    const [url] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toContain("/therapist/patients/user%20%2F%20one/notes?");
+    expect(url).toContain("limit=100");
+    expect(url).toContain("page_bytes=2097152");
+    expect(url).toContain("offset=200");
+  });
+
+  it("returns a note page with a validated continuation header", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const notes = [{
+      id: "note-1", client_note_id: "client-note-1", pattern_pid: null, blob: "B==",
+      created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
+    }];
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(notes, 200, { "X-Next-Offset": "201" })));
+    await expect(api.notes("u1", { offset: 200 })).resolves.toEqual({
+      notes,
+      nextOffset: 201,
+    });
+  });
+
+  it("sends and validates the note snapshot revision on continuation", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const notes = [{
+      id: "note-1", client_note_id: "client-note-1", pattern_pid: null, blob: "B==",
+      created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
+    }];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(jsonResponse(notes, 200, {
+          "X-Next-Offset": "1",
+          "X-Notes-Revision": "0",
+        }))
+        .mockResolvedValueOnce(jsonResponse([], 200, { "X-Notes-Revision": "0" })),
+    );
+    const first = await api.notes("u1");
+    expect(first).toMatchObject({ nextOffset: 1, revision: "0" });
+    await api.notes("u1", { offset: 1, expectedRevision: first.revision });
+    const [url] = vi.mocked(fetch).mock.calls[1]! as [string, RequestInit];
+    expect(url).toContain("expected_revision=0");
+  });
+
+  it("rejects a malformed or mismatched note continuation", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const notes = [{
+      id: "note-1", client_note_id: "client-note-1", pattern_pid: null, blob: "B==",
+      created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
+    }];
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(notes, 200, { "X-Next-Offset": "999" })));
+    await expect(api.notes("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid note continuation",
+    });
   });
 
   it("maps the unified error envelope to ApiError with the code", async () => {
@@ -84,6 +341,11 @@ describe("authenticated requests", () => {
 });
 
 describe("auth requests (no token)", () => {
+  it("does not send credentials to an insecure remote auth origin", async () => {
+    await expect(auth.login("http://api.example.com", "drx", "verif")).rejects.toMatchObject({ status: 0 });
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
   it("posts salt and login bodies without an Authorization header", async () => {
     await auth.saltFor("https://api.example.com", "drx");
     let [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
@@ -103,10 +365,18 @@ describe("auth requests (no token)", () => {
       display_name: "Dr. X",
       wrap_pub_key: "C".repeat(124),
       wrap_key_blob: "DD==",
-    });
+    }, "organization-issued-token");
     const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
     expect(url).toBe("https://api.example.com/api/v1/therapist/register");
     expect(JSON.parse(init.body as string)).toMatchObject({ username: "drx", display_name: "Dr. X" });
+    expect((init.headers as Record<string, string>)["X-Therapist-Enrollment-Token"]).toBe("organization-issued-token");
+  });
+
+  it("reads public server enrollment policy without an authorization header", async () => {
+    await auth.meta("https://api.example.com");
+    const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/meta");
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
   });
 
   it("covers the note write paths and session predicates", async () => {

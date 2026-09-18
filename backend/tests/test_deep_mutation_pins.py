@@ -76,19 +76,46 @@ async def test_account_delete_never_touches_other_users_rows(client, app):
     await alice.create_entry(client, "alice day", T0 - timedelta(days=3))
     await bob.create_entry(client, "bob day", T0 - timedelta(days=3))
     async with app.state.sessionmaker() as session:
-        session.add(Insight(id=new_id(), user_id=bob.user_id, kind="patterns",
-                            for_date=None, blob=b"bob-insight"))
-        session.add(Insight(id=new_id(), user_id=alice.user_id, kind="patterns",
-                            for_date=None, blob=b"alice-insight"))
+        session.add(
+            Insight(
+                id=new_id(),
+                user_id=bob.user_id,
+                kind="patterns",
+                for_date=None,
+                blob=b"bob-insight",
+            )
+        )
+        session.add(
+            Insight(
+                id=new_id(),
+                user_id=alice.user_id,
+                kind="patterns",
+                for_date=None,
+                blob=b"alice-insight",
+            )
+        )
         await session.commit()
 
     assert await alice.delete_account(client) == 204
 
     from sqlalchemy import select
+
     async with app.state.sessionmaker() as session:
-        bob_e = (await session.execute(select(Entry).where(Entry.user_id == bob.user_id))).scalars().all()
-        bob_i = (await session.execute(select(Insight).where(Insight.user_id == bob.user_id))).scalars().all()
-        alice_e = (await session.execute(select(Entry).where(Entry.user_id == alice.user_id))).scalars().all()
+        bob_e = (
+            (await session.execute(select(Entry).where(Entry.user_id == bob.user_id)))
+            .scalars()
+            .all()
+        )
+        bob_i = (
+            (await session.execute(select(Insight).where(Insight.user_id == bob.user_id)))
+            .scalars()
+            .all()
+        )
+        alice_e = (
+            (await session.execute(select(Entry).where(Entry.user_id == alice.user_id)))
+            .scalars()
+            .all()
+        )
     assert len(bob_e) == 1, "another user's entries were destroyed by account deletion"
     assert len(bob_i) == 1, "another user's insights were destroyed by account deletion"
     assert alice_e == [], "deleted user's entries must be gone"
@@ -141,6 +168,7 @@ def test_default_error_codes_map_is_pinned_exactly():
         403: "forbidden",
         404: "not_found",
         405: "method_not_allowed",
+        408: "request_timeout",
         409: "conflict",
         410: "gone",
         413: "payload_too_large",
@@ -154,41 +182,51 @@ def test_default_error_codes_map_is_pinned_exactly():
 async def test_register_contract_codes_and_details(client):
     bad = ClientEmulator("regcontract", "pw-reg-contract")
     # non-base64 salt
-    r = await client.post("/api/auth/register", json={
-        "username": bad.username, "salt": "!!not-b64!!", "verifier": bad.auth_key_b64})
+    r = await client.post(
+        "/api/auth/register",
+        json={"username": bad.username, "salt": "!!not-b64!!", "verifier": bad.auth_key_b64},
+    )
     assert r.status_code == 422
-    assert r.json() == {"detail": "salt and verifier must be base64",
-                        "code": "validation_error"}
+    assert r.json() == {"detail": "salt and verifier must be base64", "code": "validation_error"}
     # salt of the wrong byte length (valid b64)
-    r = await client.post("/api/auth/register", json={
-        "username": bad.username,
-        "salt": base64.b64encode(b"x" * 17).decode(),
-        "verifier": bad.auth_key_b64})
+    r = await client.post(
+        "/api/auth/register",
+        json={
+            "username": bad.username,
+            "salt": base64.b64encode(b"x" * 17).decode(),
+            "verifier": bad.auth_key_b64,
+        },
+    )
     assert r.status_code == 422
-    assert r.json() == {"detail": "salt must be exactly 16 bytes",
-                        "code": "validation_error"}
+    assert r.json() == {"detail": "salt must be exactly 16 bytes", "code": "validation_error"}
     # verifier of the wrong byte length
-    r = await client.post("/api/auth/register", json={
-        "username": bad.username, "salt": bad.salt_b64,
-        "verifier": base64.b64encode(b"y" * 33).decode()})
+    r = await client.post(
+        "/api/auth/register",
+        json={
+            "username": bad.username,
+            "salt": bad.salt_b64,
+            "verifier": base64.b64encode(b"y" * 33).decode(),
+        },
+    )
     assert r.status_code == 422
-    assert r.json() == {"detail": "verifier must be 32 bytes",
-                        "code": "validation_error"}
+    assert r.json() == {"detail": "verifier must be 32 bytes", "code": "validation_error"}
 
 
 async def test_register_conflict_code(client):
     emu = ClientEmulator("regdup", "pw-reg-dup-x")
     await emu.register(client)
     again = ClientEmulator("regdup", "pw-other-longer")
-    r = await client.post("/api/auth/register", json={
-        "username": again.username, "salt": again.salt_b64,
-        "verifier": again.auth_key_b64})
+    r = await client.post(
+        "/api/auth/register",
+        json={"username": again.username, "salt": again.salt_b64, "verifier": again.auth_key_b64},
+    )
     assert r.status_code == 409
     assert r.json() == {"detail": "username already taken", "code": "conflict"}
 
 
 async def test_register_integrity_race_returns_409_contract(monkeypatch, settings):
     """The unique-index race path (pre-check missed, INSERT collided)."""
+
     class UserResult:
         def scalar_one_or_none(self):
             return None
@@ -214,10 +252,17 @@ async def test_register_integrity_race_returns_409_contract(monkeypatch, setting
             pass
 
     from app.cache import FixedWindowCounter
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
-        settings=settings, rate_counter=FixedWindowCounter())))
-    body = auth.RegisterRequest(username="race-user", salt=base64.b64encode(b"s" * 16).decode(),
-                                verifier=base64.b64encode(b"v" * 32).decode())
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(settings=settings, rate_counter=FixedWindowCounter())
+        )
+    )
+    body = auth.RegisterRequest(
+        username="race-user",
+        salt=base64.b64encode(b"s" * 16).decode(),
+        verifier=base64.b64encode(b"v" * 32).decode(),
+    )
     with pytest.raises(ApiError) as exc_info:
         await auth.register(body=body, request=request, session=RacingSession())
     assert exc_info.value.status_code == 409
@@ -235,8 +280,13 @@ async def test_login_unknown_user_burns_exact_dummy_inputs(client, monkeypatch):
         return b"\x00" * 64
 
     monkeypatch.setattr(auth, "hash_verifier_off_loop", recorder)
-    r = await client.post("/api/auth/login", json={
-        "username": "ghost-user-never-registered", "verifier": base64.b64encode(b"z" * 32).decode()})
+    r = await client.post(
+        "/api/auth/login",
+        json={
+            "username": "ghost-user-never-registered",
+            "verifier": base64.b64encode(b"z" * 32).decode(),
+        },
+    )
     assert r.status_code == 401
     assert r.json() == {"detail": "invalid credentials", "code": "invalid_credentials"}
     assert calls == [(b"\x00" * auth.AUTH_KEY_SIZE, b"\x00" * 16)]
@@ -252,8 +302,9 @@ async def test_login_known_user_bad_b64_verifier_uses_empty_bytes(client, monkey
         return b"\x00" * 64
 
     monkeypatch.setattr(auth, "hash_verifier_off_loop", recorder)
-    r = await client.post("/api/auth/login", json={
-        "username": emu.username, "verifier": "!!not-b64!!"})
+    r = await client.post(
+        "/api/auth/login", json={"username": emu.username, "verifier": "!!not-b64!!"}
+    )
     assert r.status_code == 401
     assert r.json() == {"detail": "invalid credentials", "code": "invalid_credentials"}
     # The undecodable verifier collapses to empty bytes before hashing.
@@ -311,13 +362,26 @@ async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, sett
         def scalar_one_or_none(self):
             return None
 
+    class RevisionResult:
+        # The production path advances the owner marker in the same
+        # transaction as the INSERT.  Model a successful DML update so this
+        # fixture reaches the intended insert-IntegrityError race path.
+        rowcount = 1
+
     class RacingSession:
         def __init__(self):
             self.executions = 0
 
+        async def get(self, model, user_id, *, populate_existing=False):
+            return user
+
         async def execute(self, stmt):
             self.executions += 1
-            return QuotaResult() if self.executions == 1 else PreCheckResult()
+            if self.executions == 1:
+                return QuotaResult()
+            if self.executions == 2:
+                return PreCheckResult()
+            return RevisionResult()
 
         def add(self, row):
             pass
@@ -330,11 +394,15 @@ async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, sett
         async def rollback(self):
             pass
 
+        async def refresh(self, row, *, attribute_names=None):
+            pass
+
     user = User(id="u-race", is_active=True, token_epoch=1)
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
     RacingSession.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
-    body = e.EntryCreate(client_entry_id="e-race", blob=base64.b64encode(b"x" * 64).decode(),
-                         entry_date=T0)
+    body = e.EntryCreate(
+        client_entry_id="e-race", blob=base64.b64encode(b"x" * 64).decode(), entry_date=T0
+    )
     with pytest.raises(ApiError) as exc_info:
         await e.create_entry(body=body, request=request, user=user, session=RacingSession())
     assert exc_info.value.status_code == 409
@@ -345,27 +413,39 @@ async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, sett
 async def test_entry_blob_too_small_detail(client):
     emu = ClientEmulator("smolblob", "pw-smol-blob-x")
     await emu.register(client)
-    r = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-smol",
-        "blob": base64.b64encode(os.urandom(8)).decode(),  # < nonce+tag
-        "entry_date": T0.isoformat(),
-    })
+    r = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-smol",
+            "blob": base64.b64encode(os.urandom(8)).decode(),  # < nonce+tag
+            "entry_date": T0.isoformat(),
+        },
+    )
     assert r.status_code == 422
-    assert r.json() == {"detail": f"blob must be at least {crypto.MIN_BLOB_SIZE} bytes",
-                        "code": "validation_error"}
+    assert r.json() == {
+        "detail": f"blob must be at least {crypto.MIN_BLOB_SIZE} bytes",
+        "code": "validation_error",
+    }
 
 
 async def test_entry_before_account_detail(client):
     emu = ClientEmulator("toosoon", "pw-too-soon-x")
     await emu.register(client)
-    r = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-early",
-        "blob": emu.encrypt_entry("early", T0 - timedelta(days=5), "e-early"),
-        "entry_date": (T0 - timedelta(days=5)).isoformat(),
-    })
+    r = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-early",
+            "blob": emu.encrypt_entry("early", T0 - timedelta(days=5), "e-early"),
+            "entry_date": (T0 - timedelta(days=5)).isoformat(),
+        },
+    )
     assert r.status_code == 422
-    assert r.json() == {"detail": "entry_date is before this account existed",
-                        "code": "validation_error"}
+    assert r.json() == {
+        "detail": "entry_date is before this account existed",
+        "code": "validation_error",
+    }
 
 
 # ===========================================================================
@@ -374,10 +454,14 @@ async def test_entry_before_account_detail(client):
 
 
 def _payload(text="x", sentiment=None, created_at=None):
-    return json.dumps({
-        "v": 1, "text": text, "sentiment": sentiment,
-        "created_at": (created_at or T0).isoformat(),
-    }).encode()
+    return json.dumps(
+        {
+            "v": 1,
+            "text": text,
+            "sentiment": sentiment,
+            "created_at": (created_at or T0).isoformat(),
+        }
+    ).encode()
 
 
 def _budget_payloads(count, per_entry_chars):
@@ -431,8 +515,7 @@ def test_parse_entries_sentiment_clamp_both_ends():
 
 def test_parse_entries_inner_date_tolerance_edges():
     # one day of skew is honest (timezone) and must parse
-    parsed = insights._parse_entries(
-        [bytearray(_payload(created_at=T0 - timedelta(days=1)))], [T0])
+    parsed = insights._parse_entries([bytearray(_payload(created_at=T0 - timedelta(days=1)))], [T0])
     assert parsed[0].entry_date == T0
     # two days is not
     with pytest.raises(ValueError, match=r"^created_at does not match entry_date$"):
@@ -441,8 +524,9 @@ def test_parse_entries_inner_date_tolerance_edges():
 
 def test_parse_entries_type_and_sentiment_error_messages():
     with pytest.raises(ValueError, match=r"^text must be a string$"):
-        insights._parse_entries([bytearray(b'{"text": 5, "created_at": "'
-                                           + T0.isoformat().encode() + b'"}')], [T0])
+        insights._parse_entries(
+            [bytearray(b'{"text": 5, "created_at": "' + T0.isoformat().encode() + b'"}')], [T0]
+        )
     with pytest.raises(ValueError, match=r"^sentiment must be a finite number$"):
         insights._parse_entries([bytearray(_payload(sentiment=True))], [T0])
 
@@ -515,33 +599,50 @@ async def test_recompute_token_and_session_contracts(client):
     emu = await _insight_user(client, None)
     r = await client.post("/api/insights/recompute", headers=emu.headers)
     assert r.status_code == 401
-    assert r.json() == {"detail": "missing processing session token",
-                        "code": "processing_session_required"}
+    assert r.json() == {
+        "detail": "missing processing session token",
+        "code": "processing_session_required",
+    }
 
-    r = await client.post("/api/insights/recompute",
-                          headers={**emu.headers, "X-Processing-Token": "not-a-token"})
+    r = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": "not-a-token"}
+    )
     assert r.status_code == 403
-    assert r.json() == {"detail": "processing session missing or expired",
-                        "code": "processing_session_invalid"}
+    assert r.json() == {
+        "detail": "processing session missing or expired",
+        "code": "processing_session_invalid",
+    }
 
 
 async def test_recompute_tampered_entry_contract(client, app):
     emu = await _insight_user(client, app)
     async with app.state.sessionmaker() as session:
         from sqlalchemy import select, update
-        row = (await session.execute(
-            select(Entry).where(Entry.user_id == emu.user_id)
-            .order_by(Entry.entry_date.asc()))).scalars().first()
-        await session.execute(update(Entry).where(Entry.id == row.id)
-                              .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1])))
+
+        row = (
+            (
+                await session.execute(
+                    select(Entry)
+                    .where(Entry.user_id == emu.user_id)
+                    .order_by(Entry.entry_date.asc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        await session.execute(
+            update(Entry)
+            .where(Entry.id == row.id)
+            .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1]))
+        )
         await session.commit()
 
     token = await emu.open_processing_session(client)
-    r = await client.post("/api/insights/recompute",
-                          headers={**emu.headers, "X-Processing-Token": token})
+    r = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     assert r.status_code == 400
-    assert r.json() == {"detail": "entry blob failed authentication",
-                        "code": "entry_blob_invalid"}
+    assert r.json() == {"detail": "entry blob failed authentication", "code": "entry_blob_invalid"}
 
 
 async def test_recompute_malformed_payload_contract(client, app):
@@ -549,16 +650,23 @@ async def test_recompute_malformed_payload_contract(client, app):
     aad = crypto.build_aad("entry", emu.user_id, "e-malformed")
     blob = crypto.encrypt(emu.data_key, b"this is not json at all", aad)
     async with app.state.sessionmaker() as session:
-        session.add(Entry(id=new_id(), user_id=emu.user_id, client_entry_id="e-malformed",
-                          blob=blob, entry_date=T0 - timedelta(days=1)))
+        session.add(
+            Entry(
+                id=new_id(),
+                user_id=emu.user_id,
+                client_entry_id="e-malformed",
+                blob=blob,
+                entry_date=T0 - timedelta(days=1),
+            )
+        )
         await session.commit()
 
     token = await emu.open_processing_session(client)
-    r = await client.post("/api/insights/recompute",
-                          headers={**emu.headers, "X-Processing-Token": token})
+    r = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     assert r.status_code == 400
-    assert r.json() == {"detail": "entry payload malformed",
-                        "code": "entry_payload_malformed"}
+    assert r.json() == {"detail": "entry payload malformed", "code": "entry_payload_malformed"}
 
 
 async def test_recompute_fk_violation_maps_to_410_contract(client, app, monkeypatch):
@@ -569,8 +677,9 @@ async def test_recompute_fk_violation_maps_to_410_contract(client, app, monkeypa
 
     monkeypatch.setattr(insights, "_replace_insight", fk_bomb)
     token = await emu.open_processing_session(client)
-    r = await client.post("/api/insights/recompute",
-                          headers={**emu.headers, "X-Processing-Token": token})
+    r = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     assert r.status_code == 410
     assert r.json() == {"detail": "account no longer exists", "code": "account_deleted"}
 
@@ -578,11 +687,22 @@ async def test_recompute_fk_violation_maps_to_410_contract(client, app, monkeypa
 async def _tamper_state(app, emu):
     """Flip one byte of the persisted brain-state blob."""
     from sqlalchemy import select, update
+
     async with app.state.sessionmaker() as session:
-        row = (await session.execute(select(Insight).where(
-            Insight.user_id == emu.user_id, Insight.kind == "brain"))).scalars().first()
-        await session.execute(update(Insight).where(Insight.id == row.id)
-                              .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1])))
+        row = (
+            (
+                await session.execute(
+                    select(Insight).where(Insight.user_id == emu.user_id, Insight.kind == "brain")
+                )
+            )
+            .scalars()
+            .first()
+        )
+        await session.execute(
+            update(Insight)
+            .where(Insight.id == row.id)
+            .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1]))
+        )
         await session.commit()
 
 
@@ -593,19 +713,32 @@ async def test_recompute_retry_path_tampered_entry_contract(client, app):
     await emu.recompute(client)  # persists a brain-state row
     await _tamper_state(app, emu)
     from sqlalchemy import select, update
+
     async with app.state.sessionmaker() as session:
-        row = (await session.execute(select(Entry).where(Entry.user_id == emu.user_id)
-                                     .order_by(Entry.entry_date.asc()))).scalars().first()
-        await session.execute(update(Entry).where(Entry.id == row.id)
-                              .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1])))
+        row = (
+            (
+                await session.execute(
+                    select(Entry)
+                    .where(Entry.user_id == emu.user_id)
+                    .order_by(Entry.entry_date.asc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        await session.execute(
+            update(Entry)
+            .where(Entry.id == row.id)
+            .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1]))
+        )
         await session.commit()
 
     token = await emu.open_processing_session(client)
-    r = await client.post("/api/insights/recompute",
-                          headers={**emu.headers, "X-Processing-Token": token})
+    r = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     assert r.status_code == 400
-    assert r.json() == {"detail": "entry blob failed authentication",
-                        "code": "entry_blob_invalid"}
+    assert r.json() == {"detail": "entry blob failed authentication", "code": "entry_blob_invalid"}
 
 
 async def test_recompute_retry_path_malformed_entry_contract(client, app):
@@ -617,17 +750,23 @@ async def test_recompute_retry_path_malformed_entry_contract(client, app):
     aad = crypto.build_aad("entry", emu.user_id, "e-retry-malformed")
     blob = crypto.encrypt(emu.data_key, b"still not json", aad)
     async with app.state.sessionmaker() as session:
-        session.add(Entry(id=new_id(), user_id=emu.user_id,
-                          client_entry_id="e-retry-malformed",
-                          blob=blob, entry_date=T0 - timedelta(days=1)))
+        session.add(
+            Entry(
+                id=new_id(),
+                user_id=emu.user_id,
+                client_entry_id="e-retry-malformed",
+                blob=blob,
+                entry_date=T0 - timedelta(days=1),
+            )
+        )
         await session.commit()
 
     token = await emu.open_processing_session(client)
-    r = await client.post("/api/insights/recompute",
-                          headers={**emu.headers, "X-Processing-Token": token})
+    r = await client.post(
+        "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
+    )
     assert r.status_code == 400
-    assert r.json() == {"detail": "entry payload malformed",
-                        "code": "entry_payload_malformed"}
+    assert r.json() == {"detail": "entry payload malformed", "code": "entry_payload_malformed"}
 
 
 async def test_question_retention_window_edges(client, app):
@@ -635,19 +774,41 @@ async def test_question_retention_window_edges(client, app):
     today = date.today()
     async with app.state.sessionmaker() as session:
         # 91 days old: outside retention (deleted); 90 days old: kept
-        session.add(Insight(id=new_id(), user_id=emu.user_id, kind="question",
-                            for_date=today - timedelta(days=91), blob=b"old"))
-        session.add(Insight(id=new_id(), user_id=emu.user_id, kind="question",
-                            for_date=today - timedelta(days=90), blob=b"edge"))
+        session.add(
+            Insight(
+                id=new_id(),
+                user_id=emu.user_id,
+                kind="question",
+                for_date=today - timedelta(days=91),
+                blob=b"old",
+            )
+        )
+        session.add(
+            Insight(
+                id=new_id(),
+                user_id=emu.user_id,
+                kind="question",
+                for_date=today - timedelta(days=90),
+                blob=b"edge",
+            )
+        )
         await session.commit()
 
     await emu.recompute(client)
 
     from sqlalchemy import select
+
     async with app.state.sessionmaker() as session:
-        remaining = {row.for_date for row in (
-            await session.execute(select(Insight).where(
-                Insight.user_id == emu.user_id, Insight.kind == "question"))).scalars()}
+        remaining = {
+            row.for_date
+            for row in (
+                await session.execute(
+                    select(Insight).where(
+                        Insight.user_id == emu.user_id, Insight.kind == "question"
+                    )
+                )
+            ).scalars()
+        }
     assert today - timedelta(days=91) not in remaining, "91-day-old question must be purged"
     assert today - timedelta(days=90) in remaining, "90-day-old question must be retained"
 
@@ -697,36 +858,56 @@ async def test_request_size_ceilings_are_enforced_at_the_edge(client):
     emu = ClientEmulator("ceilings", "pw-ceilings-x")
     await emu.register(client)
     # salt: 129 chars is one over the ceiling and must fail SCHEMA validation
-    r = await client.post("/api/auth/register", json={
-        "username": "ceilings2", "salt": "A" * (MAX_SALT_B64 + 1),
-        "verifier": emu.auth_key_b64})
+    r = await client.post(
+        "/api/auth/register",
+        json={
+            "username": "ceilings2",
+            "salt": "A" * (MAX_SALT_B64 + 1),
+            "verifier": emu.auth_key_b64,
+        },
+    )
     assert r.status_code == 422
     assert "String should have at most 128 characters" in r.json()["detail"]
     # data_key: 45 chars (one over 44)
-    r = await client.post("/api/processing/sessions", headers=emu.headers,
-                          json={"data_key": "A" * (MAX_DATA_KEY_B64 + 1)})
+    r = await client.post(
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": "A" * (MAX_DATA_KEY_B64 + 1)},
+    )
     assert r.status_code == 422
     assert "String should have at most 44 characters" in r.json()["detail"]
     # blob: 1_500_001 chars (one over)
-    r = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-huge", "blob": "A" * (MAX_BLOB_B64 + 1),
-        "entry_date": T0.isoformat()})
+    r = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-huge",
+            "blob": "A" * (MAX_BLOB_B64 + 1),
+            "entry_date": T0.isoformat(),
+        },
+    )
     assert r.status_code == 422
     assert "String should have at most 1500000 characters" in r.json()["detail"]
     # at exactly the ceilings the schema passes and validation moves downstream
-    r = await client.post("/api/processing/sessions", headers=emu.headers,
-                          json={"data_key": "A" * MAX_DATA_KEY_B64})
+    r = await client.post(
+        "/api/processing/sessions", headers=emu.headers, json={"data_key": "A" * MAX_DATA_KEY_B64}
+    )
     assert r.status_code == 422 and r.json()["detail"] == "data_key must be 32 bytes"
 
 
 async def test_processing_session_length_contract(client):
     emu = ClientEmulator("dkeylen", "pw-d-key-len-x")
     await emu.register(client)
-    r = await client.post("/api/processing/sessions", headers=emu.headers,
-                          json={"data_key": base64.b64encode(b"k" * 33).decode()})
+    r = await client.post(
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": base64.b64encode(b"k" * 33).decode()},
+    )
     assert r.status_code == 422
-    assert r.json() == {"detail": f"data_key must be {crypto.KEY_SIZE} bytes",
-                        "code": "validation_error"}
+    assert r.json() == {
+        "detail": f"data_key must be {crypto.KEY_SIZE} bytes",
+        "code": "validation_error",
+    }
 
 
 async def test_processing_session_requires_data_key(client):
@@ -761,7 +942,8 @@ async def test_require_user_commit_failure_recovers_user(monkeypatch):
     secret = "flaky-session-secret"
     token = tokens.issue_token(user.id, secret, 60, epoch=1)
     request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(token_secret=secret))))
+        app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(token_secret=secret)))
+    )
     result = await require_user(request, f"Bearer {token}", FlakySession())
     assert result is user, "a failed commit must keep the authenticated user usable"
 
@@ -777,10 +959,11 @@ def test_main_logger_channel_name():
 
 def test_error_envelope_detail_is_always_a_string():
     assert _error_envelope(400, ["not", "a", "string"]) == {
-        "detail": "request failed", "code": "bad_request"}
+        "detail": "request failed",
+        "code": "bad_request",
+    }
     assert _error_envelope(400, "") == {"detail": "request failed", "code": "bad_request"}
-    assert _error_envelope(400, "real problem") == {
-        "detail": "real problem", "code": "bad_request"}
+    assert _error_envelope(400, "real problem") == {"detail": "real problem", "code": "bad_request"}
 
 
 def test_error_envelope_unknown_status_default_code():
@@ -801,11 +984,12 @@ async def test_validation_detail_shape(client, app, monkeypatch):
     from app.deps import require_user
 
     async def explode():
-        raise RequestValidationError([
-            {"loc": ("body", "entries", 0), "msg": "not a valid entry",
-             "type": "weird"},
-            {"loc": ("body", "salt"), "msg": "too short", "type": "string_too_short"},
-        ])
+        raise RequestValidationError(
+            [
+                {"loc": ("body", "entries", 0), "msg": "not a valid entry", "type": "weird"},
+                {"loc": ("body", "salt"), "msg": "too short", "type": "string_too_short"},
+            ]
+        )
 
     app.dependency_overrides[require_user] = explode
     try:
@@ -813,8 +997,7 @@ async def test_validation_detail_shape(client, app, monkeypatch):
     finally:
         app.dependency_overrides.clear()
     assert r.status_code == 422
-    assert r.json()["detail"] == (
-        "entries.0: not a valid entry; salt: too short")
+    assert r.json()["detail"] == ("entries.0: not a valid entry; salt: too short")
     assert r.json()["code"] == "validation_error"
 
 
@@ -825,9 +1008,9 @@ async def test_validation_detail_defaults_and_truncation(client, app, monkeypatc
         raise RequestValidationError([{"loc": (), "type": "weird"}])
 
     async def many():
-        raise RequestValidationError([
-            {"loc": ("body", f"f{i}"), "msg": "m" * 30, "type": "x"} for i in range(40)
-        ])
+        raise RequestValidationError(
+            [{"loc": ("body", f"f{i}"), "msg": "m" * 30, "type": "x"} for i in range(40)]
+        )
 
     async def none_at_all():
         raise RequestValidationError([])
@@ -852,6 +1035,7 @@ async def test_readyz_contract_and_openapi_tags(client, app):
     assert r.status_code == 200
     assert set(r.json()) == {"status", "version"}
     from app.main import APP_VERSION
+
     assert r.json()["version"] == APP_VERSION
     assert app.openapi()["paths"]["/readyz"]["get"]["tags"] == ["ops"]
 
@@ -876,8 +1060,10 @@ async def test_readyz_reports_database_unavailable(client, app, caplog):
         app.state.sessionmaker = real
     assert r.status_code == 503
     assert r.json() == {"detail": "database unavailable", "code": "service_unavailable"}
-    assert any(r.getMessage() == "readiness check failed: database unreachable"
-               for r in caplog.records)
+    assert any(
+        r.getMessage() == "readiness check failed: database or schema unavailable"
+        for r in caplog.records
+    )
 
 
 # ===========================================================================
@@ -901,8 +1087,12 @@ async def _run_middleware(handler, headers=(), bodies=(b"",), max_body=16):
         sent.append(message)
 
     mw = HardeningMiddleware(handler, max_body_bytes=max_body)
-    scope = {"type": "http", "method": "POST", "path": "/",
-             "headers": [(b"content-length", str(len(bodies[0])).encode()), *headers]}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "headers": [(b"content-length", str(len(bodies[0])).encode()), *headers],
+    }
     await mw(scope, receive, send)
     return sent
 
@@ -942,9 +1132,15 @@ async def test_middleware_bad_content_length_body():
         sent.append(m)
 
     await HardeningMiddleware(unreachable, max_body_bytes=16)(
-        {"type": "http", "method": "POST", "path": "/",
-         "headers": [(b"content-length", b"not-a-number")]},
-        receive, send)
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [(b"content-length", b"not-a-number")],
+        },
+        receive,
+        send,
+    )
     assert sent[0]["status"] == 400
     assert await _body_of(sent) == _BAD_LENGTH
 
@@ -962,9 +1158,15 @@ async def test_middleware_oversize_content_length_body():
         sent.append(m)
 
     await HardeningMiddleware(unreachable, max_body_bytes=16)(
-        {"type": "http", "method": "POST", "path": "/",
-         "headers": [(b"content-length", b"999999")]},
-        receive, send)
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [(b"content-length", b"999999")],
+        },
+        receive,
+        send,
+    )
     assert sent[0]["status"] == 413
     assert await _body_of(sent) == _OVERSIZE
 
@@ -994,17 +1196,21 @@ async def test_middleware_xff_warns_once_with_exact_message(caplog):
         return {"type": "http.request", "body": b""}
 
     mw = HardeningMiddleware(ok, max_body_bytes=16)
-    scope = {"type": "http", "method": "GET", "path": "/",
-             "headers": [(b"x-forwarded-for", b"1.2.3.4")]}
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"x-forwarded-for", b"1.2.3.4")],
+    }
     with caplog.at_level(logging.WARNING, logger="mindpattern"):
         await mw(scope, receive, send)
         await mw(scope, receive, send)
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert warnings[0].getMessage() == (
-        "X-Forwarded-For received but MINDPATTERN_TRUST_PROXY_HEADERS "
-        "is off — rate limiting keys on the direct peer (the proxy?) "
-        "for every client; enable it only behind a trusted reverse proxy"
+        "X-Forwarded-For ignored: MINDPATTERN_TRUST_PROXY_HEADERS is off "
+        "or the direct peer is outside MINDPATTERN_TRUSTED_PROXY_IPS; "
+        "rate limiting keys on the direct peer"
     )
 
 
@@ -1092,11 +1298,12 @@ async def test_user_locks_evict_down_to_cap():
             await gate.wait()
 
     tasks = [asyncio.create_task(hold_until_released(k)) for k in ("a", "b", "c")]
-    for _ in range(200):  # all three concurrently held (refcount > 0)
-        if len(locks._locks) == 3:
+    for _ in range(200):  # two dedicated holders + one shared overflow holder
+        if len(locks._locks) == 2 and locks._overflow_refs == 1:
             break
         await asyncio.sleep(0.01)
-    assert len(locks._locks) == 3
+    assert len(locks._locks) == 2
+    assert locks._overflow_refs == 1
     gate.set()
     await asyncio.gather(*tasks)
 
@@ -1111,15 +1318,17 @@ async def test_user_locks_evict_down_to_cap():
 
 
 def _prod_settings(**overrides) -> Settings:
-    base = dict(environment="staging", token_secret="x" * 40,
-                database_url="postgresql+asyncpg://u:p@h/db")
+    base = dict(
+        environment="staging", token_secret="x" * 40, database_url="postgresql+asyncpg://u:p@h/db"
+    )
     base.update(overrides)
     return Settings(**base)
 
 
 def _dev_settings(**overrides) -> Settings:
-    base = dict(environment="development", token_secret="x" * 40,
-                database_url="sqlite+aiosqlite://")
+    base = dict(
+        environment="development", token_secret="x" * 40, database_url="sqlite+aiosqlite://"
+    )
     base.update(overrides)
     return Settings(**base)
 
@@ -1137,8 +1346,8 @@ def test_settings_secret_length_message():
     with pytest.raises(RuntimeError) as exc_info:
         _prod_settings(token_secret="short")
     assert str(exc_info.value) == (
-        "MINDPATTERN_TOKEN_SECRET must be at least 32 characters "
-        "in environment 'staging'")
+        "MINDPATTERN_TOKEN_SECRET must be at least 32 characters in environment 'staging'"
+    )
 
 
 def test_settings_lower_bound_messages():
@@ -1149,11 +1358,17 @@ def test_settings_lower_bound_messages():
 
 
 def test_settings_upper_bound_messages():
-    with pytest.raises(RuntimeError, match=rf"^token_ttl_seconds must be <= {MAX_TOKEN_TTL_SECONDS}$"):
+    with pytest.raises(
+        RuntimeError, match=rf"^token_ttl_seconds must be <= {MAX_TOKEN_TTL_SECONDS}$"
+    ):
         _dev_settings(token_ttl_seconds=MAX_TOKEN_TTL_SECONDS + 1)
-    with pytest.raises(RuntimeError, match=rf"^processing_session_ttl must be <= {MAX_PROCESSING_SESSION_TTL}$"):
+    with pytest.raises(
+        RuntimeError, match=rf"^processing_session_ttl must be <= {MAX_PROCESSING_SESSION_TTL}$"
+    ):
         _dev_settings(processing_session_ttl=MAX_PROCESSING_SESSION_TTL + 1)
-    with pytest.raises(RuntimeError, match=rf"^auth_rate_window must be <= {MAX_RATE_WINDOW_SECONDS}$"):
+    with pytest.raises(
+        RuntimeError, match=rf"^auth_rate_window must be <= {MAX_RATE_WINDOW_SECONDS}$"
+    ):
         _dev_settings(auth_rate_window=MAX_RATE_WINDOW_SECONDS + 1)
     with pytest.raises(RuntimeError, match=rf"^auth_rate_limit must be <= {MAX_RATE_LIMIT}$"):
         _dev_settings(auth_rate_limit=MAX_RATE_LIMIT + 1)
@@ -1170,6 +1385,7 @@ def test_settings_1024_floors_are_inclusive():
 
 def test_config_logger_channel_name():
     from app.config import logger as config_logger
+
     assert config_logger.name == "mindpattern"
 
 
@@ -1179,18 +1395,22 @@ def test_settings_llm_transport_gates(caplog):
     assert str(exc_info.value) == (
         "MINDPATTERN_LLM_URL must use https:// — decrypted journal "
         "plaintext is POSTed to it. Plain http:// is only accepted "
-        "for http://localhost / http://127.0.0.1 with "
-        "MINDPATTERN_ENV=development exactly.")
+        "for exact loopback hosts with "
+        "MINDPATTERN_ENV=development exactly."
+    )
     import logging as _logging
+
     with caplog.at_level(_logging.WARNING, logger="mindpattern"):
         _dev_settings(llm_url="https://llm.example.com/v1", llm_api_key="")
     assert any(
         "MINDPATTERN_LLM_URL is set but MINDPATTERN_LLM_API_KEY is "
         "empty — LLM requests will go out without an API key" in r.getMessage()
-        for r in caplog.records)
+        for r in caplog.records
+    )
     # dev loopback http stays legal
-    assert _dev_settings(llm_url="http://127.0.0.1:8080/v1",
-                         llm_api_key="k").llm_url.startswith("http://127.0.0.1")
+    assert _dev_settings(llm_url="http://127.0.0.1:8080/v1", llm_api_key="k").llm_url.startswith(
+        "http://127.0.0.1"
+    )
 
 
 # ===========================================================================
@@ -1212,17 +1432,20 @@ def test_b64url_canonical_forms():
 
 def test_verify_token_malformed_payload_message():
     body = tokens._b64url_encode(
-        json.dumps({"uid": "u", "iat": 1, "exp": "soon", "ep": 1},
-                   separators=(",", ":"), sort_keys=True).encode())
-    sig = tokens._b64url_encode(
-        hmac_mod.new(b"secret", body.encode(), hashlib.sha256).digest())
+        json.dumps(
+            {"uid": "u", "iat": 1, "exp": "soon", "ep": 1}, separators=(",", ":"), sort_keys=True
+        ).encode()
+    )
+    sig = tokens._b64url_encode(hmac_mod.new(b"secret", body.encode(), hashlib.sha256).digest())
     with pytest.raises(tokens.TokenError, match=r"^malformed payload$"):
         tokens.verify_token(f"{body}.{sig}", "secret", now=2)
 
 
 def test_encrypt_nonce_size_message():
     key = os.urandom(crypto.KEY_SIZE)
-    with pytest.raises(crypto.CryptoError, match=rf"^nonce must be {crypto.NONCE_SIZE} bytes, got 5$"):
+    with pytest.raises(
+        crypto.CryptoError, match=rf"^nonce must be {crypto.NONCE_SIZE} bytes, got 5$"
+    ):
         crypto.encrypt_with_nonce(key, b"payload", None, b"12345")
 
 
@@ -1233,8 +1456,7 @@ async def test_keystore_expiry_boundary_zeroizes_and_messages(monkeypatch):
 
     zeroized: list = []
     real_zeroize = enclave.zeroize
-    monkeypatch.setattr(enclave, "zeroize",
-                        lambda k: zeroized.append(k) or real_zeroize(k))
+    monkeypatch.setattr(enclave, "zeroize", lambda k: zeroized.append(k) or real_zeroize(k))
 
     with pytest.raises(enclave.KeyNotFound, match=r"^processing session expired$"):
         store.pop(token, now=110.0, owner="u1")  # exactly at expiry
@@ -1245,8 +1467,7 @@ async def test_keystore_expiry_boundary_zeroizes_and_messages(monkeypatch):
         store.pop("no-such-token", now=100.0)
 
     token2 = store.create(key, ttl_seconds=10, now=100.0, owner="u1")
-    with pytest.raises(enclave.KeyNotFound,
-                       match=r"^processing session belongs to another user$"):
+    with pytest.raises(enclave.KeyNotFound, match=r"^processing session belongs to another user$"):
         store.pop(token2, now=105.0, owner="someone-else")
 
 

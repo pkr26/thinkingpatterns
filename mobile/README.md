@@ -11,12 +11,12 @@ The client half of the zero-knowledge contract:
 ## Setup
 
 ```bash
-npm install
-cd ios && pod install && cd ..        # iOS
-npm run ios                           # or: npm run android
+npm ci
 npm run typecheck                     # strict TS check
-npm test                              # 1,015 tests across 51 files (98% per-file coverage thresholds)
-npx stryker run                         # full mutation campaign (99.6% — see ../reports/mutation_report_mobile_2026-09-15.md)
+npm test                              # global 90/85/85/90 coverage thresholds
+npm run verify:vectors
+npm run verify:native-release          # intentionally fails until ios/ and android/ are restored
+npx stryker run                        # scheduled mutation gate
 ```
 
 The API base URL defaults to `http://localhost:8000` and is configurable in
@@ -44,12 +44,12 @@ loudly on any disagreement. Run it whenever you touch `src/crypto/**`.
 | `OnboardingScreen` | Three calm first-run panels, shown once after registration: the daily habit + 30-day threshold, encryption (with the one honest processing-session exception), and the no-recovery warning with the 13+ line. |
 | `UnlockScreen` | After restart the session token persists but the key vault is locked; re-derives keys from the password (offline-capable via cached salt). |
 | `EntryScreen` | Daily entry with 30-day progress ring, explicit one-tap mood check-in (a deliberate tap always wins over inferred sentiment), on-device sentiment, offline queue, honest inline save/sync feedback. |
-| `HistoryScreen` | Past entries pulled from the server and decrypted on-device only; read / edit / delete. Entries are immutable server-side, so edit = delete + re-upload under a fresh id; needs connectivity and says so when there is none. |
+| `HistoryScreen` | Past entries pulled from the server and decrypted on-device only; read / edit / delete. Edit uses atomic `PUT /entries/{clientEntryId}`, preserving the original if a network interruption occurs; it needs connectivity and says so when there is none. |
 | `InsightsScreen` | Decrypts the insight blob; pattern cards (timing / mood link / repeated phrase). No advice, no diagnosis. Crisis-adjacent patterns (`detail.sensitive=true`, or a suppress-list label match) render as a non-quoting card — "A difficult thought has been returning…" + a support link — never the text itself. |
 | `QuestionScreen` | One reflective question per day (pre-threshold: a day-1 generic question answered fully on-device from the pool pinned to `shared/generic_questions.json`); opens a processing session to recompute when needed. "Write about this" bridges question → journal. |
 | `CrisisScreen` | Offline crisis resources (988, Crisis Text Line, 911 guidance); one tap from every screen, no network dependency. |
 | `PrivacyScreen` | The privacy policy, in plain language, offline — static content, no network, no account. |
-| `SettingsScreen` | Server URL, LLM consent, encrypted export, hard delete, sign out — plus the recovered-entries surface: server-rejected or quarantined uploads are preserved (never destroyed) and can be recovered here. |
+| `SettingsScreen` | HTTPS server URL (plain HTTP only for loopback development), LLM consent, hard delete, sign out — plus the recovered-entries surface: server-rejected or quarantined uploads are preserved (never destroyed) and can be recovered here. Account export is disabled until a reviewed native streaming-to-file path exists. |
 
 Voice-to-text: v1 accepts the text through the system keyboard's dictation
 (long-press the globe/spacebar on iOS, microphone key on Gboard); a native
@@ -59,12 +59,12 @@ Voice-to-text: v1 accepts the text through the system keyboard's dictation
 ## Session storage — the honest version
 
 `src/secureStore.ts` stores the session token AES-256-GCM-encrypted under a
-random per-install device key, so a backup no longer contains the token
-verbatim. Stated plainly: **the device key currently lives in AsyncStorage
-too** (a documented fallback pending react-native-keychain), so a device
-backup includes both the key and the ciphertext it protects — a
-fully-controlled device attacker recovers the session. Keychain/Keystore
-custody of that key is the fix; see the checklist below.
+random per-install device key held only in iOS Keychain / Android Keystore
+through `react-native-keychain` (`WHEN_UNLOCKED_THIS_DEVICE_ONLY` on iOS).
+The encrypted envelope may reside in AsyncStorage, but the key does not.
+There is deliberately no file-backed fallback: if the native Keychain/Keystore
+seam is unavailable, session persistence fails closed rather than creating a
+recoverable bearer-token secret in app storage.
 
 ## Sync model
 
@@ -76,14 +76,14 @@ scope, not handled.
 
 ## Native hardening checklist
 
-This repo ships JS/TS source only; the `ios/`/`android/` projects are
-generated with the React Native toolchain. Apply these when generating
-them:
+This repo currently ships JS/TS source only; `ios/` and `android/` are
+absent. `npm run verify:native-release` therefore fails closed. Restore or
+generate both projects, install Pods, verify autolinking, and run signed
+device builds before shipping.
 
-- **react-native-keychain with `ThisDeviceOnly`** for the `secureStore`
-  seam — replaces the AsyncStorage device-key fallback so backups stop
-  containing the key. The seam (`SecureStoreBackend`) means only the
-  backend module changes; callers keep using `secureStore` unchanged.
+- **Verify `react-native-keychain` autolinking and `ThisDeviceOnly`** for the
+  `secureStore` seam in the generated native projects. The JavaScript layer
+  already has no AsyncStorage device-key fallback.
 - **`android:allowBackup="false"`**, and `NSURLIsExcludedFromBackupKey` on
   the AsyncStorage directory on iOS — queue/mood-log ciphertext and the
   secureStore envelope don't belong in platform backups at all.

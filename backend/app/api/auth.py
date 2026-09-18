@@ -29,7 +29,10 @@ import binascii
 import hashlib
 import hmac
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
+import anyio
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, update
@@ -42,6 +45,7 @@ from ..cache import (
     record_keyed_failure,
 )
 from ..deps import ApiError, get_session, require_user
+from ..locks import lifecycle_locks
 from ..models import User
 from ..schemas import LoginRequest, RegisterRequest, SaltLookupRequest, SaltResponse, TokenResponse
 from ..security.kdf import hkdf_sha256
@@ -52,7 +56,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # N=2^16 (64 MiB) — above OWASP's absolute floor and defensible here: the
 # input is a 256-bit key already stretched by client-side PBKDF2-600k, so
 # offline cracking pays both costs per guess.
-SCRYPT_N = 2 ** 16
+SCRYPT_N = 2**16
 SCRYPT_R = 8
 SCRYPT_P = 1
 SCRYPT_MAXMEM = 256 * 1024 * 1024
@@ -83,6 +87,47 @@ def _auth_limiter(request: Request):
     return getattr(request.app.state, "auth_limiter", None)
 
 
+@asynccontextmanager
+async def auth_work_slot(request: Request) -> AsyncIterator[None]:
+    """Admit password-KDF work without queueing a DB-owning request.
+
+    ``CapacityLimiter`` is also passed to ``run_sync`` so only its worker
+    slots execute scrypt.  This companion, non-blocking limiter is acquired
+    *before* login opens a DB transaction. Its capacity matches the worker
+    limiter, so every admitted request has a worker slot available after its
+    short database read; excess requests receive a retryable overload error
+    instead of piling up while holding pooled connections.
+    """
+    limiter = getattr(request.app.state, "auth_admission_limiter", None)
+    if limiter is None:
+        # Direct router tests construct minimal request doubles. Production
+        # apps always wire the admission limiter in main.create_app().
+        yield
+        return
+    try:
+        limiter.acquire_nowait()
+    except anyio.WouldBlock:
+        raise ApiError(
+            status_code=503,
+            detail="authentication service busy; retry shortly",
+            code="service_unavailable",
+            headers={"Retry-After": "1"},
+        ) from None
+    try:
+        yield
+    finally:
+        limiter.release()
+
+
+async def _close_read_transaction(session: AsyncSession) -> None:
+    """Return the pool connection after an auth SELECT and before scrypt."""
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+
 DECOY_SALT_INFO = b"mindpattern/decoy-salt/v1"
 
 
@@ -111,9 +156,13 @@ def _issue(request: Request, user: User) -> TokenResponse:
     "/register",
     response_model=TokenResponse,
     status_code=201,
-    dependencies=[Depends(make_rate_limiter("auth-register", "auth_rate_limit", "auth_rate_window"))],
+    dependencies=[
+        Depends(make_rate_limiter("auth-register", "auth_rate_limit", "auth_rate_window"))
+    ],
 )
-async def register(body: RegisterRequest, request: Request, session: AsyncSession = Depends(get_session)):
+async def register(
+    body: RegisterRequest, request: Request, session: AsyncSession = Depends(get_session)
+):
     settings = request.app.state.settings
     # Per-username bucket: rotating source IPs must not allow unbounded
     # probing of one name (the 409 availability answer is the one oracle a
@@ -148,9 +197,10 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
     # Hash FIRST, before the existence check, so the taken/free paths are
     # computationally identical (no timing oracle on top of the status code).
     scrypt_server_salt = os.urandom(16)
-    verifier_hash = await hash_verifier_off_loop(
-        verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
-    )
+    async with auth_work_slot(request):
+        verifier_hash = await hash_verifier_off_loop(
+            verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
+        )
 
     existing = await session.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none() is not None:
@@ -185,7 +235,9 @@ async def register(body: RegisterRequest, request: Request, session: AsyncSessio
     response_model=SaltResponse,
     dependencies=[Depends(make_rate_limiter("auth-salt", "auth_rate_limit", "auth_rate_window"))],
 )
-async def get_salt(body: SaltLookupRequest, request: Request, session: AsyncSession = Depends(get_session)):
+async def get_salt(
+    body: SaltLookupRequest, request: Request, session: AsyncSession = Depends(get_session)
+):
     # POST, not GET /salt/{username}: usernames must never ride the URL path,
     # where default proxy/uvicorn access logs would inventory every queried
     # name. The body is not logged by standard servers.
@@ -204,34 +256,40 @@ async def get_salt(body: SaltLookupRequest, request: Request, session: AsyncSess
     dependencies=[Depends(make_rate_limiter("auth-login", "auth_rate_limit", "auth_rate_window"))],
 )
 async def login(body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)):
-    settings = request.app.state.settings
-    # Per-username bucket (slows targeted credential stuffing that rotates
-    # IPs), but only FAILED VERIFICATIONS consume it: checking-and-counting
-    # up front let anyone anonymously lock a victim out of their own account
-    # by spraying garbage logins at their name.
-    username_key = f"login-name:{body.username}"
-    check_keyed_limit_without_count(
-        request, username_key, settings.auth_rate_limit, settings.auth_rate_window
-    )
-    result = await session.execute(select(User).where(User.username == body.username))
-    user = result.scalar_one_or_none()
-    try:
-        verifier_bytes = base64.b64decode(body.verifier, validate=True)
-    except _b64_decode_error:
-        verifier_bytes = b""
-    if user is None or not user.is_active:
-        # Burn equivalent CPU so response timing does not reveal existence.
-        await hash_verifier_off_loop(
-            b"\x00" * AUTH_KEY_SIZE, b"\x00" * 16, limiter=_auth_limiter(request)
+    # Login throttling is intentionally IP/device-facing only. A hard
+    # per-username deny bucket turns a distributed attacker into a trivial
+    # account-lockout oracle: they can spend the victim's failure budget and
+    # make a correct password return 429. The normal auth bucket still
+    # throttles each source, while real deployments should add trusted
+    # device/risk signals or a challenge rather than anonymously denying the
+    # account holder.
+    async with auth_work_slot(request):
+        result = await session.execute(select(User).where(User.username == body.username))
+        user = result.scalar_one_or_none()
+        # Critical ordering: do not retain a pool connection while the KDF is
+        # queued/running. expire_on_commit=False keeps these ORM attributes
+        # usable after the read transaction releases its connection.
+        await _close_read_transaction(session)
+        try:
+            verifier_bytes = base64.b64decode(body.verifier, validate=True)
+        except _b64_decode_error:
+            verifier_bytes = b""
+        if user is None or not user.is_active:
+            # Burn equivalent CPU so response timing does not reveal existence.
+            await hash_verifier_off_loop(
+                b"\x00" * AUTH_KEY_SIZE, b"\x00" * 16, limiter=_auth_limiter(request)
+            )
+            raise ApiError(
+                status_code=401, detail="invalid credentials", code="invalid_credentials"
+            )
+        candidate = await hash_verifier_off_loop(
+            verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
         )
-        raise ApiError(status_code=401, detail="invalid credentials", code="invalid_credentials")
-    candidate = await hash_verifier_off_loop(
-        verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
-    )
-    if not hmac.compare_digest(candidate, bytes(user.verifier)):
-        record_keyed_failure(request, username_key, settings.auth_rate_window)
-        raise ApiError(status_code=401, detail="invalid credentials", code="invalid_credentials")
-    return _issue(request, user)
+        if not hmac.compare_digest(candidate, bytes(user.verifier)):
+            raise ApiError(
+                status_code=401, detail="invalid credentials", code="invalid_credentials"
+            )
+        return _issue(request, user)
 
 
 @router.post(
@@ -256,8 +314,13 @@ async def logout(
     account die with it — after sign-out nothing may still hold the data key
     (the account-deletion path does the same purge).
     """
-    await session.execute(
-        update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)
-    )
-    await session.commit()
-    request.app.state.key_store.destroy_all_for_owner(user.id)
+    # Session creation takes the same fence from its fresh epoch check
+    # through key_store.create(). That makes this commit-plus-purge one
+    # lifecycle event: a pre-logout bearer cannot create a new key after the
+    # purge has returned.
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        await session.execute(
+            update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)
+        )
+        await session.commit()
+        request.app.state.key_store.destroy_all_for_owner(user.id)

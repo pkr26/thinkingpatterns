@@ -58,8 +58,8 @@ class TestMetricsRegistry:
 
     def test_recompute_histogram_is_cumulative(self):
         registry = MetricsRegistry()
-        registry.observe_recompute(0.3)   # <= 0.25? no; <= 0.5 yes
-        registry.observe_recompute(3.0)   # <= 5.0 yes
+        registry.observe_recompute(0.3)  # <= 0.25? no; <= 0.5 yes
+        registry.observe_recompute(3.0)  # <= 5.0 yes
         text = registry.render(keystore_sessions=0)
         assert 'mindpattern_recompute_seconds_bucket{le="0.25"} 0' in text
         assert 'mindpattern_recompute_seconds_bucket{le="0.5"} 1' in text
@@ -133,14 +133,17 @@ async def test_recompute_records_duration_and_429s_are_visible(client, settings)
     assert "mindpattern_recompute_seconds_count 1" in text, text
     # Rate-limited responses flow through the counter: hammer salt lookups.
     from app.cache import FixedWindowCounter  # noqa: F401  (documentation)
+
     for _ in range(25):
         await client.post("/api/auth/salt", json={"username": "metricsuser"})
     text2 = (await client.get("/metrics")).text
+
     def _family(text: str, family: str) -> int:
         for line in text.splitlines():
             if line.startswith("mindpattern_requests_total") and f'"{family}"' in line:
                 return int(line.rsplit(" ", 1)[1])
         return 0
+
     assert _family(text2, "4xx") > _family(text, "4xx"), "429s must be visible in metrics"
 
 
@@ -176,7 +179,9 @@ async def test_load_rows_budget_large_enough_changes_nothing(client, app):
     for i in range(5):
         cid = f"e-{i}"
         ids.append(cid)
-        await emu.create_entry(client, f"plain day {i}", TODAY - timedelta(days=10 - i), client_entry_id=cid)
+        await emu.create_entry(
+            client, f"plain day {i}", TODAY - timedelta(days=10 - i), client_entry_id=cid
+        )
     async with app.state.sessionmaker() as session:
         from app.api.insights import _load_rows
 
@@ -192,9 +197,7 @@ async def test_tiny_budget_still_recomputes(client, settings, monkeypatch):
     await emu.register(client)
     await emu.backdate_account(client, 45)
     for i in range(35):
-        await emu.create_entry(
-            client, "filler " * 900 + f"day {i}", TODAY - timedelta(days=34 - i)
-        )
+        await emu.create_entry(client, "filler " * 900 + f"day {i}", TODAY - timedelta(days=34 - i))
     body = await emu.recompute(client)
     assert body["phase"] in ("baseline", "insight")
     assert body["analyzer"] == "brain"
@@ -224,9 +227,11 @@ async def test_cross_host_guard_acquires_and_releases_on_postgres(monkeypatch):
         async def exec_driver_sql(self, sql):
             assert "pg_try_advisory_lock" in sql or "pg_advisory_unlock" in sql
             self.locks.append(sql)
+
             class _Scalar:
                 def scalar(self):
                     return True
+
             return _Scalar()
 
         async def commit(self):
@@ -262,6 +267,7 @@ async def test_cross_host_guard_refuses_when_lock_taken():
             class _Scalar:
                 def scalar(self):
                     return False
+
             return _Scalar()
 
         async def close(self):

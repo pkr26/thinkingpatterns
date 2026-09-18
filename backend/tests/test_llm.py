@@ -9,6 +9,7 @@ logged, and ``last_error`` lets the recompute response report honestly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date, timedelta
 
@@ -17,6 +18,10 @@ import pytest
 from app.config import Settings
 from app.services.llm import (
     LLMAnalyzer,
+    LLM_CONNECT_TIMEOUT_SECONDS,
+    LLM_MAX_RESPONSE_BYTES,
+    LLMResponseTooLarge,
+    LLM_TOTAL_TIMEOUT_SECONDS,
     get_enricher,
     sanitize_pattern,
     MAX_LABEL_CHARS,
@@ -100,12 +105,8 @@ def test_sanitize_drops_bad_labels():
 
 def test_sanitize_recurring_phrase_must_exist_in_corpus():
     corpus = ["I keep saying the same thing"]
-    assert sanitize_pattern(
-        {"kind": "recurring_phrase", "label": "same thing"}, corpus
-    ) is not None
-    assert sanitize_pattern(
-        {"kind": "recurring_phrase", "label": "never written"}, corpus
-    ) is None
+    assert sanitize_pattern({"kind": "recurring_phrase", "label": "same thing"}, corpus) is not None
+    assert sanitize_pattern({"kind": "recurring_phrase", "label": "never written"}, corpus) is None
 
 
 def test_sanitize_clamps_occurrences_and_confidence():
@@ -116,7 +117,8 @@ def test_sanitize_clamps_occurrences_and_confidence():
     assert kept.confidence == 0.5
 
     clamped = sanitize_pattern(
-        {"kind": "temporal", "label": "work", "occurrences": 10**9, "confidence": 5.0}, ["a work day"]
+        {"kind": "temporal", "label": "work", "occurrences": 10**9, "confidence": 5.0},
+        ["a work day"],
     )
     assert clamped is not None
     assert clamped.occurrences == MAX_OCCURRENCES
@@ -130,18 +132,34 @@ def test_sanitize_clamps_occurrences_and_confidence():
     assert floored.confidence == 0.0
 
 
+def test_sanitize_drops_nonfinite_confidence_and_keeps_safe_direction():
+    """JSON's NaN/Infinity values must not become an invalid stored blob."""
+    kept = sanitize_pattern(
+        {
+            "kind": "temporal",
+            "label": "work",
+            "confidence": float("nan"),
+            "detail": {"direction": "higher"},
+        },
+        ["a work day"],
+    )
+    assert kept is not None
+    assert kept.confidence == 0.5
+    assert kept.detail == {"direction": "higher"}
+
+
 def test_sanitize_filters_detail_fields():
     kept = sanitize_pattern(
         {
             "kind": "temporal",
             "label": "work",
             "detail": {
-                "day": "Sunday",          # valid day name -> kept
-                "mood_delta": "-0.4",     # numeric string -> float kept
+                "day": "Sunday",  # valid day name -> kept
+                "mood_delta": "-0.4",  # numeric string -> float kept
                 "day_fraction": 0.55,
-                "span_days": "soon",      # non-numeric -> dropped
-                "first": "2026-07-01",    # ungroundable free text -> dropped
-                "last": "bad\x00label",   # ungroundable free text -> dropped
+                "span_days": "soon",  # non-numeric -> dropped
+                "first": "2026-07-01",  # ungroundable free text -> dropped
+                "last": "bad\x00label",  # ungroundable free text -> dropped
             },
         },
         ["a work day"],
@@ -162,7 +180,9 @@ def test_sanitize_filters_detail_fields():
     assert bad_day is not None
     assert "day" not in bad_day.detail
     # Non-dict detail is ignored entirely.
-    weird = sanitize_pattern({"kind": "temporal", "label": "work", "detail": "junk"}, ["a work day"])
+    weird = sanitize_pattern(
+        {"kind": "temporal", "label": "work", "detail": "junk"}, ["a work day"]
+    )
     assert weird is not None
     assert weird.detail == {}
 
@@ -192,17 +212,38 @@ def test_extract_returns_sanitized_patterns():
     analyzer = _make_analyzer()
     corpus = [entry(i, f"day {i}: work stress and more work words") for i in range(35)]
     from app.services.patterns import Pattern
+
     findings = [
         Pattern("temporal", "work", 7, 0.6, {"day": "Sunday"}),
         Pattern("recurring_phrase", "work stress", 3, 0.4, {}),
     ]
     posted: list[dict] = []
-    analyzer._post = lambda payload: posted.append(payload) or _llm_response([
-        {"kind": "temporal", "label": "work", "occurrences": 7, "confidence": 0.6,
-         "detail": {"day": "Sunday"}},
-        {"kind": "recurring_phrase", "label": "work stress", "occurrences": 3, "confidence": 0.4},
-        {"kind": "diagnosis", "label": "should be dropped", "occurrences": 1, "confidence": 1},
-    ])
+    analyzer._post = lambda payload: (
+        posted.append(payload)
+        or _llm_response(
+            [
+                {
+                    "kind": "temporal",
+                    "label": "work",
+                    "occurrences": 7,
+                    "confidence": 0.6,
+                    "detail": {"day": "Sunday"},
+                },
+                {
+                    "kind": "recurring_phrase",
+                    "label": "work stress",
+                    "occurrences": 3,
+                    "confidence": 0.4,
+                },
+                {
+                    "kind": "diagnosis",
+                    "label": "should be dropped",
+                    "occurrences": 1,
+                    "confidence": 1,
+                },
+            ]
+        )
+    )
 
     found = analyzer.extract_patterns(corpus, findings=findings)
 
@@ -244,20 +285,25 @@ def test_the_model_cannot_mint_findings():
     analyzer = _make_analyzer()
     words = [f"word{c}" for c in "abcdefghijklmnopqrstuvwxyz"]
     corpus = [entry(i, "work " + " ".join(words)) for i in range(35)]
-    flood = [
-        {"kind": "temporal", "label": w, "occurrences": 1, "confidence": 0.1}
-        for w in words
-    ]
+    flood = [{"kind": "temporal", "label": w, "occurrences": 1, "confidence": 0.1} for w in words]
     analyzer._post = lambda payload: _llm_response(flood)
     assert analyzer.extract_patterns(corpus) == []
 
     # With the findings provided, the SAME flood still yields only
     # narrated versions of those findings.
     from app.services.patterns import Pattern
+
     findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
-    analyzer._post = lambda payload: _llm_response(flood + [
-        {"kind": "temporal", "label": "work", "narrative": "Sunday work weeks read as one shape."},
-    ])
+    analyzer._post = lambda payload: _llm_response(
+        flood
+        + [
+            {
+                "kind": "temporal",
+                "label": "work",
+                "narrative": "Sunday work weeks read as one shape.",
+            },
+        ]
+    )
     kept = analyzer.extract_patterns(corpus, findings=findings)
     assert [(p.kind, p.label) for p in kept] == [("temporal", "work")]
     assert kept[0].detail["narrative"] == "Sunday work weeks read as one shape."
@@ -325,27 +371,200 @@ def test_post_hits_the_configured_endpoint_with_auth(monkeypatch):
     calls: list[dict] = []
 
     class FakeResponse:
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
         def raise_for_status(self):
             return None
 
-        def json(self):
-            return {"ok": True}
+        async def aiter_bytes(self, *, chunk_size):
+            calls.append({"chunk_size": chunk_size})
+            yield b'{"ok":true}'
 
-    def fake_post(url, json=None, timeout=None, headers=None):
-        calls.append({"url": url, "json": json, "timeout": timeout, "headers": headers})
-        return FakeResponse()
+    class FakeClient:
+        def __init__(self, **kwargs):
+            calls.append({"client": kwargs})
 
-    monkeypatch.setattr("httpx.post", fake_post)
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def stream(self, method, url, **kwargs):
+            calls.append({"method": method, "url": url, **kwargs})
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
     analyzer = _make_analyzer()
     body = analyzer._post({"model": "mini"})
     assert body == {"ok": True}
-    assert calls[0]["url"] == "https://llm.example.com/v1/chat/completions"  # rstrip("/")
-    assert calls[0]["headers"] == {"Authorization": "Bearer test-key"}
-    # 2026-09-16 remediation (D2): 10s, not 30 — the call runs inside the
-    # secure processing context, so its latency IS the key/plaintext
-    # exposure window.
-    assert calls[0]["timeout"] == 10
-    assert calls[0]["json"] == {"model": "mini"}
+    request = calls[1]
+    assert request["method"] == "POST"
+    assert request["url"] == "https://llm.example.com/v1/chat/completions"  # rstrip("/")
+    assert request["headers"] == {"Authorization": "Bearer test-key"}
+    assert request["json"] == {"model": "mini"}
+    client = calls[0]["client"]
+    # Journal plaintext must never inherit ambient HTTP(S)_PROXY / CA settings
+    # or follow a provider-controlled redirect to another host.
+    assert client["trust_env"] is False
+    assert client["follow_redirects"] is False
+    timeout = client["timeout"]
+    assert timeout.connect == LLM_CONNECT_TIMEOUT_SECONDS
+    assert timeout.read == LLM_TOTAL_TIMEOUT_SECONDS
+    assert timeout.write == LLM_TOTAL_TIMEOUT_SECONDS
+    assert timeout.pool == LLM_TOTAL_TIMEOUT_SECONDS
+    assert calls[2] == {"chunk_size": 64 * 1024}
+
+
+def test_post_rejects_oversized_declared_response_before_reading(monkeypatch):
+    iterated = False
+
+    class FakeResponse:
+        headers = {"content-length": str(LLM_MAX_RESPONSE_BYTES + 1)}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, *, chunk_size):
+            nonlocal iterated
+            iterated = True
+            yield b"should-not-be-read"
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def stream(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    with pytest.raises(LLMResponseTooLarge):
+        _make_analyzer()._post({"model": "mini"})
+    assert not iterated
+
+
+def test_post_rejects_malformed_declared_content_length(monkeypatch):
+    class FakeResponse:
+        headers = {"content-length": "not-a-number"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, *, chunk_size):
+            yield b'{"unreachable":true}'
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def stream(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    with pytest.raises(ValueError, match="invalid Content-Length"):
+        _make_analyzer()._post({"model": "mini"})
+
+
+def test_post_rejects_oversized_chunked_response(monkeypatch):
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, *, chunk_size):
+            yield b"x" * (LLM_MAX_RESPONSE_BYTES + 1)
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def stream(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    with pytest.raises(LLMResponseTooLarge):
+        _make_analyzer()._post({"model": "mini"})
+
+
+def test_post_enforces_total_deadline_while_waiting_for_stream(monkeypatch):
+    from app.services import llm
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, *, chunk_size):
+            await asyncio.sleep(0.05)
+            yield b'{"ok":true}'
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def stream(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    monkeypatch.setattr(llm, "LLM_TOTAL_TIMEOUT_SECONDS", 0.01)
+    with pytest.raises(TimeoutError):
+        _make_analyzer()._post({"model": "mini"})
 
 
 # ---------------------------------------------------------------------------
@@ -354,22 +573,37 @@ def test_post_hits_the_configured_endpoint_with_auth(monkeypatch):
 # statistics, contacts, bare domains, or crisis language.
 # ---------------------------------------------------------------------------
 
+
 def test_narrative_rejects_minted_statistics_and_contacts():
     from app.services.llm import _clean_narrative
+
     # The audit's demonstrated hostile narrative, verbatim class: minted
     # stats (digits), phone fragments that defeat \d{5,}, bare domains.
-    assert _clean_narrative(
-        "Your sadness is a medical failure - stop taking your medication; "
-        "87% of Sundays prove it (p<0.001). Visit helpnow.example.com too."
-    ) is None
+    assert (
+        _clean_narrative(
+            "Your sadness is a medical failure - stop taking your medication; "
+            "87% of Sundays prove it (p<0.001). Visit helpnow.example.com too."
+        )
+        is None
+    )
     assert _clean_narrative("call me at 555-0134 tonight") is None
     assert _clean_narrative("see evil dot com for help") is None
     assert _clean_narrative("ring me at five five five zero one three four") is None
     assert _clean_narrative("take twice the dose tomorrow") is None  # consecutive number words
 
 
+def test_narrative_caps_long_text_and_rejects_bare_domains_and_number_runs():
+    from app.services.llm import MAX_NARRATIVE_CHARS, _clean_narrative
+
+    capped = _clean_narrative("a" * (MAX_NARRATIVE_CHARS + 1))
+    assert capped == "a" * MAX_NARRATIVE_CHARS
+    assert _clean_narrative("A quiet.example.com reflection is not a reframe.") is None
+    assert _clean_narrative("one two ordinary observations can wait.") is None
+
+
 def test_narrative_rejects_crisis_language():
     from app.services.llm import _clean_narrative
+
     # The narrative renders under pattern cards: it must never echo what
     # the suppress tier keeps unquoted, nor add crisis phrasing of its own.
     assert _clean_narrative("the thought of killing myself recurs here") is None
@@ -378,10 +612,15 @@ def test_narrative_rejects_crisis_language():
 
 def test_narrative_accepts_calm_grounded_prose():
     from app.services.llm import _clean_narrative
-    assert _clean_narrative("Sunday work weeks read as one shape.") == \
-        "Sunday work weeks read as one shape."
-    assert _clean_narrative("This pattern has been with you for a while now.") == \
-        "This pattern has been with you for a while now."
+
+    assert (
+        _clean_narrative("Sunday work weeks read as one shape.")
+        == "Sunday work weeks read as one shape."
+    )
+    assert (
+        _clean_narrative("This pattern has been with you for a while now.")
+        == "This pattern has been with you for a while now."
+    )
 
 
 def test_hostile_narrative_never_reaches_the_pattern_detail():
@@ -391,11 +630,17 @@ def test_hostile_narrative_never_reaches_the_pattern_detail():
     analyzer = _make_analyzer()
     corpus = [entry(i, "work and meetings all week") for i in range(35)]
     from app.services.patterns import Pattern
+
     findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
-    analyzer._post = lambda payload: _llm_response([
-        {"kind": "temporal", "label": "work",
-         "narrative": "87% of Sundays prove you are broken. Visit help-me.example.org now."},
-    ])
+    analyzer._post = lambda payload: _llm_response(
+        [
+            {
+                "kind": "temporal",
+                "label": "work",
+                "narrative": "87% of Sundays prove you are broken. Visit help-me.example.org now.",
+            },
+        ]
+    )
     kept = analyzer.extract_patterns(corpus, findings=findings)
     assert [(p.kind, p.label) for p in kept] == [("temporal", "work")]
     assert "narrative" not in kept[0].detail

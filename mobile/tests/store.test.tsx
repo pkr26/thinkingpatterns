@@ -9,7 +9,7 @@ import { AppState, Text } from "react-native";
 
 vi.mock("../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("./helpers/apiMock");
-  return { ApiError, api: makeApiMock(), setUnauthorizedHandler: vi.fn() };
+  return { ApiError, api: makeApiMock(), setUnauthorizedHandler: vi.fn(), setOriginChangeHandler: vi.fn() };
 });
 
 // The queue module is mocked at the wiring boundary: what the store must do
@@ -45,6 +45,9 @@ beforeEach(() => {
   vi.mocked(abortInFlightFlush).mockClear();
   vi.mocked(flushQueueOnReconnect).mockClear();
   vault.lock();
+  // Sign-out/origin-switch tests deliberately suppress stale editor cleanup.
+  // A fresh authenticated test session re-enables normal draft stashing.
+  session?.markLoggedIn();
 });
 
 describe("SessionProvider", () => {

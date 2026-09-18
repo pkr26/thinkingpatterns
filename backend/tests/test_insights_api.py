@@ -16,8 +16,10 @@ from app.security import crypto
 from tests.helpers import ClientEmulator, daterange
 
 TODAY = date.today()  # question blobs are AAD-bound to the server's "today"
-WORK_ANXIOUS = ("Deadline at work monday, the boss piled on another project and a "
-                "late meeting. Anxious, stressed, dreading the presentation.")
+WORK_ANXIOUS = (
+    "Deadline at work monday, the boss piled on another project and a "
+    "late meeting. Anxious, stressed, dreading the presentation."
+)
 CALM = "Long walk by the river, felt calm and grateful. Cooked, ate well, slept deeply."
 
 
@@ -29,7 +31,9 @@ async def seed_corpus(client, emu, days: int) -> None:
     await emu.backdate_account(client, days=days + 2)
     for day in daterange(days, TODAY):
         if day.weekday() == 6:  # Sunday
-            await emu.create_entry(client, WORK_ANXIOUS, day, client_entry_id=f"w-{day.isoformat()}")
+            await emu.create_entry(
+                client, WORK_ANXIOUS, day, client_entry_id=f"w-{day.isoformat()}"
+            )
         else:
             await emu.create_entry(client, CALM, day, client_entry_id=f"c-{day.isoformat()}")
 
@@ -194,11 +198,15 @@ async def test_processing_session_rejects_bad_keys(client):
     await emu.register(client)
     wrong_size = __import__("base64").b64encode(b"5-bytes!!").decode()
     response = await client.post(
-        "/api/processing/sessions", headers=emu.headers, json={"data_key": wrong_size},
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": wrong_size},
     )
     assert response.status_code == 422
     response = await client.post(
-        "/api/processing/sessions", headers=emu.headers, json={"data_key": "@@not-b64@@"},
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": "@@not-b64@@"},
     )
     assert response.status_code == 422
 
@@ -216,9 +224,14 @@ async def test_tampered_entry_blob_fails_authentication(client):
     # Corrupt one stored blob directly (a malicious server or bit rot).
     from sqlalchemy import select
     from app.models import Entry
+
     app = client._transport.app  # noqa: SLF001 — test reachability into state
     async with app.state.sessionmaker() as session:
-        row = (await session.execute(select(Entry).where(Entry.user_id == emu.user_id))).scalars().first()
+        row = (
+            (await session.execute(select(Entry).where(Entry.user_id == emu.user_id)))
+            .scalars()
+            .first()
+        )
         corrupted = bytearray(bytes(row.blob))
         corrupted[-1] ^= 1
         row.blob = bytes(corrupted)
@@ -251,9 +264,12 @@ async def test_wrong_data_key_cannot_recompute(client):
     # A session opened under this account but holding the WRONG key still
     # fails at GCM authentication during decryption.
     import base64
+
     stranger_key_b64 = base64.b64encode(stranger.data_key).decode()
     wrong_key_session = await client.post(
-        "/api/processing/sessions", headers=emu.headers, json={"data_key": stranger_key_b64},
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": stranger_key_b64},
     )
     assert wrong_key_session.status_code == 201
     recompute = await client.post(
@@ -315,4 +331,6 @@ async def test_insights_blob_is_bound_to_user(client):
     raw = await client.get("/api/insights", headers=emu.headers)
     blob = base64.b64decode(raw.json()["blob"])
     with pytest.raises(crypto.TamperError):
-        crypto.decrypt(emu.data_key, blob, crypto.build_aad("insights", "somebody-else", "patterns"))
+        crypto.decrypt(
+            emu.data_key, blob, crypto.build_aad("insights", "somebody-else", "patterns")
+        )

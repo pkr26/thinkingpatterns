@@ -12,11 +12,12 @@
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { api, setUnauthorizedHandler } from "./api/client";
+import { api, setOriginChangeHandler, setUnauthorizedHandler } from "./api/client";
 import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
+import { clearCrisisDialogStamp } from "./crisisDialog";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
@@ -25,10 +26,14 @@ import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
  *  account switch / account deletion (all of which run signOut). A
  *  different account on the same device never sees it. */
 let stashedDraft: { userId: string; text: string } | null = null;
+/** Sign-out and origin changes intentionally unmount the editor. Its cleanup
+ * must not re-stash plaintext after we just wiped it. A normal 401 lock still
+ * permits a draft restore after the same account re-unlocks. */
+let mayStashDraft = true;
 
 /** Stash an in-progress draft before a vault lock unmounts the editor. */
 export function stashDraft(userId: string, text: string): void {
-  stashedDraft = { userId, text };
+  if (mayStashDraft) stashedDraft = { userId, text };
 }
 
 /** True when a draft is stashed for THIS account (does not consume it). */
@@ -126,6 +131,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // queue flush — not just the Entry screen) locks the vault app-wide;
     // the client invokes this hook before the ApiError reaches the caller.
     setUnauthorizedHandler(() => vault.lock());
+    // An API-origin change is not an ordinary sign-out: it must never call
+    // logout against the old or new server. The API client has already
+    // erased disk credentials before invoking this hook; lock memory and
+    // suppress editor-unmount draft persistence before the new URL lands.
+    setOriginChangeHandler(() => {
+      abortInFlightFlush();
+      mayStashDraft = false;
+      stashedDraft = null;
+      vault.lock();
+      setAuthStatus("loggedOut");
+      setActiveDays(0);
+    });
     api.isLoggedIn().then((logged) => {
       // Stryker disable next-line ConditionalExpression: React 18 made setState on an unmounted component a silent no-op, so skipping the cancelled guard is unobservable
       if (!cancelled) setAuthStatus(logged ? "loggedIn" : "loggedOut");
@@ -162,6 +179,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // Stryker disable next-line BooleanLiteral: React 18 treats a post-unmount setState as a silent no-op, so never marking cancelled is unobservable
       cancelled = true;
       setUnauthorizedHandler(null);
+      setOriginChangeHandler(null);
       // Stryker disable next-line ConditionalExpression: clearTimeout(null) is a documented no-op, so the guard is unobservable
       if (idleTimer.current) clearTimeout(idleTimer.current);
       unsubscribe();
@@ -170,7 +188,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, // Stryker disable next-line ArrayDeclaration: touchActivity is a stable useCallback([]) identity, so [] and [touchActivity] are behaviorally identical
      [touchActivity]);
 
-  const markLoggedIn = useCallback((): void => setAuthStatus("loggedIn"),
+  const markLoggedIn = useCallback((): void => {
+    mayStashDraft = true;
+    setAuthStatus("loggedIn");
+  },
   // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
   []);
 
@@ -200,10 +221,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // offline: the token also dies at natural expiry
     }
-    vault.lock();
     // The stashed draft is plaintext in the JS heap: it must not outlive
     // the session it belongs to (shared-device confidentiality).
+    mayStashDraft = false;
     stashedDraft = null;
+    vault.lock();
     // Local account hygiene (shared-device confidentiality): the cached
     // KDF salt, the offline-unlock proof and the recompute stamp are what
     // let a LATER user of this device interact with the previous account's
@@ -217,6 +239,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     if (userId) {
       await clearRecomputeStamp(userId).catch(() => {});
       await clearUnlockProof(userId).catch(() => {});
+      await clearCrisisDialogStamp(userId).catch(() => {});
     }
     if (username) await api.clearCachedSalt(username).catch(() => {});
     await api.clearSession();

@@ -16,7 +16,7 @@ vi.mock("../src/api/client", () => ({ api: apiMock }));
 // decrypt side is the shipping code.
 const { encryptEntry } = await import("../src/crypto/MindPatternCrypto");
 const { vault } = await import("../src/vault");
-const { buildReadableExport, moodWord } = await import("../src/readableExport");
+const { buildReadableExport, MAX_READABLE_CHARS, moodWord } = await import("../src/readableExport");
 
 const DATA_KEY = Buffer.alloc(32, 7);
 const USER = "user-1";
@@ -62,6 +62,21 @@ describe("buildReadableExport", () => {
     expect(out.skippedCount).toBe(1);
     expect(out.markdown).toContain("1 entry could not be decrypted");
     expect(out.markdown).not.toContain("garbage");
+  });
+
+  it("caps a valid oversized journal deterministically before the share sheet", async () => {
+    const oversized = "x".repeat(MAX_READABLE_CHARS);
+    apiMock.listEntries.mockResolvedValue([
+      { id: "1", client_entry_id: "e1", blob: encryptedEntry(oversized, "2026-09-01", null, "e1"), entry_date: "2026-09-01", received_at: "x" },
+    ]);
+
+    const out = await buildReadableExport();
+
+    expect(out.entryCount).toBe(0);
+    expect(out.skippedCount).toBe(0);
+    expect(out.truncatedCount).toBe(1);
+    expect(out.markdown.length).toBeLessThanOrEqual(MAX_READABLE_CHARS);
+    expect(out.markdown).toContain("1 entry omitted to keep this export under 4 MB");
   });
 
   it("fails loudly without a user id (never exports an empty shell)", async () => {

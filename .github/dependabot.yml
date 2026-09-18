@@ -1,6 +1,6 @@
 # Dependabot: weekly bumps for every ecosystem this repo pins.
-# Runtime Python versions are exact-pinned in backend/requirements.lock.txt
-# and are load-bearing (the suite verifies against that exact set) — review
+# Runtime and CI Python closures are hash-pinned in backend/requirements*.lock.txt
+# and are load-bearing (the suite verifies against those exact sets) — review
 # pip PRs against a full local test run, not just CI green.
 version: 2
 updates:
@@ -8,14 +8,22 @@ updates:
     directory: /backend
     schedule:
       interval: weekly
-    # requirements.lock.txt is the operative file; pyproject.toml carries
-    # ranges. Group minor/patch noise into one PR.
+    # requirements.in / requirements.dev.in are the reviewable sources;
+    # regenerate both hash locks after accepting a Dependabot update.
     groups:
       python-deps:
         update-types: ["minor", "patch"]
 
   - package-ecosystem: npm
     directory: /mobile
+    schedule:
+      interval: weekly
+    groups:
+      npm-deps:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /portal
     schedule:
       interval: weekly
     groups:
@@ -32,5 +40,10 @@ updates:
   # docker-compose.yml is bumped manually (comment there explains how).
   - package-ecosystem: docker
     directory: /backend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /backup
     schedule:
       interval: weekly

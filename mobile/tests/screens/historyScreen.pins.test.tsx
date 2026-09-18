@@ -36,8 +36,8 @@ import {
 } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
-  const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  const { makeApiMock, ApiError, ENTRY_PAGE_BYTES } = await import("../helpers/apiMock");
+  return { ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
 });
 
 const touchActivity = vi.fn();
@@ -670,7 +670,7 @@ describe("HistoryScreen pins: edit semantics", () => {
     await pressLabel(root, "Save changes");
     await flush();
     expect(Alert.alert).not.toHaveBeenCalled();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
     expect(textOf(root)).toContain("Updated ✓");
     await act(async () => {
       root.unmount();
@@ -684,15 +684,14 @@ describe("HistoryScreen pins: edit semantics", () => {
     await openEditor(root, "original words");
     await pressLabel(root, "Save changes");
     await flush();
-    expect(api.deleteEntry).not.toHaveBeenCalled();
-    expect(api.createEntry).not.toHaveBeenCalled();
+    expect(api.updateEntry).not.toHaveBeenCalled();
     expect(textOf(root)).toContain("Edit this entry");
   });
 
   it("while the replacement is in flight the editor is not editable", async () => {
     oneEntry();
-    let resolveDelete!: (v: unknown) => void;
-    vi.mocked(api.deleteEntry).mockImplementation(() => new Promise((resolve) => (resolveDelete = resolve)));
+    let resolveUpdate!: (v: unknown) => void;
+    vi.mocked(api.updateEntry).mockImplementation(() => new Promise((resolve) => (resolveUpdate = resolve)));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     await openEditor(root, "original words");
@@ -704,7 +703,7 @@ describe("HistoryScreen pins: edit semantics", () => {
     expect(theEditor(root).props.editable).toBe(false);
     expect(touchableByLabel(root, "Cancel").props.accessibilityState).toEqual({ disabled: true });
     await act(async () => {
-      resolveDelete({});
+      resolveUpdate({});
     });
     await flush();
     await act(async () => {
@@ -741,7 +740,7 @@ describe("HistoryScreen pins: edit semantics", () => {
 
   it("a failed edit resets the busy state — the editor unlocks and a retry completes", async () => {
     oneEntry();
-    vi.mocked(api.deleteEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.updateEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     await openEditor(root, "original words");
@@ -753,10 +752,10 @@ describe("HistoryScreen pins: edit semantics", () => {
     expect(theEditor(root).props.editable).toBe(true);
     expect(touchableByLabel(root, "Cancel").props.accessibilityState).toEqual({ disabled: false });
     // …and busyRef cleared too: the network heals and the retry goes through.
-    vi.mocked(api.deleteEntry).mockResolvedValue({} as never);
+    vi.mocked(api.updateEntry).mockResolvedValue({} as never);
     await pressLabel(root, "Save changes");
     await flush();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.updateEntry).toHaveBeenCalledTimes(2);
     expect(textOf(root)).toContain("Updated ✓");
     await act(async () => {
       root.unmount();

@@ -17,11 +17,37 @@ import { vault } from "./vault";
 
 /** Same share-sheet ceiling as the encrypted export. */
 export const MAX_READABLE_CHARS = 4_000_000;
+/** Leave room for the fixed, locally generated header and a final newline.
+ * This makes the content budget strict without repeatedly joining a nearly
+ * four-megabyte array just to discover it is too large. The final defensive
+ * trim below remains the authority if the header ever grows. */
+const HEADER_RESERVE_CHARS = 512;
+const ENTRY_SEPARATOR = "\n\n---\n\n";
 
 export interface ReadableExport {
   markdown: string;
   entryCount: number;
+  /** Ciphertexts that could not be authenticated/decrypted. */
   skippedCount: number;
+  /** Valid entries deliberately left out once the share-sheet cap is hit. */
+  truncatedCount: number;
+}
+
+function plural(count: number, singular: string, pluralForm: string): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
+function renderMarkdown(parts: readonly string[], skipped: number, truncated: number, now: Date): string {
+  const notes = [
+    skipped > 0 ? `${plural(skipped, "entry", "entries")} could not be decrypted` : "",
+    truncated > 0 ? `${plural(truncated, "entry", "entries")} omitted to keep this export under 4 MB` : "",
+  ].filter(Boolean);
+  const header =
+    `# MindPattern journal\n\nExported ${now.toISOString().slice(0, 10)} · ` +
+    `${plural(parts.length, "entry", "entries")}` +
+    (notes.length > 0 ? ` · ${notes.join(" · ")}` : "") +
+    `\n\n_Decrypted on this device. Observations only — never a diagnosis._\n`;
+  return `${header}\n${parts.join(ENTRY_SEPARATOR)}\n`;
 }
 
 /** Mood-tag words for the optional per-entry line (matches MOOD_OPTIONS
@@ -47,27 +73,46 @@ export async function buildReadableExport(now = new Date()): Promise<ReadableExp
   const ordered = [...rows].reverse();
   const parts: string[] = [];
   let skipped = 0;
-  for (const row of ordered) {
+  let truncated = 0;
+  let contentLength = 0;
+  for (const [index, row] of ordered.entries()) {
     try {
       const payload = decryptEntry(keys, userId, row.client_entry_id, row.blob);
       const text = typeof payload.text === "string" ? payload.text.trim() : "";
       if (!text && !row.entry_date) continue;
       const mood = moodWord(payload.sentiment);
-      parts.push(
-        `## ${row.entry_date || "undated"}\n\n${text || "_(empty entry)_"}${mood ? `\n\n_mood: ${mood}_` : ""}`,
-      );
+      const part =
+        `## ${row.entry_date || "undated"}\n\n${text || "_(empty entry)_"}${mood ? `\n\n_mood: ${mood}_` : ""}`;
+      const separatorLength = parts.length === 0 ? 0 : ENTRY_SEPARATOR.length;
+      // Preserve the oldest-first ordering rather than producing a
+      // surprising sparse chronology. Once one valid entry will not fit,
+      // count it and every remaining row as omitted without decrypting or
+      // allocating more plaintext.
+      if (contentLength + separatorLength + part.length > MAX_READABLE_CHARS - HEADER_RESERVE_CHARS) {
+        truncated += ordered.length - index;
+        break;
+      }
+      parts.push(part);
+      contentLength += separatorLength + part.length;
     } catch {
       skipped += 1;
     }
   }
-  const header =
-    `# MindPattern journal\n\nExported ${now.toISOString().slice(0, 10)} · ` +
-    `${parts.length} ${parts.length === 1 ? "entry" : "entries"}` +
-    (skipped > 0 ? ` · ${skipped} ${skipped === 1 ? "entry could" : "entries could"} not be decrypted` : "") +
-    `\n\n_Decrypted on this device. Observations only — never a diagnosis._\n`;
+  let markdown = renderMarkdown(parts, skipped, truncated, now);
+  // The reserve above is deliberately generous, but this remains a
+  // fail-closed size boundary if header copy is ever expanded.
+  while (markdown.length > MAX_READABLE_CHARS && parts.length > 0) {
+    parts.pop();
+    truncated += 1;
+    markdown = renderMarkdown(parts, skipped, truncated, now);
+  }
+  if (markdown.length > MAX_READABLE_CHARS) {
+    throw new Error("readable export header exceeds the safe share-sheet limit");
+  }
   return {
-    markdown: `${header}\n${parts.join("\n\n---\n\n")}\n`,
+    markdown,
     entryCount: parts.length,
     skippedCount: skipped,
+    truncatedCount: truncated,
   };
 }

@@ -5,7 +5,17 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, LargeBinary, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -29,18 +39,31 @@ class UTCDateTime(TypeDecorator):
     SQLite has no tz-aware storage: aiosqlite returns NAIVE datetimes for a
     DateTime(timezone=True) column while asyncpg returns tz-aware ones, so
     API responses (entry received_at, insight created_at) would serialize
-    differently per backend. Every value written here comes from utcnow(),
-    so attaching UTC on load is normalization, not a guess. Binds are
-    untouched — Postgres behavior is exactly as before.
+    differently per backend. Normalize aware binds to UTC *before* SQLite
+    drops their offset: otherwise ``12:00+05:30`` comes back as ``12:00Z``
+    (a different instant). Naive legacy values retain the historical
+    interpretation as UTC, and every result is returned as aware UTC.
     """
 
     impl = DateTime(timezone=True)
     cache_ok = True
 
-    def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
-        if value is not None and value.tzinfo is None:
+    def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            # Existing application writes have always been utcnow(). Treat a
+            # manually supplied naive value the same way rather than changing
+            # its meaning only on one database dialect.
             return value.replace(tzinfo=timezone.utc)
-        return value
+        return value.astimezone(timezone.utc)
+
+    def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -81,6 +104,19 @@ class User(Base):
     # Bumped on logout: stateless HMAC tokens embed the epoch they were issued
     # under, so one integer per account is a full revocation list.
     token_epoch: Mapped[int] = mapped_column(default=1)
+    # Optimistic snapshot markers for offset-paginated opaque collections.
+    # Every successful entry mutation atomically advances entries_revision;
+    # a therapist's successful note mutation atomically advances
+    # notes_revision.  They deliberately live on the owning account rather
+    # than on each row so a continuation can cheaply prove its collection did
+    # not move between requests.  BigInteger keeps the canonical wire token
+    # safely within a signed 64-bit decimal on both supported databases.
+    entries_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    notes_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     # Per-user explicit opt-in before any journal text is sent to the
     # third-party LLM endpoint (MINDPATTERN_LLM_URL). Off by default.
     llm_consent: Mapped[bool] = mapped_column(default=False)
@@ -90,6 +126,11 @@ class User(Base):
     # both cleared on withdrawal — NULL means "no consent record".
     llm_consent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     llm_consent_disclosure: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Fingerprint of the exact third-party processing policy (endpoint,
+    # provider, model, retention declaration and policy version) the user
+    # accepted. A runtime provider/policy change makes old consent inert
+    # until the user explicitly re-consents.
+    llm_consent_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Entry(Base):
@@ -97,6 +138,10 @@ class Entry(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "client_entry_id", name="uq_user_client_entry"),
         Index("ix_entries_user_date", "user_id", "entry_date"),
+        # Account export keysets on immutable receipt time rather than the
+        # editable entry_date.  This index keeps that stable traversal from
+        # re-sorting a whole account on every short-lived export page.
+        Index("ix_entries_user_received_id", "user_id", "received_at", "id"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -116,6 +161,19 @@ class Insight(Base):
         # conflict under it — SQL NULLs are distinct — those stay
         # delete-then-insert under the per-user recompute lock.
         UniqueConstraint("user_id", "kind", "for_date", name="uq_insights_user_kind_date"),
+        # SQL NULLs are distinct under the constraint above. Patterns and
+        # brain state intentionally use NULL ``for_date``, so a partial
+        # unique index is the database-level backstop that ensures one
+        # current undated row per (user, kind), even outside the in-process
+        # recompute lock (maintenance scripts, future topology changes, ...).
+        Index(
+            "uq_insights_user_kind_undated",
+            "user_id",
+            "kind",
+            unique=True,
+            sqlite_where=text("for_date IS NULL"),
+            postgresql_where=text("for_date IS NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -175,7 +233,14 @@ class PairingCode(Base):
     not turn unconsumed codes into grants."""
 
     __tablename__ = "pairing_codes"
-    __table_args__ = (Index("ix_pairing_codes_hash", "code_hash"),)
+    __table_args__ = (
+        # The HMAC digest is the authoritative identity of a live pairing
+        # code. Without this constraint, the creation path's IntegrityError
+        # retry was dead code and a rare collision could resolve to another
+        # therapist's latest row.
+        UniqueConstraint("code_hash", name="uq_pairing_codes_code_hash"),
+        Index("ix_pairing_codes_expires_at", "expires_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     therapist_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
@@ -200,6 +265,13 @@ class TherapistNote(Base):
     __table_args__ = (
         UniqueConstraint("therapist_id", "client_note_id", name="uq_notes_therapist_client"),
         Index("ix_notes_therapist_patient", "therapist_id", "user_id"),
+        Index(
+            "ix_notes_therapist_patient_created",
+            "therapist_id",
+            "user_id",
+            "created_at",
+            "id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -229,6 +301,9 @@ class AccessLog(Base):
     __table_args__ = (
         Index("ix_access_log_actor", "actor_id", "at"),
         Index("ix_access_log_user", "user_id", "at"),
+        # Retention sweeps are time-leading DELETEs; actor/user-leading
+        # indexes cannot efficiently find the oldest rows globally.
+        Index("ix_access_log_at", "at"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)

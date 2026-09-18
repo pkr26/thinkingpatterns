@@ -2,11 +2,7 @@
 # The ruff version here (v0.16.6) is the same one CI pins and the config in
 # backend/pyproject.toml was verified against.
 #
-# Heads-up on ruff-format: the tree is not yet format-clean (46 files would
-# reformat under ruff 0.16.6 defaults). The hook only touches files you
-# actually stage, but the first time you touch an unformatted file the diff
-# will include its reformatting. A one-time `ruff format backend/` commit is
-# the deliberate way to adopt it — then ruff format --check can join CI.
+# The backend is format-clean under the same Ruff version CI enforces.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.6

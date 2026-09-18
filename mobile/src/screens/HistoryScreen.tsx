@@ -13,12 +13,10 @@
  * require connectivity and say so when there is none. Deleting is a calm
  * double confirmation.
  *
- * Entries are immutable server-side (a re-upload 409s), so EDITING means
- * replacing: the old entry is deleted and the updated text goes up under a
- * fresh id — same date, the day's chosen mood preserved. The delete runs
- * FIRST so a failed replacement can never leave two copies; if the create
- * then fails, the text stays in the editor and a retry skips the
- * already-done delete (404 = the goal state).
+ * Editing uses the server's atomic replacement endpoint. The client entry id
+ * stays stable and the old ciphertext is never deleted until the replacement
+ * transaction commits, so a transient network failure cannot erase a journal
+ * entry.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -35,14 +33,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, ENTRY_PAGE_BYTES } from "../api/client";
 import { decryptEntry, encryptEntry } from "../crypto/MindPatternCrypto";
 import { MoodCalendar } from "../components/MoodCalendar";
 import { filterEntries } from "../historyFind";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { recordMood, recentMoods } from "../moodLog";
-import { newClientEntryId } from "../entryId";
 import { localSentiment, moodLabel } from "../mood";
 import { useTheme } from "../theme";
 import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
@@ -51,11 +48,19 @@ import { requestFailureCopy } from "../components/errors";
 
 /** History reveals in calm batches instead of one endless scroll. */
 const PAGE_SIZE = 50;
+/** One request's item-count ceiling; the server also applies a 2 MiB blob cap. */
+const SERVER_PAGE_SIZE = 100;
+/** Keep manual history loading genuinely bounded: at most 500 ciphertext
+ * rows / five requests can become decrypted plaintext in this screen. */
+const MAX_HISTORY_SERVER_PAGES = 5;
+const MAX_HISTORY_ROWS = SERVER_PAGE_SIZE * MAX_HISTORY_SERVER_PAGES;
 const SNIPPET_CHARS = 140;
 /** Same payload cap as the Entry screen. */
 const MAX_ENTRY_CHARS = 100_000;
 const SHOW_COUNT_ABOVE = 90_000;
 const STATUS_MS = 2_600;
+const SNAPSHOT_RELOAD_STATUS =
+  "Your journal changed while older entries were loading. Reloading the latest history from the start.";
 
 interface HistoryEntry {
   clientEntryId: string;
@@ -107,6 +112,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const [error, setError] = useState<string | null>(null);
   const [unreadable, setUnreadable] = useState(0);
   const [shown, setShown] = useState(PAGE_SIZE);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [historyLimitReached, setHistoryLimitReached] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [logMoods, setLogMoods] = useState<Record<string, number>>({});
   /** Search + calendar filter (2026-09-17): plain-text query and a tapped
    *  calendar day narrow the DECRYPTED on-device list — neither leaves the
@@ -123,6 +132,23 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   // Double-tap guard: two presses inside one frame both pass a state-only
   // check (the Entry screen's savingRef pattern) — the ref is synchronous.
   const busyRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  /** Synchronous guard for a stale native tap while a fresh page-one request
+   * is pending. State alone is batched, so it cannot protect that window. */
+  const historyReloadingRef = useRef(false);
+  // These are mutable mirrors of the history cap. State updates are batched,
+  // so refs close the brief post-response window where a rapid extra tap
+  // could otherwise start a sixth request before the disabled UI commits.
+  const loadedServerPagesRef = useRef(0);
+  const loadedCiphertextRowsRef = useRef(0);
+  const historyLimitRef = useRef(false);
+  /** A modern server gives every page in one history walk the same strict
+   * decimal revision. Null means the connected (older) server is headerless
+   * and we intentionally use the established pagination fallback. */
+  const entriesRevisionRef = useRef<string | null>(null);
+  /** Invalidates an older load-more response when a full reload begins, so a
+   * stale page can never be appended to a freshly restarted snapshot. */
+  const historyLoadEpochRef = useRef(0);
 
   /** Transient confirmation ("Entry deleted"); replaces itself cleanly. */
   const showStatus = (message: string, tone: InlineStatusTone) => {
@@ -132,14 +158,45 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     statusTimer.current = setTimeout(() => setStatus(null), STATUS_MS);
   };
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (afterRevisionConflict = false) => {
+    const loadEpoch = ++historyLoadEpochRef.current;
+    // Initial pages deliberately do not carry expected_revision: they obtain
+    // the snapshot token for this walk. A legacy server returns no token.
+    entriesRevisionRef.current = null;
+    historyReloadingRef.current = true;
     setLoading(true);
     setError(null);
     setOffline(false);
+    // An initial request replaces the paging walk. Hide its old continuation
+    // synchronously so it cannot append to the new page-one snapshot.
+    setNextOffset(null);
+    setHasMore(false);
+    setHistoryLimitReached(false);
+    loadedServerPagesRef.current = 0;
+    loadedCiphertextRowsRef.current = 0;
+    historyLimitRef.current = false;
+    if (afterRevisionConflict) {
+      // Never retain a mixture of the old and new snapshot while the restart
+      // is in flight. The person sees an explicit status below rather than a
+      // plausible-looking but incomplete journal.
+      setEntries([]);
+      setUnreadable(0);
+      setShown(PAGE_SIZE);
+      setQuery("");
+      setDayFilter(null);
+      setLogMoods({});
+    }
     try {
       const userId = await api.getUserId();
+      if (loadEpoch !== historyLoadEpochRef.current) return;
       if (!userId) throw new Error("account id missing — sign in again");
-      const rows = await api.listEntries();
+      const page = await api.listEntriesPage({
+        limit: SERVER_PAGE_SIZE,
+        offset: 0,
+        pageBytes: ENTRY_PAGE_BYTES,
+      });
+      if (loadEpoch !== historyLoadEpochRef.current) return;
+      const rows = page.entries;
       const decrypted: HistoryEntry[] = [];
       let failed = 0;
       for (const row of rows) {
@@ -163,28 +220,48 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       setEntries(decrypted);
       setUnreadable(failed);
       setShown(PAGE_SIZE);
+      setNextOffset(page.nextOffset);
+      setHasMore(page.nextOffset !== null);
+      entriesRevisionRef.current = page.revision ?? null;
+      loadedServerPagesRef.current = 1;
+      loadedCiphertextRowsRef.current = rows.length;
+      historyLimitRef.current = page.nextOffset !== null && rows.length >= MAX_HISTORY_ROWS;
+      setHistoryLimitReached(historyLimitRef.current);
       setQuery("");
       setDayFilter(null);
       // Badge fallback: entries saved before the check-in existed carry no
       // payload mood, but the device-local log usually has the day's value.
       try {
         const days = await recentMoods(vault.get().dataKey, userId, 400);
+        if (loadEpoch !== historyLoadEpochRef.current) return;
         const map: Record<string, number> = {};
         for (const day of days) map[day.date] = day.value;
         setLogMoods(map);
       } catch {
-        setLogMoods({});
+        if (loadEpoch === historyLoadEpochRef.current) setLogMoods({});
       }
     } catch (err) {
+      if (loadEpoch !== historyLoadEpochRef.current) return;
+      entriesRevisionRef.current = null;
       if (err instanceof ApiError && err.status === 0) {
         // No connection: an honest explanation beats a fake-empty list.
         setOffline(true);
         setEntries([]);
+        setHasMore(false);
+        loadedServerPagesRef.current = 0;
+        loadedCiphertextRowsRef.current = 0;
+        historyLimitRef.current = false;
+        setHistoryLimitReached(false);
+      } else if (err instanceof ApiError && err.status === 409) {
+        setError("Your journal changed while it was loading. Try again to reload the latest history.");
       } else {
         setError(requestFailureCopy(err));
       }
     } finally {
-      setLoading(false);
+      if (loadEpoch === historyLoadEpochRef.current) {
+        historyReloadingRef.current = false;
+        setLoading(false);
+      }
     }
     }, // Stryker disable next-line ArrayDeclaration: the literal dep never changes between renders and the callback closes over no render-scope values, so identity and behavior are identical
      []);
@@ -245,6 +322,100 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       removeBack();
     };
   }, [mode.kind, navigation]);
+
+  /** Fetch another bounded page only when the person explicitly asks. Search
+   * and calendar labels below make clear that they cover downloaded history,
+   * rather than silently decrypting a whole account in the background. */
+  const loadOlder = async () => {
+    if (historyReloadingRef.current || loadingMoreRef.current || !hasMore || nextOffset === null) return;
+    const remainingRows = MAX_HISTORY_ROWS - loadedCiphertextRowsRef.current;
+    if (
+      historyLimitRef.current ||
+      loadedServerPagesRef.current >= MAX_HISTORY_SERVER_PAGES ||
+      remainingRows <= 0
+    ) {
+      historyLimitRef.current = true;
+      setHistoryLimitReached(true);
+      return;
+    }
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const loadEpoch = historyLoadEpochRef.current;
+    const expectedRevision = entriesRevisionRef.current;
+    try {
+      const userId = await api.getUserId();
+      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!userId) throw new Error("account id missing — sign in again");
+      const offset = nextOffset;
+      const page = await api.listEntriesPage({
+        limit: Math.min(SERVER_PAGE_SIZE, remainingRows),
+        offset,
+        pageBytes: ENTRY_PAGE_BYTES,
+        ...(expectedRevision === null ? {} : { expectedRevision }),
+      });
+      if (loadEpoch !== historyLoadEpochRef.current) return;
+      const receivedRevision = page.revision ?? null;
+      if (
+        (expectedRevision === null && receivedRevision !== null) ||
+        (expectedRevision !== null && receivedRevision !== expectedRevision)
+      ) {
+        // The page client normally catches this first. Retain a UI-level
+        // guard so a future alternate client/mock cannot append a page from a
+        // different snapshot (including a mixed legacy/modern deployment).
+        showStatus(SNAPSHOT_RELOAD_STATUS, "neutral");
+        void load(true);
+        return;
+      }
+      const rows = page.entries;
+      const incoming: HistoryEntry[] = [];
+      let failed = 0;
+      for (const row of rows) {
+        try {
+          const payload = decryptEntry(vault.get(), userId, row.client_entry_id, row.blob);
+          incoming.push({
+            clientEntryId: row.client_entry_id,
+            entryDate: typeof row.entry_date === "string" ? row.entry_date : "",
+            receivedAt: typeof row.received_at === "string" ? row.received_at : "",
+            text: typeof payload.text === "string" ? payload.text : "",
+            sentiment: sanitizeSentiment(payload.sentiment),
+          });
+        } catch {
+          failed += 1;
+        }
+      }
+      setEntries((previous) => {
+        const byId = new Map(previous.map((entry) => [entry.clientEntryId, entry]));
+        for (const entry of incoming) byId.set(entry.clientEntryId, entry);
+        return [...byId.values()].sort((a, b) => b.entryDate.localeCompare(a.entryDate) || b.receivedAt.localeCompare(a.receivedAt));
+      });
+      setUnreadable((previous) => previous + failed);
+      setNextOffset(page.nextOffset);
+      setHasMore(page.nextOffset !== null);
+      entriesRevisionRef.current = receivedRevision;
+      const nextPageCount = loadedServerPagesRef.current + 1;
+      const nextRowCount = loadedCiphertextRowsRef.current + rows.length;
+      loadedServerPagesRef.current = nextPageCount;
+      loadedCiphertextRowsRef.current = nextRowCount;
+      historyLimitRef.current =
+        page.nextOffset !== null &&
+        (nextPageCount >= MAX_HISTORY_SERVER_PAGES || nextRowCount >= MAX_HISTORY_ROWS);
+      setHistoryLimitReached(historyLimitRef.current);
+      // Reveal the just loaded rows, rather than making a second tap feel
+      // like nothing happened.
+      setShown((previous) => previous + SERVER_PAGE_SIZE);
+    } catch (err) {
+      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (err instanceof ApiError && err.status === 409) {
+        showStatus(SNAPSHOT_RELOAD_STATUS, "neutral");
+        void load(true);
+      } else {
+        Alert.alert("Could not load older entries", requestFailureCopy(err));
+      }
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  };
 
   /** Badge value: the entry's own check-in pick first, the mood log's day
    *  value as fallback; undefined = no badge (never a verdict). */
@@ -330,44 +501,27 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         Alert.alert("Session damaged", "Account id missing — please sign in again. Your text is still on screen.");
         return;
       }
-      // Replace step 1: the old entry goes. 404 means a previous attempt
-      // already did this — the goal state — so the save simply proceeds.
+      // The same id is deliberately retained: it is part of the ciphertext
+      // AAD, and the backend replaces this one record atomically.
+      const { blobB64 } = encryptEntry(vault.get(), userId, entry.clientEntryId, trimmed, entry.entryDate, entry.sentiment);
       try {
-        await api.deleteEntry(entry.clientEntryId);
+        await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate);
       } catch (err) {
-        if (err instanceof ApiError && err.status === 404) {
-          // already removed — continue to the create
-        } else if (err instanceof ApiError && err.status === 0) {
+        if (err instanceof ApiError && err.status === 0) {
           Alert.alert(
             "Needs a connection",
-            "Updating replaces the entry on the server, so it can't run offline. Connect and try again — nothing was changed.",
+            "Updating needs a connection. Your original entry and this text are both still safe; try again when connected.",
           );
-          return;
         } else {
-          Alert.alert("Could not update", requestFailureCopy(err));
-          return;
+          Alert.alert("Could not update", `${requestFailureCopy(err)} Your original entry is unchanged and this text is still on screen.`);
         }
-      }
-      // Replace step 2: the update goes up as a NEW entry under a fresh id
-      // (entries are immutable server-side) — same date, same chosen mood.
-      const newId = newClientEntryId(entry.entryDate);
-      const { blobB64 } = encryptEntry(vault.get(), userId, newId, trimmed, entry.entryDate, entry.sentiment);
-      try {
-        await api.createEntry(newId, blobB64, entry.entryDate);
-      } catch (err) {
-        // The old version is gone and the new one is not saved — say exactly
-        // that, and keep the text in the editor so a retry finishes the job.
-        Alert.alert(
-          "Old version removed — update not saved",
-          `${requestFailureCopy(err)} Your text is still on this screen; try again to finish.`,
-        );
         return;
       }
       // Keep the device-local mood log in step with the day's newest text.
       void recordMood(vault.get().dataKey, userId, entry.entryDate, entry.sentiment ?? localSentiment(trimmed)).catch(
         () => {},
       );
-      const updated: HistoryEntry = { ...entry, clientEntryId: newId, text: trimmed };
+      const updated: HistoryEntry = { ...entry, text: trimmed };
       setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
       setMode({ kind: "detail", entry: updated });
       showStatus("Updated ✓", "ok");
@@ -480,8 +634,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   }
 
   // The list the user sees: search + tapped-day filters applied to the
-  // decrypted list, in display order. Computed per render — the corpus is
-  // bounded by the account's own entries.
+  // decrypted list, in display order. It is intentionally bounded by the
+  // pages the person chose to load; plaintext history is not bulk-loaded.
   const visibleEntries = filterEntries(
     dayFilter !== null ? entries.filter((e) => e.entryDate === dayFilter) : entries,
     query,
@@ -567,6 +721,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
               {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"} match
               {dayFilter !== null ? ` · ${dayFilter}` : ""}
               {query.trim() !== "" ? " · search" : ""}
+              {hasMore ? " · loaded history only" : ""}
             </Text>
           )}
         </>
@@ -596,6 +751,20 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             setShown(shown + PAGE_SIZE);
           }}
         />
+      )}
+      {visibleEntries.length <= shown && hasMore && !historyLimitReached && query.trim() === "" && dayFilter === null && (
+        <GhostButton
+          label={loadingMore ? "Loading older entries…" : "Load older entries"}
+          onPress={() => void loadOlder()}
+          disabled={loadingMore}
+          accessibilityLabel="Load older encrypted journal entries"
+        />
+      )}
+      {historyLimitReached && hasMore && (
+        <Text accessibilityRole="alert" style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
+          This history view has reached its safe download limit ({MAX_HISTORY_ROWS} entries or {MAX_HISTORY_SERVER_PAGES} pages).
+          More encrypted history remains on the server.
+        </Text>
       )}
       {!loading && !offline && !error && entries.length > 0 && visibleEntries.length === 0 && (
         <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize, textAlign: "center" }}>

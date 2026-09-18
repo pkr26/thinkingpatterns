@@ -62,6 +62,19 @@ class EntryCreate(BaseModel):
     entry_date: date
 
 
+class EntryReplace(BaseModel):
+    """Atomic replacement payload for an existing entry.
+
+    The client entry id remains in the path (and therefore remains part of
+    the ciphertext AAD); allowing it to change would turn an edit into a
+    delete/create sequence with the same data-loss failure mode this route
+    exists to remove.
+    """
+
+    blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+    entry_date: date
+
+
 class EntryOut(BaseModel):
     id: str
     client_entry_id: str
@@ -109,10 +122,18 @@ class LlmConsentRequest(BaseModel):
 
 class LlmConsentResponse(BaseModel):
     enabled: bool
+    # `enabled` records the user's historic choice. This separate field is
+    # false when the configured third-party policy changed, so a UI never
+    # implies that a stale choice still authorizes new plaintext egress.
+    active_for_current_policy: bool = False
     # GDPR Art. 7 record (additive): when consent was given and against
     # which disclosure version. Both null while consent is off.
     llm_consent_at: datetime | None = None
     llm_consent_disclosure: str | None = None
+    # Opaque SHA-256 fingerprint of the provider/endpoint/model/retention
+    # terms accepted by the account. It lets clients detect that consent is
+    # stale after an operator changes third-party processing.
+    llm_consent_policy: str | None = None
 
 
 class MetaResponse(BaseModel):
@@ -123,6 +144,12 @@ class MetaResponse(BaseModel):
     api_version: str  # "v1" — the canonical mount is /api/v1 (/api is legacy)
     unlock_days: int
     llm_available: bool
+    llm_provider_name: str | None = None
+    llm_data_retention: str | None = None
+    llm_policy_fingerprint: str | None = None
+    sharing_available: bool = False
+    sharing_disclosure_version: str | None = None
+    sharing_access_log_retention_days: int | None = None
 
 
 class InsightsResponse(BaseModel):
@@ -158,6 +185,7 @@ class ExportBundle(BaseModel):
     # Same Art. 7 record as the consent endpoint (additive; null when off).
     llm_consent_at: datetime | None = None
     llm_consent_disclosure: str | None = None
+    llm_consent_policy: str | None = None
     # Sharing records (metadata only — no wrapped keys; they are useless
     # without the therapist's private key anyway). Additive: old bundles
     # predate sharing and decrypt unchanged.

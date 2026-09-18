@@ -22,17 +22,24 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hmac
 import os
 from datetime import date as date_type, timedelta
 
-from fastapi import APIRouter, Depends, Header, Query, Request
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
 from ..db import rowcount as db_rowcount
-from ..deps import ApiError, get_session, require_therapist
+from ..deps import ApiError, get_session, require_sharing_enabled, require_therapist
+from ..locks import (
+    UserLocks,
+    sharing_locks,
+    sharing_patient_lock_key,
+    sharing_therapist_lock_key,
+)
 from ..models import AccessLog, Consent, Entry, PairingCode, TherapistNote, User, new_id, utcnow
 from ..schemas import (
     InsightsResponse,
@@ -52,10 +59,23 @@ from ..security.crypto import MIN_BLOB_SIZE
 from ..security.tokens import issue_token
 from ..services import threshold
 from .account import _require_verifier
-from .auth import SALT_BYTES, AUTH_KEY_SIZE, _auth_limiter, hash_verifier_off_loop
+from .auth import SALT_BYTES, AUTH_KEY_SIZE, _auth_limiter, auth_work_slot, hash_verifier_off_loop
+from .consents import MAX_PATIENTS_PER_THERAPIST
+from .entries import (
+    ENTRIES_REVISION_HEADER,
+    MAX_COLLECTION_REVISION,
+    _blob_length as _entry_blob_length,
+    assert_expected_revision,
+    collection_changed_error,
+    current_entries_revision,
+    parse_expected_revision,
+)
 from .insights import _entry_dates, _latest_insight
 
-router = APIRouter(prefix="/therapist", tags=["therapist"])
+router = APIRouter(
+    prefix="/therapist",
+    tags=["therapist"],
+)
 
 # How long a pairing code lives (single-use). Generated fresh per attempt;
 # the portal displays it, the patient types it.
@@ -69,14 +89,75 @@ PAIRING_RETENTION = timedelta(days=1)
 # deletion still never touches them — they simply live out their window).
 ACCESS_LOG_RETENTION = timedelta(days=730)
 
+# Notes are encrypted but still attacker-controlled storage. Keep one
+# therapist/patient chart bounded independently of the journal quota so a
+# compromised clinician session cannot turn a patient relationship into an
+# unbounded database/response allocation. These values deliberately leave
+# ample room for ordinary longitudinal notes (~32 MiB / 1,000 records).
+MAX_NOTES_PER_PATIENT = 1_000
+MAX_NOTE_BYTES_PER_PATIENT = 32 * 1024 * 1024
+NOTES_PAGE_SIZE = 100
+# Count pagination alone still permits a page of 100 near-maximum encrypted
+# notes (over 100 MiB of raw ciphertext).  Bound a response independently of
+# the chart-storage quota.  This is deliberately above one accepted note, so
+# a valid single note can always be retrieved rather than making a chart
+# unrecoverable after a limit change.
+NOTES_PAGE_BLOB_BYTES = 2 * 1024 * 1024
 
-def access_log_prune_statement(now):
+_note_locks = UserLocks()
+MAX_PAIRING_CODE_ATTEMPTS = 5
+
+# Therapist evidence is decrypted in a browser tab.  Unlike the patient's
+# sync client, a portal drill-down must never materialize the account's full
+# journal in one JSON response.  The byte budget applies to stored ciphertext
+# before base64/JSON expansion, and the endpoint fetches blob values only
+# after a small metadata page has passed both limits.
+THERAPIST_ENTRY_PAGE_SIZE = 25
+THERAPIST_ENTRY_RESPONSE_BLOB_BYTES = 2 * 1024 * 1024
+NOTES_REVISION_HEADER = "X-Notes-Revision"
+
+
+async def _current_notes_revision(session: AsyncSession, therapist_id: str) -> int:
+    """Load the therapist-global note snapshot marker.
+
+    A global marker intentionally invalidates a continuation when the same
+    therapist changes a different chart: it is conservative, but it avoids
+    lost increments across independently locked patient charts.
+    """
+    revision = await session.scalar(select(User.notes_revision).where(User.id == therapist_id))
+    if revision is None:
+        raise collection_changed_error("notes", NOTES_REVISION_HEADER)
+    return int(revision)
+
+
+async def _increment_notes_revision(session: AsyncSession, therapist: User) -> int:
+    """Atomically advance the therapist-global note marker with a write."""
+    result = await session.execute(
+        update(User)
+        .where(User.id == therapist.id, User.notes_revision < MAX_COLLECTION_REVISION)
+        .values(notes_revision=User.notes_revision + 1)
+    )
+    if db_rowcount(result) != 1:
+        # Keep a note mutation and its marker indivisible: an unmarked write
+        # would allow an offset continuation to silently drift.
+        raise ApiError(
+            status_code=503,
+            detail="unable to advance notes revision; retry shortly",
+            code="service_unavailable",
+            headers={"Retry-After": "1"},
+        )
+    await session.refresh(therapist, attribute_names=["notes_revision"])
+    return therapist.notes_revision
+
+
+def access_log_prune_statement(now, retention_days: int = ACCESS_LOG_RETENTION.days):
     """DELETE for audit rows past the retention window. THE one statement
     for both call sites — the opportunistic prune in POST /therapist/
     pairing-codes below and the lifespan's daily sweep (main.py): a
     steady-state deployment creates no pairing codes, so the endpoint
     alone never prunes and the table grows unbounded."""
-    return delete(AccessLog).where(AccessLog.at < now - ACCESS_LOG_RETENTION)
+    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days))
+
 
 MAX_WRAP_KEY_BLOB_BYTES = 1024  # b64 cap mirrors schemas; decoded bound
 
@@ -92,6 +173,15 @@ def _decode_b64(value: str, what: str) -> bytes:
         ) from None
 
 
+def _is_unique_violation(exc: IntegrityError) -> bool:
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    if getattr(orig, "pgcode", None) == "23505" or getattr(orig, "sqlstate", None) == "23505":
+        return True
+    return "unique" in str(orig).lower()
+
+
 def _audit(session: AsyncSession, actor: User, user_id: str, action: str) -> None:
     session.add(AccessLog(actor_id=actor.id, actor_role=actor.role, user_id=user_id, action=action))
 
@@ -104,11 +194,15 @@ def _audit(session: AsyncSession, actor: User, user_id: str, action: str) -> Non
     response_model=TokenResponse,
     status_code=201,
     dependencies=[
-        Depends(make_rate_limiter("therapist-register", "auth_rate_limit", "auth_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-register", "auth_rate_limit", "auth_rate_window")),
     ],
 )
 async def register_therapist(
-    body: TherapistRegisterRequest, request: Request, session: AsyncSession = Depends(get_session)
+    body: TherapistRegisterRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    x_therapist_enrollment_token: str | None = Header(default=None),
 ):
     """Therapist account creation. Same key schedule and enumeration
     posture as patient registration (hash first, per-username failure
@@ -118,6 +212,17 @@ async def register_therapist(
     unwrap) and the PRIVATE key as a password-encrypted blob the server
     stores but cannot open."""
     settings = request.app.state.settings
+    # In non-development deployments, sharing can only be explicitly enabled
+    # with a controlled enrollment secret (Settings rejects an enabled
+    # production feature without one). This is an operator provisioning gate,
+    # not a claim that a free-form display name proves clinical credentials.
+    expected_enrollment = settings.therapist_enrollment_token.strip()
+    if expected_enrollment:
+        provided_enrollment = (
+            x_therapist_enrollment_token if isinstance(x_therapist_enrollment_token, str) else ""
+        )
+        if not hmac.compare_digest(provided_enrollment.encode(), expected_enrollment.encode()):
+            raise ApiError(status_code=404, detail="not found", code="not_found")
     username_key = f"register-name:{body.username}"
     check_keyed_limit_without_count(
         request, username_key, settings.auth_rate_limit, settings.auth_rate_window
@@ -154,9 +259,10 @@ async def register_therapist(
         )
 
     scrypt_server_salt = os.urandom(16)
-    verifier_hash = await hash_verifier_off_loop(
-        verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
-    )
+    async with auth_work_slot(request):
+        verifier_hash = await hash_verifier_off_loop(
+            verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
+        )
     existing = await session.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none() is not None:
         record_keyed_failure(request, username_key, settings.auth_rate_window)
@@ -195,7 +301,8 @@ async def register_therapist(
     "/me",
     response_model=TherapistMeResponse,
     dependencies=[
-        Depends(make_rate_limiter("therapist-me", "read_rate_limit", "read_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-me", "read_rate_limit", "read_rate_window")),
     ],
 )
 async def therapist_me(
@@ -236,8 +343,11 @@ async def delete_therapist_account(
             code="validation_error",
         )
     await _require_verifier(user, verifier, request)
-    await session.execute(delete(User).where(User.id == user.id))
-    await session.commit()
+    # Therapist content reads and grants take this lock first, so a deletion
+    # cannot commit between their consent decision and response assembly.
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        await session.execute(delete(User).where(User.id == user.id))
+        await session.commit()
 
 
 # --- pairing ------------------------------------------------------------------
@@ -248,7 +358,8 @@ async def delete_therapist_account(
     response_model=PairingCodeResponse,
     status_code=201,
     dependencies=[
-        Depends(make_rate_limiter("pairing-create", "auth_rate_limit", "auth_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("pairing-create", "auth_rate_limit", "auth_rate_window")),
     ],
 )
 async def create_pairing_code(
@@ -267,25 +378,34 @@ async def create_pairing_code(
     # records-process window; time-based only (account deletion NEVER
     # cascade-deletes audit rows — that property is what lets a trail
     # outlive the account for its full retention period).
-    await session.execute(access_log_prune_statement(now))
-    code = sharing.generate_pairing_code()
-    row = PairingCode(
-        therapist_id=user.id,
-        code_hash=sharing.pairing_code_digest(code, request.app.state.settings.token_secret),
-        created_at=now,
-        expires_at=now + timedelta(seconds=PAIRING_TTL_SECONDS),
+    await session.execute(
+        access_log_prune_statement(now, request.app.state.settings.access_log_retention_days)
     )
-    session.add(row)
-    try:
-        await session.commit()
-    except IntegrityError as exc:
-        # Astronomically unlikely (fixed-window counter makes sustained
-        # generation cheap to throttle); still refuse rather than retry-loop.
-        await session.rollback()
-        raise ApiError(
-            status_code=409, detail="pairing code collision, try again", code="conflict"
-        ) from exc
-    return PairingCodeResponse(code=code, expires_in=PAIRING_TTL_SECONDS)
+    for _ in range(MAX_PAIRING_CODE_ATTEMPTS):
+        code = sharing.generate_pairing_code()
+        row = PairingCode(
+            therapist_id=user.id,
+            code_hash=sharing.pairing_code_digest(code, request.app.state.settings.token_secret),
+            created_at=now,
+            expires_at=now + timedelta(seconds=PAIRING_TTL_SECONDS),
+        )
+        session.add(row)
+        try:
+            await session.commit()
+            return PairingCodeResponse(code=code, expires_in=PAIRING_TTL_SECONDS)
+        except IntegrityError as exc:
+            await session.rollback()
+            if not _is_unique_violation(exc):
+                raise
+            # The database constraint is the authority across sessions and
+            # hosts. Draw again; this is bounded so a broken RNG/mock cannot
+            # turn a request into an endless DB retry loop.
+    raise ApiError(
+        status_code=503,
+        detail="unable to allocate a unique pairing code; retry shortly",
+        code="service_unavailable",
+        headers={"Retry-After": "1"},
+    )
 
 
 # --- patient reads ------------------------------------------------------------
@@ -317,40 +437,77 @@ async def _active_consent(session: AsyncSession, therapist: User, user_id: str) 
     "/patients",
     response_model=list[PatientOut],
     dependencies=[
-        Depends(make_rate_limiter("therapist-patients", "read_rate_limit", "read_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-patients", "read_rate_limit", "read_rate_window")),
     ],
 )
 async def list_patients(
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
 ):
-    rows = (
-        await session.execute(
-            select(Consent, User)
-            .join(User, Consent.user_id == User.id)
-            .where(Consent.therapist_id == user.id)
-            .order_by(Consent.granted_at.desc())
-        )
-    ).all()
     out: list[PatientOut] = []
-    for consent, patient in rows:
-        active = consent.status == "active"
-        out.append(
-            PatientOut(
-                user_id=patient.id,
-                username=patient.username,
-                status=consent.status,
-                granted_at=consent.granted_at,
-                revoked_at=consent.revoked_at,
-                # Key material only while the grant lives.
-                ephemeral_pub=consent.ephemeral_pub if active else None,
-                wrapped_key=(
-                    base64.b64encode(bytes(consent.wrapped_key)).decode("ascii")
-                    if active and consent.wrapped_key is not None
-                    else None
-                ),
+    # A list includes each active grant's wrapped data key.  Take the same
+    # therapist->patient order as content reads and re-read each pair under
+    # its patient fence; otherwise a revoke could clear the key just after a
+    # bulk SELECT but before this endpoint returns it.
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        patient_ids = (
+            (
+                await session.execute(
+                    select(Consent.user_id)
+                    .where(Consent.therapist_id == user.id)
+                    .order_by(Consent.granted_at.desc(), Consent.id.desc())
+                    # Keep the complete-list contract the portal currently
+                    # consumes. Standard grants cap this relationship; an
+                    # imported legacy caseload beyond that cap fails loudly
+                    # rather than producing a plausible-but-truncated list.
+                    .limit(MAX_PATIENTS_PER_THERAPIST + 1)
+                )
             )
+            .scalars()
+            .all()
         )
+        if len(patient_ids) > MAX_PATIENTS_PER_THERAPIST:
+            raise ApiError(
+                status_code=413,
+                detail="patient list exceeds the supported caseload size",
+                code="payload_too_large",
+            )
+        await session.commit()
+        for patient_id in patient_ids:
+            async with sharing_locks.hold(sharing_patient_lock_key(patient_id)):
+                row = (
+                    await session.execute(
+                        select(Consent, User)
+                        .join(User, Consent.user_id == User.id)
+                        .where(Consent.therapist_id == user.id, Consent.user_id == patient_id)
+                        .execution_options(populate_existing=True)
+                    )
+                ).first()
+                if row is None:
+                    # A concurrent account deletion can remove the pair
+                    # between the ID list and its per-patient fence.
+                    await session.commit()
+                    continue
+                consent, patient = row
+                active = consent.status == "active"
+                out.append(
+                    PatientOut(
+                        user_id=patient.id,
+                        username=patient.username,
+                        status=consent.status,
+                        granted_at=consent.granted_at,
+                        revoked_at=consent.revoked_at,
+                        # Key material only while the grant lives.
+                        ephemeral_pub=consent.ephemeral_pub if active else None,
+                        wrapped_key=(
+                            base64.b64encode(bytes(consent.wrapped_key)).decode("ascii")
+                            if active and consent.wrapped_key is not None
+                            else None
+                        ),
+                    )
+                )
+                await session.commit()
     return out
 
 
@@ -358,7 +515,8 @@ async def list_patients(
     "/patients/{user_id}/insights",
     response_model=InsightsResponse,
     dependencies=[
-        Depends(make_rate_limiter("therapist-insights", "read_rate_limit", "read_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-insights", "read_rate_limit", "read_rate_window")),
     ],
 )
 async def read_patient_insights(
@@ -370,64 +528,201 @@ async def read_patient_insights(
     """The patient's pattern view — byte-identical shape to the patient's
     own GET /insights (threshold summary + encrypted patterns blob), so
     the portal decrypts with the same AAD path the mobile app uses."""
-    consent = await _active_consent(session, user, user_id)
-    _audit(session, user, consent.user_id, "read_insights")
-    rows = await _entry_dates(session, consent.user_id)
-    state = threshold.evaluate(rows, request.app.state.settings.unlock_threshold_days)
-    latest = await _latest_insight(session, consent.user_id, "patterns")
-    await session.commit()  # the audit row
-    # Phase-gated like the patient's own GET /insights (2026-09-17 audit):
-    # a stored blob from the account's insight phase must not keep being
-    # served if entry deletions dropped it back into baseline.
-    blob = (
-        base64.b64encode(bytes(latest.blob)).decode("ascii")
-        if latest and state.phase is threshold.Phase.INSIGHT
-        else None
-    )
-    return InsightsResponse(
-        phase=state.phase.value,
-        active_days=state.active_days,
-        streak=state.streak,
-        days_remaining=state.days_remaining,
-        blob=blob,
-    )
+    if len(user_id) > 32:
+        raise ApiError(status_code=404, detail="patient not found", code="not_found")
+    # Consent revocation must serialize with the entire read decision and
+    # response construction, not merely with the initial SELECT.  The
+    # therapist key also fences therapist-account deletion.  Every path that
+    # takes both sharing locks uses this fixed order to avoid lock cycles.
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
+            consent = await _active_consent(session, user, user_id)
+            _audit(session, user, consent.user_id, "read_insights")
+            rows = await _entry_dates(session, consent.user_id)
+            state = threshold.evaluate(rows, request.app.state.settings.unlock_threshold_days)
+            latest = await _latest_insight(session, consent.user_id, "patterns")
+            # Phase-gated like the patient's own GET /insights (2026-09-17
+            # audit): a stored blob from the account's insight phase must not
+            # keep being served if entry deletions dropped it back into
+            # baseline.
+            blob = (
+                base64.b64encode(bytes(latest.blob)).decode("ascii")
+                if latest and state.phase is threshold.Phase.INSIGHT
+                else None
+            )
+            response = InsightsResponse(
+                phase=state.phase.value,
+                active_days=state.active_days,
+                streak=state.streak,
+                days_remaining=state.days_remaining,
+                blob=blob,
+            )
+            await session.commit()  # the audit row
+    return response
 
 
 @router.get(
     "/patients/{user_id}/entries",
     response_model=list[EntryOut],
     dependencies=[
-        Depends(make_rate_limiter("therapist-entries", "read_rate_limit", "read_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-entries", "read_rate_limit", "read_rate_window")),
     ],
 )
 async def read_patient_entries(
     user_id: str,
+    response: Response,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
     since: date_type | None = Query(default=None),
     until: date_type | None = Query(default=None),
     offset: int = Query(default=0, ge=0, le=100_000),
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=THERAPIST_ENTRY_PAGE_SIZE, ge=1, le=THERAPIST_ENTRY_PAGE_SIZE),
+    page_bytes: int | None = Query(
+        default=None,
+        ge=1,
+        le=THERAPIST_ENTRY_RESPONSE_BLOB_BYTES,
+    ),
+    expected_revision: str | None = None,
 ):
     """The patient's entries, paginated, with an ``until`` bound the
     patient endpoint never needed (the drill-down fetches a pattern's
-    evidence window, not the whole journal). Same wire shape and ordering
-    as the patient's own list."""
-    consent = await _active_consent(session, user, user_id)
-    _audit(session, user, consent.user_id, "read_entries")
-    query = select(Entry).where(Entry.user_id == consent.user_id)
-    if since is not None:
-        query = query.where(Entry.entry_date >= since)
-    if until is not None:
-        query = query.where(Entry.entry_date <= until)
-    query = (
-        query.order_by(Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc())
-        .offset(offset)
-        .limit(limit)
-    )
-    rows = (await session.execute(query)).scalars().all()
-    await session.commit()  # the audit row
-    return [entry_out(row) for row in rows]
+    evidence window, not the whole journal).
+
+    ``page_bytes`` is explicit modern-client opt-in to byte-truncated pages
+    and ``X-Next-Offset``. Without it an older portal gets a clear 413 if its
+    (already 25-row-capped) request would exceed the hard budget rather than
+    silently ignoring a short page and losing later evidence.
+    """
+    expected = parse_expected_revision(expected_revision)
+    if len(user_id) > 32:
+        raise ApiError(status_code=404, detail="patient not found", code="not_found")
+    result: list[EntryOut] = []
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
+            consent = await _active_consent(session, user, user_id)
+            revision = await current_entries_revision(session, consent.user_id)
+            assert_expected_revision(
+                expected,
+                revision,
+                collection="entries",
+                header_name=ENTRIES_REVISION_HEADER,
+            )
+            _audit(session, user, consent.user_id, "read_entries")
+            # Fetch ids + byte lengths first. This stays bounded at 26 tiny
+            # metadata rows rather than loading the former 500 full blobs;
+            # only entries that fit the response budget are fetched below.
+            query = select(Entry.id, _entry_blob_length(session).label("size")).where(
+                Entry.user_id == consent.user_id
+            )
+            if since is not None:
+                query = query.where(Entry.entry_date >= since)
+            if until is not None:
+                query = query.where(Entry.entry_date <= until)
+            metadata = (
+                await session.execute(
+                    query.order_by(Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc())
+                    .offset(offset)
+                    # One extra metadata row tells the portal whether it
+                    # must follow a cursor without inferring from page
+                    # length.
+                    .limit(limit + 1)
+                )
+            ).all()
+            requested = [(str(row_id), int(raw_size)) for row_id, raw_size in metadata[:limit]]
+            selected: list[tuple[str, int]]
+            if page_bytes is None:
+                selected = requested
+                if sum(size for _, size in selected) > THERAPIST_ENTRY_RESPONSE_BLOB_BYTES:
+                    raise ApiError(
+                        status_code=413,
+                        detail=(
+                            "requested evidence page exceeds the 2 MiB ciphertext budget; "
+                            "upgrade to a byte-paginating portal"
+                        ),
+                        code="payload_too_large",
+                    )
+            else:
+                selected = []
+                used_bytes = 0
+                for row_id, size in requested:
+                    if size > page_bytes:
+                        # Never make an oversized/corrupt first row look like
+                        # an empty completed page. A real portal retries with
+                        # its fixed 2 MiB budget, so this is only possible for
+                        # an explicit smaller request or legacy bad data.
+                        if not selected:
+                            raise ApiError(
+                                status_code=413,
+                                detail="an evidence entry exceeds the requested page byte budget",
+                                code="payload_too_large",
+                            )
+                        break
+                    if used_bytes + size > page_bytes:
+                        break
+                    selected.append((row_id, size))
+                    used_bytes += size
+
+            selected_ids = [row_id for row_id, _ in selected]
+            rows: list[Entry] = []
+            if selected_ids:
+                rows = list(
+                    (
+                        await session.execute(
+                            select(Entry).where(
+                                Entry.user_id == consent.user_id,
+                                Entry.id.in_(selected_ids),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                rows_by_id = {row.id: row for row in rows}
+                if len(rows_by_id) != len(selected_ids):
+                    # A second worker changed the page after its metadata
+                    # sizing pass. Do not manufacture a cursor that skips or
+                    # repeats evidence; a retry receives a fresh page.
+                    raise ApiError(
+                        status_code=409,
+                        detail="entries changed while paging; retry the request",
+                        code="conflict",
+                    )
+                rows = [rows_by_id[row_id] for row_id in selected_ids]
+                # The normal deployment is single-process and entry writes
+                # are serialized there. This is still a defensive backstop
+                # for a misconfigured multi-worker deployment: never emit a
+                # page that grew after metadata selection.
+                byte_limit = (
+                    page_bytes if page_bytes is not None else THERAPIST_ENTRY_RESPONSE_BLOB_BYTES
+                )
+                if sum(len(bytes(row.blob)) for row in rows) > byte_limit:
+                    raise ApiError(
+                        status_code=409,
+                        detail="entries changed while paging; retry the request",
+                        code="conflict",
+                    )
+
+            has_more = len(selected) < len(requested) or len(metadata) > limit
+            if has_more and rows:
+                # Contract consumed by the portal: a decimal, strictly
+                # progressing offset equal to rows actually returned. An
+                # absent header is the sole end-of-results signal.
+                response.headers["X-Next-Offset"] = str(offset + len(rows))
+            # Base64 conversion is response construction too. Keep it inside
+            # the consent fence; once the lock opens a revoke may return, and
+            # this request must not newly materialize journal bytes from an
+            # already-loaded ORM row after that linearization point.
+            result = [entry_out(row) for row in rows]
+            final_revision = await current_entries_revision(session, consent.user_id)
+            if final_revision != revision:
+                raise collection_changed_error("entries", ENTRIES_REVISION_HEADER, final_revision)
+            # Successful pages always expose their snapshot, including empty
+            # and terminal pages, so a caller never needs to infer it from a
+            # continuation header.
+            response.headers[ENTRIES_REVISION_HEADER] = str(revision)
+            await session.commit()  # the audit row
+    return result
 
 
 # --- notes --------------------------------------------------------------------
@@ -467,33 +762,196 @@ def _note_out(row: TherapistNote) -> NoteOut:
     )
 
 
+def _note_blob_length(session: AsyncSession):
+    if session.bind.dialect.name == "postgresql":
+        return func.octet_length(TherapistNote.blob)
+    return func.length(TherapistNote.blob)
+
+
+async def _assert_note_quota(
+    session: AsyncSession,
+    therapist_id: str,
+    patient_id: str,
+    incoming: int,
+    *,
+    previous_size: int = 0,
+    is_new: bool,
+) -> None:
+    """Check a per-chart count + ciphertext budget under the chart lock."""
+    count, total = (
+        await session.execute(
+            select(
+                func.count(TherapistNote.id),
+                func.coalesce(func.sum(_note_blob_length(session)), 0),
+            ).where(
+                TherapistNote.therapist_id == therapist_id,
+                TherapistNote.user_id == patient_id,
+            )
+        )
+    ).one()
+    if is_new and int(count) >= MAX_NOTES_PER_PATIENT:
+        raise ApiError(
+            status_code=413,
+            detail=f"note storage quota reached ({MAX_NOTES_PER_PATIENT} notes)",
+            code="quota_exceeded",
+        )
+    if int(total) - previous_size + incoming > MAX_NOTE_BYTES_PER_PATIENT:
+        raise ApiError(
+            status_code=413,
+            detail="note storage quota reached (total size)",
+            code="blob_quota_exceeded",
+        )
+
+
+def _decode_note_blob(value: str) -> bytes:
+    blob = _decode_b64(value, "blob")
+    if len(blob) < MIN_BLOB_SIZE:
+        raise ApiError(
+            status_code=422,
+            detail=f"blob must be at least {MIN_BLOB_SIZE} bytes",
+            code="validation_error",
+        )
+    return blob
+
+
 @router.get(
     "/patients/{user_id}/notes",
     response_model=list[NoteOut],
     dependencies=[
-        Depends(make_rate_limiter("therapist-notes-read", "read_rate_limit", "read_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-notes-read", "read_rate_limit", "read_rate_window")),
     ],
 )
 async def list_notes(
     user_id: str,
+    response: Response,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
+    offset: int = Query(default=0, ge=0, le=100_000),
+    limit: int = Query(default=NOTES_PAGE_SIZE, ge=1, le=NOTES_PAGE_SIZE),
+    page_bytes: int | None = Query(default=None, ge=1, le=NOTES_PAGE_BLOB_BYTES),
+    expected_revision: str | None = None,
 ):
+    expected = parse_expected_revision(expected_revision)
+    # Resolve the chart before waiting for its lock, then release the pooled
+    # connection.  Re-check under that lock below: account/consent state may
+    # have changed while this request was queued.
     patient_id = await _note_target(session, user, user_id)
-    _audit(session, user, patient_id, "read_notes")
-    rows = (
-        (
-            await session.execute(
-                select(TherapistNote)
-                .where(TherapistNote.therapist_id == user.id, TherapistNote.user_id == patient_id)
-                .order_by(TherapistNote.created_at.asc(), TherapistNote.id.asc())
-            )
+    await session.commit()
+
+    # Existing deployed portals use ``len(rows) < limit`` as their end
+    # signal.  Byte-truncating every request would make one of those clients
+    # silently omit later notes.  A modern client explicitly opts in with
+    # page_bytes; legacy requests instead fail loudly if their full requested
+    # page would exceed the safe response budget.
+    byte_limit = page_bytes if page_bytes is not None else NOTES_PAGE_BLOB_BYTES
+    async with _note_locks.hold(f"notes:{user.id}:{patient_id}"):
+        patient_id = await _note_target(session, user, user_id)
+        revision = await _current_notes_revision(session, user.id)
+        assert_expected_revision(
+            expected,
+            revision,
+            collection="notes",
+            header_name=NOTES_REVISION_HEADER,
         )
-        .scalars()
-        .all()
-    )
-    await session.commit()  # the audit row
-    return [_note_out(row) for row in rows]
+        _audit(session, user, patient_id, "read_notes")
+        # Do the first, bounded query without materializing ciphertext.  The
+        # previous ``limit + 1`` query fetched up to 101 note blobs before it
+        # could paginate; a chart within its 32 MiB storage quota could
+        # therefore make one ordinary read allocate and serialize roughly
+        # 43 MiB of base64 JSON.  Select ids and sizes first, then fetch only
+        # rows the caller can safely receive.
+        candidate_rows = (
+            await session.execute(
+                select(TherapistNote.id, _note_blob_length(session).label("size"))
+                .where(
+                    TherapistNote.therapist_id == user.id,
+                    TherapistNote.user_id == patient_id,
+                )
+                .order_by(TherapistNote.created_at.asc(), TherapistNote.id.asc())
+                # One extra *metadata* row tells the caller whether the
+                # count bound has more data without materializing a whole
+                # encrypted chart.
+                .offset(offset)
+                .limit(limit + 1)
+            )
+        ).all()
+
+        # The extra metadata row is continuation evidence only.  Never let it
+        # become a 101st returned row when all blobs happen to fit the byte
+        # cap.
+        requested_rows = candidate_rows[:limit]
+        selected_ids: list[str] = []
+        used_blob_bytes = 0
+        more = len(candidate_rows) > limit
+        for note_id, size in requested_rows:
+            # Application writes always have a non-null blob.  Treat a
+            # malformed legacy row conservatively as empty for pagination
+            # rather than raising a 500 while rendering a therapist's own
+            # record.
+            blob_bytes = int(size or 0)
+            if blob_bytes > byte_limit:
+                raise ApiError(
+                    status_code=413,
+                    detail="stored note exceeds the response size limit",
+                    code="payload_too_large",
+                )
+            if used_blob_bytes + blob_bytes > byte_limit:
+                if page_bytes is None:
+                    raise ApiError(
+                        status_code=413,
+                        detail="note page exceeds the response size limit; update the portal",
+                        code="payload_too_large",
+                    )
+                more = True
+                break
+            selected_ids.append(note_id)
+            used_blob_bytes += blob_bytes
+
+        rows: list[TherapistNote] = []
+        if selected_ids:
+            rows = list(
+                (
+                    await session.execute(
+                        select(TherapistNote)
+                        .where(
+                            TherapistNote.therapist_id == user.id,
+                            TherapistNote.id.in_(selected_ids),
+                        )
+                        .order_by(TherapistNote.created_at.asc(), TherapistNote.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            # Normal writes hold this same chart lock.  A missing/changed row
+            # therefore signals a bypassed deployment invariant rather than a
+            # reason to return a short page that an old client mistakes for
+            # complete history.
+            if {row.id for row in rows} != set(selected_ids) or sum(
+                len(bytes(row.blob)) for row in rows
+            ) > byte_limit:
+                raise ApiError(
+                    status_code=409,
+                    detail="notes changed while paging; retry the request",
+                    code="conflict",
+                )
+        # Serialize the opaque blob while the chart fence is still held.
+        # Returning ORM rows and letting FastAPI/model conversion access
+        # ``row.blob`` after this scope would reopen the same mutation window
+        # that the metadata/blob consistency check above deliberately closes.
+        out = [_note_out(row) for row in rows]
+        final_revision = await _current_notes_revision(session, user.id)
+        if final_revision != revision:
+            raise collection_changed_error("notes", NOTES_REVISION_HEADER, final_revision)
+        response.headers[NOTES_REVISION_HEADER] = str(revision)
+        await session.commit()  # the audit row
+    # Modern byte-bounded pages always advance exactly by materialized rows.
+    # The chart lock/mismatch check above turns a bypassed write invariant
+    # into a retryable conflict instead of an ambiguous end-of-history signal.
+    if more and rows:
+        response.headers["X-Next-Offset"] = str(offset + len(rows))
+    return out
 
 
 @router.post(
@@ -501,9 +959,10 @@ async def list_notes(
     response_model=NoteOut,
     status_code=201,
     dependencies=[
+        Depends(require_sharing_enabled),
         Depends(
             make_rate_limiter("therapist-notes-write", "entries_rate_limit", "entries_rate_window")
-        )
+        ),
     ],
 )
 async def create_note(
@@ -513,63 +972,88 @@ async def create_note(
     session: AsyncSession = Depends(get_session),
 ):
     patient_id = await _note_target(session, user, user_id)
-    blob = _decode_b64(body.blob, "blob")
-    existing = (
-        (
-            await session.execute(
-                select(TherapistNote).where(
-                    TherapistNote.therapist_id == user.id,
-                    TherapistNote.client_note_id == body.client_note_id,
+    blob = _decode_note_blob(body.blob)
+    async with _note_locks.hold(f"notes:{user.id}:{patient_id}"):
+        existing = (
+            (
+                await session.execute(
+                    select(TherapistNote).where(
+                        TherapistNote.therapist_id == user.id,
+                        TherapistNote.client_note_id == body.client_note_id,
+                    )
                 )
             )
+            .scalars()
+            .first()
         )
-        .scalars()
-        .first()
-    )
-    if existing is not None:
-        # Idempotent retry of an offline queue: rewrite in place (the
-        # patient's entries do the same on client_entry_id conflicts).
-        # Patient-scoped (2026-09-17 audit): the idempotency key is
-        # (therapist, client_note_id) — reusing an id for a DIFFERENT
-        # patient must not silently rewrite the first patient's note; that
-        # is a client bug and answers a conflict, loudly.
-        if existing.user_id != patient_id:
-            raise ApiError(
-                status_code=409,
-                detail="note id already used for another patient",
-                code="conflict",
+        if existing is not None:
+            # Idempotent retry of an offline queue: rewrite in place (the
+            # patient's entries do the same on client_entry_id conflicts).
+            # Patient-scoped (2026-09-17 audit): the idempotency key is
+            # (therapist, client_note_id) — reusing an id for a DIFFERENT
+            # patient must not silently rewrite the first patient's note; that
+            # is a client bug and answers a conflict, loudly.
+            if existing.user_id != patient_id:
+                raise ApiError(
+                    status_code=409,
+                    detail="note id already used for another patient",
+                    code="conflict",
+                )
+            await _assert_note_quota(
+                session,
+                user.id,
+                patient_id,
+                len(blob),
+                previous_size=len(bytes(existing.blob)),
+                is_new=False,
             )
-        existing.blob = blob
-        existing.pattern_pid = body.pattern_pid
-        existing.updated_at = utcnow()
-        row = existing
-    else:
-        row = TherapistNote(
-            id=new_id(),
-            therapist_id=user.id,
-            user_id=patient_id,
-            client_note_id=body.client_note_id,
-            pattern_pid=body.pattern_pid,
-            blob=blob,
-        )
-        session.add(row)
-    _audit(session, user, patient_id, "write_note")
-    try:
+            changed = bytes(existing.blob) != blob or existing.pattern_pid != body.pattern_pid
+            if changed:
+                existing.blob = blob
+                existing.pattern_pid = body.pattern_pid
+                existing.updated_at = utcnow()
+            row = existing
+        else:
+            await _assert_note_quota(session, user.id, patient_id, len(blob), is_new=True)
+            row = TherapistNote(
+                id=new_id(),
+                therapist_id=user.id,
+                user_id=patient_id,
+                client_note_id=body.client_note_id,
+                pattern_pid=body.pattern_pid,
+                blob=blob,
+            )
+            session.add(row)
+            changed = True
+        _audit(session, user, patient_id, "write_note")
+        try:
+            if changed:
+                # The note and global therapist marker commit together. Note
+                # charts use different locks, so this must be a database-side
+                # increment rather than ``user.notes_revision += 1``.
+                await _increment_notes_revision(session, user)
+            await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            raise ApiError(status_code=409, detail="note already exists", code="conflict") from exc
+        # A concurrent update/delete uses this same chart fence.  Refresh and
+        # construct the response before opening it, so a successful write
+        # cannot turn into a stale-row error (or serialize changed data) in
+        # the small gap after its commit.
+        await session.refresh(row)
+        response = _note_out(row)
         await session.commit()
-    except IntegrityError as exc:
-        await session.rollback()
-        raise ApiError(status_code=409, detail="note already exists", code="conflict") from exc
-    await session.refresh(row)
-    return _note_out(row)
+    return response
 
 
 @router.patch(
     "/notes/{note_id}",
     response_model=NoteOut,
     dependencies=[
+        Depends(require_sharing_enabled),
         Depends(
             make_rate_limiter("therapist-notes-update", "entries_rate_limit", "entries_rate_window")
-        )
+        ),
     ],
 )
 async def update_note(
@@ -591,19 +1075,56 @@ async def update_note(
     )
     if row is None:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
-    row.blob = _decode_b64(body.blob, "blob")
-    row.updated_at = utcnow()
-    _audit(session, user, row.user_id, "update_note")
+    blob = _decode_note_blob(body.blob)
+    # This read establishes the chart key used for serialization; close its
+    # transaction before potentially waiting behind another note update.
     await session.commit()
-    await session.refresh(row)
-    return _note_out(row)
+    async with _note_locks.hold(f"notes:{user.id}:{row.user_id}"):
+        # Re-fetch under the same chart lock: another request may have
+        # deleted the row while this endpoint was waiting to update it.
+        row = (
+            (
+                await session.execute(
+                    select(TherapistNote).where(
+                        TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is None:
+            raise ApiError(status_code=404, detail="note not found", code="not_found")
+        await _assert_note_quota(
+            session,
+            user.id,
+            row.user_id,
+            len(blob),
+            previous_size=len(bytes(row.blob)),
+            is_new=False,
+        )
+        changed = bytes(row.blob) != blob
+        if changed:
+            row.blob = blob
+            row.updated_at = utcnow()
+        _audit(session, user, row.user_id, "update_note")
+        if changed:
+            await _increment_notes_revision(session, user)
+        await session.commit()
+        # Keep the post-commit refresh and base64 conversion inside the same
+        # chart fence as the mutation; delete_note takes this key too.
+        await session.refresh(row)
+        response = _note_out(row)
+        await session.commit()
+    return response
 
 
 @router.delete(
     "/notes/{note_id}",
     status_code=204,
     dependencies=[
-        Depends(make_rate_limiter("therapist-notes-delete", "read_rate_limit", "read_rate_window"))
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-notes-delete", "read_rate_limit", "read_rate_window")),
     ],
 )
 async def delete_note(
@@ -611,11 +1132,42 @@ async def delete_note(
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
 ):
-    result = await session.execute(
-        delete(TherapistNote).where(
-            TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+    # Read the chart identity first, then release the short read transaction
+    # before waiting. Update/delete for one therapist+patient must use the
+    # same serialization key; otherwise a delete can race an updater between
+    # its locked re-fetch and commit and turn a normal stale row into a 500.
+    row = (
+        (
+            await session.execute(
+                select(TherapistNote).where(
+                    TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                )
+            )
         )
+        .scalars()
+        .first()
     )
-    if db_rowcount(result) == 0:
+    if row is None:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
     await session.commit()
+    async with _note_locks.hold(f"notes:{user.id}:{row.user_id}"):
+        # The row may have been removed while this delete waited behind an
+        # update/delete already holding the same chart lock.
+        row = (
+            (
+                await session.execute(
+                    select(TherapistNote).where(
+                        TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is None:
+            raise ApiError(status_code=404, detail="note not found", code="not_found")
+        patient_id = row.user_id
+        await session.delete(row)
+        _audit(session, user, patient_id, "delete_note")
+        await _increment_notes_revision(session, user)
+        await session.commit()

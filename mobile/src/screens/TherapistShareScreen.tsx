@@ -14,7 +14,7 @@
  * that already-read data cannot be unread.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { api, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
@@ -38,14 +38,28 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
   const [pending, setPending] = useState<PendingAction>(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Unknown is rendered as unavailable until the server explicitly opts in;
+   * that prevents an old/misconfigured server from presenting a pairing flow
+   * which will only fail later with a confusing 404/403. */
+  const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
 
   const refresh = useCallback(() => {
-    api.listConsents().then(setConsents).catch(() => {});
+    api.meta()
+      .then((meta) => {
+        const enabled = meta?.sharing_available === true;
+        setSharingAvailable(enabled);
+        if (enabled) api.listConsents().then(setConsents).catch(() => setConsents([]));
+        else setConsents([]);
+      })
+      .catch(() => {
+        setSharingAvailable(false);
+        setConsents([]);
+      });
   }, []);
   useEffect(refresh, [refresh]);
 
   const findTherapist = async () => {
-    if (busy || !code.trim()) return;
+    if (busy || sharingAvailable !== true || !code.trim()) return;
     setBusy(true);
     try {
       const found = await api.pairingLookup(code.trim());
@@ -171,18 +185,29 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
   };
 
   return (
-    <View
+    <ScrollView
       style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxl, gap: 14 }]}
+      contentContainerStyle={{ paddingBottom: t.spacing.xxxl }}
     >
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
 
-      <Text style={themed.label}>Sharing now</Text>
-      {consents.length === 0 && (
+      {sharingAvailable !== true && (
+        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
+          <Text style={[styles.cardTitle, { color: t.colors.text }]}>Therapist sharing unavailable</Text>
+          <Text style={themed.footnote}>
+            This server has not enabled verified clinician sharing. No pairing code or journal data will be sent.
+          </Text>
+          <GhostButton label="Back" center={false} onPress={() => navigation.goBack?.()} />
+        </View>
+      )}
+
+      {sharingAvailable === true && <Text style={themed.label}>Sharing now</Text>}
+      {sharingAvailable === true && consents.length === 0 && (
         <Text style={themed.footnote}>
           You are not sharing with anyone. Your entries stay visible only to you.
         </Text>
       )}
-      {consents.map((consent) => (
+      {sharingAvailable === true && consents.map((consent) => (
         <View
           key={consent.id}
           style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}
@@ -206,7 +231,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         </View>
       ))}
 
-      {!lookup && (
+      {sharingAvailable === true && !lookup && (
         <>
           <Text style={themed.label}>Add your therapist</Text>
           <Text style={themed.footnote}>
@@ -230,7 +255,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         </>
       )}
 
-      {lookup && !pending && (
+      {sharingAvailable === true && lookup && !pending && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={[styles.cardTitle, { color: t.colors.text }]}>{lookup.display_name}</Text>
           <Text style={themed.footnote}>
@@ -255,7 +280,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         </View>
       )}
 
-      {pending && (
+      {sharingAvailable === true && pending && (
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
             {pending.kind === "grant"
@@ -286,7 +311,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
           />
         </View>
       )}
-    </View>
+    </ScrollView>
   );
 }
 

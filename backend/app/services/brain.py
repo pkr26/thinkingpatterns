@@ -98,8 +98,8 @@ MIN_SENTENCE_TOKENS = 4
 
 # --- evidence model ----------------------------------------------------------
 HALF_LIFE_DAYS = 45.0  # recent mentions outweigh old ones; the brain forgets
-EVIDENCE_FULL = 8.0    # decayed mentions that saturate strength
-STRONG_EVIDENCE = 10   # occurrences that may surface on first qualification
+EVIDENCE_FULL = 8.0  # decayed mentions that saturate strength
+STRONG_EVIDENCE = 10  # occurrences that may surface on first qualification
 
 # Statistical claim kinds vs direct-measurement kinds. A statistical claim
 # ("work days read lower", "mood carries over more than usual") can fluke
@@ -112,10 +112,16 @@ STRONG_EVIDENCE = 10   # occurrences that may surface on first qualification
 # is there or it isn't, no null hypothesis to fluke past — so they keep
 # first-qualification surfacing at STRONG_EVIDENCE. The asymmetry is
 # deliberate: replication discipline applies to inference, not to counting.
-STATISTICAL_KINDS = frozenset({
-    "temporal", "mood_correlation", "link", "inertia", "instability",
-    "mood_shift",
-})
+STATISTICAL_KINDS = frozenset(
+    {
+        "temporal",
+        "mood_correlation",
+        "link",
+        "inertia",
+        "instability",
+        "mood_shift",
+    }
+)
 
 # The two flavors of statistical claim, replicated differently (the "2
 # distinct recompute days" bar alone was measured at ~17% false-card rate
@@ -136,7 +142,7 @@ REPLICATION_MIN_SPREAD_DAYS = 2
 # --- statistical gates -------------------------------------------------------
 ALPHA = 0.05
 TEMPORAL_MIN_N = 8
-TEMPORAL_MIN_DAY_K = 4      # per-weekday floor before a weekday is tested at all
+TEMPORAL_MIN_DAY_K = 4  # per-weekday floor before a weekday is tested at all
 TEMPORAL_MIN_FRACTION = 0.35
 # A word in ~every entry is journaling boilerplate ("unique day", "ordinary
 # notes"), not a life topic — presence claims are capped from above too.
@@ -144,38 +150,38 @@ TOPIC_PRESENCE_MAX_SHARE = 0.95
 MOOD_MIN_PER_SIDE = 8
 MOOD_MIN_DELTA = 0.2
 MOOD_MIN_EFFECT = 0.5  # Cohen's d
-MOOD_SD_FLOOR = 0.05   # lexicon mood always carries at least this measurement noise
-LINK_MIN_PER_SIDE = 8   # lagged day-after links: transitions per side
-LINK_MAX_GAP_DAYS = 2   # "next day" survives a one-day skip in journaling
+MOOD_SD_FLOOR = 0.05  # lexicon mood always carries at least this measurement noise
+LINK_MIN_PER_SIDE = 8  # lagged day-after links: transitions per side
+LINK_MAX_GAP_DAYS = 2  # "next day" survives a one-day skip in journaling
 PHRASE_MIN_OCCURRENCES = 3
 PHRASE_MIN_SPAN_DAYS = 7
 PHRASE_MIN_DISTINCT_DAYS = 3
 
 # --- within-person baseline (Bolger & Laurenceau 2013) -------------------------
-BASELINE_HALF_WINDOW = 7   # personal baseline = +/- this many days around a day
+BASELINE_HALF_WINDOW = 7  # personal baseline = +/- this many days around a day
 BASELINE_MIN_NEIGHBORS = 4  # neighbors required before the day itself is excluded
 
 # --- mood dynamics (Kuppens 2010; Houben 2015) ---------------------------------
-INERTIA_MIN_PAIRS = 10       # consecutive-day pairs per window to trust r1
-INERTIA_RECENT_MIN = 0.45    # recent carryover correlation strong enough to mention
-INERTIA_DELTA = 0.25         # ... and risen by this much vs the earlier window
+INERTIA_MIN_PAIRS = 10  # consecutive-day pairs per window to trust r1
+INERTIA_RECENT_MIN = 0.45  # recent carryover correlation strong enough to mention
+INERTIA_DELTA = 0.25  # ... and risen by this much vs the earlier window
 INERTIA_RECENT_DAYS = 28
 INSTABILITY_MIN_DAYS = 10
 INSTABILITY_RECENT_DAYS = 28
 INSTABILITY_SD_FLOOR = 0.12
-INSTABILITY_RATIO = 1.6      # recent spread vs earlier spread
+INSTABILITY_RATIO = 1.6  # recent spread vs earlier spread
 
 # --- rumination (Ehring & Watkins 2008; Al-Mosaiwi & Johnstone 2018) -----------
 RUMINATION_NEGATIVITY_MAX = -0.30  # cluster mean sentiment at or below → a worry
-RUMINATION_MIN_NEGATORS = 2        # ... or non-positive + negation-heavy phrasing
+RUMINATION_MIN_NEGATORS = 2  # ... or non-positive + negation-heavy phrasing
 
 # --- mood trajectory (EWMA control chart, Smit/Schat/Ceulemans 2023) -----------
 MOOD_SHIFT_MIN_DAYS = 21
 MOOD_SHIFT_BASELINE_MIN = 10
-MOOD_SHIFT_LAMBDA = 0.18   # inside the validated 0.05–0.25 band
-MOOD_SHIFT_LIMIT = 2.7     # control-limit multiplier (standard ARL choice)
-MOOD_SHIFT_TAIL = 5        # most recent EWMA points inspected
-MOOD_SHIFT_RUN = 3         # beyond-limit points required in the tail
+MOOD_SHIFT_LAMBDA = 0.18  # inside the validated 0.05–0.25 band
+MOOD_SHIFT_LIMIT = 2.7  # control-limit multiplier (standard ARL choice)
+MOOD_SHIFT_TAIL = 5  # most recent EWMA points inspected
+MOOD_SHIFT_RUN = 3  # beyond-limit points required in the tail
 MOOD_SHIFT_MIN_SHIFT = 0.15
 MOOD_SHIFT_SIGMA_FLOOR = 0.05
 
@@ -186,10 +192,10 @@ MOOD_SHIFT_SIGMA_FLOOR = 0.05
 MOOD_SHIFT_REANCHOR_DAYS = 21
 
 # --- lifecycle ---------------------------------------------------------------
-GRACE_DAYS = 7     # unqualified days before active → fading
+GRACE_DAYS = 7  # unqualified days before active → fading
 ARCHIVE_DAYS = 45  # unqualified days before fading → archived
-DROP_DAYS = 90     # archived patterns are dropped after this
-PROMOTE_AGE_DAYS = 7   # candidate → emerging by age without re-qualification
+DROP_DAYS = 90  # archived patterns are dropped after this
+PROMOTE_AGE_DAYS = 7  # candidate → emerging by age without re-qualification
 CONFIRM_AGE_DAYS = 21  # emerging → confirmed by age
 
 # --- language gate (2026-09-17) ----------------------------------------------------
@@ -205,9 +211,9 @@ CONFIRM_AGE_DAYS = 21  # emerging → confirmed by age
 # still count — they are the user's own report, never a translation
 # guess), and rumination's English negativity classifier steps aside
 # (recurring phrases still surface: repetition is script-independent).
-LANGUAGE_MIN_TOKENS = 50      # too little text to judge a language honestly
-LANGUAGE_HIT_FLOOR = 0.10     # ~10% recognized = English with names/slang;
-                              # Latin-script non-English prose lands ~2-5%
+LANGUAGE_MIN_TOKENS = 50  # too little text to judge a language honestly
+LANGUAGE_HIT_FLOOR = 0.10  # ~10% recognized = English with names/slang;
+# Latin-script non-English prose lands ~2-5%
 
 # --- store bounds --------------------------------------------------------------
 HISTORY_DAYS = 90
@@ -223,38 +229,197 @@ STATE_RANK = {"confirmed": 0, "emerging": 1, "fading": 2}
 
 # --- lexicon (superset of v1: explicit variants + light stemming) ---------------
 THEME_LEXICON: dict[str, tuple[str, ...]] = {
-    "work": ("work", "job", "boss", "deadline", "meeting", "office", "project",
-             "client", "interview", "presentation", "colleague", "shift",
-             "overtime", "career", "manager", "commute", "workload", "email",
-             "promotion", "layoff", "understaffed", "burnout"),
-    "sleep": ("sleep", "insomnia", "tired", "exhausted", "nightmare", "restless",
-              "fatigue", "nap", "awake", "bed", "sleepy", "asleep", "wake",
-              "bedtime", "dream", "sleepless"),
-    "social": ("friend", "party", "social", "lonely", "alone", "gathered",
-               "hangout", "hang", "gather", "isolated", "isolation", "company",
-               "meetup", "connected", "connection"),
-    "family": ("family", "mom", "dad", "mother", "father", "sister", "brother",
-               "parents", "partner", "wife", "husband", "kids", "home", "son",
-               "daughter", "grandma", "grandpa", "grandmother", "grandfather",
-               "uncle", "aunt", "cousin", "marriage", "divorce", "baby",
-               "toddler"),
-    "health": ("health", "gym", "exercise", "workout", "run", "sick", "ill",
-               "doctor", "headache", "pain", "walk", "yoga", "stretch",
-               "medicine", "meds", "migraine", "injury", "dentist", "therapy"),
-    "money": ("money", "bills", "rent", "debt", "salary", "budget", "expensive",
-              "broke", "afford", "save", "loan", "credit", "paycheck", "tax",
-              "overdraft", "insurance", "cheap"),
-    "study": ("school", "exam", "study", "class", "college", "university",
-              "homework", "assignment", "test", "quiz", "lecture", "semester",
-              "thesis", "dissertation", "revision", "teacher", "professor",
-              "grade", "fail"),
-    "food": ("eat", "food", "meal", "cook", "appetite", "hungry", "breakfast",
-             "lunch", "dinner", "snack", "coffee", "tea", "sugar", "junk",
-             "takeaway", "restaurant"),
-    "weather": ("rain", "rainy", "cold", "grey", "gray", "sunny", "storm",
-                "winter", "summer", "weather", "fog", "foggy", "heat", "humid",
-                "wind", "windy", "snow", "snowy", "drizzle", "freezing",
-                "cloud", "cloudy", "autumn"),
+    "work": (
+        "work",
+        "job",
+        "boss",
+        "deadline",
+        "meeting",
+        "office",
+        "project",
+        "client",
+        "interview",
+        "presentation",
+        "colleague",
+        "shift",
+        "overtime",
+        "career",
+        "manager",
+        "commute",
+        "workload",
+        "email",
+        "promotion",
+        "layoff",
+        "understaffed",
+        "burnout",
+    ),
+    "sleep": (
+        "sleep",
+        "insomnia",
+        "tired",
+        "exhausted",
+        "nightmare",
+        "restless",
+        "fatigue",
+        "nap",
+        "awake",
+        "bed",
+        "sleepy",
+        "asleep",
+        "wake",
+        "bedtime",
+        "dream",
+        "sleepless",
+    ),
+    "social": (
+        "friend",
+        "party",
+        "social",
+        "lonely",
+        "alone",
+        "gathered",
+        "hangout",
+        "hang",
+        "gather",
+        "isolated",
+        "isolation",
+        "company",
+        "meetup",
+        "connected",
+        "connection",
+    ),
+    "family": (
+        "family",
+        "mom",
+        "dad",
+        "mother",
+        "father",
+        "sister",
+        "brother",
+        "parents",
+        "partner",
+        "wife",
+        "husband",
+        "kids",
+        "home",
+        "son",
+        "daughter",
+        "grandma",
+        "grandpa",
+        "grandmother",
+        "grandfather",
+        "uncle",
+        "aunt",
+        "cousin",
+        "marriage",
+        "divorce",
+        "baby",
+        "toddler",
+    ),
+    "health": (
+        "health",
+        "gym",
+        "exercise",
+        "workout",
+        "run",
+        "sick",
+        "ill",
+        "doctor",
+        "headache",
+        "pain",
+        "walk",
+        "yoga",
+        "stretch",
+        "medicine",
+        "meds",
+        "migraine",
+        "injury",
+        "dentist",
+        "therapy",
+    ),
+    "money": (
+        "money",
+        "bills",
+        "rent",
+        "debt",
+        "salary",
+        "budget",
+        "expensive",
+        "broke",
+        "afford",
+        "save",
+        "loan",
+        "credit",
+        "paycheck",
+        "tax",
+        "overdraft",
+        "insurance",
+        "cheap",
+    ),
+    "study": (
+        "school",
+        "exam",
+        "study",
+        "class",
+        "college",
+        "university",
+        "homework",
+        "assignment",
+        "test",
+        "quiz",
+        "lecture",
+        "semester",
+        "thesis",
+        "dissertation",
+        "revision",
+        "teacher",
+        "professor",
+        "grade",
+        "fail",
+    ),
+    "food": (
+        "eat",
+        "food",
+        "meal",
+        "cook",
+        "appetite",
+        "hungry",
+        "breakfast",
+        "lunch",
+        "dinner",
+        "snack",
+        "coffee",
+        "tea",
+        "sugar",
+        "junk",
+        "takeaway",
+        "restaurant",
+    ),
+    "weather": (
+        "rain",
+        "rainy",
+        "cold",
+        "grey",
+        "gray",
+        "sunny",
+        "storm",
+        "winter",
+        "summer",
+        "weather",
+        "fog",
+        "foggy",
+        "heat",
+        "humid",
+        "wind",
+        "windy",
+        "snow",
+        "snowy",
+        "drizzle",
+        "freezing",
+        "cloud",
+        "cloudy",
+        "autumn",
+    ),
 }
 THEME_WORDS: dict[str, str] = {
     word: theme for theme, words in THEME_LEXICON.items() for word in words
@@ -280,73 +445,256 @@ from .sentiment_lexicon import EMOJI_VALENCES, VADER_BASE  # noqa: E402
 
 CURATED_SENTIMENT: dict[str, float] = {
     # positive — mild
-    "okay": 0.9, "ok": 0.9, "alright": 0.9, "fine": 0.8, "decent": 1.1,
-    "calm": 1.5, "quiet": 0.6, "settled": 1.2, "steady": 1.0, "neutral": 0.0,
-    "pleasant": 1.9, "mild": 0.4, "gentle": 1.1, "easy": 1.0, "simple": 0.6,
-    "comfortable": 1.6, "content": 1.9, "peaceful": 2.2, "relieved": 1.9,
-    "rested": 1.8, "refreshed": 2.0, "grounded": 1.6, "balanced": 1.3,
-    "accepted": 1.2, "safe": 1.6, "secure": 1.5, "warm": 1.4, "cozy": 1.8,
-    "soft": 0.7, "lighter": 1.4, "bright": 1.5, "clear": 0.9,
+    "okay": 0.9,
+    "ok": 0.9,
+    "alright": 0.9,
+    "fine": 0.8,
+    "decent": 1.1,
+    "calm": 1.5,
+    "quiet": 0.6,
+    "settled": 1.2,
+    "steady": 1.0,
+    "neutral": 0.0,
+    "pleasant": 1.9,
+    "mild": 0.4,
+    "gentle": 1.1,
+    "easy": 1.0,
+    "simple": 0.6,
+    "comfortable": 1.6,
+    "content": 1.9,
+    "peaceful": 2.2,
+    "relieved": 1.9,
+    "rested": 1.8,
+    "refreshed": 2.0,
+    "grounded": 1.6,
+    "balanced": 1.3,
+    "accepted": 1.2,
+    "safe": 1.6,
+    "secure": 1.5,
+    "warm": 1.4,
+    "cozy": 1.8,
+    "soft": 0.7,
+    "lighter": 1.4,
+    "bright": 1.5,
+    "clear": 0.9,
     # positive — moderate
-    "good": 1.9, "nice": 1.5, "better": 1.7, "improved": 1.6, "happy": 3.0,
-    "glad": 2.2, "joy": 2.8, "joyful": 2.9, "cheerful": 2.4, "smiled": 2.3,
-    "smile": 2.3, "laugh": 2.4, "laughed": 2.4, "fun": 2.3, "playful": 2.0,
-    "enjoy": 2.1, "enjoyed": 2.2, "love": 3.2, "loved": 2.9, "liked": 1.8,
-    "hope": 2.0, "hopeful": 2.3, "optimistic": 2.2, "excited": 2.8,
-    "eager": 2.0, "curious": 1.5, "interested": 1.2, "engaged": 1.5,
-    "motivated": 2.3, "productive": 1.9, "proud": 2.6, "accomplished": 2.3,
-    "confident": 2.4, "capable": 1.9, "strong": 1.8, "energetic": 2.4,
-    "active": 1.3, "alive": 1.9, "grateful": 2.8, "thankful": 2.8,
-    "appreciate": 2.2, "blessed": 2.5, "lucky": 1.8, "amused": 1.8,
-    "connected": 1.8, "supported": 2.0, "understood": 1.8, "heard": 1.4,
-    "relaxed": 1.9, "helpful": 1.6, "generous": 1.8, "creative": 1.7,
-    "progress": 1.5, "win": 1.9, "won": 1.9,
+    "good": 1.9,
+    "nice": 1.5,
+    "better": 1.7,
+    "improved": 1.6,
+    "happy": 3.0,
+    "glad": 2.2,
+    "joy": 2.8,
+    "joyful": 2.9,
+    "cheerful": 2.4,
+    "smiled": 2.3,
+    "smile": 2.3,
+    "laugh": 2.4,
+    "laughed": 2.4,
+    "fun": 2.3,
+    "playful": 2.0,
+    "enjoy": 2.1,
+    "enjoyed": 2.2,
+    "love": 3.2,
+    "loved": 2.9,
+    "liked": 1.8,
+    "hope": 2.0,
+    "hopeful": 2.3,
+    "optimistic": 2.2,
+    "excited": 2.8,
+    "eager": 2.0,
+    "curious": 1.5,
+    "interested": 1.2,
+    "engaged": 1.5,
+    "motivated": 2.3,
+    "productive": 1.9,
+    "proud": 2.6,
+    "accomplished": 2.3,
+    "confident": 2.4,
+    "capable": 1.9,
+    "strong": 1.8,
+    "energetic": 2.4,
+    "active": 1.3,
+    "alive": 1.9,
+    "grateful": 2.8,
+    "thankful": 2.8,
+    "appreciate": 2.2,
+    "blessed": 2.5,
+    "lucky": 1.8,
+    "amused": 1.8,
+    "connected": 1.8,
+    "supported": 2.0,
+    "understood": 1.8,
+    "heard": 1.4,
+    "relaxed": 1.9,
+    "helpful": 1.6,
+    "generous": 1.8,
+    "creative": 1.7,
+    "progress": 1.5,
+    "win": 1.9,
+    "won": 1.9,
     # positive — strong
-    "great": 3.1, "wonderful": 3.2, "amazing": 3.3, "awesome": 3.3,
-    "fantastic": 3.4, "excellent": 3.1, "beautiful": 2.9, "delight": 2.8,
-    "delighted": 2.9, "thrilled": 3.1, "ecstatic": 3.5, "bliss": 3.2,
-    "perfect": 2.9, "incredible": 2.9, "phenomenal": 3.0,
+    "great": 3.1,
+    "wonderful": 3.2,
+    "amazing": 3.3,
+    "awesome": 3.3,
+    "fantastic": 3.4,
+    "excellent": 3.1,
+    "beautiful": 2.9,
+    "delight": 2.8,
+    "delighted": 2.9,
+    "thrilled": 3.1,
+    "ecstatic": 3.5,
+    "bliss": 3.2,
+    "perfect": 2.9,
+    "incredible": 2.9,
+    "phenomenal": 3.0,
     # negative — mild
-    "bad": -1.9, "meh": -0.9, "off": -0.8, "down": -1.3, "low": -1.2,
-    "flat": -0.8, "dull": -1.1, "bored": -1.2, "tired": -1.7, "sleepy": -1.0,
-    "slow": -0.7, "heavy": -1.3, "grey": -0.6, "gray": -0.6, "bleak": -1.9,
-    "gloomy": -1.8, "mehh": -1.0, "awkward": -1.3, "annoyed": -1.7,
-    "irritated": -1.8, "frustrated": -2.0, "uneasy": -1.6, "tense": -1.7,
-    "restless": -1.5, "unsettled": -1.6, "wary": -1.4, "skeptical": -1.0,
-    "disappointed": -2.1, "underwhelmed": -1.4, "inconvenient": -1.2,
-    "guilty": -2.1, "ashamed": -2.5, "embarrassed": -2.0, "regret": -2.0,
-    "lonely": -2.4, "alone": -1.4, "isolated": -2.2, "disconnected": -1.8,
-    "unhappy": -2.2, "dissatisfied": -1.8, "stuck": -2.0, "trapped": -2.4,
-    "hollow": -2.0, "empty": -2.1, "numb": -2.3, "distant": -1.4,
+    "bad": -1.9,
+    "meh": -0.9,
+    "off": -0.8,
+    "down": -1.3,
+    "low": -1.2,
+    "flat": -0.8,
+    "dull": -1.1,
+    "bored": -1.2,
+    "tired": -1.7,
+    "sleepy": -1.0,
+    "slow": -0.7,
+    "heavy": -1.3,
+    "grey": -0.6,
+    "gray": -0.6,
+    "bleak": -1.9,
+    "gloomy": -1.8,
+    "mehh": -1.0,
+    "awkward": -1.3,
+    "annoyed": -1.7,
+    "irritated": -1.8,
+    "frustrated": -2.0,
+    "uneasy": -1.6,
+    "tense": -1.7,
+    "restless": -1.5,
+    "unsettled": -1.6,
+    "wary": -1.4,
+    "skeptical": -1.0,
+    "disappointed": -2.1,
+    "underwhelmed": -1.4,
+    "inconvenient": -1.2,
+    "guilty": -2.1,
+    "ashamed": -2.5,
+    "embarrassed": -2.0,
+    "regret": -2.0,
+    "lonely": -2.4,
+    "alone": -1.4,
+    "isolated": -2.2,
+    "disconnected": -1.8,
+    "unhappy": -2.2,
+    "dissatisfied": -1.8,
+    "stuck": -2.0,
+    "trapped": -2.4,
+    "hollow": -2.0,
+    "empty": -2.1,
+    "numb": -2.3,
+    "distant": -1.4,
     "withdrawn": -1.9,
     # negative — moderate
-    "sad": -2.5, "downcast": -2.3, "sorrow": -2.6, "grief": -2.9,
-    "grieving": -2.9, "hurt": -2.3, "aching": -2.0, "cry": -2.2,
-    "cried": -2.4, "crying": -2.4, "tears": -2.2, "weep": -2.4,
-    "miss": -1.5, "loss": -2.2, "anxious": -2.7, "anxiety": -2.6,
-    "nervous": -2.0, "worry": -2.1, "worried": -2.3, "stress": -2.0,
-    "stressed": -2.4, "pressured": -2.1, "overloaded": -2.3,
-    "overwhelmed": -2.9, "swamped": -2.1, "angry": -2.7, "anger": -2.6,
-    "mad": -2.2, "upset": -2.3, "bitter": -2.1,
-    "resentment": -2.3, "resentful": -2.2, "hate": -2.8, "dislike": -1.7,
-    "afraid": -2.5, "scared": -2.5, "fear": -2.5, "fearful": -2.4,
-    "dread": -2.6, "panic": -3.0, "panicky": -2.9, "hopeless": -3.3,
-    "helpless": -3.0, "worthless": -3.4, "useless": -3.1, "failure": -2.9,
-    "failed": -2.6, "failing": -2.7, "miserable": -2.9, "awful": -3.0,
-    "terrible": -3.1, "horrible": -3.1, "worse": -2.3, "worst": -3.0,
-    "exhausted": -2.8, "drained": -2.7, "burnt": -2.4, "burnout": -2.6,
-    "fatigue": -2.2, "insomnia": -2.6, "nightmare": -2.8, "draining": -2.0,
-    "hazy": -1.1, "foggy": -1.2, "scattered": -1.5, "distracted": -1.4,
-    "overthinking": -2.1, "spiraling": -2.7, "ruminate": -1.9,
-    "ruminating": -2.0, "migraine": -2.2, "headache": -1.9, "sick": -1.9,
-    "ill": -1.9, "pain": -2.1, "unwell": -2.0,
+    "sad": -2.5,
+    "downcast": -2.3,
+    "sorrow": -2.6,
+    "grief": -2.9,
+    "grieving": -2.9,
+    "hurt": -2.3,
+    "aching": -2.0,
+    "cry": -2.2,
+    "cried": -2.4,
+    "crying": -2.4,
+    "tears": -2.2,
+    "weep": -2.4,
+    "miss": -1.5,
+    "loss": -2.2,
+    "anxious": -2.7,
+    "anxiety": -2.6,
+    "nervous": -2.0,
+    "worry": -2.1,
+    "worried": -2.3,
+    "stress": -2.0,
+    "stressed": -2.4,
+    "pressured": -2.1,
+    "overloaded": -2.3,
+    "overwhelmed": -2.9,
+    "swamped": -2.1,
+    "angry": -2.7,
+    "anger": -2.6,
+    "mad": -2.2,
+    "upset": -2.3,
+    "bitter": -2.1,
+    "resentment": -2.3,
+    "resentful": -2.2,
+    "hate": -2.8,
+    "dislike": -1.7,
+    "afraid": -2.5,
+    "scared": -2.5,
+    "fear": -2.5,
+    "fearful": -2.4,
+    "dread": -2.6,
+    "panic": -3.0,
+    "panicky": -2.9,
+    "hopeless": -3.3,
+    "helpless": -3.0,
+    "worthless": -3.4,
+    "useless": -3.1,
+    "failure": -2.9,
+    "failed": -2.6,
+    "failing": -2.7,
+    "miserable": -2.9,
+    "awful": -3.0,
+    "terrible": -3.1,
+    "horrible": -3.1,
+    "worse": -2.3,
+    "worst": -3.0,
+    "exhausted": -2.8,
+    "drained": -2.7,
+    "burnt": -2.4,
+    "burnout": -2.6,
+    "fatigue": -2.2,
+    "insomnia": -2.6,
+    "nightmare": -2.8,
+    "draining": -2.0,
+    "hazy": -1.1,
+    "foggy": -1.2,
+    "scattered": -1.5,
+    "distracted": -1.4,
+    "overthinking": -2.1,
+    "spiraling": -2.7,
+    "ruminate": -1.9,
+    "ruminating": -2.0,
+    "migraine": -2.2,
+    "headache": -1.9,
+    "sick": -1.9,
+    "ill": -1.9,
+    "pain": -2.1,
+    "unwell": -2.0,
     # negative — strong
-    "depressed": -3.4, "depression": -3.2, "despair": -3.4,
-    "devastated": -3.4, "heartbroken": -3.2, "anguish": -3.3,
-    "tormented": -3.2, "unbearable": -3.3, "intolerable": -3.2,
-    "disgusted": -2.6, "disgust": -2.5, "contempt": -2.4, "furious": -3.1,
-    "rage": -3.0, "livid": -3.0, "terrified": -3.1, "petrified": -3.0,
-    "suicidal": -3.8, "unreal": -1.6, "impossible": -2.1,
+    "depressed": -3.4,
+    "depression": -3.2,
+    "despair": -3.4,
+    "devastated": -3.4,
+    "heartbroken": -3.2,
+    "anguish": -3.3,
+    "tormented": -3.2,
+    "unbearable": -3.3,
+    "intolerable": -3.2,
+    "disgusted": -2.6,
+    "disgust": -2.5,
+    "contempt": -2.4,
+    "furious": -3.1,
+    "rage": -3.0,
+    "livid": -3.0,
+    "terrified": -3.1,
+    "petrified": -3.0,
+    "suicidal": -3.8,
+    "unreal": -1.6,
+    "impossible": -2.1,
 }
 
 # The active graded lexicon: VADER breadth + curated authority.
@@ -357,34 +705,91 @@ SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
 # ("hardly good" ≈ "not good"). Listing them here AND in NEGATORS applied
 # both rules at once (0.7x booster times the -0.74 flip) — negation-only.
 INTENSIFIERS: dict[str, float] = {
-    "very": 1.4, "so": 1.2, "really": 1.25, "extremely": 1.6,
-    "incredibly": 1.6, "absolutely": 1.6, "completely": 1.55,
-    "totally": 1.5, "utterly": 1.6, "deeply": 1.45, "truly": 1.3,
-    "quite": 1.15, "pretty": 1.15, "super": 1.4, "highly": 1.4,
-    "insanely": 1.5, "unbelievably": 1.55,
-    "slightly": 0.75, "somewhat": 0.8, "mildly": 0.75,
-    "almost": 0.85, "little": 0.9,
+    "very": 1.4,
+    "so": 1.2,
+    "really": 1.25,
+    "extremely": 1.6,
+    "incredibly": 1.6,
+    "absolutely": 1.6,
+    "completely": 1.55,
+    "totally": 1.5,
+    "utterly": 1.6,
+    "deeply": 1.45,
+    "truly": 1.3,
+    "quite": 1.15,
+    "pretty": 1.15,
+    "super": 1.4,
+    "highly": 1.4,
+    "insanely": 1.5,
+    "unbelievably": 1.55,
+    "slightly": 0.75,
+    "somewhat": 0.8,
+    "mildly": 0.75,
+    "almost": 0.85,
+    "little": 0.9,
 }
 NEGATION_SCALAR = -0.74  # VADER's damped flip: "not good" < "bad"
 BUT_WORDS = frozenset({"but", "however", "although", "though", "yet"})
 SENTIMENT_SCALE = 4.0  # max lexicon magnitude maps onto [-1, 1]
 
-NEGATORS = frozenset({
-    "not", "no", "never", "nothing", "none", "nobody", "nowhere", "cannot",
-    "can't", "won't", "don't", "doesn't", "didn't", "isn't", "aren't",
-    "wasn't", "weren't", "haven't", "hasn't", "hadn't", "wouldn't",
-    "couldn't", "shouldn't", "hardly", "barely", "rarely",
-})
+NEGATORS = frozenset(
+    {
+        "not",
+        "no",
+        "never",
+        "nothing",
+        "none",
+        "nobody",
+        "nowhere",
+        "cannot",
+        "can't",
+        "won't",
+        "don't",
+        "doesn't",
+        "didn't",
+        "isn't",
+        "aren't",
+        "wasn't",
+        "weren't",
+        "haven't",
+        "hasn't",
+        "hadn't",
+        "wouldn't",
+        "couldn't",
+        "shouldn't",
+        "hardly",
+        "barely",
+        "rarely",
+    }
+)
 
 # Absolutist language (Al-Mosaiwi & Johnstone 2018): elevated in
 # anxiety/depression and suicidal-ideation text; reported to the user as a
 # self-reflection observation only — never as a risk score.
-ABSOLUTIST_WORDS = frozenset({
-    "always", "never", "nothing", "everything", "everyone", "nobody",
-    "none", "every", "must", "completely", "totally", "absolutely",
-    "entirely", "constantly", "forever", "unbearable", "impossible",
-    "unreal", "wholly", "undeniably",
-})
+ABSOLUTIST_WORDS = frozenset(
+    {
+        "always",
+        "never",
+        "nothing",
+        "everything",
+        "everyone",
+        "nobody",
+        "none",
+        "every",
+        "must",
+        "completely",
+        "totally",
+        "absolutely",
+        "entirely",
+        "constantly",
+        "forever",
+        "unbearable",
+        "impossible",
+        "unreal",
+        "wholly",
+        "undeniably",
+    }
+)
 
 # --- emergent topic discovery (beyond the fixed theme lexicon) --------------------
 # The lexicon covers nine universal themes; everything else a user's life
@@ -408,7 +813,7 @@ ABSOLUTIST_WORDS = frozenset({
 # themed day, and "your mood on days you tag 'family'" is exactly the
 # Daylio-style question asked with real statistics instead of a bar chart.
 SLEEP_CHANNEL_THEME = "poor sleep"
-SLEEP_MIN_RATED_NIGHTS = 10   # distinct rated nights before the split is claimable
+SLEEP_MIN_RATED_NIGHTS = 10  # distinct rated nights before the split is claimable
 
 # --- cadence signals (2026-09-17) ------------------------------------------------
 # The server already holds the writing CALENDAR (metadata, no decryption
@@ -418,13 +823,13 @@ SLEEP_MIN_RATED_NIGHTS = 10   # distinct rated nights before the split is claima
 # "the day after conflict comes up, you go quiet". Exact binomial against
 # the user's own base skip rate, one-sided (more silence than usual), in
 # the BH family like every other claim.
-AVOIDANCE_MIN_OBSERVED = 10   # theme-days with an observable next-day outcome
+AVOIDANCE_MIN_OBSERVED = 10  # theme-days with an observable next-day outcome
 AVOIDANCE_MIN_SKIPS = 5
-AVOIDANCE_MIN_LIFT = 0.20     # skips share must exceed base rate by this
+AVOIDANCE_MIN_LIFT = 0.20  # skips share must exceed base rate by this
 # RHYTHM: the regularity of the journaling rhythm itself (gap spread,
 # recent vs the user's earlier norm) — the same comparative shape as the
 # instability detector, applied to gaps between writing days.
-CADENCE_MIN_DAYS = 12         # journaling days per window half
+CADENCE_MIN_DAYS = 12  # journaling days per window half
 
 # --- person anchoring (2026-09-17) ------------------------------------------------
 # "My mood dips after seeing my mom, not my dad" is the most-requested
@@ -438,12 +843,12 @@ CADENCE_MIN_DAYS = 12         # journaling days per window half
 PERSON_MIN_DISTINCT_DAYS = 6
 PERSON_MIN_TOTAL_MENTIONS = 8
 
-TOPIC_MIN_ENTRIES = 6       # entries mentioning it before it can be tested
+TOPIC_MIN_ENTRIES = 6  # entries mentioning it before it can be tested
 TOPIC_MIN_DISTINCT_DAYS = 4
-TOPIC_RISING_MIN_RECENT = 5     # recent-half mentions for a rising claim
-TOPIC_RISING_MIN_SHARE = 0.18   # share of recent entries it must reach
-TOPIC_RISING_MIN_GAIN = 0.12    # ... above the earlier-half base rate
-TOPIC_MIN_PER_HALF = 10         # entries per half before a trend is claimable
+TOPIC_RISING_MIN_RECENT = 5  # recent-half mentions for a rising claim
+TOPIC_RISING_MIN_SHARE = 0.18  # share of recent entries it must reach
+TOPIC_RISING_MIN_GAIN = 0.12  # ... above the earlier-half base rate
+TOPIC_MIN_PER_HALF = 10  # entries per half before a trend is claimable
 TOPIC_PRESENCE_MIN_ENTRIES = 20
 TOPIC_PRESENCE_MIN_SHARE = 0.30
 TOPIC_PRESENCE_MIN_DAYS = 10
@@ -459,73 +864,374 @@ TOPIC_PRESENCE_MIN_CONTEXTS = 4
 # the phrase detector surfaces that sentence as recurring_phrase, and a
 # presence card on top would be the same measurement wearing a second hat.
 TOPIC_PRESENCE_CLUSTER_COVER = 0.8
-TOPIC_MAX_CANDIDATES = 12       # tested per run (by document frequency)
-TOPIC_MAX_SIGNALS = 6           # surfaced per run, rising first
+TOPIC_MAX_CANDIDATES = 12  # tested per run (by document frequency)
+TOPIC_MAX_SIGNALS = 6  # surfaced per run, rising first
 
 # Function words, auxiliaries, time/filler boilerplate and mood carriers —
 # none of them can be a life topic. Deliberately broad: a false negative
 # (a real topic skipped) costs little, a false positive costs trust.
-TOPIC_STOPWORDS = frozenset({
-    # pronouns / determiners / auxiliaries / prepositions / conjunctions
-    "about", "after", "again", "all", "also", "although", "always", "another",
-    "any", "anyone", "anything", "are", "around", "back", "because", "been",
-    "before", "being", "both", "but", "came", "can", "cannot", "come",
-    "could", "did", "didn", "does", "doesn", "doing", "done", "down", "else",
-    "even", "every", "everyone", "everything", "few", "for", "from", "get",
-    "gets", "getting", "give", "gives", "go", "goes", "going", "gone", "got",
-    "had", "has", "hasn", "have", "haven", "having", "her", "here", "hers",
-    "herself", "him", "himself", "his", "how", "into", "isn", "itself",
-    "just", "keep", "keeps", "kept", "know", "known", "knows", "least",
-    "less", "let", "like", "made", "make", "makes", "making", "many", "more",
-    "most", "much", "must", "myself", "never", "next", "none", "nothing",
-    "now", "off", "once", "one", "only", "other", "others", "our", "ours",
-    "ourselves", "out", "over", "own", "put", "really", "said", "same",
-    "say", "saying", "says", "see", "seem", "seemed", "seems", "seen",
-    "several", "shall", "she", "should", "since", "some", "someone",
-    "something", "still", "such", "take", "takes", "taking", "tell", "tells",
-    "than", "that", "their", "theirs", "them", "themselves", "then", "there",
-    "these", "they", "thing", "things", "think", "thinking", "this", "those",
-    "though", "through", "thus", "too", "took", "under", "until", "upon",
-    "very", "want", "wanted", "wants", "was", "wasn", "way", "well", "went",
-    "were", "weren", "what", "when", "where", "whether", "which", "while",
-    "who", "whom", "whose", "why", "will", "with", "within", "without",
-    "won", "would", "yeah", "yes", "yet", "you", "your", "yours", "yourself",
-    # time / journal boilerplate
-    "today", "yesterday", "tomorrow", "morning", "afternoon", "evening",
-    "night", "day", "days", "week", "weeks", "month", "months", "year",
-    "years", "hour", "hours", "minute", "minutes", "time", "times", "moment",
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
-    "sunday", "january", "february", "march", "april", "june", "july",
-    "august", "september", "october", "november", "december", "weekend",
-    "tonight", "lately", "recently", "maybe", "kind", "sort", "stuff",
-    "little", "bit", "pretty", "quite", "somewhat", "actually", "maybe",
-    # mood/feeling carriers (the sentiment layer owns them)
-    "feel", "feels", "felt", "feeling", "feelings", "emotion", "emotions",
-    "mood", "mind", "head", "heart", "soul", "life", "living", "live",
-    "love", "hate", "okay", "ok", "fine", "good", "bad", "better", "worse",
-    "best", "worst", "great", "nice", "hard", "easy", "weird", "strange",
-    # dropped from the sentiment lexicon for context-dependence; still never
-    # a life topic ("stayed present", "a present for mom")
-    "present",
-    # high-frequency journal verbs/nouns that are never life topics
-    "people", "person", "told", "ask", "asked", "asking", "call", "called",
-    "calling", "talk", "talked", "talking", "spend", "spent", "spending",
-    "watch", "watched", "watching", "happen", "happened", "happening",
-    "remember", "remembered", "start", "started", "starting", "stop",
-    "stopped", "stopping", "thought", "thoughts", "wonder", "wondered",
-    "wondering", "wait", "waited", "waiting", "try", "tried", "trying",
-    "turn", "turned", "turning", "find", "found", "finding", "lot", "lots",
-    "whole", "part", "kinda", "sorta", "someone's", "everyone's",
-})
+TOPIC_STOPWORDS = frozenset(
+    {
+        # pronouns / determiners / auxiliaries / prepositions / conjunctions
+        "about",
+        "after",
+        "again",
+        "all",
+        "also",
+        "although",
+        "always",
+        "another",
+        "any",
+        "anyone",
+        "anything",
+        "are",
+        "around",
+        "back",
+        "because",
+        "been",
+        "before",
+        "being",
+        "both",
+        "but",
+        "came",
+        "can",
+        "cannot",
+        "come",
+        "could",
+        "did",
+        "didn",
+        "does",
+        "doesn",
+        "doing",
+        "done",
+        "down",
+        "else",
+        "even",
+        "every",
+        "everyone",
+        "everything",
+        "few",
+        "for",
+        "from",
+        "get",
+        "gets",
+        "getting",
+        "give",
+        "gives",
+        "go",
+        "goes",
+        "going",
+        "gone",
+        "got",
+        "had",
+        "has",
+        "hasn",
+        "have",
+        "haven",
+        "having",
+        "her",
+        "here",
+        "hers",
+        "herself",
+        "him",
+        "himself",
+        "his",
+        "how",
+        "into",
+        "isn",
+        "itself",
+        "just",
+        "keep",
+        "keeps",
+        "kept",
+        "know",
+        "known",
+        "knows",
+        "least",
+        "less",
+        "let",
+        "like",
+        "made",
+        "make",
+        "makes",
+        "making",
+        "many",
+        "more",
+        "most",
+        "much",
+        "must",
+        "myself",
+        "never",
+        "next",
+        "none",
+        "nothing",
+        "now",
+        "off",
+        "once",
+        "one",
+        "only",
+        "other",
+        "others",
+        "our",
+        "ours",
+        "ourselves",
+        "out",
+        "over",
+        "own",
+        "put",
+        "really",
+        "said",
+        "same",
+        "say",
+        "saying",
+        "says",
+        "see",
+        "seem",
+        "seemed",
+        "seems",
+        "seen",
+        "several",
+        "shall",
+        "she",
+        "should",
+        "since",
+        "some",
+        "someone",
+        "something",
+        "still",
+        "such",
+        "take",
+        "takes",
+        "taking",
+        "tell",
+        "tells",
+        "than",
+        "that",
+        "their",
+        "theirs",
+        "them",
+        "themselves",
+        "then",
+        "there",
+        "these",
+        "they",
+        "thing",
+        "things",
+        "think",
+        "thinking",
+        "this",
+        "those",
+        "though",
+        "through",
+        "thus",
+        "too",
+        "took",
+        "under",
+        "until",
+        "upon",
+        "very",
+        "want",
+        "wanted",
+        "wants",
+        "was",
+        "wasn",
+        "way",
+        "well",
+        "went",
+        "were",
+        "weren",
+        "what",
+        "when",
+        "where",
+        "whether",
+        "which",
+        "while",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "will",
+        "with",
+        "within",
+        "without",
+        "won",
+        "would",
+        "yeah",
+        "yes",
+        "yet",
+        "you",
+        "your",
+        "yours",
+        "yourself",
+        # time / journal boilerplate
+        "today",
+        "yesterday",
+        "tomorrow",
+        "morning",
+        "afternoon",
+        "evening",
+        "night",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "year",
+        "years",
+        "hour",
+        "hours",
+        "minute",
+        "minutes",
+        "time",
+        "times",
+        "moment",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "january",
+        "february",
+        "march",
+        "april",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+        "weekend",
+        "tonight",
+        "lately",
+        "recently",
+        "maybe",
+        "kind",
+        "sort",
+        "stuff",
+        "little",
+        "bit",
+        "pretty",
+        "quite",
+        "somewhat",
+        "actually",
+        "maybe",
+        # mood/feeling carriers (the sentiment layer owns them)
+        "feel",
+        "feels",
+        "felt",
+        "feeling",
+        "feelings",
+        "emotion",
+        "emotions",
+        "mood",
+        "mind",
+        "head",
+        "heart",
+        "soul",
+        "life",
+        "living",
+        "live",
+        "love",
+        "hate",
+        "okay",
+        "ok",
+        "fine",
+        "good",
+        "bad",
+        "better",
+        "worse",
+        "best",
+        "worst",
+        "great",
+        "nice",
+        "hard",
+        "easy",
+        "weird",
+        "strange",
+        # dropped from the sentiment lexicon for context-dependence; still never
+        # a life topic ("stayed present", "a present for mom")
+        "present",
+        # high-frequency journal verbs/nouns that are never life topics
+        "people",
+        "person",
+        "told",
+        "ask",
+        "asked",
+        "asking",
+        "call",
+        "called",
+        "calling",
+        "talk",
+        "talked",
+        "talking",
+        "spend",
+        "spent",
+        "spending",
+        "watch",
+        "watched",
+        "watching",
+        "happen",
+        "happened",
+        "happening",
+        "remember",
+        "remembered",
+        "start",
+        "started",
+        "starting",
+        "stop",
+        "stopped",
+        "stopping",
+        "thought",
+        "thoughts",
+        "wonder",
+        "wondered",
+        "wondering",
+        "wait",
+        "waited",
+        "waiting",
+        "try",
+        "tried",
+        "trying",
+        "turn",
+        "turned",
+        "turning",
+        "find",
+        "found",
+        "finding",
+        "lot",
+        "lots",
+        "whole",
+        "part",
+        "kinda",
+        "sorta",
+        "someone's",
+        "everyone's",
+    }
+)
 
 IRREGULAR_FORMS: dict[str, str] = {
-    "slept": "sleep", "overslept": "sleep", "ate": "eat", "overate": "eat",
-    "ran": "run", "cried": "cry", "woke": "wake", "awoke": "wake",
-    "met": "meet", "paid": "pay", "said": "say", "felt": "feel",
-    "grieved": "grieve", "missed": "miss", "loathed": "loathe",
+    "slept": "sleep",
+    "overslept": "sleep",
+    "ate": "eat",
+    "overate": "eat",
+    "ran": "run",
+    "cried": "cry",
+    "woke": "wake",
+    "awoke": "wake",
+    "met": "meet",
+    "paid": "pay",
+    "said": "say",
+    "felt": "feel",
+    "grieved": "grieve",
+    "missed": "miss",
+    "loathed": "loathe",
 }
 
-BOOSTER_SCOPE = 3       # tokens before a sentiment word that may boost or negate it
+BOOSTER_SCOPE = 3  # tokens before a sentiment word that may boost or negate it
 
 
 # The high-frequency English function-word core. TOPIC_STOPWORDS
@@ -533,17 +1239,91 @@ BOOSTER_SCOPE = 3       # tokens before a sentiment word that may boost or negat
 # filters len < 4), so the language gate carries its own frequency list —
 # these are the words that make English prose READ as English (~40-50% of
 # tokens in any English sentence) regardless of content.
-_LANGUAGE_FUNCTION_WORDS: frozenset[str] = frozenset({
-    "a", "am", "an", "and", "any", "are", "as", "at", "be", "been", "being",
-    "but", "by", "can", "could", "did", "do", "does", "doing", "for", "from",
-    "had", "has", "have", "he", "her", "here", "hers", "him", "his", "i",
-    "if", "in", "into", "is", "it", "its", "me", "much", "must", "my", "no",
-    "not", "of", "on", "or", "our", "out", "over", "she", "so", "some",
-    "such", "than", "that", "the", "their", "them", "then", "there",
-    "these", "they", "this", "those", "to", "up", "us", "was", "we", "were",
-    "what", "when", "where", "which", "who", "why", "will", "with", "would",
-    "you", "your",
-})
+_LANGUAGE_FUNCTION_WORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "am",
+        "an",
+        "and",
+        "any",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "but",
+        "by",
+        "can",
+        "could",
+        "did",
+        "do",
+        "does",
+        "doing",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "he",
+        "her",
+        "here",
+        "hers",
+        "him",
+        "his",
+        "i",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "me",
+        "much",
+        "must",
+        "my",
+        "no",
+        "not",
+        "of",
+        "on",
+        "or",
+        "our",
+        "out",
+        "over",
+        "she",
+        "so",
+        "some",
+        "such",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "up",
+        "us",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "will",
+        "with",
+        "would",
+        "you",
+        "your",
+    }
+)
 
 # Every token the engine has an opinion about (function words, sentiment,
 # themes, negators, absolutists, irregulars). The language gate asks: of
@@ -561,6 +1341,7 @@ _KNOWN_TOKENS: frozenset[str] = (
 )
 
 # --- NLP primitives -------------------------------------------------------------
+
 
 def word_forms(token: str) -> list[str]:
     """Deterministic morphological candidates for one token.
@@ -594,7 +1375,12 @@ def word_forms(token: str) -> list[str]:
             forms.append(base[:-1])
         forms.append(base + "e")
     seen: set[str] = set()
-    return [f for f in forms if not (f in seen or seen.add(f))]
+    deduplicated: list[str] = []
+    for form in forms:
+        if form not in seen:
+            seen.add(form)
+            deduplicated.append(form)
+    return deduplicated
 
 
 def theme_for(token: str) -> str | None:
@@ -629,11 +1415,11 @@ def sentiment_score(tokens: list[str]) -> float:
     sentiments: list[float] = []
     # "but" re-weighting: find the LAST contrastive; damp before, boost after.
     split = max((i for i, t in enumerate(tokens) if t in BUT_WORDS), default=-1)
-    segments: list[tuple[list[float], float]] = []
+    segments: list[tuple[list[str], float]] = []
     if split >= 0:
         segments = [
-            (tokens[: split], 0.5),
-            (tokens[split + 1:], 1.5),
+            (tokens[:split], 0.5),
+            (tokens[split + 1 :], 1.5),
         ]
     else:
         segments = [(tokens, 1.0)]
@@ -643,7 +1429,7 @@ def sentiment_score(tokens: list[str]) -> float:
             valence = _word_valence(token)
             if valence == 0.0:
                 continue
-            window = seg[max(0, i - BOOSTER_SCOPE): i]
+            window = seg[max(0, i - BOOSTER_SCOPE) : i]
             # Boosters compound; a negator in scope flips the valence ONCE
             # with damping (VADER's x-0.74: "not good" is mildly negative).
             boost = 1.0
@@ -691,6 +1477,7 @@ def sentences_of(text: str) -> list[str]:
 
 # --- within-person baseline (Bolger & Laurenceau 2013) ---------------------------
 
+
 def _personal_baselines(day_sentiments: list[tuple[date, float]]) -> dict[date, float]:
     """Each day's personal mood baseline: mean of neighbouring days.
 
@@ -715,9 +1502,7 @@ def _personal_baselines(day_sentiments: list[tuple[date, float]]) -> dict[date, 
             out[day] = sum(neighbours) / len(neighbours)
         else:
             window = [
-                moods[other]
-                for other in days
-                if abs((other - day).days) <= BASELINE_HALF_WINDOW
+                moods[other] for other in days if abs((other - day).days) <= BASELINE_HALF_WINDOW
             ]
             out[day] = (sum(window) / len(window)) if window else global_mean
     return out
@@ -758,14 +1543,16 @@ def _daily_lag1_autocorr(day_values: dict[date, float]) -> float | None:
     theme's test, computed once per run.
     """
     days = sorted(day_values)
-    pairs = [(day_values[d1], day_values[d2])
-             for d1, d2 in zip(days, days[1:]) if (d2 - d1).days == 1]
+    pairs = [
+        (day_values[d1], day_values[d2]) for d1, d2 in zip(days, days[1:]) if (d2 - d1).days == 1
+    ]
     if len(pairs) < 8:
         return None
     return _pearson([a for a, _ in pairs], [b for _, b in pairs])
 
 
 # --- pattern store ----------------------------------------------------------------
+
 
 @dataclass
 class StoredPattern:
@@ -787,14 +1574,19 @@ class StoredPattern:
 
     def to_dict(self) -> dict:
         return {
-            "pid": self.pid, "kind": self.kind, "label": self.label,
-            "first_seen": self.first_seen, "last_seen": self.last_seen,
+            "pid": self.pid,
+            "kind": self.kind,
+            "label": self.label,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
             "first_qualified": self.first_qualified,
             "last_qualified": self.last_qualified,
-            "occurrences": self.occurrences, "state": self.state,
+            "occurrences": self.occurrences,
+            "state": self.state,
             "qualification_days": self.qualification_days,
             "evidence_dates": self.evidence_dates,
-            "feedback": self.feedback, "detail": self.detail,
+            "feedback": self.feedback,
+            "detail": self.detail,
         }
 
 
@@ -820,14 +1612,23 @@ def _stored_from_dict(raw: Any, pid: str) -> StoredPattern | None:
     if not isinstance(kind, str) or not isinstance(label, str):
         return None
     iso_or_none = lambda v: _parse_iso(v)  # noqa: E731
-    qualification_days = sorted({
-        d for d in raw.get("qualification_days", []) if _parse_iso(d)
-    }) if isinstance(raw.get("qualification_days"), list) else []
-    evidence_dates = sorted({
-        d for d in raw.get("evidence_dates", []) if _parse_iso(d)
-    }) if isinstance(raw.get("evidence_dates"), list) else []
-    detail = raw.get("detail") if isinstance(raw.get("detail"), dict) else {}
-    feedback = raw.get("feedback") if isinstance(raw.get("feedback"), dict) else {}
+    qualification_days = (
+        sorted({d for d in raw.get("qualification_days", []) if _parse_iso(d)})
+        if isinstance(raw.get("qualification_days"), list)
+        else []
+    )
+    evidence_dates = (
+        sorted({d for d in raw.get("evidence_dates", []) if _parse_iso(d)})
+        if isinstance(raw.get("evidence_dates"), list)
+        else []
+    )
+    detail_raw = raw.get("detail")
+    feedback_raw = raw.get("feedback")
+    detail: dict[Any, Any] = dict(detail_raw) if isinstance(detail_raw, dict) else {}
+    feedback: dict[Any, Any] = dict(feedback_raw) if isinstance(feedback_raw, dict) else {}
+    state = raw.get("state")
+    if not isinstance(state, str) or state not in SURFACED_STATES + ("candidate", "archived"):
+        state = "candidate"
     try:
         occurrences = int(raw.get("occurrences", 0) or 0)
         if occurrences < 0:
@@ -843,7 +1644,7 @@ def _stored_from_dict(raw: Any, pid: str) -> StoredPattern | None:
         first_qualified=iso_or_none(raw.get("first_qualified")) or "",
         last_qualified=iso_or_none(raw.get("last_qualified")) or "",
         occurrences=occurrences,
-        state=raw.get("state") if raw.get("state") in SURFACED_STATES + ("candidate", "archived") else "candidate",
+        state=state,
         qualification_days=qualification_days[:QUALIFICATION_DAYS_CAP],
         evidence_dates=evidence_dates[:EVIDENCE_DATES_CAP],
         feedback=feedback,
@@ -875,9 +1676,13 @@ def load_state(raw: bytes | None) -> dict:
             stored = _stored_from_dict(record, str(pid))
             if stored is not None:
                 patterns[stored.pid] = stored
-    history = parsed.get("history") if isinstance(parsed.get("history"), list) else []
-    clean_history = [h for h in history if isinstance(h, list) and len(h) == 2
-                     and isinstance(h[0], str) and isinstance(h[1], list)][:HISTORY_DAYS]
+    history_raw = parsed.get("history")
+    history: list[Any] = history_raw if isinstance(history_raw, list) else []
+    clean_history = [
+        h
+        for h in history
+        if isinstance(h, list) and len(h) == 2 and isinstance(h[0], str) and isinstance(h[1], list)
+    ][:HISTORY_DAYS]
     return {"v": STATE_VERSION, "patterns": patterns, "history": clean_history}
 
 
@@ -892,6 +1697,7 @@ def dump_state(state: dict) -> bytes:
 
 
 # --- detectors ----------------------------------------------------------------------
+
 
 @dataclass
 class _Signal:
@@ -923,9 +1729,7 @@ def _decay_strength(evidence: list[date], today: date) -> float:
     # entry-date validation should already prevent) must not push the
     # exponent positive — 2.0 ** +7900 is an OverflowError that would escape
     # as a 500 on every future recompute. Past days keep exact half-life.
-    weight = sum(
-        2.0 ** min(0.0, -((today - day).days) / HALF_LIFE_DAYS) for day in evidence
-    )
+    weight = sum(2.0 ** min(0.0, -((today - day).days) / HALF_LIFE_DAYS) for day in evidence)
     return min(1.0, weight / EVIDENCE_FULL)
 
 
@@ -934,11 +1738,31 @@ def _decay_strength(evidence: list[date], today: date) -> float:
 # candidates (a journal can genuinely be about Bill or May), but their
 # mentions must be CAPITALIZED — case-insensitive matching counted every
 # modal verb and invoice as a person-day.
-_NAME_HOMOGRAPHS = frozenset({
-    "may", "bill", "sue", "rob", "pat", "mark", "frank", "grace", "rose",
-    "jack", "reed", "miles", "art", "will", "ray", "vic", "dan", "jan",
-    "june", "april", "august",
-})
+_NAME_HOMOGRAPHS = frozenset(
+    {
+        "may",
+        "bill",
+        "sue",
+        "rob",
+        "pat",
+        "mark",
+        "frank",
+        "grace",
+        "rose",
+        "jack",
+        "reed",
+        "miles",
+        "art",
+        "will",
+        "ray",
+        "vic",
+        "dan",
+        "jan",
+        "june",
+        "april",
+        "august",
+    }
+)
 
 
 def _mentions_name(text: str, name: str) -> bool:
@@ -988,9 +1812,9 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
             counts[name] = counts.get(name, 0) + 1
             days.setdefault(name, set()).add(entry.entry_date)
     return {
-        name for name, n in counts.items()
-        if n >= PERSON_MIN_TOTAL_MENTIONS
-        and len(days.get(name, set())) >= PERSON_MIN_DISTINCT_DAYS
+        name
+        for name, n in counts.items()
+        if n >= PERSON_MIN_TOTAL_MENTIONS and len(days.get(name, set())) >= PERSON_MIN_DISTINCT_DAYS
     }
 
 
@@ -1041,7 +1865,9 @@ def _detect_themes(
         weekday_counts: dict[int, int] = {}
         for day in days:
             weekday_counts[day.weekday()] = weekday_counts.get(day.weekday(), 0) + 1
-        candidates: list[tuple[int, int, float, float, bool]] = []  # (weekday, k, fraction, pvalue, gate_ok)
+        candidates: list[
+            tuple[int, int, float, float, bool]
+        ] = []  # (weekday, k, fraction, pvalue, gate_ok)
         for weekday in sorted(weekday_counts):
             base_rate = weekday_days.get(weekday, 0) / total_days
             if not 0.0 < base_rate < 1.0:
@@ -1056,46 +1882,51 @@ def _detect_themes(
         # p-values by up to the number of weekdays). update() keeps, per
         # theme, only the best SURVIVOR after correction.
         for weekday, k, fraction, pvalue, gate_ok in candidates:
-            signals.append(_Signal(
-                pid=f"temporal:{theme}",
-                kind="temporal",
-                label=theme,
-                occurrences=count,
-                pvalue=pvalue,
-                detail={
-                    "day": DAY_NAMES[weekday],
-                    "day_count": k,
-                    "day_fraction": round(fraction, 3),
-                    "base_rate": round(weekday_days.get(weekday, 0) / total_days, 3),
-                    "p_value": round(pvalue, 6),
-                    "days_tested": len(candidates),
-                },
-                evidence_days=days,
-                gate_ok=gate_ok,
-            ))
+            signals.append(
+                _Signal(
+                    pid=f"temporal:{theme}",
+                    kind="temporal",
+                    label=theme,
+                    occurrences=count,
+                    pvalue=pvalue,
+                    detail={
+                        "day": DAY_NAMES[weekday],
+                        "day_count": k,
+                        "day_fraction": round(fraction, 3),
+                        "base_rate": round(weekday_days.get(weekday, 0) / total_days, 3),
+                        "p_value": round(pvalue, 6),
+                        "days_tested": len(candidates),
+                    },
+                    evidence_days=days,
+                    gate_ok=gate_ok,
+                )
+            )
 
         if len(without_theme) >= MOOD_MIN_PER_SIDE:
             moods_with = [s for _, s in with_theme]
             moods_without = [s for _, s in without_theme]
             delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
             effect = statsig.cohens_d(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
-            _, pvalue = statsig.welch_test(moods_with, moods_without,
-                                           variance_floor=MOOD_SD_FLOOR, lag1=lag1)
-            signals.append(_Signal(
-                pid=f"mood_correlation:{theme}",
-                kind="mood_correlation",
-                label=theme,
-                occurrences=count,
-                pvalue=pvalue,
-                detail={
-                    "mood_delta": round(delta, 3),
-                    "direction": "lower" if delta > 0 else "higher",
-                    "cohens_d": round(effect, 3),
-                    "p_value": round(pvalue, 6),
-                },
-                evidence_days=days,
-                gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,
-            ))
+            _, pvalue = statsig.welch_test(
+                moods_with, moods_without, variance_floor=MOOD_SD_FLOOR, lag1=lag1
+            )
+            signals.append(
+                _Signal(
+                    pid=f"mood_correlation:{theme}",
+                    kind="mood_correlation",
+                    label=theme,
+                    occurrences=count,
+                    pvalue=pvalue,
+                    detail={
+                        "mood_delta": round(delta, 3),
+                        "direction": "lower" if delta > 0 else "higher",
+                        "cohens_d": round(effect, 3),
+                        "p_value": round(pvalue, 6),
+                    },
+                    evidence_days=days,
+                    gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,
+                )
+            )
     return signals
 
 
@@ -1147,38 +1978,41 @@ def _detect_links(
     for theme in themes:
         exposed_pairs = [(prev, cur) for prev, cur in transitions if theme in day_themes[prev]]
         exposed = [day_residuals[cur] for _, cur in exposed_pairs]
-        unexposed = [day_residuals[cur] for prev, cur in transitions if theme not in day_themes[prev]]
+        unexposed = [
+            day_residuals[cur] for prev, cur in transitions if theme not in day_themes[prev]
+        ]
         if len(exposed) < LINK_MIN_PER_SIDE or len(unexposed) < LINK_MIN_PER_SIDE:
             continue
         delta = sum(unexposed) / len(unexposed) - sum(exposed) / len(exposed)
         effect = statsig.cohens_d(exposed, unexposed, variance_floor=MOOD_SD_FLOOR)
-        _, pvalue = statsig.welch_test(exposed, unexposed,
-                                       variance_floor=MOOD_SD_FLOOR, lag1=lag1)
+        _, pvalue = statsig.welch_test(exposed, unexposed, variance_floor=MOOD_SD_FLOOR, lag1=lag1)
         gap1 = sum(1 for prev, cur in exposed_pairs if (cur - prev).days == 1)
         gap2 = len(exposed_pairs) - gap1
         outcome_days = [cur for _, cur in exposed_pairs]
-        signals.append(_Signal(
-            pid=f"link:{theme}",
-            kind="link",
-            label=theme,
-            occurrences=len(exposed),
-            pvalue=pvalue,
-            detail={
-                # The MODAL exposed gap (ties break to 1, the stricter
-                # reading): the card copy keys off this.
-                "lag_days": 1 if gap1 >= gap2 else 2,
-                "gap1_days": gap1,
-                "gap2_days": gap2,
-                "mood_delta": round(delta, 3),
-                "direction": "lower" if delta > 0 else "higher",
-                "cohens_d": round(effect, 3),
-                "p_value": round(pvalue, 6),
-                "n_after": len(exposed),
-                "n_other": len(unexposed),
-            },
-            evidence_days=outcome_days,
-            gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,
-        ))
+        signals.append(
+            _Signal(
+                pid=f"link:{theme}",
+                kind="link",
+                label=theme,
+                occurrences=len(exposed),
+                pvalue=pvalue,
+                detail={
+                    # The MODAL exposed gap (ties break to 1, the stricter
+                    # reading): the card copy keys off this.
+                    "lag_days": 1 if gap1 >= gap2 else 2,
+                    "gap1_days": gap1,
+                    "gap2_days": gap2,
+                    "mood_delta": round(delta, 3),
+                    "direction": "lower" if delta > 0 else "higher",
+                    "cohens_d": round(effect, 3),
+                    "p_value": round(pvalue, 6),
+                    "n_after": len(exposed),
+                    "n_other": len(unexposed),
+                },
+                evidence_days=outcome_days,
+                gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,
+            )
+        )
     return signals
 
 
@@ -1217,24 +2051,26 @@ def _detect_mood_dynamics(
             # the old test even with no change at all. The p enters the
             # same Benjamini-Hochberg family as every other claim this
             # run, whether or not the effect gates pass.
-            pvalue = statsig.fisher_z_difference_p(
-                r_recent, len(recent), r_earlier, len(earlier))
-            signals.append(_Signal(
-                pid="inertia:mood",
-                kind="inertia",
-                label="day-to-day mood",
-                occurrences=len(recent),
-                pvalue=pvalue,
-                detail={
-                    "carryover_recent": round(r_recent, 3),
-                    "carryover_earlier": round(r_earlier, 3),
-                    "window_days": INERTIA_RECENT_DAYS,
-                    "p_value": round(pvalue, 6),
-                },
-                evidence_days=[d for d, _, _ in consecutive if d > recent_cutoff],
-                gate_ok=(r_recent >= INERTIA_RECENT_MIN
-                         and r_recent - r_earlier >= INERTIA_DELTA),
-            ))
+            pvalue = statsig.fisher_z_difference_p(r_recent, len(recent), r_earlier, len(earlier))
+            signals.append(
+                _Signal(
+                    pid="inertia:mood",
+                    kind="inertia",
+                    label="day-to-day mood",
+                    occurrences=len(recent),
+                    pvalue=pvalue,
+                    detail={
+                        "carryover_recent": round(r_recent, 3),
+                        "carryover_earlier": round(r_earlier, 3),
+                        "window_days": INERTIA_RECENT_DAYS,
+                        "p_value": round(pvalue, 6),
+                    },
+                    evidence_days=[d for d, _, _ in consecutive if d > recent_cutoff],
+                    gate_ok=(
+                        r_recent >= INERTIA_RECENT_MIN and r_recent - r_earlier >= INERTIA_DELTA
+                    ),
+                )
+            )
 
     # --- instability: spread of within-person residuals, recent vs earlier.
     residual_days = sorted(day_residuals)
@@ -1256,26 +2092,31 @@ def _detect_mood_dynamics(
         # fail closed to p=1: "no evidence", never a crash.
         resid_phi = _daily_lag1_autocorr(day_residuals)
         pvalue = statsig.brown_forsythe_two_sided_p(
-            recent_vals, earlier_vals,
+            recent_vals,
+            earlier_vals,
             n_eff_x=statsig.effective_sample_size(len(recent_vals), resid_phi),
             n_eff_y=statsig.effective_sample_size(len(earlier_vals), resid_phi),
         )
-        signals.append(_Signal(
-            pid="instability:mood",
-            kind="instability",
-            label="daily mood",
-            occurrences=len(recent_vals),
-            pvalue=pvalue,
-            detail={
-                "spread_recent": round(sd_recent, 3),
-                "spread_earlier": round(sd_earlier, 3),
-                "window_days": INSTABILITY_RECENT_DAYS,
-                "p_value": round(pvalue, 6),
-            },
-            evidence_days=[d for d in residual_days if d > recent_cutoff],
-            gate_ok=(sd_recent >= INSTABILITY_SD_FLOOR
-                     and sd_recent >= INSTABILITY_RATIO * max(sd_earlier, 0.0)),
-        ))
+        signals.append(
+            _Signal(
+                pid="instability:mood",
+                kind="instability",
+                label="daily mood",
+                occurrences=len(recent_vals),
+                pvalue=pvalue,
+                detail={
+                    "spread_recent": round(sd_recent, 3),
+                    "spread_earlier": round(sd_earlier, 3),
+                    "window_days": INSTABILITY_RECENT_DAYS,
+                    "p_value": round(pvalue, 6),
+                },
+                evidence_days=[d for d in residual_days if d > recent_cutoff],
+                gate_ok=(
+                    sd_recent >= INSTABILITY_SD_FLOOR
+                    and sd_recent >= INSTABILITY_RATIO * max(sd_earlier, 0.0)
+                ),
+            )
+        )
     return signals
 
 
@@ -1328,8 +2169,9 @@ def _phrase_clusters(window: list[JournalEntry]) -> list[phrase_miner.PhraseClus
     )
 
 
-def _detect_phrases(clusters: list[phrase_miner.PhraseCluster],
-                    allow_rumination: bool = True) -> list[_Signal]:
+def _detect_phrases(
+    clusters: list[phrase_miner.PhraseCluster], allow_rumination: bool = True
+) -> list[_Signal]:
     """Near-duplicate clusters; negative ones surface as rumination.
 
     A recurring near-duplicate cluster is surfaced as a repeated *worry*
@@ -1351,7 +2193,9 @@ def _detect_phrases(clusters: list[phrase_miner.PhraseCluster],
         days = sorted({ref.day for ref in cluster.members})
         variants = sorted({ref.text for ref in cluster.members})
         member_sentiments = [sentiment_score(ref.text.split()) for ref in cluster.members]
-        member_negators = [sum(1 for t in ref.text.split() if t in NEGATORS) for ref in cluster.members]
+        member_negators = [
+            sum(1 for t in ref.text.split() if t in NEGATORS) for ref in cluster.members
+        ]
         negativity = sum(member_sentiments) / len(member_sentiments)
         negators = sum(member_negators) / len(member_negators)
         is_rumination = allow_rumination and (
@@ -1371,15 +2215,17 @@ def _detect_phrases(clusters: list[phrase_miner.PhraseCluster],
             detail["negativity"] = round(negativity, 3)
             detail["mean_negators"] = round(negators, 2)
             detail["absolutist_per_100"] = absolutist_density(tokens)
-        signals.append(_Signal(
-            pid=_phrase_pid(kind, cluster.members),
-            kind=kind,
-            label=cluster.representative,
-            occurrences=len(cluster.members),
-            pvalue=None,
-            detail=detail,
-            evidence_days=days,
-        ))
+        signals.append(
+            _Signal(
+                pid=_phrase_pid(kind, cluster.members),
+                kind=kind,
+                label=cluster.representative,
+                occurrences=len(cluster.members),
+                pvalue=None,
+                detail=detail,
+                evidence_days=days,
+            )
+        )
     return signals
 
 
@@ -1461,23 +2307,25 @@ def _detect_avoidance(
         share = skips / observed
         expected_rate = sum(probs) / observed
         pvalue = statsig.poisson_binomial_sf(skips, probs)
-        signals.append(_Signal(
-            pid=f"avoidance:{theme}",
-            kind="avoidance",
-            label=theme,
-            occurrences=skips,
-            pvalue=pvalue,
-            detail={
-                "silences": skips,
-                "observed": observed,
-                "base_rate": round(base_rate, 3),
-                "expected_silences": round(sum(probs), 2),
-                "share": round(share, 3),
-                "p_value": round(pvalue, 6),
-            },
-            evidence_days=skip_days,
-            gate_ok=share >= expected_rate + AVOIDANCE_MIN_LIFT,
-        ))
+        signals.append(
+            _Signal(
+                pid=f"avoidance:{theme}",
+                kind="avoidance",
+                label=theme,
+                occurrences=skips,
+                pvalue=pvalue,
+                detail={
+                    "silences": skips,
+                    "observed": observed,
+                    "base_rate": round(base_rate, 3),
+                    "expected_silences": round(sum(probs), 2),
+                    "share": round(share, 3),
+                    "p_value": round(pvalue, 6),
+                },
+                evidence_days=skip_days,
+                gate_ok=share >= expected_rate + AVOIDANCE_MIN_LIFT,
+            )
+        )
     return signals
 
 
@@ -1506,21 +2354,23 @@ def _detect_cadence(entry_days: set[date], today: date) -> list[_Signal]:
     sd_recent = statsig.sample_sd(recent_gaps)
     sd_earlier = statsig.sample_sd(earlier_gaps)
     pvalue = statsig.brown_forsythe_two_sided_p(recent_gaps, earlier_gaps)
-    return [_Signal(
-        pid="cadence:rhythm",
-        kind="cadence",
-        label="writing rhythm",
-        occurrences=len(recent_days),
-        pvalue=pvalue,
-        detail={
-            "gap_spread_recent": round(sd_recent, 3),
-            "gap_spread_earlier": round(sd_earlier, 3),
-            "median_gap_recent": round(sorted(recent_gaps)[len(recent_gaps) // 2], 1),
-            "p_value": round(pvalue, 6),
-        },
-        evidence_days=recent_days,
-        gate_ok=(sd_recent >= 0.5 and sd_recent >= 1.5 * max(sd_earlier, 1e-9)),
-    )]
+    return [
+        _Signal(
+            pid="cadence:rhythm",
+            kind="cadence",
+            label="writing rhythm",
+            occurrences=len(recent_days),
+            pvalue=pvalue,
+            detail={
+                "gap_spread_recent": round(sd_recent, 3),
+                "gap_spread_earlier": round(sd_earlier, 3),
+                "median_gap_recent": round(sorted(recent_gaps)[len(recent_gaps) // 2], 1),
+                "p_value": round(pvalue, 6),
+            },
+            evidence_days=recent_days,
+            gate_ok=(sd_recent >= 0.5 and sd_recent >= 1.5 * max(sd_earlier, 1e-9)),
+        )
+    ]
 
 
 def _mood_reanchor_day(store: dict, today: date) -> date | None:
@@ -1598,7 +2448,7 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     ewma = mu
     signs: list[tuple[date, int]] = []
     last_ewma = mu
-    for day, s in day_sentiments[len(baseline):]:
+    for day, s in day_sentiments[len(baseline) :]:
         ewma = MOOD_SHIFT_LAMBDA * s + (1 - MOOD_SHIFT_LAMBDA) * ewma
         last_ewma = ewma
         sign = 1 if ewma > upper else (-1 if ewma < lower else 0)
@@ -1620,30 +2470,31 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     # test ran, so the family counts it.
     z_last = (last_ewma - mu) / sigma_ewma if sigma_ewma > 0 else 0.0
     pvalue = statsig.normal_two_sided_sf(z_last)
-    return [_Signal(
-        pid=f"mood_shift:{direction}",
-        kind="mood_shift",
-        label="recent mood",
-        occurrences=len(beyond),
-        pvalue=pvalue,
-        detail={
-            "direction": direction,
-            "shift": round(shift, 3),
-            "baseline": round(mu, 3),
-            "current": round(last_ewma, 3),
-            "beyond_limit_days": len(beyond),
-            "p_value": round(pvalue, 6),
-        },
-        evidence_days=beyond,
-        gate_ok=abs(shift) >= MOOD_SHIFT_MIN_SHIFT,
-    )]
+    return [
+        _Signal(
+            pid=f"mood_shift:{direction}",
+            kind="mood_shift",
+            label="recent mood",
+            occurrences=len(beyond),
+            pvalue=pvalue,
+            detail={
+                "direction": direction,
+                "shift": round(shift, 3),
+                "baseline": round(mu, 3),
+                "current": round(last_ewma, 3),
+                "beyond_limit_days": len(beyond),
+                "p_value": round(pvalue, 6),
+            },
+            evidence_days=beyond,
+            gate_ok=abs(shift) >= MOOD_SHIFT_MIN_SHIFT,
+        )
+    ]
 
 
 # --- emergent topic discovery -------------------------------------------------------
 
-def _cluster_covered_days(
-    clusters: list[phrase_miner.PhraseCluster], label: str
-) -> set[date]:
+
+def _cluster_covered_days(clusters: list[phrase_miner.PhraseCluster], label: str) -> set[date]:
     """Days on which a recurring-phrase cluster member contains *label*.
 
     Unigrams match on tokens; bigrams on ADJACENT token pairs (the label
@@ -1785,11 +2636,13 @@ def _detect_topics(
                 # baselines from manufacturing claims.
                 and share_recent >= 2.0 * base + 0.05
             )
-        is_presence = (total >= TOPIC_PRESENCE_MIN_ENTRIES
-                       and share >= TOPIC_PRESENCE_MIN_SHARE
-                       and share <= TOPIC_PRESENCE_MAX_SHARE
-                       and days_n >= TOPIC_PRESENCE_MIN_DAYS
-                       and len(followers.get(label, ())) >= TOPIC_PRESENCE_MIN_CONTEXTS)
+        is_presence = (
+            total >= TOPIC_PRESENCE_MIN_ENTRIES
+            and share >= TOPIC_PRESENCE_MIN_SHARE
+            and share <= TOPIC_PRESENCE_MAX_SHARE
+            and days_n >= TOPIC_PRESENCE_MIN_DAYS
+            and len(followers.get(label, ())) >= TOPIC_PRESENCE_MIN_CONTEXTS
+        )
         if is_presence:
             # Cluster-coverage bar: occurrences a repeated sentence already
             # explains (the engine surfaces that sentence as a phrase card)
@@ -1823,17 +2676,19 @@ def _detect_topics(
             if fallback is not None:
                 signals.append(fallback)
             continue
-        signals.append(_Signal(
-            pid=f"topic:{label}",
-            kind="topic",
-            label=label,
-            occurrences=total,
-            pvalue=pvalue,
-            detail={**shared_detail, "trend": "rising", "p_value": round(pvalue, 6)},
-            evidence_days=sorted(df_days[label]),
-            gate_ok=gate_ok,
-            fallback=fallback,
-        ))
+        signals.append(
+            _Signal(
+                pid=f"topic:{label}",
+                kind="topic",
+                label=label,
+                occurrences=total,
+                pvalue=pvalue,
+                detail={**shared_detail, "trend": "rising", "p_value": round(pvalue, 6)},
+                evidence_days=sorted(df_days[label]),
+                gate_ok=gate_ok,
+                fallback=fallback,
+            )
+        )
     return signals
 
 
@@ -1842,7 +2697,7 @@ def _detect_topics(
 # The detail field that carries a claim's CORE semantics, per kind: when a
 # re-qualification rewrites it, the claim itself has changed.
 _SEMANTIC_DETAIL_KEYS = {
-    "temporal": "day",          # the dominant weekday
+    "temporal": "day",  # the dominant weekday
     "mood_correlation": "direction",
     "link": "direction",
     "mood_shift": "direction",
@@ -1892,8 +2747,10 @@ def _replication_satisfied(
         return False
     if record.kind in EVIDENCE_DATE_KINDS:
         return any(_iso(day) not in prior_evidence for day in signal.evidence_days)
-    spread = (date.fromisoformat(record.qualification_days[-1])
-              - date.fromisoformat(record.qualification_days[0])).days
+    spread = (
+        date.fromisoformat(record.qualification_days[-1])
+        - date.fromisoformat(record.qualification_days[0])
+    ).days
     return spread >= REPLICATION_MIN_SPREAD_DAYS
 
 
@@ -1920,20 +2777,25 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
                 record.state = "archived"
             base_pid = signal.pid
             suffix = 2
-            while (f"{base_pid}~{suffix}" in patterns
-                   or f"{base_pid}~{suffix}" in qualified_pids):
+            while f"{base_pid}~{suffix}" in patterns or f"{base_pid}~{suffix}" in qualified_pids:
                 suffix += 1
             signal.pid = f"{base_pid}~{suffix}"
             record = None
         qualified_pids.add(signal.pid)
         if record is None:
             record = StoredPattern(
-                pid=signal.pid, kind=signal.kind, label=signal.label,
+                pid=signal.pid,
+                kind=signal.kind,
+                label=signal.label,
                 first_seen=_iso(min(signal.evidence_days)),
                 last_seen=_iso(max(signal.evidence_days)),
-                first_qualified=today_iso, last_qualified=today_iso,
-                occurrences=signal.occurrences, state="candidate",
-                qualification_days=[], evidence_dates=[], feedback={},
+                first_qualified=today_iso,
+                last_qualified=today_iso,
+                occurrences=signal.occurrences,
+                state="candidate",
+                qualification_days=[],
+                evidence_dates=[],
+                feedback={},
                 detail={},
             )
             patterns[signal.pid] = record
@@ -1954,8 +2816,7 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
         # evidence recorded BEFORE this merge — a "new evidence day" is new
         # relative to everything earlier runs already counted.
         prior_evidence = set(record.evidence_dates)
-        evidence = sorted(set(record.evidence_dates)
-                          | {_iso(d) for d in signal.evidence_days})
+        evidence = sorted(set(record.evidence_dates) | {_iso(d) for d in signal.evidence_days})
         record.evidence_dates = evidence[-EVIDENCE_DATES_CAP:]
 
         # Lifecycle promotion. DIRECT-measurement kinds: strong evidence
@@ -1966,15 +2827,19 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
         # independent second observation (_replication_satisfied). A single
         # lucky p-value stays a candidate forever.
         if record.state == "candidate":
-            spread = (date.fromisoformat(record.qualification_days[-1])
-                      - date.fromisoformat(record.qualification_days[0])).days
+            spread = (
+                date.fromisoformat(record.qualification_days[-1])
+                - date.fromisoformat(record.qualification_days[0])
+            ).days
             if record.kind in STATISTICAL_KINDS:
                 if _replication_satisfied(record, signal, prior_evidence):
                     record.state = "emerging"
-            elif (record.occurrences >= STRONG_EVIDENCE
-                    or len(record.qualification_days) >= 2
-                    or (today - date.fromisoformat(record.first_qualified)).days >= PROMOTE_AGE_DAYS
-                    or spread >= PROMOTE_AGE_DAYS):
+            elif (
+                record.occurrences >= STRONG_EVIDENCE
+                or len(record.qualification_days) >= 2
+                or (today - date.fromisoformat(record.first_qualified)).days >= PROMOTE_AGE_DAYS
+                or spread >= PROMOTE_AGE_DAYS
+            ):
                 record.state = "emerging"
         if record.state == "emerging":
             if (today - date.fromisoformat(record.first_qualified)).days >= CONFIRM_AGE_DAYS:
@@ -2004,8 +2869,11 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
         if pid in qualified_pids or not record.last_qualified:
             continue
         stale_days = (today - date.fromisoformat(record.last_qualified)).days
-        if record.state == "candidate" and stale_days > GRACE_DAYS \
-                and record.kind in STATISTICAL_KINDS:
+        if (
+            record.state == "candidate"
+            and stale_days > GRACE_DAYS
+            and record.kind in STATISTICAL_KINDS
+        ):
             record.state = "archived"
         if record.state in ACTIVE_STATES and stale_days > GRACE_DAYS:
             record.state = "fading"
@@ -2030,6 +2898,7 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
 
 # --- the update entry point -------------------------------------------------------------
 
+
 def _record_is_sensitive(record: StoredPattern) -> bool:
     """True when a surfaced pattern's own wording is suppress-tier crisis
     content (label, or any stored phrase variant — the representative is
@@ -2039,10 +2908,10 @@ def _record_is_sensitive(record: StoredPattern) -> bool:
     variants = record.detail.get("variants")
     if isinstance(variants, list):
         return any(
-            isinstance(variant, str) and crisis.matches_suppress(variant)
-            for variant in variants
+            isinstance(variant, str) and crisis.matches_suppress(variant) for variant in variants
         )
     return False
+
 
 @dataclass
 class BrainUpdate:
@@ -2053,8 +2922,12 @@ class BrainUpdate:
     patterns_fading: int
 
 
-def update(state: dict, entries: list[JournalEntry], today: date,
-           feedback: list[tuple[str, bool]] | None = None) -> BrainUpdate:
+def update(
+    state: dict,
+    entries: list[JournalEntry],
+    today: date,
+    feedback: list[tuple[str, bool]] | None = None,
+) -> BrainUpdate:
     """Fold the corpus into the persistent store; surface what earned it.
 
     Pure: the caller's ``state`` is never mutated. Copy-on-entry via a
@@ -2104,9 +2977,7 @@ def update(state: dict, entries: list[JournalEntry], today: date,
         # theme/phrase lookups simply never match them). Counted per
         # OCCURRENCE: an entry of five sobs carries five sob tokens, not
         # one (a repeated word is counted five times too).
-        tokens.extend(
-            e for e in EMOJI_VALENCES for _ in range(entry.text.count(e))
-        )
+        tokens.extend(e for e in EMOJI_VALENCES for _ in range(entry.text.count(e)))
         if entry.sentiment is not None and math.isfinite(entry.sentiment):
             # Client-supplied mood tag: clamped to the engine's scale. A
             # non-finite value (NaN poisons every average downstream) falls
@@ -2122,7 +2993,12 @@ def update(state: dict, entries: list[JournalEntry], today: date,
     person_names = _person_candidates(window)
     if person_names:
         per_entry = [
-            (entry, tokens, themes | {n for n in person_names if _mentions_name(entry.text, n)}, sentiment)
+            (
+                entry,
+                tokens,
+                themes | {n for n in person_names if _mentions_name(entry.text, n)},
+                sentiment,
+            )
             for entry, tokens, themes, sentiment in per_entry
         ]
 
@@ -2184,7 +3060,9 @@ def update(state: dict, entries: list[JournalEntry], today: date,
         # the topic presence gate (a presence a repeated sentence already
         # explains is the same measurement twice) — computed once per run.
         clusters = _phrase_clusters(window)
-        signals.extend(_detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1))
+        signals.extend(
+            _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1)
+        )
         signals.extend(_detect_phrases(clusters, allow_rumination=language_ok))
         # EWMA baseline re-anchor: once a stored shift is established, the
         # chart re-learns the new normal from post-shift data only.
@@ -2220,7 +3098,13 @@ def update(state: dict, entries: list[JournalEntry], today: date,
     # extremeness, so the family must count every test and the gates filter
     # the corrected survivors instead.
     tested = [s for s in signals if s.pvalue is not None]
-    survivors = statsig.benjamini_hochberg([s.pvalue for s in tested], q=ALPHA)
+    pvalues: list[float] = []
+    for signal in tested:
+        # `tested` was filtered above; the explicit assertion lets the static
+        # type retain the same invariant without weakening the runtime guard.
+        assert signal.pvalue is not None
+        pvalues.append(signal.pvalue)
+    survivors = statsig.benjamini_hochberg(pvalues, q=ALPHA)
     surviving = {id(s) for s, keep in zip(tested, survivors) if keep}
     qualified: list[_Signal] = []
     for signal in signals:
@@ -2255,7 +3139,9 @@ def update(state: dict, entries: list[JournalEntry], today: date,
         if signal.kind != "temporal":
             continue
         current = best_temporal.get(signal.label)
-        if current is None or signal.detail.get("day_count", 0) > current.detail.get("day_count", 0):
+        if current is None or signal.detail.get("day_count", 0) > current.detail.get(
+            "day_count", 0
+        ):
             best_temporal[signal.label] = signal
     if best_temporal:
         qualified = [s for s in qualified if s.kind != "temporal"]
@@ -2286,12 +3172,14 @@ def update(state: dict, entries: list[JournalEntry], today: date,
             continue
         evidence = [date.fromisoformat(d) for d in record.evidence_dates]
         surfaced_records.append((record, _decay_strength(evidence, today)))
-    surfaced_records.sort(key=lambda item: (
-        STATE_RANK.get(item[0].state, 3),
-        -item[1],
-        -item[0].occurrences,
-        item[0].pid,
-    ))
+    surfaced_records.sort(
+        key=lambda item: (
+            STATE_RANK.get(item[0].state, 3),
+            -item[1],
+            -item[0].occurrences,
+            item[0].pid,
+        )
+    )
     surfaced_records = surfaced_records[:MAX_SURFACED]
 
     n_window_entries = len(per_entry)
@@ -2307,39 +3195,41 @@ def update(state: dict, entries: list[JournalEntry], today: date,
             patterns_new += 1
         if record.state == "fading":
             patterns_fading += 1
-        surfaced.append(Pattern(
-            kind=record.kind,
-            label=record.label,
-            occurrences=record.occurrences,
-            confidence=round(strength, 3),
-            detail={
-                **record.detail,
-                # Stable identity for external attachment (therapist notes):
-                # phrase-cluster pids are anchored on internal sentence
-                # refs, so kind+label alone cannot reconstruct them.
-                "pattern_pid": record.pid,
-                "pattern_state": record.state,
-                "strength": round(strength, 3),
-                "first_seen": record.first_seen,
-                "last_seen": record.last_seen,
-                "is_new": is_new,
-                "sample_days": n_window_entries,
-                # The days whose entries fed this pattern (capped at
-                # EVIDENCE_DATES_CAP). Powers the evidence drill-down: the
-                # patient's app and the therapist portal fetch the entries
-                # for exactly these dates. Dates only — never quotes text.
-                "evidence_dates": list(record.evidence_dates),
-                # Question-feedback taps (encrypted at rest with the rest
-                # of the state): powers feedback-aware question ranking.
-                "feedback": dict(record.feedback),
-                # Crisis interlock: when the wording itself is suppress-tier,
-                # the card is marked so the client renders the NON-QUOTING
-                # variant (and the question engine never touches it —
-                # enforced again there). Computed at surfacing time, never
-                # stored: the flag follows the current phrase contract.
-                **({"sensitive": True} if _record_is_sensitive(record) else {}),
-            },
-        ))
+        surfaced.append(
+            Pattern(
+                kind=record.kind,
+                label=record.label,
+                occurrences=record.occurrences,
+                confidence=round(strength, 3),
+                detail={
+                    **record.detail,
+                    # Stable identity for external attachment (therapist notes):
+                    # phrase-cluster pids are anchored on internal sentence
+                    # refs, so kind+label alone cannot reconstruct them.
+                    "pattern_pid": record.pid,
+                    "pattern_state": record.state,
+                    "strength": round(strength, 3),
+                    "first_seen": record.first_seen,
+                    "last_seen": record.last_seen,
+                    "is_new": is_new,
+                    "sample_days": n_window_entries,
+                    # The days whose entries fed this pattern (capped at
+                    # EVIDENCE_DATES_CAP). Powers the evidence drill-down: the
+                    # patient's app and the therapist portal fetch the entries
+                    # for exactly these dates. Dates only — never quotes text.
+                    "evidence_dates": list(record.evidence_dates),
+                    # Question-feedback taps (encrypted at rest with the rest
+                    # of the state): powers feedback-aware question ranking.
+                    "feedback": dict(record.feedback),
+                    # Crisis interlock: when the wording itself is suppress-tier,
+                    # the card is marked so the client renders the NON-QUOTING
+                    # variant (and the question engine never touches it —
+                    # enforced again there). Computed at surfacing time, never
+                    # stored: the flag follows the current phrase contract.
+                    **({"sensitive": True} if _record_is_sensitive(record) else {}),
+                },
+            )
+        )
 
     history = store["history"]
     surfaced_pids = [r.pid for r, _ in surfaced_records]

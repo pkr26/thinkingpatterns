@@ -65,6 +65,7 @@ ALL_MINDPATTERN_ENV_VARS = [
     "MINDPATTERN_PROCESSING_RATE_WINDOW",
     "MINDPATTERN_READ_RATE_LIMIT",
     "MINDPATTERN_READ_RATE_WINDOW",
+    "MINDPATTERN_BODY_READ_TIMEOUT",
     "MINDPATTERN_MAX_BODY_BYTES",
     "MINDPATTERN_MAX_ENTRIES_PER_USER",
     "MINDPATTERN_MAX_USER_BLOB_BYTES",
@@ -77,7 +78,14 @@ ALL_MINDPATTERN_ENV_VARS = [
     "MINDPATTERN_LLM_URL",
     "MINDPATTERN_LLM_API_KEY",
     "MINDPATTERN_LLM_MODEL",
+    "MINDPATTERN_LLM_PROVIDER_NAME",
+    "MINDPATTERN_LLM_DATA_RETENTION",
+    "MINDPATTERN_LLM_POLICY_VERSION",
+    "MINDPATTERN_ACCESS_LOG_RETENTION_DAYS",
+    "MINDPATTERN_THERAPIST_SHARING_ENABLED",
+    "MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN",
     "MINDPATTERN_TRUST_PROXY_HEADERS",
+    "MINDPATTERN_TRUSTED_PROXY_IPS",
     "MINDPATTERN_CORS_ORIGINS",
     "MINDPATTERN_DB_URL",
 ]
@@ -117,6 +125,7 @@ def test_settings_defaults_are_pinned(clean_env):
         "processing_rate_window": 60,
         "read_rate_limit": 300,
         "read_rate_window": 60,
+        "body_read_timeout_seconds": 30,
         "max_body_bytes": 2 * 1024 * 1024,
         "max_entries_per_user": 10_000,
         "max_user_blob_bytes": 256 * 1024 * 1024,
@@ -126,14 +135,21 @@ def test_settings_defaults_are_pinned(clean_env):
         # Added 2026-09-07: dedicated export bucket + env-sized PG pool.
         "export_rate_limit": 5,
         "export_rate_window": 60,
+        "access_log_retention_days": 730,
         "db_pool_size": 5,
         "db_max_overflow": 10,
         "db_pool_timeout": 30,
         "llm_url": "",
         "llm_api_key": "",
         "llm_model": "gpt-4o-mini",
+        "llm_provider_name": "",
+        "llm_data_retention": "",
+        "llm_policy_version": "v1",
+        "therapist_sharing_enabled": True,
+        "therapist_enrollment_token": "",
         "cors_origins": [],
         "trust_proxy_headers": False,
+        "trusted_proxy_ips": [],
     }
 
 
@@ -166,6 +182,7 @@ def test_from_env_wires_every_variable(clean_env, monkeypatch):
     monkeypatch.setenv("MINDPATTERN_PROCESSING_RATE_WINDOW", "57")
     monkeypatch.setenv("MINDPATTERN_READ_RATE_LIMIT", "8")
     monkeypatch.setenv("MINDPATTERN_READ_RATE_WINDOW", "58")
+    monkeypatch.setenv("MINDPATTERN_BODY_READ_TIMEOUT", "17")
     monkeypatch.setenv("MINDPATTERN_MAX_BODY_BYTES", str(1024 * 1024))
     monkeypatch.setenv("MINDPATTERN_MAX_ENTRIES_PER_USER", "99")
     monkeypatch.setenv("MINDPATTERN_MAX_USER_BLOB_BYTES", str(1024 * 1024))
@@ -174,6 +191,7 @@ def test_from_env_wires_every_variable(clean_env, monkeypatch):
     monkeypatch.setenv("MINDPATTERN_LLM_API_KEY", "sk-test")
     monkeypatch.setenv("MINDPATTERN_LLM_MODEL", "mini-latest")
     monkeypatch.setenv("MINDPATTERN_TRUST_PROXY_HEADERS", "1")
+    monkeypatch.setenv("MINDPATTERN_TRUSTED_PROXY_IPS", "10.0.0.9, 2001:db8::/64")
     monkeypatch.setenv("MINDPATTERN_CORS_ORIGINS", "https://a.example, https://b.example")
 
     settings = Settings.from_env()
@@ -191,6 +209,7 @@ def test_from_env_wires_every_variable(clean_env, monkeypatch):
     assert settings.processing_rate_window == 57
     assert settings.read_rate_limit == 8
     assert settings.read_rate_window == 58
+    assert settings.body_read_timeout_seconds == 17
     assert settings.max_body_bytes == 1024 * 1024
     assert settings.max_entries_per_user == 99
     assert settings.max_user_blob_bytes == 1024 * 1024
@@ -199,12 +218,27 @@ def test_from_env_wires_every_variable(clean_env, monkeypatch):
     assert settings.llm_api_key == "sk-test"
     assert settings.llm_model == "mini-latest"
     assert settings.trust_proxy_headers is True
+    assert settings.trusted_proxy_ips == ["10.0.0.9/32", "2001:db8::/64"]
     assert settings.cors_origins == ["https://a.example", "https://b.example"]
 
 
 def test_from_env_rejects_non_integer(clean_env, monkeypatch):
     monkeypatch.setenv("MINDPATTERN_AUTH_RATE_LIMIT", "ten")
-    with pytest.raises(ValueError, match=r"^environment variable MINDPATTERN_AUTH_RATE_LIMIT='ten' is not an integer$"):
+    with pytest.raises(
+        ValueError,
+        match=r"^environment variable MINDPATTERN_AUTH_RATE_LIMIT='ten' is not an integer$",
+    ):
+        Settings.from_env()
+
+
+def test_proxy_header_mode_requires_valid_direct_peer_allowlist(clean_env, monkeypatch):
+    monkeypatch.setenv("MINDPATTERN_ENV", "development")
+    monkeypatch.setenv("MINDPATTERN_TRUST_PROXY_HEADERS", "1")
+    with pytest.raises(RuntimeError, match="MINDPATTERN_TRUSTED_PROXY_IPS"):
+        Settings.from_env()
+
+    monkeypatch.setenv("MINDPATTERN_TRUSTED_PROXY_IPS", "not-an-ip")
+    with pytest.raises(RuntimeError, match="invalid IP/CIDR"):
         Settings.from_env()
 
 
@@ -232,7 +266,9 @@ def test_production_refuses_weak_token_secret_at_the_exact_boundary(clean_env, m
     monkeypatch.setenv("MINDPATTERN_DB_URL", "postgresql+asyncpg://u:p@h/db")
 
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "x" * 31)
-    with pytest.raises(RuntimeError, match=r"MINDPATTERN_TOKEN_SECRET must be at least 32 characters"):
+    with pytest.raises(
+        RuntimeError, match=r"MINDPATTERN_TOKEN_SECRET must be at least 32 characters"
+    ):
         Settings.from_env()
 
     # Exactly 32 characters is the accepted minimum.
@@ -326,14 +362,17 @@ def test_route_wiring_prefixes_tags_and_limiter_buckets():
         assert _limiter_bucket(route) == bucket, f"{method} {path} limiter bucket"
     assert len(seen) == len(EXPECTED_ROUTES)
     # healthz is declared straight on the app factory.
-    health = next(r for r in module_level_app.routes if isinstance(r, APIRoute) and r.path == "/healthz")
+    health = next(
+        r for r in module_level_app.routes if isinstance(r, APIRoute) and r.path == "/healthz"
+    )
     assert set(health.tags) == {"ops"}
 
 
 def test_limiter_composite_key_shape():
     """The counter key is bucket:client — pinned so buckets never collide."""
     route = next(
-        r for r in entries_api.router.routes
+        r
+        for r in entries_api.router.routes
         if isinstance(r, APIRoute) and r.path == "/entries" and "POST" in r.methods
     )
     check = next(d.dependency for d in route.dependencies if d.dependency.__name__ == "check")
@@ -430,7 +469,7 @@ def test_counter_drops_exactly_expired_windows():
     assert "fresh" in counter._hits
 
 
-def test_client_key_ignores_forwarded_headers_unless_trusted():
+def test_client_key_uses_only_middleware_authorized_forwarding_state():
     from starlette.requests import Request
 
     scope = {
@@ -443,7 +482,12 @@ def test_client_key_ignores_forwarded_headers_unless_trusted():
     request = Request(scope)
     # Default: do NOT trust the spoofable header.
     assert client_key(request) == "1.2.3.4"
-    # Opt-in: rightmost entry across the whole line.
+    # A raw boolean alone never grants a direct client authority over XFF.
+    assert client_key(request, trust_proxy_headers=True) == "1.2.3.4"
+    # HardeningMiddleware supplies this state only after the direct socket
+    # peer matches MINDPATTERN_TRUSTED_PROXY_IPS and it sanitizes the chain.
+    request.state.mindpattern_trusted_proxy = True
+    request.state.mindpattern_forwarded_client = "8.8.8.8"
     assert client_key(request, trust_proxy_headers=True) == "8.8.8.8"
 
 
@@ -535,7 +579,16 @@ async def test_cors_middleware_contract(settings):
     # preferred DELETE /account re-auth transport and a browser client must
     # be allowed to send it cross-origin (origins themselves stay opt-in).
     assert cors.kwargs["allow_headers"] == [
-        "Authorization", "Content-Type", "X-Processing-Token", "X-Account-Verifier",
+        "Authorization",
+        "Content-Type",
+        "X-Processing-Token",
+        "X-Account-Verifier",
+        "X-Therapist-Enrollment-Token",
+    ]
+    assert cors.kwargs["expose_headers"] == [
+        "X-Next-Offset",
+        "X-Entries-Revision",
+        "X-Notes-Revision",
     ]
     assert cors.kwargs["allow_origins"] == []
 
@@ -604,14 +657,22 @@ async def test_register_rejects_whitespace_in_base64_verifier(client):
 async def test_register_rejects_wrongly_sized_salt_and_verifier(client):
     response = await client.post(
         "/api/auth/register",
-        json={"username": "sizing", "salt": base64.b64encode(b"short").decode(), "verifier": base64.b64encode(b"y" * 32).decode()},
+        json={
+            "username": "sizing",
+            "salt": base64.b64encode(b"short").decode(),
+            "verifier": base64.b64encode(b"y" * 32).decode(),
+        },
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "salt must be exactly 16 bytes"
 
     response = await client.post(
         "/api/auth/register",
-        json={"username": "sizing", "salt": base64.b64encode(b"x" * 16).decode(), "verifier": base64.b64encode(b"y" * 31).decode()},
+        json={
+            "username": "sizing",
+            "salt": base64.b64encode(b"x" * 16).decode(),
+            "verifier": base64.b64encode(b"y" * 31).decode(),
+        },
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "verifier must be 32 bytes"
@@ -673,39 +734,62 @@ async def test_entry_validation_details_are_exact(client):
     await emu.register(client)
 
     too_small = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "e-small", "blob": base64.b64encode(b"x" * 27).decode(), "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-small",
+            "blob": base64.b64encode(b"x" * 27).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert too_small.status_code == 422
     assert too_small.json()["detail"] == "blob must be at least 28 bytes"
 
     future = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "e-future", "blob": base64.b64encode(b"x" * 40).decode(),
-              # Two days out: one day of FORWARD grace absorbs device-local
-              # dates east of UTC (added 2026-09-07), so the rejection pin
-              # moved past the grace window.
-              "entry_date": (TODAY + timedelta(days=2)).isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-future",
+            "blob": base64.b64encode(b"x" * 40).decode(),
+            # Two days out: one day of FORWARD grace absorbs device-local
+            # dates east of UTC (added 2026-09-07), so the rejection pin
+            # moved past the grace window.
+            "entry_date": (TODAY + timedelta(days=2)).isoformat(),
+        },
     )
     assert future.status_code == 422
     assert future.json()["detail"] == "entry_date cannot be in the future"
 
     ancient = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "e-old", "blob": base64.b64encode(b"x" * 40).decode(),
-              "entry_date": (TODAY - timedelta(days=400)).isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-old",
+            "blob": base64.b64encode(b"x" * 40).decode(),
+            "entry_date": (TODAY - timedelta(days=400)).isoformat(),
+        },
     )
     assert ancient.status_code == 422
     assert ancient.json()["detail"] == "entry_date is before this account existed"
 
     created = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "e-dup", "blob": base64.b64encode(b"x" * 40).decode(), "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-dup",
+            "blob": base64.b64encode(b"x" * 40).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert created.status_code == 201
     duplicate = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "e-dup", "blob": base64.b64encode(b"x" * 40).decode(), "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-dup",
+            "blob": base64.b64encode(b"x" * 40).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "entry already exists"
@@ -721,11 +805,13 @@ async def test_entry_quota_details_are_exact(client, app):
     app.state.settings.max_entries_per_user = 1
     blob = base64.b64encode(b"x" * 40).decode()
     await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": "q-1", "blob": blob, "entry_date": TODAY.isoformat()},
     )
     second = await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": "q-2", "blob": blob, "entry_date": TODAY.isoformat()},
     )
     assert second.status_code == 413
@@ -738,8 +824,13 @@ async def test_byte_quota_boundary_admits_an_exactly_full_account(client, app):
     raw = b"x" * 40
     app.state.settings.max_user_blob_bytes = len(raw)  # exactly the incoming blob
     created = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "qb-1", "blob": base64.b64encode(raw).decode(), "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "qb-1",
+            "blob": base64.b64encode(raw).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert created.status_code == 201
 
@@ -748,8 +839,13 @@ async def test_min_blob_size_boundary(client):
     emu = ClientEmulator("blobbound", "pw-blob-bound")
     await emu.register(client)
     exactly = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "mb-1", "blob": base64.b64encode(b"x" * 28).decode(), "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "mb-1",
+            "blob": base64.b64encode(b"x" * 28).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert exactly.status_code == 201
 
@@ -892,18 +988,40 @@ async def test_stale_insight_rows_are_replaced_for_the_same_kind_only(client, ap
 
     async with app.state.sessionmaker() as session:
         # A foreign-kind row and a stale same-kind row for another date.
-        session.add(Insight(user_id=emu.user_id, kind="other-kind", for_date=TODAY - timedelta(days=3),
-                            blob=b"keep-me"))
-        session.add(Insight(user_id=emu.user_id, kind="patterns", for_date=TODAY - timedelta(days=9),
-                            blob=b"stale"))
-        session.add(Insight(user_id=emu.user_id, kind="question", for_date=TODAY - timedelta(days=9),
-                            blob=b"stale-q"))
+        session.add(
+            Insight(
+                user_id=emu.user_id,
+                kind="other-kind",
+                for_date=TODAY - timedelta(days=3),
+                blob=b"keep-me",
+            )
+        )
+        session.add(
+            Insight(
+                user_id=emu.user_id,
+                kind="patterns",
+                for_date=TODAY - timedelta(days=9),
+                blob=b"stale",
+            )
+        )
+        session.add(
+            Insight(
+                user_id=emu.user_id,
+                kind="question",
+                for_date=TODAY - timedelta(days=9),
+                blob=b"stale-q",
+            )
+        )
         await session.commit()
 
     await emu.recompute(client)
 
     async with app.state.sessionmaker() as session:
-        rows = (await session.execute(select(Insight).where(Insight.user_id == emu.user_id))).scalars().all()
+        rows = (
+            (await session.execute(select(Insight).where(Insight.user_id == emu.user_id)))
+            .scalars()
+            .all()
+        )
     kinds = sorted((r.kind, r.for_date) for r in rows)
     pattern_rows = [r for r in rows if r.kind == "patterns"]
     # The foreign-kind row is untouched, exactly ONE fresh patterns row
@@ -925,7 +1043,9 @@ async def test_register_stores_a_16_byte_server_scrypt_salt(client, app):
     emu = ClientEmulator("srvsalt", "pw-srv-salt")
     await emu.register(client)
     async with app.state.sessionmaker() as session:
-        row = (await session.execute(select(User).where(User.username == emu.username))).scalar_one()
+        row = (
+            await session.execute(select(User).where(User.username == emu.username))
+        ).scalar_one()
     assert len(bytes(row.scrypt_salt)) == 16
 
 
@@ -960,7 +1080,8 @@ async def test_login_failure_detail_is_exact(client):
     emu = ClientEmulator("badlogin", "pw-bad-login")
     await emu.register(client)
     response = await client.post(
-        "/api/auth/login", json={"username": emu.username, "verifier": base64.b64encode(b"w" * 32).decode()}
+        "/api/auth/login",
+        json={"username": emu.username, "verifier": base64.b64encode(b"w" * 32).decode()},
     )
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid credentials"
@@ -1053,8 +1174,12 @@ async def test_export_bundle_header_is_exact(client):
 
 def _http_scope(headers=None, method="POST"):
     return {
-        "type": "http", "asgi": {"version": "2.3"}, "http_version": "1.1",
-        "method": method, "path": "/x", "headers": headers or [],
+        "type": "http",
+        "asgi": {"version": "2.3"},
+        "http_version": "1.1",
+        "method": method,
+        "path": "/x",
+        "headers": headers or [],
     }
 
 
@@ -1104,7 +1229,10 @@ async def test_body_exactly_at_the_cap_is_allowed():
     sent = await _call_asgi(
         wrapped,
         _http_scope([]),
-        [{"type": "http.request", "more_body": True}, {"type": "http.request", "body": b"0" * 11, "more_body": False}],
+        [
+            {"type": "http.request", "more_body": True},
+            {"type": "http.request", "body": b"0" * 11, "more_body": False},
+        ],
     )
     assert sent[0]["status"] == 413
 
@@ -1121,12 +1249,15 @@ async def test_body_exactly_at_the_cap_is_allowed():
     sent = await _call_asgi(
         exact,
         _http_scope([]),
-        [{"type": "http.request", "more_body": True}, {"type": "http.request", "body": b"123", "more_body": False}],
+        [
+            {"type": "http.request", "more_body": True},
+            {"type": "http.request", "body": b"123", "more_body": False},
+        ],
     )
     assert sent[0]["status"] == 200
 
 
-async def test_overflow_converts_to_a_real_disconnect_message():
+async def test_overflow_is_rejected_before_the_app_can_observe_it():
     seen_types = []
 
     async def reader_app(scope, receive, send):
@@ -1140,10 +1271,12 @@ async def test_overflow_converts_to_a_real_disconnect_message():
 
     wrapped = HardeningMiddleware(reader_app, max_body_bytes=4)
     sent = await _call_asgi(
-        wrapped, _http_scope([]), [{"type": "http.request", "body": b"toolarge", "more_body": False}]
+        wrapped,
+        _http_scope([]),
+        [{"type": "http.request", "body": b"toolarge", "more_body": False}],
     )
-    assert "http.disconnect" in seen_types
-    assert sent[0]["status"] == 200  # the app answered; its answer stands
+    assert seen_types == []
+    assert sent[0]["status"] == 413
 
 
 async def test_silent_app_without_overflow_gets_no_synthesized_response():
@@ -1168,10 +1301,13 @@ async def test_no_second_response_after_the_app_already_answered():
 
 async def test_app_provided_security_headers_are_not_duplicated():
     async def headered(scope, receive, send):
-        await send({
-            "type": "http.response.start", "status": 200,
-            "headers": [(b"cache-control", b"no-store"), (b"x-custom", b"x-frame-options")],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"cache-control", b"no-store"), (b"x-custom", b"x-frame-options")],
+            }
+        )
         await send({"type": "http.response.body", "body": b""})
 
     wrapped = HardeningMiddleware(headered, max_body_bytes=100)
@@ -1201,10 +1337,10 @@ async def test_unhandled_exceptions_are_logged_on_the_mindpattern_logger(caplog)
     wrapped = HardeningMiddleware(exploding, max_body_bytes=100)
     with caplog.at_level(logging.ERROR, logger="mindpattern"):
         await _call_asgi(wrapped, _http_scope([], method="GET"), [])
-    matching = [r for r in caplog.records if "unhandled error serving GET /x" in r.message]
+    matching = [r for r in caplog.records if "unhandled error serving method=GET" in r.message]
     assert matching, "expected an unhandled-error record"
     assert matching[0].name == "mindpattern"
-    assert matching[0].message == "unhandled error serving GET /x"
+    assert matching[0].message == "unhandled error serving method=GET"
 
 
 # ---------------------------------------------------------------------------
@@ -1269,15 +1405,18 @@ def test_sanitize_keeps_numeric_span_days():
 def _entry(n, text="work", sentiment=0.1):
     from app.services.patterns import JournalEntry
 
-    return JournalEntry(text=text, entry_date=date(2026, 7, 1) + timedelta(days=n), sentiment=sentiment)
+    return JournalEntry(
+        text=text, entry_date=date(2026, 7, 1) + timedelta(days=n), sentiment=sentiment
+    )
 
 
 def test_llm_prompt_and_payload_shape_are_pinned():
     analyzer = LLMAnalyzer("https://llm.example.com/v1", "key", model="mini")
     posted = []
-    analyzer._post = lambda payload: posted.append(payload) or {
-        "choices": [{"message": {"content": json.dumps({"patterns": []})}}]
-    }
+    analyzer._post = lambda payload: (
+        posted.append(payload)
+        or {"choices": [{"message": {"content": json.dumps({"patterns": []})}}]}
+    )
     analyzer.extract_patterns([_entry(0, "a work day", sentiment=-0.25)])
 
     payload = posted[0]
@@ -1311,9 +1450,9 @@ def test_llm_budget_boundary_is_exact():
     corpus = [_entry(i, "w" * 75_000) for i in range(4)]
 
     posted = []
-    analyzer._post = lambda payload: posted.append(payload) or {
-        "choices": [{"message": {"content": '{"patterns": []}'}}]
-    }
+    analyzer._post = lambda payload: (
+        posted.append(payload) or {"choices": [{"message": {"content": '{"patterns": []}'}}]}
+    )
     analyzer.extract_patterns(corpus)
 
     sent_entries = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
@@ -1325,9 +1464,9 @@ def test_llm_budget_boundary_is_exact():
 def test_llm_sends_the_last_entries_within_the_slice_and_budget():
     analyzer = LLMAnalyzer("https://llm.example.com/v1", "key")
     posted = []
-    analyzer._post = lambda payload: posted.append(payload) or {
-        "choices": [{"message": {"content": '{"patterns": []}'}}]
-    }
+    analyzer._post = lambda payload: (
+        posted.append(payload) or {"choices": [{"message": {"content": '{"patterns": []}'}}]}
+    )
     corpus = [_entry(i, f"entry {i} " + "x" * 700) for i in range(250)]
     analyzer.extract_patterns(corpus)
     sent_entries = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
@@ -1366,8 +1505,9 @@ def test_question_pool_dedups_duplicates():
     """build_pool must keep only the FIRST occurrence of any question."""
     from app.services.patterns import Pattern
 
-    temporal = Pattern(kind="temporal", label="work", occurrences=6, confidence=0.8,
-                       detail={"day": "Sunday"})
+    temporal = Pattern(
+        kind="temporal", label="work", occurrences=6, confidence=0.8, detail={"day": "Sunday"}
+    )
     pool = questions_module.build_pool([temporal])
     assert len(pool) == len(set(pool))  # no duplicates survive
 
@@ -1400,7 +1540,11 @@ async def test_register_schema_boundaries(client):
     # in the handler with the size message; "A" alone is not decodable b64.
     one_char = await client.post(
         "/api/auth/register",
-        json={"username": "bounds", "salt": base64.b64encode(b"s").decode(), "verifier": good_verifier},
+        json={
+            "username": "bounds",
+            "salt": base64.b64encode(b"s").decode(),
+            "verifier": good_verifier,
+        },
     )
     assert one_char.status_code == 422
     assert one_char.json()["detail"] == "salt must be exactly 16 bytes"
@@ -1478,7 +1622,8 @@ async def test_entry_schema_boundaries(client):
 
     # 1-char blob reaches the handler's base64 branch.
     one_char = await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": "eb-1", "blob": "A", "entry_date": TODAY.isoformat()},
     )
     assert one_char.status_code == 422
@@ -1486,23 +1631,35 @@ async def test_entry_schema_boundaries(client):
 
     # client_entry_id pattern: 1-64 chars of [A-Za-z0-9_-].
     bad_id = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "!!bad!!", "blob": base64.b64encode(b"z" * 40).decode(),
-              "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "!!bad!!",
+            "blob": base64.b64encode(b"z" * 40).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert bad_id.status_code == 422
     assert _is_validation_shaped(bad_id.json()["detail"])
 
     ok_64 = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "a" * 64, "blob": base64.b64encode(b"z" * 40).decode(),
-              "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "a" * 64,
+            "blob": base64.b64encode(b"z" * 40).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert ok_64.status_code == 201
     over_64 = await client.post(
-        "/api/entries", headers=emu.headers,
-        json={"client_entry_id": "a" * 65, "blob": base64.b64encode(b"z" * 40).decode(),
-              "entry_date": TODAY.isoformat()},
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "a" * 65,
+            "blob": base64.b64encode(b"z" * 40).decode(),
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert over_64.status_code == 422
     assert _is_validation_shaped(over_64.json()["detail"])
@@ -1511,13 +1668,15 @@ async def test_entry_schema_boundaries(client):
     huge = base64.b64encode(b"b" * 1_125_000).decode()
     assert len(huge) == 1_500_000
     at_cap = await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": "eb-huge", "blob": huge, "entry_date": TODAY.isoformat()},
     )
     assert at_cap.status_code == 201
     # ...and one character over is a pydantic 422 (list-shaped detail).
     capped = await client.post(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         json={"client_entry_id": "eb-huge2", "blob": huge + "A", "entry_date": TODAY.isoformat()},
     )
     assert capped.status_code == 422
@@ -1531,40 +1690,57 @@ async def test_single_character_fields_reach_the_handlers(client):
     from tests.test_insights_api import seed_corpus  # noqa: F401  (ordering)
 
     # Register: salt and verifier.
-    r1 = await client.post("/api/auth/register", json={
-        "username": "singlechar", "salt": "A",
-        "verifier": base64.b64encode(b"v" * 32).decode(),
-    })
+    r1 = await client.post(
+        "/api/auth/register",
+        json={
+            "username": "singlechar",
+            "salt": "A",
+            "verifier": base64.b64encode(b"v" * 32).decode(),
+        },
+    )
     assert r1.status_code == 422
     assert r1.json()["detail"] == "salt and verifier must be base64"
 
     emu = ClientEmulator("singlechar2", "pw-single-char-2")
     await emu.register(client)
-    r2 = await client.post("/api/auth/register", json={
-        "username": "singlechar2b", "salt": emu.salt_b64, "verifier": "A",
-    })
+    r2 = await client.post(
+        "/api/auth/register",
+        json={
+            "username": "singlechar2b",
+            "salt": emu.salt_b64,
+            "verifier": "A",
+        },
+    )
     assert r2.status_code == 422
     assert r2.json()["detail"] == "salt and verifier must be base64"
 
     # Login verifier: the handler deliberately swallows the decode error and
     # burns CPU -> flat 401 (never 422; a shape change betrays a min_length
     # mutant).
-    r3 = await client.post("/api/auth/login", json={
-        "username": emu.username, "verifier": "A",
-    })
+    r3 = await client.post(
+        "/api/auth/login",
+        json={
+            "username": emu.username,
+            "verifier": "A",
+        },
+    )
     assert r3.status_code == 401
     assert r3.json()["detail"] == "invalid credentials"
 
     # Account deletion and LLM consent verifiers: authenticated requests with
     # a bad proof are 403 (since 2026-09-07; 401 means "session expired").
     r4 = await client.request(
-        "DELETE", "/api/account", headers=emu.headers, json={"verifier": "A"},
+        "DELETE",
+        "/api/account",
+        headers=emu.headers,
+        json={"verifier": "A"},
     )
     assert r4.status_code == 403
     assert r4.json()["detail"] == "invalid credentials"
 
     r5 = await client.put(
-        "/api/account/llm-consent", headers=emu.headers,
+        "/api/account/llm-consent",
+        headers=emu.headers,
         json={"enabled": True, "verifier": "A"},
     )
     assert r5.status_code == 403
@@ -1572,10 +1748,14 @@ async def test_single_character_fields_reach_the_handlers(client):
 
     # Register username: 1 char passes pydantic? No — the pattern (3..64)
     # rejects it, list-shaped; a 3-char name is accepted.
-    r6 = await client.post("/api/auth/register", json={
-        "username": "a", "salt": emu.salt_b64,
-        "verifier": base64.b64encode(b"v" * 32).decode(),
-    })
+    r6 = await client.post(
+        "/api/auth/register",
+        json={
+            "username": "a",
+            "salt": emu.salt_b64,
+            "verifier": base64.b64encode(b"v" * 32).decode(),
+        },
+    )
     assert r6.status_code == 422
     assert _is_validation_shaped(r6.json()["detail"])
 
@@ -1587,20 +1767,23 @@ async def test_verifier_and_username_caps_on_every_schema(client):
 
     # Login: pattern-anchored username and capped verifier.
     bad_format = await client.post(
-        "/api/auth/login", json={"username": "!!bad!!", "verifier": emu.auth_key_b64},
+        "/api/auth/login",
+        json={"username": "!!bad!!", "verifier": emu.auth_key_b64},
     )
     assert bad_format.status_code == 422
     assert _is_validation_shaped(bad_format.json()["detail"])
 
     long_login = await client.post(
-        "/api/auth/login", json={"username": emu.username, "verifier": v65},
+        "/api/auth/login",
+        json={"username": emu.username, "verifier": v65},
     )
     assert long_login.status_code == 422
     assert _is_validation_shaped(long_login.json()["detail"])
 
     # LLM consent PUT: capped verifier.
     long_consent = await client.put(
-        "/api/account/llm-consent", headers=emu.headers,
+        "/api/account/llm-consent",
+        headers=emu.headers,
         json={"enabled": True, "verifier": v65},
     )
     assert long_consent.status_code == 422
@@ -1608,7 +1791,10 @@ async def test_verifier_and_username_caps_on_every_schema(client):
 
     # Account deletion: capped verifier.
     long_delete = await client.request(
-        "DELETE", "/api/account", headers=emu.headers, json={"verifier": v65},
+        "DELETE",
+        "/api/account",
+        headers=emu.headers,
+        json={"verifier": v65},
     )
     assert long_delete.status_code == 422
     assert _is_validation_shaped(long_delete.json()["detail"])
@@ -1619,7 +1805,9 @@ async def test_processing_key_schema_boundaries(client):
     await emu.register(client)
 
     one_char = await client.post(
-        "/api/processing/sessions", headers=emu.headers, json={"data_key": "A"},
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": "A"},
     )
     assert one_char.status_code == 422
     assert one_char.json()["detail"] == "data_key must be base64"
@@ -1629,7 +1817,9 @@ async def test_processing_key_schema_boundaries(client):
     k48 = base64.b64encode(b"k" * 48).decode()
     assert len(k48) == 64
     over = await client.post(
-        "/api/processing/sessions", headers=emu.headers, json={"data_key": k48 + "A"},
+        "/api/processing/sessions",
+        headers=emu.headers,
+        json={"data_key": k48 + "A"},
     )
     assert over.status_code == 422
     assert _is_validation_shaped(over.json()["detail"])
@@ -1670,17 +1860,19 @@ async def test_keyed_limit_buckets_use_the_username_namespaced_keys(client, app)
     keys = set(counter._hits)
     assert not any(k.startswith(f"register-name:{emu.username}") for k in keys), keys
 
-    # A SUCCESSFUL login no longer consumes the per-username bucket (only
-    # failed verifications count — garbage probes must not lock a victim out).
-    await client.post("/api/auth/login", json={"username": emu.username, "verifier": emu.auth_key_b64})
+    # Login has no per-username deny bucket: an attacker rotating source IPs
+    # must not be able to spend a victim's failure budget and lock them out.
+    await client.post(
+        "/api/auth/login", json={"username": emu.username, "verifier": emu.auth_key_b64}
+    )
     keys = set(counter._hits)
     assert not any(k.startswith(f"login-name:{emu.username}") for k in keys), keys
 
-    # A FAILED verification does consume it.
+    # A FAILED verification also must not create a name-scoped lockout.
     wrong = base64.b64encode(b"\x11" * 32).decode()
     await client.post("/api/auth/login", json={"username": emu.username, "verifier": wrong})
     keys = set(counter._hits)
-    assert any(k.startswith(f"login-name:{emu.username}") for k in keys), keys
+    assert not any(k.startswith(f"login-name:{emu.username}") for k in keys), keys
 
     # And a 409 register conflict does consume the register-name bucket.
     response = await client.post(
@@ -1715,7 +1907,11 @@ async def test_baseline_recompute_writes_no_insight_rows(client, app):
         "/api/insights/recompute", headers={**emu.headers, "X-Processing-Token": token}
     )
     async with app.state.sessionmaker() as session:
-        rows = (await session.execute(select(Insight).where(Insight.user_id == emu.user_id))).scalars().all()
+        rows = (
+            (await session.execute(select(Insight).where(Insight.user_id == emu.user_id)))
+            .scalars()
+            .all()
+        )
     assert rows == []
 
 
@@ -1735,7 +1931,11 @@ async def test_threshold_recompute_without_patterns_stores_nothing(client, app):
     assert result["patterns_stored"] == 0
 
     async with app.state.sessionmaker() as session:
-        rows = (await session.execute(select(Insight).where(Insight.user_id == emu.user_id))).scalars().all()
+        rows = (
+            (await session.execute(select(Insight).where(Insight.user_id == emu.user_id)))
+            .scalars()
+            .all()
+        )
     assert not any(r.kind == "question" for r in rows)
 
 
@@ -1749,13 +1949,19 @@ async def test_old_question_rows_survive_a_new_recompute(client, app):
 
     stale_date = TODAY - timedelta(days=5)
     async with app.state.sessionmaker() as session:
-        session.add(Insight(user_id=emu.user_id, kind="question", for_date=stale_date, blob=b"history"))
+        session.add(
+            Insight(user_id=emu.user_id, kind="question", for_date=stale_date, blob=b"history")
+        )
         await session.commit()
 
     await emu.recompute(client)
 
     async with app.state.sessionmaker() as session:
-        rows = (await session.execute(select(Insight).where(Insight.user_id == emu.user_id))).scalars().all()
+        rows = (
+            (await session.execute(select(Insight).where(Insight.user_id == emu.user_id)))
+            .scalars()
+            .all()
+        )
     dates = {(r.kind, r.for_date) for r in rows}
     assert ("question", stale_date) in dates  # history is not deleted
     assert ("question", TODAY) in dates
@@ -1769,9 +1975,9 @@ async def test_old_question_rows_survive_a_new_recompute(client, app):
 def test_llm_budget_exhausts_mid_entry_with_one_char_left():
     analyzer = LLMAnalyzer("https://llm.example.com/v1", "key")
     posted = []
-    analyzer._post = lambda payload: posted.append(payload) or {
-        "choices": [{"message": {"content": '{"patterns": []}'}}]
-    }
+    analyzer._post = lambda payload: (
+        posted.append(payload) or {"choices": [{"message": {"content": '{"patterns": []}'}}]}
+    )
     # 74_999 + 75_000 = 149_999; one char of budget remains for entry 3.
     corpus = [
         _entry(0, "a" * 74_999),
@@ -1814,7 +2020,16 @@ async def test_meta_payload_is_exact(client):
     assert response.status_code == 200
     assert response.json() == {
         # api_version added with the /api/v1 mount (2026-09-07).
-        "version": "1.0.0", "api_version": "v1", "unlock_days": 30, "llm_available": False,
+        "version": "1.0.0",
+        "api_version": "v1",
+        "unlock_days": 30,
+        "llm_available": False,
+        "llm_provider_name": None,
+        "llm_data_retention": None,
+        "llm_policy_fingerprint": None,
+        "sharing_available": True,
+        "sharing_disclosure_version": "v1",
+        "sharing_access_log_retention_days": 730,
     }
 
 
@@ -1830,10 +2045,12 @@ def test_enclave_key_mismatch_message_is_pinned():
 def test_question_pool_dedups_identically_rendered_patterns():
     from app.services.patterns import Pattern
 
-    same_a = Pattern(kind="temporal", label="work", occurrences=6, confidence=0.9,
-                     detail={"day": "Sunday"})
-    same_b = Pattern(kind="temporal", label="work", occurrences=5, confidence=0.8,
-                     detail={"day": "Sunday"})
+    same_a = Pattern(
+        kind="temporal", label="work", occurrences=6, confidence=0.9, detail={"day": "Sunday"}
+    )
+    same_b = Pattern(
+        kind="temporal", label="work", occurrences=5, confidence=0.8, detail={"day": "Sunday"}
+    )
     pool = questions_module.build_pool([same_a, same_b])
     assert len(pool) == len(set(pool))
     single = questions_module.build_pool([same_a])

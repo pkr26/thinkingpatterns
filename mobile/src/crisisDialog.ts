@@ -5,7 +5,7 @@
  * fatigue trains dismissal, and the user who needs it most stops reading
  * it. The stamp is an ISO LOCAL calendar date (the same day the entry
  * belongs to, never a UTC guess) persisted per account at
- * @mindpattern/crisis_dialog_<userId> via AsyncStorage. Account deletion
+ * @mindpattern/crisis_dialog_<userId> via the encrypted secure store. Account deletion
  * must wipe it — clearCrisisDialogStamp rides the SettingsScreen deletion
  * flow, the same idiom as components/keyConsent.ts.
  *
@@ -15,7 +15,7 @@
  * a restart re-shows it. The stamp is a fatigue guard, never a gate that
  * can permanently silence support.
  */
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { secureStore } from "./secureStore";
 
 const key = (userId: string): string => `@mindpattern/crisis_dialog_${userId}`;
 
@@ -25,7 +25,7 @@ const memoryStamps = new Map<string, string>();
 /** True when the support dialog already ran for this account on `todayISO`. */
 export async function crisisDialogShownOn(userId: string, todayISO: string): Promise<boolean> {
   try {
-    return (await AsyncStorage.getItem(key(userId))) === todayISO;
+    return (await secureStore.getItem(key(userId))) === todayISO;
   } catch {
     // Storage unreadable: the memory mirror is the only record left.
     return memoryStamps.get(userId) === todayISO;
@@ -37,7 +37,7 @@ export async function crisisDialogShownOn(userId: string, todayISO: string): Pro
 export async function recordCrisisDialogShown(userId: string, todayISO: string): Promise<void> {
   memoryStamps.set(userId, todayISO);
   try {
-    await AsyncStorage.setItem(key(userId), todayISO);
+    await secureStore.setItem(key(userId), todayISO);
   } catch {
     // The mirror holds it; a restart simply re-shows the dialog (fail-open).
   }
@@ -46,5 +46,5 @@ export async function recordCrisisDialogShown(userId: string, todayISO: string):
 /** Account-deletion hygiene: the stamp must not outlive its account. */
 export async function clearCrisisDialogStamp(userId: string): Promise<void> {
   memoryStamps.delete(userId);
-  await AsyncStorage.removeItem(key(userId));
+  await secureStore.removeItem(key(userId));
 }

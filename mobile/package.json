@@ -2,6 +2,7 @@
   "name": "mindpattern-mobile",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
@@ -10,32 +11,39 @@
     "test:watch": "vitest",
     "test:mutation": "stryker run",
     "verify:vectors": "node tools/verify_vectors.mjs",
+    "verify:native-release": "node tools/verify_native_release.mjs",
     "decrypt:export": "node tools/decrypt_export.mjs",
     "typecheck": "tsc --noEmit"
   },
   "overrides": {
     "decode-uri-component": "^0.5.0",
-    "qs": "^6.16.0"
+    "qs": "^6.16.0",
+    "image-size": "2.0.4"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.0",
     "@react-navigation/native": "^7.3.18",
     "@react-navigation/native-stack": "^7.18.10",
-    "react": "19.1.0",
-    "react-native": "0.81.0",
-    "react-native-quick-crypto": "^0.7.0",
+    "react": "19.2.3",
+    "react-native": "0.87.1",
+    "react-native-keychain": "10.0.0",
+    "react-native-nitro-modules": "0.37.1",
+    "react-native-quick-base64": "3.0.1",
+    "react-native-quick-crypto": "1.1.7",
     "react-native-safe-area-context": "^5.0.0",
     "react-native-screens": "^4.0.0"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
+    "@react-native-community/cli": "20.2.0",
+    "@react-native/metro-config": "0.87.1",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-test-renderer": "^19.1.0",
-    "@vitest/coverage-v8": "^3.2.7",
-    "react-test-renderer": "^19.1.0",
+    "@vitest/coverage-v8": "4.1.11",
+    "react-test-renderer": "19.2.3",
     "typescript": "^5.6.0",
-    "vitest": "^3.2.7"
+    "vitest": "4.1.11"
   }
 }

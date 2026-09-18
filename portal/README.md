@@ -30,13 +30,48 @@ patient patterns**, plus the therapist's own encrypted notes.
 
 ```bash
 cd portal
-npm install
+npm ci
 npm run dev        # http://localhost:5173 — /api proxied to localhost:8000
 ```
 
 Start the backend first (see ../backend). In production the portal is a
-static bundle behind the same origin as the API, or the API's
-`MINDPATTERN_CORS_ORIGINS` must allowlist the portal origin.
+static bundle behind the same HTTPS origin as the API. `/api` is reverse
+proxied on that origin; do not deploy the sign-in page against a separately
+user-configurable API host.
+
+## Production safety requirements
+
+- Serve the portal and API over one HTTPS origin. The sign-in page has no
+  user-editable server field: salts, derived verifiers, bearer tokens, and
+  enrollment tokens are sent only to its own origin. Development uses the
+  same-origin Vite `/api` proxy on an explicit loopback host. Fetches use
+  `redirect: "error"`, omit ambient cookies, and reject a response that
+  reports a different origin, so a 30x cannot forward a bearer token.
+- Configure the static host to emit the headers in `public/_headers` for every
+  route. Vite copies that file into `dist` for hosts that support the common
+  `_headers` format; other CDNs must translate the same CSP, frame, referrer,
+  MIME-sniffing, cache, permissions, opener, resource-isolation, and HSTS
+  policies into their native config. This is an HTTPS-production contract:
+  the HSTS policy includes subdomains, so use a hostname whose subdomains are
+  also HTTPS-controlled before enabling it. Do not add HSTS to local HTTP
+  development headers.
+  The CSP in `index.html` is a fallback, not a replacement for response
+  headers. Its `connect-src` is same-origin only; a broad HTTPS egress policy
+  would undermine the immutable sign-in destination.
+- Therapist registration requires a 12+ character password. A 16+ character
+  passphrase is accepted as-is; 12–15 character passwords must use at least
+  three character types. Existing therapist accounts may still sign in with
+  their established credential so operators can migrate them deliberately.
+- New clinician enrollment is policy-gated by the server's public `/meta`
+  response. A disabled or unreachable policy disables the registration action
+  with an administrative explanation instead of treating a blocked enrollment
+  as bad credentials. Where an organization issues a controlled enrollment
+  token, the form sends it only as `X-Therapist-Enrollment-Token` on the
+  HTTPS registration request and drops it from memory immediately afterward.
+- Signing out, session expiry, idle lock, and component teardown cancel
+  in-flight authenticated requests, drop non-extractable browser key handles,
+  overwrite raw wrap/note key bytes where JavaScript permits it, and remove
+  locally stored visit-date metadata.
 
 ## Crypto contracts
 
@@ -56,7 +91,7 @@ Key material lives in memory only. Closing the tab forgets everything.
 ## Tests
 
 ```bash
-npm test           # vitest + coverage (per-file thresholds)
+npm test           # vitest + coverage (global quality thresholds)
 npm run typecheck
 npm run build      # typecheck + production bundle
 ```

@@ -58,6 +58,10 @@ describe("parseServerUrl", () => {
     expect(parseServerUrl("not a url")).toBeNull();
     expect(parseServerUrl("https://")).toBeNull();
     expect(parseServerUrl("https://ho st")).toBeNull();
+    // URL validates the authority after the product grammar admits it. A
+    // single colon is a port separator, not proof that the port is valid.
+    expect(parseServerUrl("https://api.example.com:abc")).toBeNull();
+    expect(parseServerUrl("https://api.example.com:65536")).toBeNull();
     // Mangled IPv6 (two colons, unbracketed) must not slip through.
     expect(parseServerUrl("http://1:2::3:8000")).toBeNull();
   });

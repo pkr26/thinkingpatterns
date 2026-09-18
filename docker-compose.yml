@@ -5,15 +5,24 @@ services:
     # migrated on every deploy without a separate step. A database created by a
     # pre-migrations (create_all-era) deploy must be adopted once with
     # `alembic stamp head` — see backend/alembic/README.md.
-    build: ./backend
+    # Production deliberately never builds from this checkout.  The release
+    # asset supplies this variable as a fully-qualified manifest-list digest
+    # (for example ghcr.io/owner/mindpattern@sha256:...).  Keeping `build`
+    # out of the deployment file makes the pulled, provenance/SBOM-attested
+    # artifact the one that actually runs.  See deploy/README.md for the
+    # required verification and docker-compose.dev.yml for local source
+    # builds.
+    image: ${MINDPATTERN_API_IMAGE:?set MINDPATTERN_API_IMAGE to the API @sha256 reference from the release env asset}
     environment:
       MINDPATTERN_ENV: production
       MINDPATTERN_DB_URL: postgresql+asyncpg://${POSTGRES_USER:-mindpattern}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-mindpattern}
       MINDPATTERN_TOKEN_SECRET: ${MINDPATTERN_TOKEN_SECRET:?set a real secret in .env}
       MINDPATTERN_UNLOCK_DAYS: "30"
-      # Set to "1" when uvicorn runs with --proxy-headers behind a reverse
-      # proxy, so rate limiting uses real client IPs from X-Forwarded-For.
-      MINDPATTERN_TRUST_PROXY_HEADERS: "0"
+      # Safe forwarding is opt-in: the app accepts X-Forwarded-For only when
+      # the direct peer also matches this explicit IP/CIDR allowlist. Do not
+      # use uvicorn --proxy-headers; the app validates the raw peer itself.
+      MINDPATTERN_TRUST_PROXY_HEADERS: ${MINDPATTERN_TRUST_PROXY_HEADERS:-0}
+      MINDPATTERN_TRUSTED_PROXY_IPS: ${MINDPATTERN_TRUSTED_PROXY_IPS:-}
     ports:
       # Loopback-only by default: the API speaks plaintext HTTP and must sit
       # behind a TLS-terminating reverse proxy before it is reachable from
@@ -31,8 +40,10 @@ services:
           memory: 1500M
     mem_limit: 1500M
     healthcheck:
-      # Same probe as the Dockerfile HEALTHCHECK.
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"]
+      # Same readiness probe as the Dockerfile HEALTHCHECK.  /healthz proves
+      # only that Python is alive; /readyz also proves DB connectivity and
+      # that Alembic reached the required schema head.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=4)"]
       interval: 30s
       timeout: 5s
       start_period: 10s
@@ -75,8 +86,9 @@ services:
     # A plain `docker compose up` never starts this service.
     #
     # What this gives you: one ENCRYPTED `pg_dump --format=custom` per day
-    # into the pgbackups named volume, with files older than
-    # BACKUP_RETENTION_DAYS (default 35) deleted after each successful dump.
+    # into the pgbackups named volume. Files older than
+    # BACKUP_RETENTION_DAYS (default 35) are pruned before every attempt,
+    # including retries after a failed dump.
     #
     # ENCRYPTION (2026-09-16 remediation, finding G1): dumps are piped
     # through `openssl enc -aes-256-cbc -pbkdf2` with a key from
@@ -94,9 +106,11 @@ services:
     # keep it short — the default 35 days is a starting point, not a
     # recommendation. Never commit the volume contents; rehearse restores.
     profiles: ["backups"]
-    # Same pinned image as `db`: pg_dump's major version must match the
-    # server's, and reusing the image keeps the deployment to one artifact.
-    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    # This is the separately attested backup-worker image, supplied by the
+    # release env asset as an immutable @sha256 reference.  Do not add a
+    # source `build` stanza here: a production backup must use the same
+    # reviewed artifact whose SBOM/provenance was published with the API.
+    image: ${MINDPATTERN_BACKUP_IMAGE:?set MINDPATTERN_BACKUP_IMAGE to the backup @sha256 reference from the release env asset}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -117,30 +131,76 @@ services:
     # compose from interpolating the loop's own variables. The dump runs
     # BEFORE the first sleep so `up -d backup` proves itself immediately;
     # a failed dump leaves no partial file (writes go to a .tmp and are
-    # renamed only after openssl succeeds, so the loop keeps the previous
-    # day's file on any failure).
+    # renamed only after encryption AND a keyed integrity tag succeed, so the
+    # loop keeps the previous day's file on any failure).  AES-CBC alone is
+    # confidential but malleable; the sidecar HMAC makes tampering detectable
+    # before a restore attempts to decrypt the dump.
     entrypoint:
       - sh
       - -c
       - |
+        # A successful encryptor can otherwise mask a failed pg_dump in a
+        # shell pipeline (it would faithfully encrypt an empty/truncated
+        # stream).  BusyBox ash in the pinned Alpine image supports pipefail;
+        # make that guarantee explicit before treating a dump as valid.
         set -eu
-        # The alpine postgres image ships libcrypto but not always the CLI.
-        command -v openssl >/dev/null 2>&1 || apk add --no-cache openssl >/dev/null
+        set -o pipefail
+        # `openssl enc -out` creates the ciphertext temporary file itself;
+        # the final artifact inherits that mode through mv.  Docker's normal
+        # process umask may be 022, so make every dump artifact owner-only
+        # rather than relying on volume mount isolation alone. The HMAC
+        # sidecar also explicitly opens mode 0600 in backup_mac.py.
+        umask 077
+        command -v openssl >/dev/null 2>&1 && command -v mindpattern-backup-mac >/dev/null 2>&1 || {
+          echo "backup image is missing its required crypto utilities" >&2
+          exit 1
+        }
+        case "$$BACKUP_RETENTION_DAYS" in
+          ''|*[!0-9]*)
+            echo "BACKUP_RETENTION_DAYS must be a positive whole number" >&2
+            exit 1
+            ;;
+        esac
+        if [ "$$BACKUP_RETENTION_DAYS" -lt 1 ]; then
+          echo "BACKUP_RETENTION_DAYS must be at least 1" >&2
+          exit 1
+        fi
+        cleanup_backup_artifacts() {
+          # Retention is a deletion promise, not a success-path nicety. Run
+          # it before EVERY attempt so an outage cannot indefinitely retain
+          # expired account data; a cleanup error stops/restarts the worker
+          # loudly instead of silently violating the policy.
+          mindpattern-backup-mac prune /backups "$$BACKUP_RETENTION_DAYS"
+          find /backups -name 'mindpattern-*.dump.enc.tmp' -delete
+          find /backups -name 'mindpattern-*.dump.enc.hmac.tmp' -delete
+        }
         while :; do
+          sleep_seconds=86400
+          cleanup_backup_artifacts
           stamp=$$(date -u +%Y%m%dT%H%M%SZ)
           out="/backups/mindpattern-$$stamp.dump.enc"
           tmp="$$out.tmp"
+          mac="$$out.hmac"
+          mac_tmp="$$mac.tmp"
           if PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
-              | openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:BACKUP_KEY -out "$$tmp"; then
+              | openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:BACKUP_KEY -out "$$tmp" \
+              && mindpattern-backup-mac write "$$tmp" "$$mac_tmp"; then
+            # Sidecar first, ciphertext last: a visible final .dump.enc is
+            # therefore never left without its integrity tag if the process
+            # is killed between publication steps. An orphan tag is harmless.
+            mv "$$mac_tmp" "$$mac"
             mv "$$tmp" "$$out"
-            echo "backup: wrote $$out (encrypted)"
-            find /backups -name 'mindpattern-*.dump.enc' -mtime +"$$BACKUP_RETENTION_DAYS" -delete
-            rm -f /backups/mindpattern-*.dump.tmp
+            echo "backup: wrote $$out (encrypted + authenticated)"
           else
-            echo "backup: pg_dump/encrypt failed at $$stamp; keeping previous dumps" >&2
-            rm -f "$$tmp"
+            echo "backup: pg_dump/encrypt/authenticate failed at $$stamp; keeping previous dumps" >&2
+            find /backups -name "mindpattern-$$stamp.dump.enc.tmp" -delete
+            find /backups -name "mindpattern-$$stamp.dump.enc.hmac.tmp" -delete
+            # A transient database/DNS/disk failure must not create a 24-hour
+            # recovery-point gap. Retry with a bounded delay while preserving
+            # previously published authenticated backups.
+            sleep_seconds=300
           fi
-          sleep 86400
+          sleep "$$sleep_seconds"
         done
 
 volumes:

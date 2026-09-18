@@ -169,8 +169,13 @@ def build_corpus(end: date, days: int, seed: int) -> list[dict]:
     day = start
     while day <= end:
         wd = day.weekday()
-        planted = (wd == 6 or day in family_days or day in worry_days
-                   or day in guitar_days or day in guitar_early)
+        planted = (
+            wd == 6
+            or day in family_days
+            or day in worry_days
+            or day in guitar_days
+            or day in guitar_early
+        )
         # Planted days always write (the demo's structure must not be
         # gambled away by the skip draw); filler days skip like a real user.
         if planted or (wd != 2 and rng.random() < 0.85):
@@ -214,12 +219,16 @@ def main() -> int:
     # The flag exists for CI/automation; interactively the password is
     # prompted for instead, so it never travels on argv (visible in `ps`
     # and shell history).
-    parser.add_argument("--password", default=None,
-                        help="demo account password (omit to be prompted)")
+    parser.add_argument(
+        "--password", default=None, help="demo account password (omit to be prompted)"
+    )
     parser.add_argument("--days", type=int, default=84)
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--db-url", default=None,
-                        help="SQLAlchemy URL of the API database — needed once to backdate the demo account's created_at (see below)")
+    parser.add_argument(
+        "--db-url",
+        default=None,
+        help="SQLAlchemy URL of the API database — needed once to backdate the demo account's created_at (see below)",
+    )
     args = parser.parse_args()
     if args.password is None:
         args.password = getpass.getpass(f"password for demo account {args.username!r}: ")
@@ -235,15 +244,22 @@ def main() -> int:
     verifier_b64 = base64.b64encode(auth_key).decode()
 
     # Register (login if the name is taken, e.g. on a re-run).
-    register = client.post("/api/auth/register", json={
-        "username": args.username,
-        "salt": base64.b64encode(salt).decode(),
-        "verifier": verifier_b64,
-    })
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "username": args.username,
+            "salt": base64.b64encode(salt).decode(),
+            "verifier": verifier_b64,
+        },
+    )
     if register.status_code == 409:
-        login = client.post("/api/auth/login", json={
-            "username": args.username, "verifier": verifier_b64,
-        })
+        login = client.post(
+            "/api/auth/login",
+            json={
+                "username": args.username,
+                "verifier": verifier_b64,
+            },
+        )
         login.raise_for_status()
         session = login.json()
     else:
@@ -268,6 +284,7 @@ def main() -> int:
 
         async def backdate() -> None:
             from sqlalchemy.ext.asyncio import create_async_engine
+
             engine = create_async_engine(args.db_url)
             Session = build_sessionmaker(engine)
             async with Session() as db:
@@ -285,14 +302,17 @@ def main() -> int:
     corpus = build_corpus(date.today(), args.days, args.seed)
     print(f"seeding {len(corpus)} encrypted entries over {args.days} days…")
     for item in corpus:
-        payload = json.dumps({
-            "v": 1,
-            "text": item["text"],
-            "sentiment": item["sentiment"],
-            "created_at": item["date"],
-        }).encode()
+        payload = json.dumps(
+            {
+                "v": 1,
+                "text": item["text"],
+                "sentiment": item["sentiment"],
+                "created_at": item["date"],
+            }
+        ).encode()
         blob = crypto.encrypt(
-            data_key, payload,
+            data_key,
+            payload,
             crypto.build_aad("entry", user_id, f"e-{item['date']}-{item['date'][5:]}"),
         )
         body = {
@@ -311,17 +331,26 @@ def main() -> int:
         created.raise_for_status()
 
     # One single-use processing session, then the recompute.
-    ps = client.post("/api/processing/sessions", headers=headers,
-                     json={"data_key": base64.b64encode(data_key).decode()})
+    ps = client.post(
+        "/api/processing/sessions",
+        headers=headers,
+        json={"data_key": base64.b64encode(data_key).decode()},
+    )
     ps.raise_for_status()
-    recompute = client.post("/api/insights/recompute", headers={
-        **headers, "x-processing-token": ps.json()["session_token"],
-    })
+    recompute = client.post(
+        "/api/insights/recompute",
+        headers={
+            **headers,
+            "x-processing-token": ps.json()["session_token"],
+        },
+    )
     recompute.raise_for_status()
     result = recompute.json()
-    print(f"recompute: phase={result['phase']} active_days={result['active_days']} "
-          f"analyzer={result['analyzer']} patterns={result['patterns_stored']} "
-          f"question_stored={result['question_stored']}")
+    print(
+        f"recompute: phase={result['phase']} active_days={result['active_days']} "
+        f"analyzer={result['analyzer']} patterns={result['patterns_stored']} "
+        f"question_stored={result['question_stored']}"
+    )
 
     insights = client.get("/api/insights", headers=headers)
     insights.raise_for_status()
@@ -330,7 +359,8 @@ def main() -> int:
         print("no insight blob stored")
         return 1
     plain = crypto.decrypt(
-        data_key, base64.b64decode(blob_b64),
+        data_key,
+        base64.b64decode(blob_b64),
         crypto.build_aad("insights", user_id, "patterns"),
     )
     payload = json.loads(plain.decode())

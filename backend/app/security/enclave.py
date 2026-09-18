@@ -37,6 +37,10 @@ class KeyNotFound(Exception):
     """Raised when a processing-session token is unknown or expired."""
 
 
+class KeyStoreFull(Exception):
+    """Raised when a bounded processing-session store cannot admit a key."""
+
+
 class InMemoryKeyStore:
     """Memory-only, TTL-bounded store for per-session data keys.
 
@@ -46,23 +50,46 @@ class InMemoryKeyStore:
     a token issued for one account cannot drive a recompute for another.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        max_sessions: int = 1_024,
+        max_sessions_per_owner: int = 4,
+    ) -> None:
+        if max_sessions < 1 or max_sessions_per_owner < 1:
+            raise ValueError("processing-session limits must be positive")
         self._keys: dict[str, tuple[bytearray, float, str | None]] = {}
         self._lock = threading.Lock()
+        self._max_sessions = max_sessions
+        self._max_sessions_per_owner = max_sessions_per_owner
 
     def create(
-        self, key: bytes | bytearray, ttl_seconds: int, now: float | None = None, owner: str | None = None
+        self,
+        key: bytes | bytearray,
+        ttl_seconds: int,
+        now: float | None = None,
+        owner: str | None = None,
     ) -> str:
         if len(key) != KEY_SIZE:
             raise ValueError(f"key must be {KEY_SIZE} bytes")
         if ttl_seconds <= 0:
             raise ValueError("ttl must be positive")
         token = secrets.token_urlsafe(32)
-        current = now if now is not None else time.time()
+        # TTLs measure elapsed time, not wall-clock time. A host clock step
+        # backwards must never make an uploaded journal key live longer.
+        current = now if now is not None else time.monotonic()
         with self._lock:
             # Sessions are short-lived; purge stale ones so repeated creates
             # cannot grow the store unboundedly.
             self._purge_expired_locked(current)
+            if len(self._keys) >= self._max_sessions:
+                raise KeyStoreFull("processing session capacity reached")
+            if owner is not None:
+                owner_sessions = sum(
+                    1 for _, _, bound_owner in self._keys.values() if bound_owner == owner
+                )
+                if owner_sessions >= self._max_sessions_per_owner:
+                    raise KeyStoreFull("processing session capacity reached for account")
             self._keys[token] = (bytearray(key), current + ttl_seconds, owner)
         return token
 
@@ -74,7 +101,7 @@ class InMemoryKeyStore:
         responsible for zeroizing its copy when done. Production recompute
         paths use pop() (single-use); get() exists for inspection/tests.
         """
-        current = now if now is not None else time.time()
+        current = now if now is not None else time.monotonic()
         with self._lock:
             entry = self._keys.get(token)
             if entry is not None:
@@ -104,26 +131,36 @@ class InMemoryKeyStore:
         zeroizing it on every exit path — the recompute endpoint does so in
         a finally around the whole processing run.
         """
-        current = now if now is not None else time.time()
+        current = now if now is not None else time.monotonic()
         with self._lock:
-            entry = self._keys.pop(token, None)
+            # Inspect before consuming.  An owner-mismatched request must be
+            # indistinguishable from an unknown token *without* letting that
+            # requester erase another account's still-valid processing
+            # session.  Popping first made a leaked/guessed token a
+            # cross-account denial-of-service primitive.
+            entry = self._keys.get(token)
             if entry is None:
                 self._purge_expired_locked(current)
                 raise KeyNotFound("unknown processing session")
             key, expiry, bound_owner = entry
             if current >= expiry:
                 zeroize(key)
+                del self._keys[token]
                 raise KeyNotFound("processing session expired")
             if owner is not None and bound_owner is not None and owner != bound_owner:
-                zeroize(key)
                 raise KeyNotFound("processing session belongs to another user")
+            # Only the authorized caller consumes the store-owned buffer.
+            del self._keys[token]
             return key
 
-    def destroy(self, token: str) -> bool:
+    def destroy(self, token: str, *, owner: str | None = None) -> bool:
         with self._lock:
-            entry = self._keys.pop(token, None)
+            entry = self._keys.get(token)
             if entry is None:
                 return False
+            if owner is not None and entry[2] is not None and owner != entry[2]:
+                return False
+            del self._keys[token]
             zeroize(entry[0])
             return True
 
@@ -136,9 +173,18 @@ class InMemoryKeyStore:
                 del self._keys[t]
             return len(doomed)
 
+    def destroy_all(self) -> int:
+        """Zeroize every resident key (process shutdown / emergency drain)."""
+        with self._lock:
+            count = len(self._keys)
+            for key, _, _ in self._keys.values():
+                zeroize(key)
+            self._keys.clear()
+            return count
+
     def purge_expired(self, now: float | None = None) -> int:
         with self._lock:
-            return self._purge_expired_locked(now if now is not None else time.time())
+            return self._purge_expired_locked(now if now is not None else time.monotonic())
 
     def _purge_expired_locked(self, now: float) -> int:
         expired = [t for t, (_, exp, _) in self._keys.items() if now >= exp]
@@ -217,6 +263,7 @@ def run_isolated(
 __all__ = [
     "EncryptedItem",
     "InMemoryKeyStore",
+    "KeyStoreFull",
     "KeyNotFound",
     "SecureProcessingContext",
     "TamperError",

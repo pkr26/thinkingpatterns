@@ -2,9 +2,9 @@
  * Typed API client. The Authorization token never coexists with the password.
  *
  * Server URL policy: https is required for anything off-device. Plain http
- * is allowed ONLY for localhost/loopback development servers, or for the
- * exact insecure URL the user explicitly consented to (per-URL consent —
- * allowing http://nas.lan never blesses any other host).
+ * is allowed only for the device-local loopback hosts used during development.
+ * A bearer token, password verifier, or data key must never be sent over a
+ * LAN/WAN cleartext connection, even after a modal "consent" click.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "../secureStore";
@@ -15,9 +15,8 @@ import { secureStore } from "../secureStore";
 const API_PREFIX = "/api/v1";
 
 const BASE_URL_KEY = "@mindpattern/base_url";
-/** Stores the exact URL the user consented to for plain HTTP (not a
- *  sticky global flag: consenting to one host must not silently bless
- *  every other cleartext server). Empty/"0" = no consent. */
+/** Legacy key retained only so an old cleartext-consent bit is actively
+ * cleared on upgrade. It is never consulted to authorize a connection. */
 const INSECURE_OK_KEY = "@mindpattern/insecure_http_ok";
 const TOKEN_KEY = "@mindpattern/token";
 const USER_ID_KEY = "@mindpattern/user_id";
@@ -33,10 +32,18 @@ export const DEFAULT_BASE_URL = "http://localhost:8000";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ERROR_MESSAGE_CHARS = 200;
-/** A server that always returns a full page would loop listEntries
- *  forever (memory exhaustion, battery drain). 100 pages = 50k entries —
- *  far beyond any real journal; past that the server is hostile/broken. */
+/** A server that always returns valid-looking continuations would loop
+ * listEntries forever (memory exhaustion, battery drain). 100 pages is far
+ * beyond any real journal; past that the server is hostile/broken. */
 const MAX_LIST_PAGES = 100;
+/** A changed snapshot is retryable, but never retry indefinitely under a
+ * continuously-written journal. One clean restart obtains a fresh token; a
+ * second conflict is surfaced to the caller honestly. */
+const MAX_LIST_SNAPSHOT_RESTARTS = 1;
+/** The backend's explicit byte-page ceiling for encrypted journal blobs.
+ * Sending it on every modern list request opts into continuation headers,
+ * rather than treating a byte-short response as end-of-history. */
+export const ENTRY_PAGE_BYTES = 2 * 1024 * 1024;
 /** Entry ids this client generates are [A-Za-z0-9_-]; anything else in this
  *  position is at-rest tampering and must never reach the URL path. The
  *  1-64 length band matches the backend exactly (backend/app/schemas.py
@@ -74,20 +81,42 @@ export interface PairingLookup {
   wrap_pub_key: string;
 }
 
+/** `URL#hostname` is canonicalized before it reaches this check. Keep the
+ * permitted development loopback set deliberately exact: a look-alike such
+ * as `localhost.` or `127.0.0.2` must still require TLS. */
+function isExplicitLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
 export function parseServerUrl(candidate: string): { url: string; insecure: boolean } | null {
   const trimmed = candidate.trim();
-  const match = /^(https?):\/\/([^\s/?#@]+)(\/[^\s?#]*)?$/.exec(trimmed);
-  if (!match) return null;
-  // The regex guarantees non-empty scheme and host; the assertions only
-  // satisfy noUncheckedIndexedAccess.
-  const scheme = match[1]!;
-  const host = match[2]!;
-  const path = match[3] ?? "";
-  if (/:.*:/.test(host) && !host.startsWith("[")) return null; // mangled IPv6
-  const url = `${scheme}://${host}${path.replace(/\/+$/, "")}`;
-  const isLoopback = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host);
-  const insecure = scheme === "http" && !isLoopback;
-  return { url, insecure };
+  // Keep the intentionally narrow product grammar (lowercase http(s), no
+  // userinfo, query or fragment) while delegating authority/port/IPv6
+  // validation to the platform URL parser. The old hand parser accepted an
+  // invalid single-colon authority such as `https://api.example:abc` and
+  // persisted it, leaving the next request to fail much later.
+  if (!/^(https?):\/\/([^\s/?#@]+)(\/[^\s?#]*)?$/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+    const path = parsed.pathname.replace(/\/+$/, "");
+    return {
+      url: `${parsed.origin}${path}`,
+      insecure: parsed.protocol === "http:" && !isExplicitLoopbackHost(parsed.hostname),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function getBaseUrl(): Promise<string> {
@@ -96,6 +125,29 @@ export async function getBaseUrl(): Promise<string> {
 
 async function originOf(url: string): Promise<string> {
   return new URL(url).origin;
+}
+
+/** Return true only for the loopback development endpoints whose traffic
+ * never leaves the device. `localhost.` and look-alike host names are not
+ * loopback; keeping this deliberately exact avoids hostname-trick bypasses. */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" && isExplicitLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A server-origin switch is a security boundary. The session provider
+ * registers this synchronous hook to lock the in-memory vault and move the
+ * navigator to logged-out before the new origin is persisted. Keeping the
+ * hook here (instead of importing the store) avoids an api ↔ store cycle.
+ */
+let onOriginChange: (() => void | Promise<void>) | null = null;
+export function setOriginChangeHandler(handler: (() => void | Promise<void>) | null): void {
+  onOriginChange = handler;
 }
 
 /** Every per-account and per-origin local value: salts, unlock proofs,
@@ -110,28 +162,46 @@ function isOriginBoundKey(key: string): boolean {
     // constant to import, so the literal is duplicated here on purpose.
     key.startsWith("@mindpattern/question_feedback.") ||
     key.startsWith("mindpattern.moodlog.") ||
-    key === "@mindpattern/queue_quarantine" ||
-    key === "@mindpattern/queue_rejected"
+    key.startsWith("@mindpattern/crisis_dialog_")
   );
 }
 
 export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } = {}): Promise<string | null> {
+  void opts;
   const parsed = parseServerUrl(url);
   if (!parsed) return "Enter a full URL like https://your-server:8000 (no credentials in the URL).";
-  if (parsed.insecure && !opts.allowInsecure) {
-    return "This server uses plain HTTP. To accept the risk, use 'Allow insecure HTTP' first.";
+  // `allowInsecure` remains in the type for a source-compatible upgrade,
+  // but cannot override the transport boundary. A user cannot meaningfully
+  // consent away another app / Wi-Fi observer's ability to steal a bearer.
+  if (parsed.insecure && !isLoopbackUrl(parsed.url)) {
+    // Proactively retire an upgrade-era exception even though it is never
+    // consulted. Leaving it around invites a later regression to revive it.
+    await AsyncStorage.setItem(INSECURE_OK_KEY, "0");
+    return "This server uses plain HTTP. Use HTTPS for any server other than localhost or 127.0.0.1.";
   }
-  const previous = await AsyncStorage.getItem(BASE_URL_KEY);
-  await AsyncStorage.setItem(BASE_URL_KEY, parsed.url);
-  const originChanged = previous !== null && previous !== parsed.url;
+  const previous = (await AsyncStorage.getItem(BASE_URL_KEY)) ?? DEFAULT_BASE_URL;
+  let originChanged = false;
+  try {
+    originChanged = (await originOf(previous)) !== (await originOf(parsed.url));
+  } catch {
+    // An old/corrupt setting is never a reason to retain a live credential.
+    originChanged = true;
+  }
   if (originChanged) {
-    // Origin change: the stored session (token, user id, username) belongs to
-    // the OLD origin — leaving it in place would send live credentials to the
-    // new server on the very next request. The user re-authenticates against
-    // the new origin instead.
+    // IMPORTANT ORDERING: erase the old credential BEFORE persisting the new
+    // base URL. A request racing this function therefore either (a) reads the
+    // old URL and can only send its token to its old origin, or (b) reads the
+    // new URL after this wipe and has no token to attach. Persisting first was
+    // a real bearer-token exfiltration window.
     await secureStore.removeItem(TOKEN_KEY);
     await secureStore.removeItem(USER_ID_KEY);
     await secureStore.removeItem(USERNAME_KEY);
+    try {
+      await onOriginChange?.();
+    } catch {
+      // Credential erasure is complete even if a UI subscriber has already
+      // unmounted. Do not leave a half-switched origin because of that.
+    }
     // KDF salts, unlock proofs, recompute stamps, mood logs and queue
     // quarantine data are equally origin-bound: one server's salt must
     // never be used to derive keys against another server's account.
@@ -144,28 +214,24 @@ export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } 
       // getAllKeys unavailable: the session wipe above is the critical part.
     }
   }
-  // Consent is recorded for THIS url only; saving any other URL (secure or
-  // otherwise) clears it, so consent can never outlive its server.
-  await AsyncStorage.setItem(
-    INSECURE_OK_KEY,
-    parsed.insecure && opts.allowInsecure ? parsed.url : "0",
-  );
+  await AsyncStorage.setItem(BASE_URL_KEY, parsed.url);
+  // Remove a legacy consent value rather than carrying a cleartext exception
+  // forward into a later client version.
+  await AsyncStorage.setItem(INSECURE_OK_KEY, "0");
   return null; // null = saved
 }
 
 /** No-argument form: is ANY insecure consent currently stored (used for
  *  display). With a url: is THIS exact url the one consented to? */
 export async function isInsecureHttpAllowed(url?: string): Promise<boolean> {
-  const stored = await getInsecureConsentUrl();
-  if (stored === null) return false;
-  return url === undefined ? true : stored === url;
+  void url;
+  return false;
 }
 
-/** The exact URL the user consented to for plain HTTP (or null). UI keeps
- *  this in state so a save never blocks on (or skips past) the check. */
+/** Retained as a source-compatible upgrade seam. No cleartext exception is
+ * ever persisted or returned. */
 export async function getInsecureConsentUrl(): Promise<string | null> {
-  const stored = await AsyncStorage.getItem(INSECURE_OK_KEY);
-  return stored && stored !== "0" ? stored : null;
+  return null;
 }
 
 /**
@@ -225,6 +291,7 @@ export const API_ERROR_CODES = [
   "payload_too_large",
   "not_found",
   "conflict",
+  "collection_changed",
   "unauthorized",
   "entry_blob_invalid",
   "entry_payload_malformed",
@@ -276,6 +343,11 @@ interface RequestOptions {
    *  network stacks leave response.url empty — is treated as a redirect
    *  failure, not silently accepted. */
   sensitive?: boolean;
+  /** A small number of endpoints need response metadata in addition to the
+   * JSON body (currently the byte-paginated entries continuation).  Keep the
+   * common request path and all of its redirect/auth/error hardening rather
+   * than reimplementing fetch for a single header. */
+  includeResponse?: boolean;
 }
 
 async function request(
@@ -286,6 +358,13 @@ async function request(
   opts: RequestOptions = {},
 ): Promise<any> {
   const base = await getBaseUrl();
+  // Settings validates before persisting, but AsyncStorage can be restored
+  // from an older backup or tampered with. Enforce the transport boundary at
+  // the send point too, before reading/attaching a bearer credential.
+  const configured = parseServerUrl(base);
+  if (!configured || (configured.insecure && !isLoopbackUrl(configured.url))) {
+    throw new ApiError(0, "refusing to send data to an invalid or cleartext remote server URL");
+  }
   const token = await secureStore.getItem(TOKEN_KEY);
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -299,6 +378,10 @@ async function request(
       // JSON.stringify(undefined) is undefined: GETs send no body.
       body: JSON.stringify(body),
       signal: controller.signal,
+      // Fetch implementations that honor this option must fail before
+      // reissuing Authorization at a redirect target. The final-url check
+      // below remains a defense for React Native stacks that ignore it.
+      redirect: "error",
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
@@ -332,7 +415,7 @@ async function request(
       throw new ApiError(0, "server redirected the request off the configured origin — check your server URL");
     }
   }
-  if (response.status === 204) return null;
+  if (response.status === 204) return opts.includeResponse ? { data: null, response } : null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401 && token !== null) {
@@ -359,7 +442,7 @@ async function request(
       retryAfter,
     );
   }
-  return data;
+  return opts.includeResponse ? { data, response } : data;
 }
 
 export class ApiError extends Error {
@@ -376,6 +459,12 @@ export class ApiError extends Error {
   }
 }
 
+/** The owner-entry paging contract uses 409 for a stale snapshot token. It
+ * is safe to retry from page zero, unlike an arbitrary mutation conflict. */
+function entriesRevisionConflict(): ApiError {
+  return new ApiError(409, "entries changed while paging; retry the request", "collection_changed");
+}
+
 /** One entry row as the backend serializes it (EntryOut). The server is
  *  untrusted — this types the shape for callers, it is not a guarantee, and
  *  unknown extra fields (e.g. a future "sensitive" flag) pass through
@@ -386,6 +475,78 @@ export interface ListedEntry {
   blob: string;
   entry_date: string;
   received_at: string;
+}
+
+/** Strict wire representation for an owner-journal snapshot revision. Keep
+ * this as a string: the backend permits the full signed-64-bit range, which
+ * JavaScript Numbers cannot represent exactly. */
+export type EntriesRevision = string;
+
+/** A byte-bounded entry response. `nextOffset` is present only when the
+ * server has more rows, and is validated before callers can act on it.
+ * `revision` is null for a legacy server that does not support stable
+ * snapshots. */
+export interface ListedEntriesPage {
+  entries: ListedEntry[];
+  nextOffset: number | null;
+  revision: EntriesRevision | null;
+}
+
+export interface ListEntriesPageOptions {
+  since?: string;
+  limit?: number;
+  offset?: number;
+  pageBytes?: number;
+  /** A revision returned by a preceding page. The wire name is
+   * `expected_revision`; supplying it makes a changed collection return 409
+   * instead of silently mixing two snapshots. */
+  expectedRevision?: EntriesRevision;
+}
+
+function invalidEntryPageResponse(): never {
+  throw new ApiError(0, "invalid entry page response — refusing the response");
+}
+
+/** Parse the paging signal as a strict, non-ambiguous integer. The modern
+ * server promises offset + returned-row-count, so accepting a guessed or
+ * malformed offset could skip history or create an unbounded sync loop. An
+ * older server ignores `page_bytes` and has no header; its only safe fallback
+ * is the legacy rule that an exactly-full requested page has another page. */
+function entryNextOffset(header: string | null, offset: number, entries: ListedEntry[], limit: number): number | null {
+  if (entries.length > limit) invalidEntryPageResponse();
+  const expected = offset + entries.length;
+  if (!Number.isSafeInteger(expected)) invalidEntryPageResponse();
+  if (header === null) return entries.length === limit ? expected : null;
+  if (!/^(?:0|[1-9][0-9]*)$/.test(header)) invalidEntryPageResponse();
+  const nextOffset = Number(header);
+  if (
+    !Number.isSafeInteger(nextOffset) ||
+    entries.length === 0 ||
+    nextOffset !== expected
+  ) {
+    invalidEntryPageResponse();
+  }
+  return nextOffset;
+}
+
+/** The backend's canonical nonnegative signed-64-bit decimal grammar. Do
+ * not use Number() here: revisions above Number.MAX_SAFE_INTEGER would be
+ * rounded and could turn a valid snapshot token into a different request. */
+const ENTRY_REVISION_PATTERN = /^(?:0|[1-9][0-9]{0,18})$/;
+const MAX_ENTRY_REVISION = "9223372036854775807";
+
+function isEntriesRevision(value: unknown): value is EntriesRevision {
+  return (
+    typeof value === "string" &&
+    ENTRY_REVISION_PATTERN.test(value) &&
+    (value.length < MAX_ENTRY_REVISION.length || value <= MAX_ENTRY_REVISION)
+  );
+}
+
+function entryRevision(header: string | null): EntriesRevision | null {
+  if (header === null) return null; // headerless servers retain legacy paging
+  if (!isEntriesRevision(header)) invalidEntryPageResponse();
+  return header;
 }
 
 export const api = {
@@ -456,30 +617,134 @@ export const api = {
 
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string) =>
     request("POST", `${API_PREFIX}/entries`, { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
-  /** Paginates through every page (server caps pages at 500 entries).
-   *  Offset pagination can drift under CONCURRENT inserts (a new entry
-   *  shifts later rows down one page boundary): the consumer-side fix is
-   *  the dedupe below — entries are append-mostly, so the residual risk is
-   *  a missed just-inserted row, which the next incremental pull (since=)
-   *  picks up. Full-history consumers should still key on client_entry_id. */
-  listEntries: async (since?: string): Promise<ListedEntry[]> => {
-    const all: ListedEntry[] = [];
-    const seen = new Set<string>();
-    const pageSize = 500;
-    for (let page = 0; page < MAX_LIST_PAGES; page++) {
-      const params = new URLSearchParams({ limit: String(pageSize), offset: String(page * pageSize) });
-      if (since) params.set("since", since);
-      const result = (await request("GET", `${API_PREFIX}/entries?${params.toString()}`)) as ListedEntry[];
-      for (const entry of result) {
-        if (seen.has(entry.client_entry_id)) continue; // page-boundary drift
-        seen.add(entry.client_entry_id);
-        all.push(entry);
-      }
-      if (result.length < pageSize) return all;
+  /** Atomically replace an existing encrypted entry. The client id stays
+   * stable, so the encrypted blob remains AAD-bound to the same account and
+   * record. This deliberately avoids delete-then-create data loss. */
+  updateEntry: async (clientEntryId: string, blobB64: string, entryDate: string) => {
+    if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
+      throw new ApiError(0, "invalid entry id — refusing the request");
     }
-    // A hostile or broken server can return full pages forever — abort
-    // loudly instead of looping (and allocating) without bound.
-    throw new ApiError(0, "server keeps returning full entry pages — aborting sync, contact support or check the server");
+    return request(
+      "PUT",
+      `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`,
+      { blob: blobB64, entry_date: entryDate },
+    );
+  },
+  /** One bounded ciphertext page. Screens use this rather than materializing
+   * an entire multi-year journal in JS memory. */
+  listEntriesPage: async (options: ListEntriesPageOptions = {}): Promise<ListedEntriesPage> => {
+    const limit = options.limit ?? 100;
+    const offset = options.offset ?? 0;
+    const pageBytes = options.pageBytes ?? ENTRY_PAGE_BYTES;
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 500 ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      !Number.isInteger(pageBytes) ||
+      pageBytes < 1 ||
+      pageBytes > ENTRY_PAGE_BYTES ||
+      (options.expectedRevision !== undefined && !isEntriesRevision(options.expectedRevision))
+    ) {
+      throw new ApiError(0, "invalid entry page request — refusing the request");
+    }
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      page_bytes: String(pageBytes),
+    });
+    if (options.since) params.set("since", options.since);
+    if (options.expectedRevision !== undefined) params.set("expected_revision", options.expectedRevision);
+    const result = (await request(
+      "GET",
+      `${API_PREFIX}/entries?${params.toString()}`,
+      undefined,
+      {},
+      { includeResponse: true },
+    )) as { data: unknown; response: Response };
+    if (!Array.isArray(result.data)) invalidEntryPageResponse();
+    const entries = result.data as ListedEntry[];
+    const nextOffsetHeader =
+      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Next-Offset") : null;
+    const revisionHeader =
+      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Entries-Revision") : null;
+    const revision = entryRevision(revisionHeader);
+    // A modern server must echo the exact snapshot on every successful page.
+    // Treat a missing/different header as a retryable conflict rather than
+    // allowing a mixed history to reach the decrypting UI. Headerless legacy
+    // servers never receive expected_revision in the first place.
+    if (options.expectedRevision !== undefined && revision !== options.expectedRevision) {
+      throw entriesRevisionConflict();
+    }
+    return { entries, nextOffset: entryNextOffset(nextOffsetHeader, offset, entries, limit), revision };
+  },
+  /** Paginates through every byte-bounded page (server caps each request at
+   * 500 entries and 2 MiB of encrypted blobs). Modern servers issue a
+   * snapshot revision on page one; every continuation sends it back so a
+   * concurrent write returns retryable 409 rather than causing offset drift.
+   * Headerless servers retain the established dedupe-only fallback. */
+  listEntries: async (since?: string): Promise<ListedEntry[]> => {
+    for (let attempt = 0; attempt <= MAX_LIST_SNAPSHOT_RESTARTS; attempt += 1) {
+      try {
+        const all: ListedEntry[] = [];
+        const seen = new Set<string>();
+        const pageSize = 500;
+        let offset = 0;
+        let revision: EntriesRevision | null = null;
+        let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
+        const getPage = async (pageOffset: number): Promise<ListedEntriesPage> => {
+          const result = await api.listEntriesPage({
+            since,
+            limit: pageSize,
+            offset: pageOffset,
+            pageBytes: ENTRY_PAGE_BYTES,
+            ...(revisionMode === "snapshot" && revision !== null ? { expectedRevision: revision } : {}),
+          });
+          // `revision` is always null|string from the real client. The nullish
+          // fallback also keeps older test doubles and external callers on the
+          // documented headerless path rather than accidentally sending
+          // `expected_revision=undefined`.
+          const receivedRevision = result.revision ?? null;
+          if (revisionMode === "unknown") {
+            revisionMode = receivedRevision === null ? "legacy" : "snapshot";
+            revision = receivedRevision;
+          } else if (
+            (revisionMode === "snapshot" && receivedRevision !== revision) ||
+            (revisionMode === "legacy" && receivedRevision !== null)
+          ) {
+            // A load-balanced deployment changed protocol modes during one
+            // walk. Restart instead of mixing unpinned and pinned pages.
+            throw entriesRevisionConflict();
+          }
+          return result;
+        };
+        for (let page = 0; page < MAX_LIST_PAGES; page++) {
+          const result = await getPage(offset);
+          for (const entry of result.entries) {
+            if (seen.has(entry.client_entry_id)) continue; // legacy page-boundary drift
+            seen.add(entry.client_entry_id);
+            all.push(entry);
+          }
+          if (result.nextOffset === null) return all;
+          offset = result.nextOffset;
+        }
+        // A header-less legacy server cannot distinguish exactly MAX_LIST_PAGES
+        // full pages from one more page. Permit one *empty* terminal probe so a
+        // 50k-row journal does not falsely fail at the boundary; never retain a
+        // nonempty overflow response, which preserves the aggregate cap.
+        const probe = await getPage(offset);
+        if (probe.entries.length === 0 && probe.nextOffset === null) return all;
+        // A hostile or broken server has more entries than the bounded sync may
+        // retain. The probe is deliberately inspected before its rows reach
+        // `all`, so the cap is real rather than merely a loop-count guard.
+        throw new ApiError(0, "server keeps returning entry continuations — aborting sync, contact support or check the server");
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409 && attempt < MAX_LIST_SNAPSHOT_RESTARTS) continue;
+        throw err;
+      }
+    }
+    throw new ApiError(0, "could not obtain a stable journal history snapshot");
   },
   deleteEntry: async (clientEntryId: string) => {
     // The id lands in the URL path: validate the exact shape this client
@@ -491,10 +756,9 @@ export const api = {
     return request("DELETE", `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`);
   },
 
-  /** 2026-09-16 (red-team finding F2): the data key is the whole journal.
-   *  Ordinary requests may run over consented plain HTTP (BYO-server), but
-   *  the KEY shipment refuses it outright — https or loopback only, no
-   *  consent dialog can override that. */
+  /** The data key is the whole journal. The app transport policy already
+   * refuses every remote plain-HTTP server; retain this local check as a
+   * defence-in-depth guard for a corrupted persisted base URL. */
   openProcessingSession: async (dataKeyB64: string) => {
     const parsed = parseServerUrl(await getBaseUrl());
     if (parsed && parsed.insecure) {

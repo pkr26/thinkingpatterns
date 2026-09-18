@@ -17,6 +17,7 @@ Revises: e930dbc4f001
 Create Date: 2026-09-08 10:00:00.000000
 
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -26,19 +27,21 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a7c91e4b2d03'
-down_revision: str | Sequence[str] | None = 'e930dbc4f001'
+revision: str = "a7c91e4b2d03"
+down_revision: str | Sequence[str] | None = "e930dbc4f001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table('users') as batch_op:
-        batch_op.add_column(sa.Column('llm_consent_at', sa.DateTime(timezone=True), nullable=True))
-        batch_op.add_column(sa.Column('llm_consent_disclosure', sa.String(length=64), nullable=True))
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.add_column(sa.Column("llm_consent_at", sa.DateTime(timezone=True), nullable=True))
+        batch_op.add_column(
+            sa.Column("llm_consent_disclosure", sa.String(length=64), nullable=True)
+        )
 
 
 def downgrade() -> None:
-    with op.batch_alter_table('users') as batch_op:
-        batch_op.drop_column('llm_consent_disclosure')
-        batch_op.drop_column('llm_consent_at')
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.drop_column("llm_consent_disclosure")
+        batch_op.drop_column("llm_consent_at")

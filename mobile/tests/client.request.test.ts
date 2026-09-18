@@ -12,6 +12,7 @@ import {
   ApiError,
   DEFAULT_BASE_URL,
   detailToMessage,
+  ENTRY_PAGE_BYTES,
   getBaseUrl,
   isInsecureHttpAllowed,
   setBaseUrl,
@@ -21,8 +22,16 @@ import {
 // The real client validates the FINAL url of every response (redirect
 // hardening); node Response objects carry url === "" so the mock pins a
 // same-origin url on every stubbed response by default.
-const jsonResponse = (body: unknown, status = 200, url = DEFAULT_BASE_URL): Response => {
-  const response = new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+const jsonResponse = (
+  body: unknown,
+  status = 200,
+  url = DEFAULT_BASE_URL,
+  headers: Record<string, string> = {},
+): Response => {
+  const response = new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers },
+  });
   Object.defineProperty(response, "url", { value: url });
   return response;
 };
@@ -51,6 +60,8 @@ describe("stored base URL policy", () => {
   it("rejects malformed URLs with actionable guidance", async () => {
     expect(await setBaseUrl("not a url")).toMatch(/full URL like https/);
     expect(await setBaseUrl("ftp://example.com")).toMatch(/full URL like https/);
+    expect(await setBaseUrl("https://api.example.com:abc")).toMatch(/full URL like https/);
+    expect(await setBaseUrl("https://api.example.com:65536")).toMatch(/full URL like https/);
     expect(await getBaseUrl()).toBe(DEFAULT_BASE_URL);
   });
 
@@ -60,25 +71,19 @@ describe("stored base URL policy", () => {
     expect(await getBaseUrl()).toBe(DEFAULT_BASE_URL);
   });
 
-  it("saves an insecure server only when explicitly allowed, and remembers the consent", async () => {
-    expect(await setBaseUrl("http://nas.lan:8000", { allowInsecure: true })).toBeNull();
-    expect(await getBaseUrl()).toBe("http://nas.lan:8000");
-    expect(await isInsecureHttpAllowed()).toBe(true);
-    // Consent is scoped to the exact URL: any OTHER cleartext server is
-    // still refused until separately consented to.
-    expect(await isInsecureHttpAllowed("http://nas.lan:8000")).toBe(true);
-    expect(await isInsecureHttpAllowed("http://other.lan:8000")).toBe(false);
-    const error = await setBaseUrl("http://other.lan:8000");
-    expect(error).toMatch(/plain HTTP/i);
+  it("never permits a remote cleartext server, even with a legacy consent flag", async () => {
+    expect(await setBaseUrl("http://nas.lan:8000", { allowInsecure: true })).toMatch(/plain HTTP/i);
+    expect(await getBaseUrl()).toBe(DEFAULT_BASE_URL);
+    expect(await isInsecureHttpAllowed()).toBe(false);
+    expect(await isInsecureHttpAllowed("http://nas.lan:8000")).toBe(false);
   });
 
-  it("clears a previous consent when a different URL is saved (no sticky downgrade)", async () => {
+  it("does not retain a legacy cleartext-consent exception", async () => {
     await setBaseUrl("http://nas.lan:8000", { allowInsecure: true });
-    expect(await isInsecureHttpAllowed()).toBe(true);
+    expect(await isInsecureHttpAllowed()).toBe(false);
     await setBaseUrl("http://other.lan:8000", { allowInsecure: true });
-    // Saving OTHER consented URL replaced the old one — nas.lan's consent is gone.
     expect(await isInsecureHttpAllowed("http://nas.lan:8000")).toBe(false);
-    expect(await isInsecureHttpAllowed("http://other.lan:8000")).toBe(true);
+    expect(await isInsecureHttpAllowed("http://other.lan:8000")).toBe(false);
   });
 
   it("allows loopback http without consent and records it as not-allowed", async () => {
@@ -325,31 +330,131 @@ describe("session storage helpers", () => {
 });
 
 describe("listEntries pagination", () => {
-  it("keeps fetching pages of 500 until a short page arrives", async () => {
-    const fullPage = Array.from({ length: 500 }, (_, i) => ({ client_entry_id: `e-${i}` }));
+  it("requests the 2 MiB opt-in and follows an exact continuation after a byte-short page", async () => {
+    const firstPage = [{ client_entry_id: "e-0" }, { client_entry_id: "e-1" }];
     const shortPage = [{ client_entry_id: "last" }];
     vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(fullPage))
+      .mockResolvedValueOnce(jsonResponse(firstPage, 200, DEFAULT_BASE_URL, { "X-Next-Offset": "2" }))
       .mockResolvedValueOnce(jsonResponse(shortPage));
 
     const entries = await api.listEntries();
 
-    expect(entries).toHaveLength(501);
+    expect(entries).toHaveLength(3);
     const urls = vi.mocked(fetch).mock.calls.map(([u]) => u as string);
-    expect(urls[0]).toContain("limit=500&offset=0");
-    expect(urls[1]).toContain("limit=500&offset=500");
+    expect(urls[0]).toContain(`limit=500&offset=0&page_bytes=${ENTRY_PAGE_BYTES}`);
+    expect(urls[1]).toContain(`limit=500&offset=2&page_bytes=${ENTRY_PAGE_BYTES}`);
     expect(urls).toHaveLength(2);
   });
 
-  it("stops immediately on a short first page and forwards since", async () => {
+  it("returns a typed page with null continuation when the header is absent", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([{ id: 1 }]));
-    await api.listEntries("2026-01-01");
+    await expect(api.listEntriesPage({ limit: 7, offset: 4 })).resolves.toEqual({
+      entries: [{ id: 1 }],
+      nextOffset: null,
+      revision: null,
+    });
     const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=0&since=2026-01-01`);
+    expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/entries?limit=7&offset=4&page_bytes=${ENTRY_PAGE_BYTES}`);
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
   });
 
-  it("handles a full page followed by an empty one", async () => {
+  it("uses the legacy full-page fallback when an older server ignores page_bytes", async () => {
+    const entries = [{ id: 1 }, { id: 2 }];
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(entries));
+    await expect(api.listEntriesPage({ limit: 2, offset: 4 })).resolves.toEqual({
+      entries,
+      nextOffset: 6,
+      revision: null,
+    });
+  });
+
+  it("preserves a full 64-bit snapshot revision and sends it on an explicit continuation", async () => {
+    const revision = "9223372036854775807";
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse([{ client_entry_id: "e-1" }], 200, DEFAULT_BASE_URL, { "X-Entries-Revision": revision }),
+    );
+
+    await expect(api.listEntriesPage({ limit: 7, offset: 4, expectedRevision: revision })).resolves.toEqual({
+      entries: [{ client_entry_id: "e-1" }],
+      nextOffset: null,
+      revision,
+    });
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `${DEFAULT_BASE_URL}/api/v1/entries?limit=7&offset=4&page_bytes=${ENTRY_PAGE_BYTES}&expected_revision=${revision}`,
+    );
+  });
+
+  it("rejects malformed revisions and a response that does not echo the expected snapshot", async () => {
+    for (const revision of ["", "01", "-1", "1.0", "1,2", "9223372036854775808"]) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        jsonResponse([], 200, DEFAULT_BASE_URL, { "X-Entries-Revision": revision }),
+      );
+      await expect(api.listEntriesPage()).rejects.toMatchObject({
+        status: 0,
+        message: "invalid entry page response — refusing the response",
+      });
+    }
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse([], 200, DEFAULT_BASE_URL, { "X-Entries-Revision": "8" }),
+    );
+    await expect(api.listEntriesPage({ expectedRevision: "7" })).rejects.toMatchObject({
+      status: 409,
+      code: "collection_changed",
+    });
+
+    // A mixed deployment must not silently turn a pinned walk back into
+    // legacy offset paging midway through the journal.
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([]));
+    await expect(api.listEntriesPage({ expectedRevision: "7" })).rejects.toMatchObject({
+      status: 409,
+      code: "collection_changed",
+    });
+
+    for (const revision of ["", "01", "-1", "1.5", "9223372036854775808"]) {
+      await expect(api.listEntriesPage({ expectedRevision: revision })).rejects.toMatchObject({ status: 0 });
+    }
+  });
+
+  it("pins aggregate paging to its first snapshot and restarts once after a 409", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        jsonResponse([{ client_entry_id: "stale" }], 200, DEFAULT_BASE_URL, {
+          "X-Next-Offset": "1",
+          "X-Entries-Revision": "5",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ detail: "changed", code: "collection_changed" }, 409))
+      .mockResolvedValueOnce(
+        jsonResponse([{ client_entry_id: "fresh" }], 200, DEFAULT_BASE_URL, {
+          "X-Next-Offset": "1",
+          "X-Entries-Revision": "6",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([{ client_entry_id: "older" }], 200, DEFAULT_BASE_URL, { "X-Entries-Revision": "6" }),
+      );
+
+    await expect(api.listEntries()).resolves.toEqual([{ client_entry_id: "fresh" }, { client_entry_id: "older" }]);
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(urls[0]).not.toContain("expected_revision=");
+    expect(urls[1]).toContain("expected_revision=5");
+    expect(urls[2]).not.toContain("expected_revision=");
+    expect(urls[3]).toContain("expected_revision=6");
+  });
+
+  it("stops immediately on a no-continuation first page and forwards since", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([{ id: 1 }]));
+    await api.listEntries("2026-01-01");
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=0&page_bytes=${ENTRY_PAGE_BYTES}&since=2026-01-01`,
+    );
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues through a full header-less legacy page instead of silently truncating history", async () => {
     const fullPage = Array.from({ length: 500 }, (_, i) => ({ client_entry_id: `e-${i}` }));
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(fullPage))
@@ -360,11 +465,28 @@ describe("listEntries pagination", () => {
     // The wire path carries ONLY the pagination params — a spurious
     // `since=undefined` would break incremental sync.
     expect((vi.mocked(fetch).mock.calls[0] as [string])[0]).toBe(
-      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=0`,
+      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=0&page_bytes=${ENTRY_PAGE_BYTES}`,
     );
     expect((vi.mocked(fetch).mock.calls[1] as [string])[0]).toBe(
-      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=500`,
+      `${DEFAULT_BASE_URL}/api/v1/entries?limit=500&offset=500&page_bytes=${ENTRY_PAGE_BYTES}`,
     );
+  });
+
+  it("rejects malformed, non-advancing, or inconsistent continuations before another request", async () => {
+    for (const header of ["", "01", "-1", "one", "1, 2", "2"]) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        jsonResponse([{ client_entry_id: "e-1" }], 200, DEFAULT_BASE_URL, { "X-Next-Offset": header }),
+      );
+      await expect(api.listEntriesPage()).rejects.toMatchObject({
+        status: 0,
+        message: "invalid entry page response — refusing the response",
+      });
+    }
+
+    // Header-present empty pages violate the contract too: a continuation
+    // exists only when there is another row after what was returned.
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([], 200, DEFAULT_BASE_URL, { "X-Next-Offset": "0" }));
+    await expect(api.listEntriesPage()).rejects.toMatchObject({ status: 0 });
   });
 });
 
@@ -472,8 +594,8 @@ describe("persisted storage keys", () => {
     expect(await storage.getItem("@mindpattern/insecure_http_ok")).toBe("0");
 
     await setBaseUrl("http://nas.lan:8000", { allowInsecure: true });
-    // Consent is recorded as the exact URL, not a global "1".
-    expect(await storage.getItem("@mindpattern/insecure_http_ok")).toBe("http://nas.lan:8000");
+    // A legacy cleartext-consent bit is never an authorization path.
+    expect(await storage.getItem("@mindpattern/insecure_http_ok")).toBe("0");
 
     await api.clearSession();
     expect(await api.isLoggedIn()).toBe(false);
@@ -626,16 +748,65 @@ describe("sensitive-request redirect hardening", () => {
 });
 
 describe("listEntries hostile-server cap", () => {
-  // M1: a server that always returns a full page must not loop the client
+  // M1: a server that always returns valid-looking continuations must not loop the client
   // forever (unbounded memory + battery drain).
   it("aborts loudly after the page cap instead of looping forever", async () => {
     const fullPage = Array.from({ length: 500 }, (_, i) => ({ client_entry_id: `e-${i}` }));
-    vi.mocked(fetch).mockImplementation(async () => jsonResponse(fullPage));
+    vi.mocked(fetch).mockImplementation(
+      (async (url: RequestInfo | URL) => {
+        const offset = Number(new URL(String(url)).searchParams.get("offset"));
+        return jsonResponse(fullPage, 200, DEFAULT_BASE_URL, { "X-Next-Offset": String(offset + fullPage.length) });
+      }) as never,
+    );
     await expect(api.listEntries()).rejects.toMatchObject({
       status: 0,
-      message: expect.stringContaining("full entry pages"),
+      message: expect.stringContaining("entry continuations"),
     });
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(100);
+    // One final bounded probe distinguishes an exactly-full legacy terminal
+    // page from real overflow. Its nonempty response is never retained.
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(101);
+  });
+
+  it("accepts exactly 100 full header-less legacy pages after one empty terminal probe", async () => {
+    const pageSize = 500;
+    const maxRows = 100 * pageSize;
+    vi.mocked(fetch).mockImplementation(
+      (async (url: RequestInfo | URL) => {
+        const offset = Number(new URL(String(url)).searchParams.get("offset"));
+        if (offset === maxRows) return jsonResponse([]);
+        return jsonResponse(
+          Array.from({ length: pageSize }, (_, index) => ({ client_entry_id: `legacy-${offset + index}` })),
+        );
+      }) as never,
+    );
+
+    const entries = await api.listEntries();
+
+    expect(entries).toHaveLength(maxRows);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(101);
+  });
+
+  it("rejects a nonempty cap probe before inspecting or retaining its rows", async () => {
+    const overflow = {} as { client_entry_id: string };
+    Object.defineProperty(overflow, "client_entry_id", {
+      enumerable: true,
+      get: () => {
+        throw new Error("overflow row was inspected");
+      },
+    });
+    const pageSpy = vi.spyOn(api, "listEntriesPage").mockImplementation(async (options = {}) => {
+      const offset = options.offset ?? 0;
+      if (offset === 100) return { entries: [overflow] as never, nextOffset: null };
+      return { entries: [{ client_entry_id: `e-${offset}` }] as never, nextOffset: offset + 1 };
+    });
+    try {
+      await expect(api.listEntries()).rejects.toMatchObject({
+        status: 0,
+        message: expect.stringContaining("entry continuations"),
+      });
+    } finally {
+      pageSpy.mockRestore();
+    }
   });
 });
 
@@ -751,7 +922,7 @@ describe("listEntries drift hardening", () => {
     const page1 = Array.from({ length: 500 }, (_, i) => ({ client_entry_id: `e-${i}` }));
     const page2 = [{ client_entry_id: "e-499" }, { client_entry_id: "e-500" }];
     vi.mocked(fetch)
-      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse(page1, 200, DEFAULT_BASE_URL, { "X-Next-Offset": "500" }))
       .mockResolvedValueOnce(jsonResponse(page2));
     const entries = await api.listEntries();
     expect(entries).toHaveLength(501);

@@ -20,10 +20,12 @@ beforeEach(() => {
 });
 
 describe("crisisDialog throttle", () => {
-  it("is not shown before any record, and the record lands as an ISO date stamp", async () => {
+  it("is not shown before any record, and the persisted stamp is encrypted", async () => {
     expect(await crisisDialogShownOn("user-1", "2026-09-14")).toBe(false);
     await recordCrisisDialogShown("user-1", "2026-09-14");
-    expect(await storage.getItem(STAMP_KEY)).toBe("2026-09-14");
+    const raw = await storage.getItem(STAMP_KEY);
+    expect(raw).not.toBe("2026-09-14");
+    expect(raw).not.toContain("2026-09-14");
     expect(await crisisDialogShownOn("user-1", "2026-09-14")).toBe(true);
   });
 
@@ -32,7 +34,7 @@ describe("crisisDialog throttle", () => {
     expect(await crisisDialogShownOn("user-1", "2026-09-15")).toBe(false);
     // …and a re-show restamps the day.
     await recordCrisisDialogShown("user-1", "2026-09-15");
-    expect(await storage.getItem(STAMP_KEY)).toBe("2026-09-15");
+    expect(await storage.getItem(STAMP_KEY)).not.toContain("2026-09-15");
   });
 
   it("throttles per account — a second account on the same device is unaffected", async () => {

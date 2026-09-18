@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__, config, singleprocess
 from .api import api_router, api_v1_router
 from .cache import FixedWindowCounter
-from .db import build_engine, build_sessionmaker, init_models
+from .db import SCHEMA_HEAD, build_engine, build_sessionmaker, init_models
 from .deps import DEFAULT_ERROR_CODES
 from .metrics import MetricsMiddleware, MetricsRegistry
 from .middleware import HardeningMiddleware
@@ -49,9 +49,11 @@ async def _acquire_cross_host_guard(engine) -> AsyncConnection | None:
         return None
     conn = await engine.connect()
     try:
-        acquired = (await conn.exec_driver_sql(
-            f"SELECT pg_try_advisory_lock({CROSS_HOST_ADVISORY_LOCK_ID})"
-        )).scalar()
+        acquired = (
+            await conn.exec_driver_sql(
+                f"SELECT pg_try_advisory_lock({CROSS_HOST_ADVISORY_LOCK_ID})"
+            )
+        ).scalar()
         if acquired:
             # The SELECT autobegins a transaction; close it. Session-level
             # advisory locks survive COMMIT, but a transaction held open
@@ -78,13 +80,12 @@ async def _release_cross_host_guard(conn: AsyncConnection | None) -> None:
     if conn is None:
         return
     try:
-        await conn.exec_driver_sql(
-            f"SELECT pg_advisory_unlock({CROSS_HOST_ADVISORY_LOCK_ID})"
-        )
+        await conn.exec_driver_sql(f"SELECT pg_advisory_unlock({CROSS_HOST_ADVISORY_LOCK_ID})")
     except Exception:
         logger.warning("pg_advisory_unlock failed; disconnect releases the lock", exc_info=True)
     finally:
         await conn.close()
+
 
 logger = logging.getLogger("mindpattern")
 
@@ -97,6 +98,12 @@ APP_VERSION = __version__
 # grew unbounded. The sweep runs the same shared statement (see
 # api/therapist.py) once at startup and then daily.
 ACCESS_LOG_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
+# Processing sessions contain client data keys.  The store also validates
+# expiry on every access, but a periodic purge is required so an abandoned
+# process does not retain expired key material merely because no later
+# request happens to touch the store.  A one-second cadence keeps the
+# over-TTL residency bounded without coupling one timer task to every key.
+PROCESSING_KEY_PURGE_INTERVAL_SECONDS = 1
 
 
 async def _prune_access_log_once(app: FastAPI) -> None:
@@ -107,7 +114,9 @@ async def _prune_access_log_once(app: FastAPI) -> None:
     from .models import utcnow
 
     async with app.state.sessionmaker() as session:
-        await session.execute(access_log_prune_statement(utcnow()))
+        await session.execute(
+            access_log_prune_statement(utcnow(), app.state.settings.access_log_retention_days)
+        )
         await session.commit()
 
 
@@ -122,6 +131,20 @@ async def _access_log_retention_sweep(app: FastAPI) -> None:
         except Exception:
             logger.exception("access_log retention sweep failed; retrying next cycle")
         await asyncio.sleep(ACCESS_LOG_SWEEP_INTERVAL_SECONDS)
+
+
+async def _processing_key_sweep(app: FastAPI) -> None:
+    """Purge expired processing keys even while the API is otherwise idle."""
+    while True:
+        try:
+            app.state.key_store.purge_expired()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A failure here must not take the API down; expiration is still
+            # enforced at get/pop/create, and the next short interval retries.
+            logger.exception("processing-key expiry sweep failed; retrying shortly")
+        await asyncio.sleep(PROCESSING_KEY_PURGE_INTERVAL_SECONDS)
 
 
 def _error_envelope(status_code: int, detail, code: str | None = None) -> dict:
@@ -144,21 +167,22 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # in-process. A second worker used to boot silently and fragment
         # every one of those guarantees (2026-09-16 red-team finding C1) —
         # now it refuses to start. Re-entrant within a process (tests).
-        with singleprocess.single_process_guard(
-            settings.token_secret, settings.database_url
-        ):
+        with singleprocess.single_process_guard(settings.token_secret, settings.database_url):
             if settings.trust_proxy_headers:
                 config.logger.warning(
                     "MINDPATTERN_TRUST_PROXY_HEADERS is on: rate-limit identity "
-                    "comes from X-Forwarded-For. The origin MUST only be reachable "
-                    "through a trusted proxy that appends its own observation — "
-                    "direct client access with a spoofable header defeats per-IP "
-                    "limits entirely (2026-09-16 red-team finding B2)."
+                    "comes only from X-Forwarded-For received over a direct peer "
+                    "in MINDPATTERN_TRUSTED_PROXY_IPS=%s. Keep the API unreachable "
+                    "except through that proxy, which must append its observation; "
+                    "do not enable uvicorn --proxy-headers because this middleware "
+                    "needs the raw peer to verify the boundary.",
+                    ",".join(settings.trusted_proxy_ips),
                 )
             # Cross-host guard (2026-09-17): the flock above is per-host;
             # on Postgres a session advisory lock closes the multi-HOST hole.
             boot_guard_conn = await _acquire_cross_host_guard(app.state.engine)
             sweep_task: asyncio.Task | None = None
+            key_sweep_task: asyncio.Task | None = None
             try:
                 # create_all is a dev/test convenience only. Outside development
                 # the schema comes from `alembic upgrade head` (run by the image
@@ -173,11 +197,20 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 # lifecycle to the lifespan for tests.
                 sweep_task = asyncio.create_task(_access_log_retention_sweep(app))
                 app.state.access_log_sweep_task = sweep_task
+                key_sweep_task = asyncio.create_task(_processing_key_sweep(app))
+                app.state.processing_key_sweep_task = key_sweep_task
                 yield
             finally:
                 if sweep_task is not None:
                     sweep_task.cancel()
                     await asyncio.gather(sweep_task, return_exceptions=True)
+                if key_sweep_task is not None:
+                    key_sweep_task.cancel()
+                    await asyncio.gather(key_sweep_task, return_exceptions=True)
+                # Process shutdown is a terminal lifecycle boundary: drop
+                # every key before disposing DB/network resources or returning
+                # control to a process manager that may retain memory briefly.
+                app.state.key_store.destroy_all()
                 await _release_cross_host_guard(boot_guard_conn)
                 await app.state.engine.dispose()
 
@@ -213,6 +246,17 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # limiter: a login flood must not be able to queue unbounded 64-MiB
     # allocations on the shared anyio thread pool.
     app.state.auth_limiter = anyio.CapacityLimiter(4)
+    # Non-blocking admission paired with auth_limiter: acquire this BEFORE
+    # the login SELECT, so a flood gets a small 503 queue boundary rather
+    # than retaining pooled DB connections while it waits behind scrypt.
+    app.state.auth_admission_limiter = anyio.CapacityLimiter(4)
+    # Exports no longer hold a cursor across the client connection, but they
+    # still page through a potentially large account. Keep a small global
+    # active-export cap below available database capacity as a second DoS
+    # boundary (and always leave one connection for ordinary traffic).
+    app.state.export_limiter = anyio.CapacityLimiter(
+        max(1, min(2, settings.db_pool_size + settings.db_max_overflow - 1))
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -224,7 +268,17 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # X-Processing-Token drives recomputes; X-Account-Verifier is the
         # preferred DELETE /account re-auth transport — a browser client
         # could not send either in a cross-origin request without this.
-        allow_headers=["Authorization", "Content-Type", "X-Processing-Token", "X-Account-Verifier"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Processing-Token",
+            "X-Account-Verifier",
+            "X-Therapist-Enrollment-Token",
+        ],
+        # Offset-paginated clients must read both the opaque next-page cursor
+        # and the collection snapshot marker that makes a continuation safe
+        # across independent requests.
+        expose_headers=["X-Next-Offset", "X-Entries-Revision", "X-Notes-Revision"],
     )
     # Inside the hardening layer: aggregate status counters (no paths, no
     # user data — see app/metrics.py). Added BEFORE HardeningMiddleware so
@@ -235,7 +289,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     app.add_middleware(
         HardeningMiddleware,
         max_body_bytes=settings.max_body_bytes,
+        body_read_timeout_seconds=settings.body_read_timeout_seconds,
         trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_ips=settings.trusted_proxy_ips,
     )
 
     @app.exception_handler(StarletteHTTPException)
@@ -297,9 +353,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             # account.py idiom): the comparison itself must not leak.
             expected = f"Bearer {live_settings.metrics_token}"
             if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
-                raise StarletteHTTPException(
-                    status_code=401, detail="metrics token required"
-                )
+                raise StarletteHTTPException(status_code=401, detail="metrics token required")
         keystore_len = len(request.app.state.key_store)
         return PlainTextResponse(
             request.app.state.metrics.render(keystore_len),
@@ -311,8 +365,20 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         try:
             async with request.app.state.sessionmaker() as session:
                 await session.execute(text("SELECT 1"))
+                # Development's create_all convenience deliberately does not
+                # create alembic_version. Every deployed/non-development app
+                # must prove it is at the exact migration head before a load
+                # balancer sends real journal traffic to it.
+                if request.app.state.settings.environment != "development":
+                    version = (
+                        await session.execute(text("SELECT version_num FROM alembic_version"))
+                    ).scalar_one_or_none()
+                    if version != SCHEMA_HEAD:
+                        raise RuntimeError(
+                            f"database schema revision {version!r} is not required head {SCHEMA_HEAD!r}"
+                        )
         except Exception:
-            logger.exception("readiness check failed: database unreachable")
+            logger.exception("readiness check failed: database or schema unavailable")
             return JSONResponse(
                 status_code=503,
                 content=_error_envelope(503, "database unavailable"),

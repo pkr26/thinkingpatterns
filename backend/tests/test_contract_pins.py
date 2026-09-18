@@ -26,10 +26,14 @@ BASE = date(2026, 7, 5)  # a Sunday
 # Exhaustive lexicon coverage: every single word must still work.
 # --------------------------------------------------------------------------
 
+
 def test_every_lexicon_word_triggers_its_theme():
     for theme, words in patterns.THEME_LEXICON.items():
         for word in words:
-            assert patterns.extract_themes(f"today i dealt with {word} again") == {theme}, (theme, word)
+            assert patterns.extract_themes(f"today i dealt with {word} again") == {theme}, (
+                theme,
+                word,
+            )
 
 
 def test_theme_words_reverse_index_matches_lexicon():
@@ -49,13 +53,20 @@ def test_every_negative_word_scores_negative():
 
 def test_day_names_pinned():
     assert patterns.DAY_NAMES == (
-        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
     )
 
 
 # --------------------------------------------------------------------------
 # KDF / crypto contract pins (the mobile app depends on these exact bytes).
 # --------------------------------------------------------------------------
+
 
 def test_kdf_info_strings_pinned():
     assert kdf.AUTH_INFO == b"mindpattern/auth/v1"
@@ -94,6 +105,7 @@ def test_crypto_error_messages_are_part_of_the_contract():
 # --------------------------------------------------------------------------
 # Token wire format.
 # --------------------------------------------------------------------------
+
 
 def test_token_body_is_compact_sorted_json():
     token = tokens.issue_token("u1", "secret", 60, now=1000.0)
@@ -138,9 +150,7 @@ def test_token_error_messages():
 
     def signed(body: bytes) -> str:
         b = tokens._b64url_encode(body)
-        sig = tokens._b64url_encode(
-            hmac_mod.new(b"s", b.encode("ascii"), hashlib.sha256).digest()
-        )
+        sig = tokens._b64url_encode(hmac_mod.new(b"s", b.encode("ascii"), hashlib.sha256).digest())
         return f"{b}.{sig}"
 
     # Correctly signed, but the payload is not a dict with uid/exp.
@@ -150,6 +160,7 @@ def test_token_error_messages():
 
 def test_processing_tokens_are_43_char_urlsafe():
     from app.security.enclave import InMemoryKeyStore
+
     store = InMemoryKeyStore()
     key = crypto.generate_key()
     t = store.create(key, 60)
@@ -161,8 +172,10 @@ def test_processing_tokens_are_43_char_urlsafe():
 # Enclave error semantics.
 # --------------------------------------------------------------------------
 
+
 def test_enclave_error_messages():
     from app.security.enclave import InMemoryKeyStore, KeyNotFound
+
     store = InMemoryKeyStore()
     with pytest.raises(ValueError, match=r"^key must be 32 bytes"):
         store.create(b"short", 60)
@@ -178,6 +191,7 @@ def test_enclave_error_messages():
 # --------------------------------------------------------------------------
 # Behavioral boundary tests (kill constant-drift mutants).
 # --------------------------------------------------------------------------
+
 
 def test_temporal_fraction_boundary_exactly_half():
     # 2 of 4 work-mentions on a Sunday: fraction == 0.5 must fire.
@@ -199,8 +213,13 @@ def test_temporal_fraction_boundary_exactly_half():
 
 
 def test_mood_delta_boundary_exactly_point_three():
-    with_theme = [JournalEntry("meeting at work", BASE + timedelta(days=i), sentiment=-0.15) for i in range(4)]
-    without = [JournalEntry("walk in the park", BASE + timedelta(days=10 + i), sentiment=0.15) for i in range(4)]
+    with_theme = [
+        JournalEntry("meeting at work", BASE + timedelta(days=i), sentiment=-0.15) for i in range(4)
+    ]
+    without = [
+        JournalEntry("walk in the park", BASE + timedelta(days=10 + i), sentiment=0.15)
+        for i in range(4)
+    ]
     analysis = analyze(with_theme + without)
     mood = [p for p in analysis.patterns if p.kind == "mood_correlation"]
     assert mood and mood[0].detail["mood_delta"] == pytest.approx(0.3)
@@ -294,6 +313,7 @@ def test_rotation_hits_every_pool_item_within_one_cycle():
 
 def test_error_messages_round_two():
     from app.security.enclave import SecureProcessingContext
+
     with pytest.raises(ValueError, match=r"^salt must be at least 8 bytes"):
         kdf.derive_master_key("p", b"1234567", kdf.MIN_ITERATIONS)
     with pytest.raises(ValueError, match=r"^iterations must be at least"):
@@ -312,6 +332,7 @@ def test_error_messages_round_two():
 
 def test_ttl_of_one_second_is_valid():
     from app.security.enclave import InMemoryKeyStore
+
     store = InMemoryKeyStore()
     store.create(crypto.generate_key(), 1)
     assert len(store) == 1
@@ -339,6 +360,7 @@ def test_tamper_message_anchored():
 
 def test_purge_at_exact_expiry_boundary():
     from app.security.enclave import InMemoryKeyStore
+
     store = InMemoryKeyStore()
     store.create(crypto.generate_key(), 10, now=0.0)
     assert store.purge_expired(now=10.0) == 1  # expiry instant counts as expired
@@ -346,8 +368,14 @@ def test_purge_at_exact_expiry_boundary():
 
 def test_nested_plaintext_windows_counted():
     from app.security.enclave import SecureProcessingContext, plaintext_windows
+
     key = crypto.generate_key()
-    item = [(crypto.build_aad("e", "u", "1"), crypto.encrypt(key, b"x", crypto.build_aad("e", "u", "1")))]
+    item = [
+        (
+            crypto.build_aad("e", "u", "1"),
+            crypto.encrypt(key, b"x", crypto.build_aad("e", "u", "1")),
+        )
+    ]
     inner = SecureProcessingContext(key)
     outer_result = SecureProcessingContext(key).run(
         item, lambda plains: inner.run(item, lambda p2: plaintext_windows())
@@ -365,7 +393,15 @@ def test_three_dot_token_reports_bad_signature():
 
 def test_theme_names_are_the_public_pattern_labels():
     assert set(patterns.THEME_LEXICON) == {
-        "work", "sleep", "social", "family", "health", "money", "study", "food", "weather",
+        "work",
+        "sleep",
+        "social",
+        "family",
+        "health",
+        "money",
+        "study",
+        "food",
+        "weather",
     }
 
 
@@ -377,13 +413,19 @@ def test_phrase_threshold_boundaries_exact():
     assert hit.detail["first"] == BASE.isoformat()
     assert hit.detail["last"] == (BASE + timedelta(days=7)).isoformat()
     # Two occurrences never fire.
-    assert patterns.recurring_phrases([
-        JournalEntry("cannot sleep tonight", BASE + timedelta(days=d)) for d in (0, 7)
-    ]) == []
+    assert (
+        patterns.recurring_phrases(
+            [JournalEntry("cannot sleep tonight", BASE + timedelta(days=d)) for d in (0, 7)]
+        )
+        == []
+    )
     # Three occurrences within six days never fire.
-    assert patterns.recurring_phrases([
-        JournalEntry("cannot sleep tonight", BASE + timedelta(days=d)) for d in (0, 2, 6)
-    ]) == []
+    assert (
+        patterns.recurring_phrases(
+            [JournalEntry("cannot sleep tonight", BASE + timedelta(days=d)) for d in (0, 2, 6)]
+        )
+        == []
+    )
 
 
 def test_phrase_scan_continues_past_rejected_sentence():
@@ -419,7 +461,12 @@ def test_theme_scan_continues_past_weak_theme():
 def test_dominant_weekday_tie_breaks_to_earliest_day():
     # Sunday encountered first, Tuesday second, 2 mentions each -> Tuesday wins
     # (earlier weekday index is the deterministic tie-break).
-    days = [BASE, BASE + timedelta(days=2), BASE + timedelta(weeks=1), BASE + timedelta(weeks=1, days=2)]
+    days = [
+        BASE,
+        BASE + timedelta(days=2),
+        BASE + timedelta(weeks=1),
+        BASE + timedelta(weeks=1, days=2),
+    ]
     entries = [JournalEntry("work crunch day", d) for d in days]
     temporal = next(p for p in analyze(entries).patterns if p.kind == "temporal")
     assert temporal.detail["day"] == "Tuesday"
@@ -427,8 +474,9 @@ def test_dominant_weekday_tie_breaks_to_earliest_day():
 
 def test_day_fraction_and_confidence_rounding_pinned():
     # 4 of 6 mentions on Sunday -> fraction 2/3 -> 0.667; conf = 6/12*(0.5+1/3) -> 0.417.
-    days = [BASE + timedelta(weeks=w) for w in range(4)] + \
-           [BASE + timedelta(weeks=w, days=2) for w in range(2)]
+    days = [BASE + timedelta(weeks=w) for w in range(4)] + [
+        BASE + timedelta(weeks=w, days=2) for w in range(2)
+    ]
     entries = [JournalEntry("work crunch day", d) for d in days]
     temporal = next(p for p in analyze(entries).patterns if p.kind == "temporal")
     assert temporal.detail["day_fraction"] == 0.667
@@ -442,7 +490,9 @@ def test_temporal_confidence_saturation_and_boundary():
     temporal = next(p for p in analyze(entries).patterns if p.kind == "temporal")
     assert temporal.confidence == pytest.approx(0.25)
     # 24 weekly mentions: confidence saturates at exactly 1.0.
-    saturated = [JournalEntry(f"work crunch variant {w}", BASE + timedelta(weeks=w)) for w in range(24)]
+    saturated = [
+        JournalEntry(f"work crunch variant {w}", BASE + timedelta(weeks=w)) for w in range(24)
+    ]
     temporal24 = next(p for p in analyze(saturated).patterns if p.kind == "temporal")
     assert temporal24.confidence == 1.0
 
@@ -456,33 +506,58 @@ def test_phrase_confidence_pinned():
 
 
 def test_mood_confidence_and_rounding_pinned():
-    with_theme = [JournalEntry("meeting at work", BASE + timedelta(days=i), sentiment=-0.25) for i in range(4)]
-    without = [JournalEntry("walk in the park", BASE + timedelta(days=10 + i), sentiment=0.25) for i in range(4)]
+    with_theme = [
+        JournalEntry("meeting at work", BASE + timedelta(days=i), sentiment=-0.25) for i in range(4)
+    ]
+    without = [
+        JournalEntry("walk in the park", BASE + timedelta(days=10 + i), sentiment=0.25)
+        for i in range(4)
+    ]
     mood = next(p for p in analyze(with_theme + without).patterns if p.kind == "mood_correlation")
     assert mood.confidence == pytest.approx(4 / 12 * 0.5)
     assert mood.detail["mood_delta"] == 0.5
 
-    third = [JournalEntry("meeting at work", BASE + timedelta(days=i), sentiment=-1 / 6) for i in range(4)]
-    third_out = [JournalEntry("walk in the park", BASE + timedelta(days=10 + i), sentiment=1 / 6) for i in range(4)]
+    third = [
+        JournalEntry("meeting at work", BASE + timedelta(days=i), sentiment=-1 / 6)
+        for i in range(4)
+    ]
+    third_out = [
+        JournalEntry("walk in the park", BASE + timedelta(days=10 + i), sentiment=1 / 6)
+        for i in range(4)
+    ]
     mood3 = next(p for p in analyze(third + third_out).patterns if p.kind == "mood_correlation")
     assert mood3.detail["mood_delta"] == 0.333
 
-    big_with = [JournalEntry(f"work crunch {i}", BASE + timedelta(weeks=i), sentiment=-1.0) for i in range(24)]
-    big_without = [JournalEntry("calm river walk", BASE + timedelta(days=100 + i), sentiment=1.0) for i in range(24)]
-    mood24 = next(p for p in analyze(big_with + big_without).patterns if p.kind == "mood_correlation")
+    big_with = [
+        JournalEntry(f"work crunch {i}", BASE + timedelta(weeks=i), sentiment=-1.0)
+        for i in range(24)
+    ]
+    big_without = [
+        JournalEntry("calm river walk", BASE + timedelta(days=100 + i), sentiment=1.0)
+        for i in range(24)
+    ]
+    mood24 = next(
+        p for p in analyze(big_with + big_without).patterns if p.kind == "mood_correlation"
+    )
     assert mood24.confidence == 1.0
 
 
 def test_pattern_ordering_pinned():
     # mood (0.833) outranks temporal (0.417).
     entries = [JournalEntry("work deadline stress", BASE + timedelta(weeks=w)) for w in range(5)]
-    entries += [JournalEntry("calm and grateful walk", BASE + timedelta(weeks=w, days=3)) for w in range(5)]
+    entries += [
+        JournalEntry("calm and grateful walk", BASE + timedelta(weeks=w, days=3)) for w in range(5)
+    ]
     assert analyze(entries).patterns[0].kind == "mood_correlation"
 
     # Confidence tie (0.75 each): 9-mention temporal outranks 6-mention phrase.
     tie = [JournalEntry(f"work crunch variant {w}", BASE + timedelta(weeks=w)) for w in range(9)]
-    tie += [JournalEntry("cannot sleep tonight", BASE + timedelta(weeks=w, days=1)) for w in range(6)]
-    ranked = [(p.kind, p.label) for p in analyze(tie).patterns if p.confidence == pytest.approx(0.75)]
+    tie += [
+        JournalEntry("cannot sleep tonight", BASE + timedelta(weeks=w, days=1)) for w in range(6)
+    ]
+    ranked = [
+        (p.kind, p.label) for p in analyze(tie).patterns if p.confidence == pytest.approx(0.75)
+    ]
     assert ranked[0] == ("temporal", "work")
 
 
@@ -500,7 +575,12 @@ def test_avg_sentiment_nonzero_pinned():
 def test_to_dict_stats_keys_pinned():
     payload = analyze([JournalEntry("work crunch", BASE)]).to_dict()
     assert set(payload) == {
-        "total_entries", "active_days", "avg_sentiment", "first_date", "last_date", "patterns",
+        "total_entries",
+        "active_days",
+        "avg_sentiment",
+        "first_date",
+        "last_date",
+        "patterns",
     }
 
 
@@ -512,9 +592,14 @@ def test_describe_full_copy_pinned():
     temporal = Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})
     assert temporal.describe() == "You've mentioned 'work' 12 times, most often on Sundays."
     mood = Pattern("mood_correlation", "sleep", 8, 0.6, {"mood_delta": 0.7})
-    assert mood.describe() == "Your entries read lower on days when 'sleep' comes up (mood drop of 0.7)."
+    assert (
+        mood.describe()
+        == "Your entries read lower on days when 'sleep' comes up (mood drop of 0.7)."
+    )
     phrase = Pattern("recurring_phrase", "cannot sleep tonight", 4, 0.5, {})
-    assert phrase.describe() == 'The phrase "cannot sleep tonight" keeps returning — 4 times so far.'
+    assert (
+        phrase.describe() == 'The phrase "cannot sleep tonight" keeps returning — 4 times so far.'
+    )
     # Defaults with no detail dict at all.
     assert Pattern("temporal", "work", 2, 0.5).describe() == (
         "You've mentioned 'work' 2 times, most often on the same days."

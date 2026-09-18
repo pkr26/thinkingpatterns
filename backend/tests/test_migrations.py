@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -18,9 +19,11 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 
 from app.config import Settings
+from app.db import SCHEMA_HEAD, build_engine, build_sessionmaker, init_models
 from app.main import create_app
 from app.models import Base, Entry, User
 
@@ -44,12 +47,10 @@ def _schema_snapshot(engine: Engine) -> dict:
                 for c in insp.get_columns(table)
             },
             "indexes": sorted(
-                (i["name"], tuple(i["column_names"]), i["unique"])
-                for i in insp.get_indexes(table)
+                (i["name"], tuple(i["column_names"]), i["unique"]) for i in insp.get_indexes(table)
             ),
             "uniques": sorted(
-                (u["name"], tuple(u["column_names"]))
-                for u in insp.get_unique_constraints(table)
+                (u["name"], tuple(u["column_names"])) for u in insp.get_unique_constraints(table)
             ),
             "fks": sorted(
                 (
@@ -77,7 +78,7 @@ def test_migrations_reproduce_create_all_schema(tmp_path, monkeypatch):
     # The schema diff above ignores the version table; assert the stamp too.
     with mig_engine.connect() as conn:
         rows = conn.exec_driver_sql("SELECT version_num FROM alembic_version").all()
-    assert rows == [("c41f8a92d5e7",)]  # head: therapist sharing tables
+    assert rows == [(SCHEMA_HEAD,)]
     mig_engine.dispose()
     ref_engine.dispose()
 
@@ -148,6 +149,63 @@ def test_consent_record_revision_roundtrips(tmp_path, monkeypatch):
     assert {"llm_consent_at", "llm_consent_disclosure"} <= consent_columns()
 
 
+def test_collection_snapshot_revision_migration_backfills_and_roundtrips(tmp_path, monkeypatch):
+    """Existing accounts start at a usable zero marker and downgrade cleanly."""
+    db_file = tmp_path / "collection-revisions.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+
+    # Seed an account on the immediately preceding deployed schema, then
+    # prove the new non-null counters backfill rather than breaking upgrade.
+    command.upgrade(cfg, "b9e6c4a7d812")
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            INSERT INTO users
+                (id, username, salt, verifier, scrypt_salt, created_at,
+                 is_active, token_epoch, llm_consent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "revision-migration-user",
+                "revision-migration-user",
+                "s",
+                b"v",
+                b"k",
+                "2026-09-18T00:00:00+00:00",
+                1,
+                1,
+                0,
+            ),
+        )
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db_file}")
+    columns = {column["name"]: column for column in inspect(engine).get_columns("users")}
+    assert {"entries_revision", "notes_revision"} <= columns.keys()
+    assert not columns["entries_revision"]["nullable"]
+    assert not columns["notes_revision"]["nullable"]
+    with engine.connect() as conn:
+        revisions = conn.exec_driver_sql(
+            "SELECT entries_revision, notes_revision FROM users WHERE id = ?",
+            ("revision-migration-user",),
+        ).all()
+    assert revisions == [(0, 0)]
+    engine.dispose()
+
+    command.downgrade(cfg, "b9e6c4a7d812")
+    engine = create_engine(f"sqlite:///{db_file}")
+    assert not (
+        {"entries_revision", "notes_revision"}
+        & {c["name"] for c in inspect(engine).get_columns("users")}
+    )
+    engine.dispose()
+    command.upgrade(cfg, "head")
+
+
 def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
     db_file = tmp_path / "migrated.db"
     db_url = f"sqlite+aiosqlite:///{db_file}"
@@ -155,7 +213,9 @@ def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
 
     async def smoke() -> None:
         settings = Settings(
-            environment="development", database_url=db_url, token_secret="test-secret-not-for-production"
+            environment="development",
+            database_url=db_url,
+            token_secret="test-secret-not-for-production",
         )
         application = create_app(settings)
         async with application.router.lifespan_context(application):
@@ -163,7 +223,14 @@ def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
                 user = User(username="mig-user", salt="s", verifier=b"v", scrypt_salt=b"k")
                 session.add(user)
                 await session.commit()
-                session.add(Entry(user_id=user.id, client_entry_id="e1", blob=b"x", entry_date=user.created_at.date()))
+                session.add(
+                    Entry(
+                        user_id=user.id,
+                        client_entry_id="e1",
+                        blob=b"x",
+                        entry_date=user.created_at.date(),
+                    )
+                )
                 await session.commit()
                 loaded = await session.scalar(select(User).where(User.username == "mig-user"))
                 assert loaded is not None
@@ -171,6 +238,110 @@ def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
                 assert [e.client_entry_id for e in entries] == ["e1"]
 
     asyncio.run(smoke())
+
+
+def test_utc_datetime_preserves_aware_offset_instant_on_sqlite():
+    """SQLite removes timezone offsets from DateTime storage. UTCDateTime
+    must normalize before that conversion, or a non-UTC aware value silently
+    changes instant on a SQLite development/test round trip.
+    """
+
+    original = datetime(2026, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+
+    async def round_trip() -> datetime:
+        engine = build_engine("sqlite+aiosqlite://")
+        try:
+            await init_models(engine)
+            sessionmaker = build_sessionmaker(engine)
+            async with sessionmaker() as session:
+                user = User(
+                    username="offset-user",
+                    salt="s",
+                    verifier=b"v",
+                    scrypt_salt=b"k",
+                    created_at=original,
+                )
+                session.add(user)
+                await session.commit()
+                user_id = user.id
+            async with sessionmaker() as session:
+                loaded = await session.get(User, user_id)
+                assert loaded is not None
+                return loaded.created_at
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(round_trip()) == original.astimezone(timezone.utc)
+
+
+def test_undated_insight_unique_index_deduplicates_legacy_rows(tmp_path, monkeypatch):
+    """The NULL-date partial index must preserve the newest historical
+    pattern/brain row before enforcing its invariant on both fresh writes
+    and old databases that predate the index.
+    """
+
+    db_file = tmp_path / "undated-insights.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    command.upgrade(cfg, "d52c4e8f14a0")
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            INSERT INTO users
+                (id, username, salt, verifier, scrypt_salt, created_at,
+                 is_active, token_epoch, llm_consent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("user-1", "undated-user", "s", b"v", b"k", "2026-01-01T00:00:00+00:00", 1, 1, 0),
+        )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+            VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            ("old", "user-1", "patterns", b"old", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+            VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            ("new", "user-1", "patterns", b"new", "2026-01-02T00:00:00+00:00"),
+        )
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT id, blob FROM insights WHERE user_id = ? AND kind = ? AND for_date IS NULL",
+            ("user-1", "patterns"),
+        ).all()
+        assert rows == [("new", b"new")]
+        conn.exec_driver_sql(
+            """
+            INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+            VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            ("brain-1", "user-1", "brain", b"state", "2026-01-02T00:00:00+00:00"),
+        )
+        with pytest.raises(IntegrityError):
+            conn.exec_driver_sql(
+                """
+                INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+                VALUES (?, ?, ?, NULL, ?, ?)
+                """,
+                ("brain-2", "user-1", "brain", b"duplicate", "2026-01-03T00:00:00+00:00"),
+            )
+    assert any(
+        index["name"] == "uq_insights_user_kind_undated" and index["unique"]
+        for index in inspect(engine).get_indexes("insights")
+    )
+    engine.dispose()
 
 
 def test_postgres_alembic_upgrade_head_and_current(monkeypatch):

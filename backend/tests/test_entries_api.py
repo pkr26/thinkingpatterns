@@ -51,11 +51,15 @@ async def test_duplicate_client_entry_id_conflicts(client):
     emu = ClientEmulator("carol", "pass-3")
     await emu.register(client)
     await emu.create_entry(client, "first", TODAY, client_entry_id="fixed-id")
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "fixed-id",
-        "blob": emu.encrypt_entry("second", TODAY, "fixed-id"),
-        "entry_date": TODAY.isoformat(),
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "fixed-id",
+            "blob": emu.encrypt_entry("second", TODAY, "fixed-id"),
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert response.status_code == 409
 
 
@@ -79,20 +83,30 @@ async def test_rejects_undecodable_and_tiny_blobs(client):
     emu = ClientEmulator("erin", "pass-5")
     await emu.register(client)
     for blob in ("!!!not-base64!!!", base64.b64encode(b"tooshort").decode()):
-        response = await client.post("/api/entries", headers=emu.headers, json={
-            "client_entry_id": f"id-{blob[:6]}", "blob": blob, "entry_date": TODAY.isoformat(),
-        })
+        response = await client.post(
+            "/api/entries",
+            headers=emu.headers,
+            json={
+                "client_entry_id": f"id-{blob[:6]}",
+                "blob": blob,
+                "entry_date": TODAY.isoformat(),
+            },
+        )
         assert response.status_code == 422
 
 
 async def test_rejects_future_entry_date(client):
     emu = ClientEmulator("frank", "pass-6")
     await emu.register(client)
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "future-id",
-        "blob": emu.encrypt_entry("from tomorrow", TODAY + timedelta(days=3), "future-id"),
-        "entry_date": (TODAY + timedelta(days=3)).isoformat(),
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "future-id",
+            "blob": emu.encrypt_entry("from tomorrow", TODAY + timedelta(days=3), "future-id"),
+            "entry_date": (TODAY + timedelta(days=3)).isoformat(),
+        },
+    )
     assert response.status_code == 422
 
 
@@ -105,7 +119,8 @@ async def test_since_filter_and_ordering(client):
         await emu.create_entry(client, f"day minus {offset}", day, client_entry_id=f"e{offset}")
 
     since = await client.get(
-        "/api/entries", headers=emu.headers,
+        "/api/entries",
+        headers=emu.headers,
         params={"since": (TODAY - timedelta(days=3)).isoformat()},
     )
     listed = since.json()
@@ -135,11 +150,15 @@ async def test_offset_paginates_beyond_the_first_page(client):
 async def test_rejects_entries_predating_the_account(client):
     emu = ClientEmulator("timecop", "pass-9")
     await emu.register(client)
-    response = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "impossible",
-        "blob": emu.encrypt_entry("five days ago", TODAY - timedelta(days=5), "impossible"),
-        "entry_date": (TODAY - timedelta(days=5)).isoformat(),
-    })
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "impossible",
+            "blob": emu.encrypt_entry("five days ago", TODAY - timedelta(days=5), "impossible"),
+            "entry_date": (TODAY - timedelta(days=5)).isoformat(),
+        },
+    )
     # Backdating 30 distinct days in an afternoon must not fast-forward the
     # 30-day progressive-revelation threshold.
     assert response.status_code == 422

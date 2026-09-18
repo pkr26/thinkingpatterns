@@ -1,0 +1,16 @@
+# Production inputs.  Keep direct dependencies exact and regenerate the
+# hashed closure with:
+#   uv pip compile requirements.in -c requirements.lock.txt \
+#     --generate-hashes --no-annotate --output-file requirements.lock.txt
+#
+# requirements.lock.txt is the installable artifact; this file makes the
+# intent reviewable without making Docker/PyPI resolve a floating range.
+aiosqlite==0.22.1
+alembic==1.19.2
+asyncpg==0.30.0
+cryptography==50.0.1
+fastapi==0.141.1
+greenlet==3.3.2
+httpx==0.28.1
+sqlalchemy==2.0.52
+uvicorn[standard]==0.52.4

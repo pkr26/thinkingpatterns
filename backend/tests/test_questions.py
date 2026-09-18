@@ -72,7 +72,9 @@ class TestDeterminism:
     def test_question_always_comes_from_pool(self):
         pool = questions.build_pool(PATTERNS)
         for i in range(30):
-            assert questions.question_for_today("user-a", PATTERNS, TODAY + timedelta(days=i)) in pool
+            assert (
+                questions.question_for_today("user-a", PATTERNS, TODAY + timedelta(days=i)) in pool
+            )
 
     def test_no_patterns_falls_back_to_generic(self):
         q = questions.question_for_today("user-a", [], TODAY)

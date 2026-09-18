@@ -100,7 +100,9 @@ def do_run_migrations(connection: Connection) -> None:
             try:
                 connection.exec_driver_sql(f"SELECT pg_advisory_unlock({ADVISORY_LOCK_ID})")
             except Exception:  # the disconnect alone releases the lock
-                logger.warning("pg_advisory_unlock failed; disconnect releases the lock", exc_info=True)
+                logger.warning(
+                    "pg_advisory_unlock failed; disconnect releases the lock", exc_info=True
+                )
 
 
 async def run_migrations_online() -> None:
@@ -114,4 +116,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     asyncio.run(run_migrations_online())
-

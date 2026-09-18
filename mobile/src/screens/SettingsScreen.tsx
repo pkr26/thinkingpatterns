@@ -13,14 +13,17 @@
  * match — try again" (the card stays up); a 401 means the session died
  * (the vault is already locked; the only path is re-unlock).
  *
+ * EXPORT SAFETY: full-account export is intentionally unavailable until a
+ * reviewed native streaming-to-file component exists; buffering a capped
+ * account in JS before invoking Share is not safe on a phone.
+ *
  * RECOVERY: entries the server permanently rejected are preserved in the
  * offline queue's rejected store (never destroyed); a "Recovered entries"
  * row appears when any exist and requeues them in one tap.
  */
 import React, { useEffect, useState } from "react";
-import { Alert, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { api, getBaseUrl, getInsecureConsentUrl, parseServerUrl, setBaseUrl } from "../api/client";
-import { buildReadableExport, MAX_READABLE_CHARS } from "../readableExport";
+import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { api, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
 import { reminderCapability, biometricCapability } from "../nativeFeatures";
@@ -32,6 +35,7 @@ import {
   requeueRejected,
   quarantinedQueueExists,
   flushQueue,
+  hasLegacyQueueRecovery,
 } from "../offlineQueue";
 import { clearKeyShipConsent } from "../components/keyConsent";
 import { clearOnboardingSeen } from "../onboarding";
@@ -40,10 +44,6 @@ import { clearFeedback } from "../questionFeedback";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy, calmFallbackCopy } from "../components/errors";
-
-/** The Android share sheet dies around ~10 MB of intent payload; refuse
- *  oversized exports with an honest message instead of a silent no-op. */
-const MAX_EXPORT_CHARS = 4_000_000;
 
 /** Keep in sync with package.json; shown in About (the server reports its
  *  own version via /api/meta). */
@@ -56,31 +56,39 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const { signOut, touchActivity } = useSession();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [consentedUrl, setConsentedUrl] = useState<string | null>(null);
   const [llmAvailable, setLlmAvailable] = useState(false);
+  const [sharingAvailable, setSharingAvailable] = useState(false);
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);
   const [quarantined, setQuarantined] = useState(false);
+  const [legacyQueueRecovery, setLegacyQueueRecovery] = useState(false);
   const [pending, setPending] = useState<PendingAction>(null);
   const [password, setPassword] = useState("");
 
   React.useEffect(() => {
     getBaseUrl().then(setUrl);
-    getInsecureConsentUrl().then(setConsentedUrl);
     api.meta()
       .then((m) => {
         // Stryker disable next-line OptionalChaining: a null/undefined meta makes m.llm_available throw inside this .then, and the chained .catch(() => {}) swallows it — llmAvailable stays false exactly as with the chain
         setLlmAvailable(Boolean(m?.llm_available));
+        // Sharing is fail-closed: only a server that explicitly advertises
+        // verified-clinician sharing may expose a pairing flow.
+        setSharingAvailable(m?.sharing_available === true);
         // Stryker disable next-line OptionalChaining: with m null/undefined, typeof m.version throws into the same .catch(() => {}) — no observable difference (the typeof guard itself stays live)
         if (typeof m?.version === "string") setServerVersion(m.version);
       })
       .catch(() => {});
     // Stryker disable next-line OptionalChaining: an undefined consent payload makes c.enabled throw into the .catch(() => {}) — setLlmEnabled is never reached either way
     api.getLlmConsent().then((c) => setLlmEnabled(Boolean(c?.enabled))).catch(() => {});
-    // Sync-recovery surfaces: rejected (preserved) entries and quarantine.
-    rejectedEntryCount().then(setRejectedCount).catch(() => {});
-    quarantinedQueueExists().then(setQuarantined).catch(() => {});
+    // Sync-recovery surfaces are scoped to the authenticated account and
+    // configured server; no account can learn another's queued metadata.
+    api.getUserId().then((userId) => {
+      if (!userId) return;
+      rejectedEntryCount(userId).then(setRejectedCount).catch(() => {});
+      quarantinedQueueExists(userId).then(setQuarantined).catch(() => {});
+    }).catch(() => {});
+    hasLegacyQueueRecovery().then(setLegacyQueueRecovery).catch(() => {});
   }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
      []);
 
@@ -90,33 +98,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       Alert.alert("Invalid URL", "Enter a full URL like https://your-server:8000");
       return;
     }
-    if (parsed.insecure && consentedUrl !== parsed.url) {
-      Alert.alert(
-        "Insecure server",
-        "This server uses plain HTTP. Everything you send — including your sign-in key — would be readable on the network. Allow insecure HTTP only for testing on a trusted network.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Allow insecure HTTP",
-            style: "destructive",
-            // Consent is per-URL and saves immediately: it can never linger
-            // to bless a different cleartext server later.
-            onPress: () => {
-              setConsentedUrl(parsed.url);
-              void setBaseUrl(parsed.url, { allowInsecure: true }).then((error) => {
-                if (error) Alert.alert("Could not save server", error);
-                else Alert.alert("Saved", `Server URL updated (${parsed.url}).`);
-              });
-            },
-          },
-        ],
-      );
-      return;
-    }
-    // Stryker disable next-line ConditionalExpression: reachable only when !parsed.insecure or consentedUrl === parsed.url, and in both cases parsed.insecure && true ≡ the original condition
-    const error = await setBaseUrl(parsed.url, { allowInsecure: parsed.insecure && consentedUrl === parsed.url });
+    const error = await setBaseUrl(parsed.url);
     if (error) Alert.alert("Could not save server", error);
-    else Alert.alert("Saved", `Server URL updated (${parsed.url}).`);
+    else Alert.alert("Saved", "Server URL updated. Changing server origins signs this device out to protect your session.");
   };
 
   /** One tap: move rejected entries back into the live queue and flush.
@@ -125,10 +109,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     if (busy) return;
     setBusy(true);
     try {
-      const moved = await requeueRejected();
       const userId = await api.getUserId();
+      if (!userId) {
+        Alert.alert("Sign in required", "Sign in again before retrying saved entries.");
+        return;
+      }
+      const moved = await requeueRejected(userId);
       if (userId) await flushQueue(userId).catch(() => {}); // offline: next flush handles it
-      const left = await rejectedEntryCount();
+      const left = await rejectedEntryCount(userId);
       setRejectedCount(left);
       Alert.alert(
         "Recovered entries",
@@ -206,7 +194,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         const { clearMoodLog } = await import("../moodLog");
         const { clearRecomputeStamp } = await import("../brainSync");
         const { clearUnlockProof } = await import("../unlockProof");
-        await clearQueue();
+        if (userId) await clearQueue(userId);
         if (userId) {
           await clearMoodLog(userId);
           await clearRecomputeStamp(userId);
@@ -238,87 +226,16 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }
   };
 
-  const exportData = async () => {
-    setBusy(true);
-    try {
-      const userId = await api.getUserId();
-      if (userId) {
-        await flushQueue(userId).catch(() => {});
-      }
-      const bundle = await api.exportAccount();
-      // Ciphertext bundle: decryptable with your password (tools/decrypt_export.mjs).
-      const json = JSON.stringify(bundle, null, 2);
-      if (json.length > MAX_EXPORT_CHARS) {
-        Alert.alert(
-          "Export too large",
-          `Your export is ${(json.length / 1_000_000).toFixed(1)}M characters — too large for the device share sheet. Contact support for a bulk export.`,
-        );
-        return;
-      }
-      try {
-        const result = (await Share.share({ title: "MindPattern export (encrypted)", message: json })) as
-          | { action?: string }
-          | undefined;
-        if (result?.action === "dismissedAction") return; // user cancelled — quiet
-        Alert.alert(
-          "Exported",
-          `${bundle.entries.length} entries and ${bundle.insights.length} insights (encrypted). ` +
-            "Keep it safe — it is only decryptable with your password (see tools/decrypt_export.mjs).",
-        );
-      } catch {
-        // A share failure must never look like a successful export.
-        Alert.alert(
-          "Export did not complete",
-          "The share sheet failed or closed before anything was shared. Nothing left the device.",
-        );
-      }
-    } catch (err) {
-      Alert.alert("Export failed", calmFallbackCopy(err, "Something went wrong — try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  /** Readable Markdown export (2026-09-17): decrypted ON-DEVICE, shared as
-   *  plain text — the human-readable copy next to the encrypted backup. */
-  const exportReadable = async () => {
-    setBusy(true);
-    try {
-      const userId = await api.getUserId();
-      if (userId) {
-        await flushQueue(userId).catch(() => {});
-      }
-      const { markdown, entryCount, skippedCount } = await buildReadableExport();
-      if (markdown.length > MAX_READABLE_CHARS) {
-        Alert.alert(
-          "Export too large",
-          `Your journal is ${(markdown.length / 1_000_000).toFixed(1)}M characters — too large for the device share sheet. Use the encrypted export for a full backup.`,
-        );
-        return;
-      }
-      try {
-        const result = (await Share.share({
-          title: "MindPattern journal (readable)",
-          message: markdown,
-        })) as { action?: string } | undefined;
-        if (result?.action === "dismissedAction") return; // user cancelled — quiet
-        Alert.alert(
-          "Exported",
-          `${entryCount} entries as readable text` +
-            (skippedCount > 0 ? ` (${skippedCount} could not be decrypted and were skipped)` : "") +
-            ". Keep it safe — this copy is NOT encrypted.",
-        );
-      } catch {
-        Alert.alert(
-          "Export did not complete",
-          "The share sheet failed or closed before anything was shared. Nothing left the device.",
-        );
-      }
-    } catch (err) {
-      Alert.alert("Export failed", calmFallbackCopy(err, "Something went wrong — try again."));
-    } finally {
-      setBusy(false);
-    }
+  /** Full exports deliberately fail closed in this build. The API streams
+   * ciphertext, but React Native's stock fetch/Share path buffers it into a
+   * JS string first; an account near the server cap could exhaust memory and
+   * expose plaintext in a share intent. Re-enable only with a reviewed
+   * native streaming-to-file implementation. */
+  const explainExportUnavailable = () => {
+    Alert.alert(
+      "Export unavailable in this build",
+      "To protect large journals, this app needs its verified secure file-export component before it can create an export. Your entries remain safely on the server and this device.",
+    );
   };
 
   const deleteEverything = () => {
@@ -386,9 +303,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   };
 
   return (
-    <View
+    <ScrollView
       style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxl, gap: 14 }]}
       onTouchStart={touchActivity}
+      contentContainerStyle={{ paddingBottom: t.spacing.xxxl }}
     >
       {/* Crisis help: one tap from here, works offline (see CrisisScreen). */}
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
@@ -413,6 +331,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           A damaged piece of the offline queue was set aside instead of deleted. New entries sync
           normally.
         </Text>
+      )}
+      {legacyQueueRecovery && (
+        <View style={[styles.card, { backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: t.radius.lg }]} accessibilityRole="alert">
+          <Text style={{ color: t.colors.text, fontSize: t.type.title.fontSize, fontWeight: "700" }}>Older offline entries need recovery</Text>
+          <Text style={themed.footnote}>
+            This update protected unsent encrypted entries from being sent to the wrong server. They remain on this device but cannot be safely assigned automatically; contact support before clearing app data.
+          </Text>
+        </View>
       )}
 
       {llmAvailable && (
@@ -485,6 +411,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
               ]}
               onPress={() => {
                 touchActivity();
+                setThemeModeState(mode);
                 setThemeMode(mode);
               }}
               accessibilityRole="radio"
@@ -521,18 +448,23 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         )}
       </View>
 
+      {sharingAvailable ? (
+        <GhostButton
+          label="Share with my therapist"
+          center={false}
+          onPress={() => navigation.navigate("TherapistShare")}
+          accessibilityLabel="Share your entries and patterns with a therapist"
+        />
+      ) : (
+        <Text style={themed.footnote}>
+          Therapist sharing is not available on this server. It stays disabled until verified clinician enrollment is configured.
+        </Text>
+      )}
       <GhostButton
-        label="Share with my therapist"
+        label="Why export is unavailable"
         center={false}
-        onPress={() => navigation.navigate("TherapistShare")}
-        accessibilityLabel="Share your entries and patterns with a therapist"
-      />
-      <PrimaryButton label="Export my data (encrypted)" onPress={exportData} disabled={busy} />
-      <GhostButton
-        label="Export as readable text"
-        onPress={exportReadable}
-        disabled={busy}
-        accessibilityLabel="Export your journal as readable text, decrypted on this device"
+        onPress={explainExportUnavailable}
+        accessibilityLabel="Why export is unavailable in this build"
       />
       <PrimaryButton label="Delete my account and data" onPress={deleteEverything} disabled={busy} danger />
       <GhostButton
@@ -568,7 +500,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         autoComplete="off"
       />
       <PrimaryButton label="Save server URL" onPress={saveUrl} disabled={busy} />
-    </View>
+    </ScrollView>
   );
 }
 

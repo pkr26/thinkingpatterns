@@ -21,6 +21,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -131,6 +132,10 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxxl, gap: t.spacing.md }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <ScrollView
+        contentContainerStyle={{ flexGrow: 1, justifyContent: "center", gap: t.spacing.md }}
+        keyboardShouldPersistTaps="handled"
+      >
       <Text style={[styles.title, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
         Locked
       </Text>
@@ -162,6 +167,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       {/* Crisis help needs no unlock and no network — the locked state is
           exactly when it must be one tap away. */}
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }

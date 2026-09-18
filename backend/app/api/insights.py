@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
 from ..deps import ApiError, get_session, require_regular_user
-from ..locks import UserLocks
+from ..locks import UserLocks, lifecycle_locks
 from ..models import Entry, Insight, User, new_id, utcnow
 from ..schemas import (
     InsightsResponse,
@@ -61,7 +61,7 @@ from ..schemas import (
 )
 from ..security import crypto
 from ..security.crypto import TamperError
-from ..security.enclave import KeyNotFound, SecureProcessingContext, zeroize
+from ..security.enclave import KeyNotFound, KeyStoreFull, SecureProcessingContext, zeroize
 from ..services import brain, llm, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
@@ -97,8 +97,10 @@ def _dialect_insert(session: AsyncSession):
     same-name re-import as an incompatible assignment."""
     if session.bind.dialect.name == "postgresql":
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         return pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
     return sqlite_insert
 
 
@@ -149,16 +151,38 @@ def _is_fk_violation(exc: IntegrityError) -> bool:
     return "foreign key" in str(orig).lower()
 
 
+async def _fresh_processing_session_user(
+    session: AsyncSession, user_id: str, expected_epoch: int
+) -> User:
+    """Re-authorize a processing-session mint under the lifecycle fence.
+
+    ``require_user`` necessarily ran before the caller acquired that lock.
+    A logout can therefore invalidate its otherwise-authenticated token while
+    it waits; the epoch equality makes that stale handoff fail closed.
+    """
+    fresh = await session.get(User, user_id, populate_existing=True)
+    if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+        raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    return fresh
+
+
 @router.post(
     "/processing/sessions",
     response_model=ProcessingSessionResponse,
     status_code=201,
-    dependencies=[Depends(make_rate_limiter("processing-sessions", "processing_rate_limit", "processing_rate_window"))],
+    dependencies=[
+        Depends(
+            make_rate_limiter(
+                "processing-sessions", "processing_rate_limit", "processing_rate_window"
+            )
+        )
+    ],
 )
 async def create_processing_session(
     body: ProcessingSessionRequest,
     request: Request,
     user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
 ):
     data_key = _decode_b64(body.data_key, "data_key")
     if len(data_key) != crypto.KEY_SIZE:
@@ -168,10 +192,37 @@ async def create_processing_session(
             code="validation_error",
         )
     settings = request.app.state.settings
-    token = request.app.state.key_store.create(
-        data_key, settings.processing_session_ttl, owner=user.id
+    # Authentication ran before this endpoint body. A logout/delete may win
+    # while this request is queued, so preserve the epoch it authenticated
+    # under and re-check it inside the same lifecycle fence that performs the
+    # logout/delete key purge. Merely checking ``is_active`` would still let a
+    # pre-logout bearer mint a fresh in-memory data-key token after the purge.
+    expected_epoch = user.token_epoch
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = await _fresh_processing_session_user(session, user.id, expected_epoch)
+        # Return the pooled connection before touching the in-memory keystore;
+        # this is only a short authorization re-check, not a transaction that
+        # must remain open for the token's TTL.
+        await session.commit()
+        try:
+            token = request.app.state.key_store.create(
+                data_key, settings.processing_session_ttl, owner=fresh.id
+            )
+        except KeyStoreFull:
+            # Do not let one account or a fleet of abandoned uploads turn this
+            # memory-only key store into an unbounded secret cache. Clients
+            # can consume an existing token or wait for its short TTL.
+            raise ApiError(
+                status_code=503,
+                detail=(
+                    "processing session capacity reached; consume an existing session or retry shortly"
+                ),
+                code="service_unavailable",
+                headers={"Retry-After": "1"},
+            ) from None
+    return ProcessingSessionResponse(
+        session_token=token, expires_in=settings.processing_session_ttl
     )
-    return ProcessingSessionResponse(session_token=token, expires_in=settings.processing_session_ttl)
 
 
 # The analysis cost of an entry scales with its *text bytes* (MinHash signs
@@ -193,15 +244,20 @@ INNER_DATE_TOLERANCE_DAYS = 1
 # retry used to catch only TamperError, so a malformed entry surfaced as a
 # 500 exactly when the state blob was ALSO tampered. OverflowError is a
 # backstop behind the date validation above.
-_ENTRY_MALFORMED = (json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError, TypeError, OverflowError)
+_ENTRY_MALFORMED = (
+    json.JSONDecodeError,
+    KeyError,
+    UnicodeDecodeError,
+    ValueError,
+    TypeError,
+    OverflowError,
+)
 # Flattened once: Python 3.14 rejects the nested except (TamperError,
 # _ENTRY_MALFORMED) form.
 _TAMPER_OR_MALFORMED = (TamperError, *_ENTRY_MALFORMED)
 
 
-def _parse_entries(
-    plains: list[bytearray], outer_dates: list[date_type]
-) -> list[JournalEntry]:
+def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> list[JournalEntry]:
     entries: list[JournalEntry] = []
     for raw, outer in zip(plains, outer_dates):
         payload = json.loads(raw.decode("utf-8"))
@@ -216,7 +272,11 @@ def _parse_entries(
             # every average downstream — reject them here, clamp the rest
             # to the engine's [-1, 1] scale. bool is an int subclass in
             # Python but `true` is not a mood tag.
-            if isinstance(sentiment, bool) or not isinstance(sentiment, (int, float)) or not math.isfinite(sentiment):
+            if (
+                isinstance(sentiment, bool)
+                or not isinstance(sentiment, (int, float))
+                or not math.isfinite(sentiment)
+            ):
                 raise ValueError("sentiment must be a finite number")
             sentiment = max(-1.0, min(1.0, float(sentiment)))
         inner = date_type.fromisoformat(payload["created_at"])
@@ -228,12 +288,20 @@ def _parse_entries(
         # silent default that would quietly mislabel the analysis.
         energy = payload.get("energy")
         if energy is not None:
-            if isinstance(energy, bool) or not isinstance(energy, (int, float)) or not math.isfinite(energy):
+            if (
+                isinstance(energy, bool)
+                or not isinstance(energy, (int, float))
+                or not math.isfinite(energy)
+            ):
                 raise ValueError("energy must be a finite number")
             energy = max(-1.0, min(1.0, float(energy)))
         sleep_raw = payload.get("sleep")
         if sleep_raw is not None:
-            if isinstance(sleep_raw, bool) or not isinstance(sleep_raw, int) or not 1 <= sleep_raw <= 5:
+            if (
+                isinstance(sleep_raw, bool)
+                or not isinstance(sleep_raw, int)
+                or not 1 <= sleep_raw <= 5
+            ):
                 raise ValueError("sleep must be an integer 1..5")
         tags_raw = payload.get("tags")
         tags: tuple[str, ...] = ()
@@ -285,7 +353,10 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
     # different patterns into the pool and misattributes taps to the wrong
     # pattern whenever a sensitive pattern ranks in the top 5.
     pool_patterns = [
-        p for p in sorted(patterns, key=question_engine.feedback_rank)[:question_engine.MAX_PATTERN_QUESTIONS]
+        p
+        for p in sorted(patterns, key=question_engine.feedback_rank)[
+            : question_engine.MAX_PATTERN_QUESTIONS
+        ]
         if not question_engine.pattern_is_sensitive(p)
     ]
     rendered: list[str] = []
@@ -362,9 +433,7 @@ async def _load_rows(
     analysis. Rows beyond the budget are dropped oldest-first, exactly
     like the per-recompute text truncation they sit beneath.
     """
-    recency = (
-        Entry.entry_date.desc(), Entry.received_at.desc(), Entry.id.desc()
-    )
+    recency = (Entry.entry_date.desc(), Entry.received_at.desc(), Entry.id.desc())
     id_rows = (
         await session.execute(
             # The same dialect-aware byte-length expression the entries
@@ -433,7 +502,13 @@ async def _latest_insight(session: AsyncSession, user_id: str, kind: str) -> Ins
 @router.post(
     "/insights/recompute",
     response_model=RecomputeResponse,
-    dependencies=[Depends(make_rate_limiter("insights-recompute", "processing_rate_limit", "processing_rate_window"))],
+    dependencies=[
+        Depends(
+            make_rate_limiter(
+                "insights-recompute", "processing_rate_limit", "processing_rate_window"
+            )
+        )
+    ],
 )
 async def recompute(
     request: Request,
@@ -467,7 +542,9 @@ async def recompute(
         # session token the client opened is consumed (destroyed) so the
         # keystore does not hold an unused key for the rest of the TTL.
         if x_processing_token:
-            key_store.destroy(x_processing_token)
+            # The token is account-bound just like the insight-phase pop.
+            # A baseline caller may clean up only its own pending session.
+            key_store.destroy(x_processing_token, owner=user.id)
         return RecomputeResponse(
             phase=state.phase.value,
             active_days=state.active_days,
@@ -515,14 +592,38 @@ async def recompute(
     # dies before enrichment must not count an LLM outcome it never ran.
     enricher_invoked = False
     started = time.monotonic()
+    # Fence external-processing lifecycle changes. The account consent/delete
+    # paths take this same lock, so a stale authenticated User object cannot
+    # authorize plaintext dispatch after withdrawal has returned.
+    lifecycle_guard = lifecycle_locks.hold(f"llm-lifecycle:{user.id}")
+    lifecycle_entered = False
     try:
+        # The zeroizing finally MUST cover lock acquisition too: cancellation
+        # while this request waits behind consent withdrawal/account deletion
+        # must not strand the popped bytearray until garbage collection.
+        await lifecycle_guard.__aenter__()
+        lifecycle_entered = True
         async with _recompute_locks.hold(f"insights:{user.id}"):
             # READ phase: one short transaction, closed by the context
             # manager BEFORE any analysis runs. Only plain values (blobs as
             # immutable bytes, dates, ids) leave the session.
             async with sessionmaker() as session:
+                fresh_user = await session.get(User, user.id)
+                if fresh_user is None or not fresh_user.is_active:
+                    raise ApiError(
+                        status_code=410,
+                        detail="account no longer exists",
+                        code="account_deleted",
+                    )
+                # This is deliberately re-read under the lifecycle fence,
+                # immediately before the analysis path is constructed. A
+                # previously accepted policy becomes inert if the operator
+                # changes provider/endpoint/model/retention terms.
+                llm_consent_current = llm.consent_is_current(fresh_user, settings)
                 rows = await _load_rows(
-                    session, user.id, settings.recompute_entry_limit,
+                    session,
+                    user.id,
+                    settings.recompute_entry_limit,
                     settings.analysis_blob_budget,
                 )
                 # The SERVER-validated outer dates drive the brain's calendar;
@@ -542,7 +643,7 @@ async def recompute(
                     if prior
                     else None
                 )
-            enricher = llm.get_enricher(settings, llm_consent=user.llm_consent)
+            enricher = llm.get_enricher(settings, llm_consent=llm_consent_current)
 
             def make_analyze_fn(with_state: bool, with_feedback: bool):
                 # A factory, not a plain closure: the tamper-retry below passes
@@ -558,8 +659,12 @@ async def recompute(
                     fb_plain = bytes(plains[-1]) if with_feedback else None
                     entries = _parse_entries(entry_plains, analysis_dates)
                     feedback_events = _parse_feedback(fb_plain) if fb_plain is not None else []
-                    result = brain.update(brain.load_state(state_plain), entries, today,
-                                          feedback=feedback_events or None)
+                    result = brain.update(
+                        brain.load_state(state_plain),
+                        entries,
+                        today,
+                        feedback=feedback_events or None,
+                    )
                     merged = list(result.surfaced)
                     if enricher is not None:
                         enricher_invoked = True
@@ -568,7 +673,10 @@ async def recompute(
                         # attach a sanitized narrative to them — its output
                         # replaces a finding's detail (narrative added),
                         # never mints a new claim.
-                        narrated = {(p.kind, p.label): p for p in enricher.extract_patterns(entries, findings=merged)}
+                        narrated = {
+                            (p.kind, p.label): p
+                            for p in enricher.extract_patterns(entries, findings=merged)
+                        }
                         merged = [narrated.get((p.kind, p.label), p) for p in merged]
                         merged = merged[: brain.MAX_SURFACED]
                     return result, merged
@@ -578,12 +686,15 @@ async def recompute(
             feedback_item = (
                 # Same 4xx discipline as every other payload: bad base64 is
                 # a client bug, not a 500, and must not echo payload bytes.
-                (crypto.build_aad("feedback", user.id),
-                 _decode_b64(feedback_blob, "feedback_blob"))
+                (crypto.build_aad("feedback", user.id), _decode_b64(feedback_blob, "feedback_blob"))
                 if feedback_blob
                 else None
             )
-            encrypted = entry_items + ([state_item] if state_item else []) + ([feedback_item] if feedback_item else [])
+            encrypted = (
+                entry_items
+                + ([state_item] if state_item else [])
+                + ([feedback_item] if feedback_item else [])
+            )
             # Analysis runs on a DEDICATED capacity limiter, not the shared anyio
             # thread pool: recomputes are attacker-sized multi-second CPU work and
             # must never queue in front of login scrypt (or any other request's
@@ -594,7 +705,8 @@ async def recompute(
                 # LLM round-trip); run it in a worker thread so the event loop that
                 # serves every other request never stalls behind a recompute.
                 result, merged = await anyio.to_thread.run_sync(
-                    SecureProcessingContext(data_key).run, encrypted,
+                    SecureProcessingContext(data_key).run,
+                    encrypted,
                     make_analyze_fn(state_item is not None, feedback_item is not None),
                     limiter=analyze_limiter,
                 )
@@ -626,7 +738,9 @@ async def recompute(
                     # only) distinguishes them exactly as before.
                     try:
                         result, merged = await anyio.to_thread.run_sync(
-                            SecureProcessingContext(data_key).run, entry_items, make_analyze_fn(False, False),
+                            SecureProcessingContext(data_key).run,
+                            entry_items,
+                            make_analyze_fn(False, False),
                             limiter=analyze_limiter,
                         )
                     except TamperError:
@@ -736,14 +850,15 @@ async def recompute(
                 # endpoint contributed nothing — the response must not
                 # claim it ran).
                 analyzer=(
-                    "llm"
-                    if enricher is not None and enricher.last_error is None
-                    else "brain"
+                    "llm" if enricher is not None and enricher.last_error is None else "brain"
                 ),
                 patterns_new=result.patterns_new,
                 patterns_fading=result.patterns_fading,
             )
     finally:
+        # Scrub before any awaited cleanup. A cancellation during context
+        # manager exit must never skip the only deterministic data-key wipe.
+        zeroize(data_key)
         # Observability on EVERY exit (2026-09-17 audit): failed recomputes
         # used to be invisible in the histogram — a corpus that 400s after
         # seconds of real analysis work is exactly the spike an operator
@@ -752,13 +867,16 @@ async def recompute(
             metrics.observe_recompute(time.monotonic() - started)
             if enricher is not None and enricher_invoked:
                 metrics.observe_llm(failed=enricher.last_error is not None)
-        zeroize(data_key)
+        if lifecycle_entered:
+            await lifecycle_guard.__aexit__(None, None, None)
 
 
 @router.get(
     "/insights",
     response_model=InsightsResponse,
-    dependencies=[Depends(make_rate_limiter("insights-read", "read_rate_limit", "read_rate_window"))],
+    dependencies=[
+        Depends(make_rate_limiter("insights-read", "read_rate_limit", "read_rate_window"))
+    ],
 )
 async def get_insights(
     request: Request,
@@ -792,7 +910,9 @@ async def get_insights(
 @router.get(
     "/questions/today",
     response_model=QuestionResponse,
-    dependencies=[Depends(make_rate_limiter("questions-read", "read_rate_limit", "read_rate_window"))],
+    dependencies=[
+        Depends(make_rate_limiter("questions-read", "read_rate_limit", "read_rate_window"))
+    ],
 )
 async def get_question_today(
     user: User = Depends(require_regular_user),
@@ -800,13 +920,21 @@ async def get_question_today(
 ):
     today = date_type.today()
     row = (
-        await session.execute(
-            select(Insight)
-            .where(Insight.user_id == user.id, Insight.kind == "question", Insight.for_date == today)
-            .order_by(Insight.created_at.desc(), Insight.id.desc())
-            .limit(1)
+        (
+            await session.execute(
+                select(Insight)
+                .where(
+                    Insight.user_id == user.id,
+                    Insight.kind == "question",
+                    Insight.for_date == today,
+                )
+                .order_by(Insight.created_at.desc(), Insight.id.desc())
+                .limit(1)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if row is None:
         raise ApiError(
             status_code=404,

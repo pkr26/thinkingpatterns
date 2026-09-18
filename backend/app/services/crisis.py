@@ -200,11 +200,16 @@ SUPPRESS_RE = _compile_tier(SUPPRESS_PATTERNS)
 # Arabic Letter Mark, and the variation selectors (FE0F rides along with
 # emoji, so it lands inside typed words).
 _INVISIBLE = dict.fromkeys(
-    [ord(c) for c in (
-        "\u00ad\u034f\u061c\u180e\u200b\u200c\u200d\u200e\u200f\u202a\u202b"
-        "\u202c\u202d\u202e\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068"
-        "\u2069\ufeff"
-    )] + list(range(0xfe00, 0xfe10)))
+    [
+        ord(c)
+        for c in (
+            "\u00ad\u034f\u061c\u180e\u200b\u200c\u200d\u200e\u200f\u202a\u202b"
+            "\u202c\u202d\u202e\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068"
+            "\u2069\ufeff"
+        )
+    ]
+    + list(range(0xFE00, 0xFE10))
+)
 
 # Latin lookalikes from Cyrillic/Greek (the confusables an attacker can
 # actually type on any keyboard), plus (2026-09-17 audit) Cyrillic к/м and
@@ -212,16 +217,45 @@ _INVISIBLE = dict.fromkeys(
 # fires on "kıll myself" while ECMAScript does not, splitting the engines.
 # Keys are the post-NFKC lowercase forms; the sigma family (final/lunate)
 # is spelled by codepoint — ς, σ and ϲ all look like "s".
-_HOMOGLYPHS = str.maketrans({
-    "а": "a", "с": "c", "е": "e", "о": "o", "р": "p", "х": "x", "у": "y",
-    "і": "i", "ѕ": "s", "ј": "j", "һ": "h", "ԁ": "d", "ɡ": "g", "ԛ": "q",
-    "ԝ": "w", "ѵ": "v", "з": "3",  # з folds to 3, then leet-folds to e
-    "к": "k", "м": "m", "ı": "i",
-    "ο": "o", "α": "a", "ε": "e", "ι": "i", "κ": "k", "ρ": "p", "τ": "t",
-    "υ": "u", "ν": "v", "μ": "m", "η": "n", "ω": "w",
-    "\u03c2": "s", "\u03c3": "s",  # final/regular sigma: "s"-shaped
-    "\u03f2": "c",  # lunate sigma: crescent, impersonates "c"
-})
+_HOMOGLYPHS = str.maketrans(
+    {
+        "а": "a",
+        "с": "c",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "х": "x",
+        "у": "y",
+        "і": "i",
+        "ѕ": "s",
+        "ј": "j",
+        "һ": "h",
+        "ԁ": "d",
+        "ɡ": "g",
+        "ԛ": "q",
+        "ԝ": "w",
+        "ѵ": "v",
+        "з": "3",  # з folds to 3, then leet-folds to e
+        "к": "k",
+        "м": "m",
+        "ı": "i",
+        "ο": "o",
+        "α": "a",
+        "ε": "e",
+        "ι": "i",
+        "κ": "k",
+        "ρ": "p",
+        "τ": "t",
+        "υ": "u",
+        "ν": "v",
+        "μ": "m",
+        "η": "n",
+        "ω": "w",
+        "\u03c2": "s",
+        "\u03c3": "s",  # final/regular sigma: "s"-shaped
+        "\u03f2": "c",  # lunate sigma: crescent, impersonates "c"
+    }
+)
 
 # Leet substitutions applied ONLY between two letters ("k1ll"->"kill" but
 # "1 want" keeps its digit, and no date or phone number is rewritten), or
@@ -232,8 +266,18 @@ _HOMOGLYPHS = str.maketrans({
 # map would look the unmapped digit up and crash (2026-09-17 audit: the
 # old [0-9@!$34578] class matched them — "grade6test" raised KeyError and
 # bricked every recompute for the account).
-_LEET = {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
-         "8": "b", "@": "a", "!": "i", "$": "s"}
+_LEET = {
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "8": "b",
+    "@": "a",
+    "!": "i",
+    "$": "s",
+}
 _LEET_RE = re.compile(r"([a-z])([0134578@!$])([a-z])")
 _LEET_EDGE_RE = re.compile(r"(^|\s)([0134578@!$])([a-z])")
 
@@ -242,20 +286,20 @@ _LEET_EDGE_RE = re.compile(r"(^|\s)([0134578@!$])([a-z])")
 # ("i am so sad" keeps its shape; "u s a won gold" is only 3).
 _SINGLE_LETTER_JOIN = 4
 
-_PUNCT_TO_SPACE_RE = re.compile(r"[^0-9a-z'\-\s\u00c0-\u02af\u0370-\u03ff"
-                                r"\u0400-\u04ff\u0600-\u06ff\u0900-\u097f"
-                                r"\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff"
-                                r"\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]")
+_PUNCT_TO_SPACE_RE = re.compile(
+    r"[^0-9a-z'\-\s\u00c0-\u02af\u0370-\u03ff"
+    r"\u0400-\u04ff\u0600-\u06ff\u0900-\u097f"
+    r"\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff"
+    r"\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]"
+)
 
 
 def _leet_fold(text: str) -> str:
     # Loop until stable: "su1c1de" needs two passes (each replacement makes
     # the next digit newly adjacent to letters).
     while True:
-        folded = _LEET_RE.sub(
-            lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), text)
-        folded = _LEET_EDGE_RE.sub(
-            lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), folded)
+        folded = _LEET_RE.sub(lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), text)
+        folded = _LEET_EDGE_RE.sub(lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), folded)
         if folded == text:
             return text
         text = folded
@@ -272,8 +316,11 @@ def _fold_latin_marks(text: str) -> str:
     for ch in text:
         decomposed = unicodedata.normalize("NFKD", ch)
         base = decomposed[0]
-        if (len(decomposed) > 1 and ord(base) < 0x0250
-                and all("\u0300" <= c <= "\u036f" for c in decomposed[1:])):
+        if (
+            len(decomposed) > 1
+            and ord(base) < 0x0250
+            and all("\u0300" <= c <= "\u036f" for c in decomposed[1:])
+        ):
             out.append(base)
         else:
             out.append(ch)
@@ -397,7 +444,13 @@ def _concat_join(tokens: list[str]) -> str:
 # Every other ending ("myself", "suicide", "everything", ...) has no
 # benign extension worth fearing, and the anchor would only create misses.
 _CONCAT_ANCHORED_ENDINGS: tuple[str, ...] = (
-    "die", "dead", "cutting", "gone", "on", "up", "out",
+    "die",
+    "dead",
+    "cutting",
+    "gone",
+    "on",
+    "up",
+    "out",
 )
 
 
@@ -412,10 +465,8 @@ def _concat_pattern(pattern: str) -> str:
     return src
 
 
-DIALOG_CONCAT_RE = _compile_tier(
-    tuple(_concat_pattern(p) for p in DIALOG_PATTERNS))
-SUPPRESS_CONCAT_RE = _compile_tier(
-    tuple(_concat_pattern(p) for p in SUPPRESS_PATTERNS))
+DIALOG_CONCAT_RE = _compile_tier(tuple(_concat_pattern(p) for p in DIALOG_PATTERNS))
+SUPPRESS_CONCAT_RE = _compile_tier(tuple(_concat_pattern(p) for p in SUPPRESS_PATTERNS))
 
 
 # Benign compounds are masked on the PRE-punctuation-fold text, matched as
@@ -425,8 +476,8 @@ SUPPRESS_CONCAT_RE = _compile_tier(
 # never eat only half of a longer entry.
 _BENIGN_MASK_RES: tuple[re.Pattern[str], ...] = tuple(
     re.compile(
-        r"\b" + r"[\s\-]+".join(re.escape(w) for w in compound.split()) + r"\b",
-        re.IGNORECASE)
+        r"\b" + r"[\s\-]+".join(re.escape(w) for w in compound.split()) + r"\b", re.IGNORECASE
+    )
     for compound in sorted(BENIGN_COMPOUNDS, key=len, reverse=True)
 )
 
@@ -452,13 +503,15 @@ def _match_variants(text: str) -> tuple[str, ...]:
 def matches_dialog(text: str) -> bool:
     """True when the (conservative) client dialog tier fires."""
     variants = _match_variants(text)
-    return (any(DIALOG_RE.search(v) for v in variants[:2])
-            or any(DIALOG_CONCAT_RE.search(v) for v in (variants[2],)))
+    return any(DIALOG_RE.search(v) for v in variants[:2]) or any(
+        DIALOG_CONCAT_RE.search(v) for v in (variants[2],)
+    )
 
 
 def matches_suppress(text: str) -> bool:
     """True when the (broader) suppression tier fires: never quote this
     back as a pattern card or reflective question."""
     variants = _match_variants(text)
-    return (any(SUPPRESS_RE.search(v) for v in variants[:2])
-            or any(SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)))
+    return any(SUPPRESS_RE.search(v) for v in variants[:2]) or any(
+        SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)
+    )

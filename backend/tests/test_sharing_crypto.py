@@ -194,3 +194,13 @@ class TestPairingCodes:
 
     def test_normalize(self):
         assert sharing.normalize_pairing_code(" ab2c ") == "AB2C"
+
+    def test_non_ascii_or_invalid_code_is_a_safe_non_match(self):
+        # The public endpoints deliberately flatten malformed pairing codes
+        # to 404. Digest derivation must therefore never throw UnicodeEncodeError
+        # for a direct caller either.
+        assert sharing.normalize_pairing_code("\u00e9") == ""
+        assert sharing.normalize_pairing_code("\u00df" * 4) == ""
+        assert sharing.normalize_pairing_code("\u00a0AB2C4D6F") == ""
+        assert sharing.normalize_pairing_code("AB2C-4D6") == ""
+        assert sharing.pairing_code_digest("\u00e9", "s1") == sharing.pairing_code_digest("", "s1")

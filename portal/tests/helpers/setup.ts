@@ -12,6 +12,8 @@ Object.defineProperty(globalThis, "window", {
     removeEventListener: (_type: string, _listener: () => void) => undefined,
     print: () => undefined,
     localStorage: {
+      get length() { return mem.size; },
+      key: (index: number) => [...mem.keys()][index] ?? null,
       getItem: (k: string) => mem.get(k) ?? null,
       setItem: (k: string, v: string) => void mem.set(k, v),
       removeItem: (k: string) => void mem.delete(k),

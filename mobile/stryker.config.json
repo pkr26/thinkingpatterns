@@ -1,6 +1,5 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "//": "thresholds.break is the regression floor from the 2026-09-15 full campaign (4,356 mutants, 99.64% measured; 15 documented survivors \u2014 see ../../reports/mutation_report_mobile_2026-09-15.md).",
   "testRunner": "vitest",
   "inPlace": true,
   "vitest": {
@@ -21,6 +20,7 @@
     "break": 99
   },
   "timeoutMS": 60000,
+  "concurrency": 2,
   "tempDirName": "stryker-tmp",
   "allowConsoleColors": true
 }

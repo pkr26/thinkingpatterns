@@ -22,41 +22,142 @@ SENTENCE_RE = re.compile(r"[^.!?]+")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 THEME_LEXICON: dict[str, tuple[str, ...]] = {
-    "work": ("work", "job", "boss", "deadline", "meeting", "office", "project",
-             "client", "interview", "presentation", "colleague", "shift",
-             "overtime", "career", "manager"),
-    "sleep": ("sleep", "insomnia", "tired", "exhausted", "nightmare", "restless",
-              "fatigue", "nap", "awake", "bed"),
-    "social": ("friend", "friends", "party", "social", "lonely", "alone",
-               "gathered", "hangout"),
-    "family": ("family", "mom", "dad", "mother", "father", "sister", "brother",
-               "parents", "partner", "wife", "husband", "kids", "home"),
-    "health": ("health", "gym", "exercise", "workout", "run", "running", "sick",
-               "ill", "doctor", "headache", "pain"),
-    "money": ("money", "bills", "rent", "debt", "salary", "budget", "expensive",
-              "broke", "afford"),
-    "study": ("school", "exam", "exams", "study", "studying", "class", "college",
-              "university", "homework", "assignment"),
+    "work": (
+        "work",
+        "job",
+        "boss",
+        "deadline",
+        "meeting",
+        "office",
+        "project",
+        "client",
+        "interview",
+        "presentation",
+        "colleague",
+        "shift",
+        "overtime",
+        "career",
+        "manager",
+    ),
+    "sleep": (
+        "sleep",
+        "insomnia",
+        "tired",
+        "exhausted",
+        "nightmare",
+        "restless",
+        "fatigue",
+        "nap",
+        "awake",
+        "bed",
+    ),
+    "social": ("friend", "friends", "party", "social", "lonely", "alone", "gathered", "hangout"),
+    "family": (
+        "family",
+        "mom",
+        "dad",
+        "mother",
+        "father",
+        "sister",
+        "brother",
+        "parents",
+        "partner",
+        "wife",
+        "husband",
+        "kids",
+        "home",
+    ),
+    "health": (
+        "health",
+        "gym",
+        "exercise",
+        "workout",
+        "run",
+        "running",
+        "sick",
+        "ill",
+        "doctor",
+        "headache",
+        "pain",
+    ),
+    "money": ("money", "bills", "rent", "debt", "salary", "budget", "expensive", "broke", "afford"),
+    "study": (
+        "school",
+        "exam",
+        "exams",
+        "study",
+        "studying",
+        "class",
+        "college",
+        "university",
+        "homework",
+        "assignment",
+    ),
     "food": ("eat", "eating", "food", "meal", "cook", "appetite", "hungry"),
-    "weather": ("rain", "rainy", "cold", "grey", "gray", "sunny", "storm",
-                "winter", "summer"),
+    "weather": ("rain", "rainy", "cold", "grey", "gray", "sunny", "storm", "winter", "summer"),
 }
 THEME_WORDS: dict[str, str] = {
     word: theme for theme, words in THEME_LEXICON.items() for word in words
 }
 
-POSITIVE_WORDS = frozenset({
-    "good", "great", "happy", "calm", "relaxed", "joy", "excited", "grateful",
-    "proud", "hopeful", "content", "peaceful", "energetic", "loved",
-    "confident", "better", "relieved", "pleasant", "smiled", "laughed",
-})
-NEGATIVE_WORDS = frozenset({
-    "bad", "sad", "anxious", "anxiety", "stressed", "stress", "angry",
-    "depressed", "worried", "nervous", "exhausted", "tired", "lonely",
-    "afraid", "scared", "hopeless", "guilty", "ashamed", "irritated",
-    "overwhelmed", "numb", "empty", "cry", "crying", "panic", "hate",
-    "awful", "terrible", "worse", "dread",
-})
+POSITIVE_WORDS = frozenset(
+    {
+        "good",
+        "great",
+        "happy",
+        "calm",
+        "relaxed",
+        "joy",
+        "excited",
+        "grateful",
+        "proud",
+        "hopeful",
+        "content",
+        "peaceful",
+        "energetic",
+        "loved",
+        "confident",
+        "better",
+        "relieved",
+        "pleasant",
+        "smiled",
+        "laughed",
+    }
+)
+NEGATIVE_WORDS = frozenset(
+    {
+        "bad",
+        "sad",
+        "anxious",
+        "anxiety",
+        "stressed",
+        "stress",
+        "angry",
+        "depressed",
+        "worried",
+        "nervous",
+        "exhausted",
+        "tired",
+        "lonely",
+        "afraid",
+        "scared",
+        "hopeless",
+        "guilty",
+        "ashamed",
+        "irritated",
+        "overwhelmed",
+        "numb",
+        "empty",
+        "cry",
+        "crying",
+        "panic",
+        "hate",
+        "awful",
+        "terrible",
+        "worse",
+        "dread",
+    }
+)
 
 MIN_THEME_OCCURRENCES = 4
 TEMPORAL_DAY_FRACTION = 0.5
@@ -77,9 +178,9 @@ class JournalEntry:
     # own ratings/tags for the day, never a model inference. All optional —
     # a v1 payload simply leaves them None/empty and the engine behaves
     # exactly as before.
-    energy: float | None = None        # [-1, 1]: drained → energized
-    sleep_quality: int | None = None   # 1..5: rough → rested
-    tags: tuple[str, ...] = ()         # short activity tags ("family", "run")
+    energy: float | None = None  # [-1, 1]: drained → energized
+    sleep_quality: int | None = None  # 1..5: rough → rested
+    tags: tuple[str, ...] = ()  # short activity tags ("family", "run")
 
 
 @dataclass(frozen=True)
@@ -106,22 +207,26 @@ class Pattern:
         if self.detail.get("channel") == "sleep_quality":
             if self.kind == "link":
                 direction = self.detail.get("direction", "lower")
-                return ("The day after a night you rated as rougher than your own "
-                        f"usual, your entries read {direction} than usual for you.")
+                return (
+                    "The day after a night you rated as rougher than your own "
+                    f"usual, your entries read {direction} than usual for you."
+                )
             if self.kind == "mood_correlation":
                 direction = self.detail.get("direction", "lower")
-                return ("On nights you rated as rougher than your own usual, "
-                        f"your entries read {direction} the same day.")
+                return (
+                    "On nights you rated as rougher than your own usual, "
+                    f"your entries read {direction} the same day."
+                )
             if self.kind == "temporal":
                 day = self.detail.get("day", "the same day")
-                return (f"Your rougher nights (by your own ratings) fall most often on {day}s.")
+                return f"Your rougher nights (by your own ratings) fall most often on {day}s."
         if self.kind == "temporal":
             day = self.detail.get("day", "the same day")
             if self.detail.get("source") == "tag":
-                return (f"You tagged '{self.label}' {self.occurrences} times, "
-                        f"most often on {day}s.")
-            return (f"You've mentioned '{self.label}' {self.occurrences} times, "
-                    f"most often on {day}s.")
+                return f"You tagged '{self.label}' {self.occurrences} times, most often on {day}s."
+            return (
+                f"You've mentioned '{self.label}' {self.occurrences} times, most often on {day}s."
+            )
         if self.kind == "mood_correlation":
             delta = self.detail.get("mood_delta", 0.0)
             # Old blobs carry no direction: derive it from the delta's sign,
@@ -129,58 +234,72 @@ class Pattern:
             direction = self.detail.get("direction") or ("higher" if delta < 0 else "lower")
             shift = "drop" if direction == "lower" else "lift"
             if self.detail.get("source") == "tag":
-                return (f"Your entries read {direction} on days you tag '{self.label}' "
-                        f"(mood {shift} of {abs(delta):.1f}).")
-            return (f"Your entries read {direction} on days when '{self.label}' comes up "
-                    f"(mood {shift} of {abs(delta):.1f}).")
+                return (
+                    f"Your entries read {direction} on days you tag '{self.label}' "
+                    f"(mood {shift} of {abs(delta):.1f})."
+                )
+            return (
+                f"Your entries read {direction} on days when '{self.label}' comes up "
+                f"(mood {shift} of {abs(delta):.1f})."
+            )
         if self.kind == "avoidance":
             silences = self.detail.get("silences", self.occurrences)
             share = self.detail.get("share", 0.0)
             base = self.detail.get("base_rate", 0.0)
-            return (f"The day after '{self.label}' comes up, you tend not to write "
-                    f"({silences} of the observable such days, versus your usual "
-                    f"{base * 100:.0f}% silent days overall — {share * 100:.0f}% here).")
+            return (
+                f"The day after '{self.label}' comes up, you tend not to write "
+                f"({silences} of the observable such days, versus your usual "
+                f"{base * 100:.0f}% silent days overall — {share * 100:.0f}% here)."
+            )
         if self.kind == "cadence":
-            return ("Your writing rhythm has been less regular than it used to be "
-                    "for you — longer stretches of silence between writing days.")
+            return (
+                "Your writing rhythm has been less regular than it used to be "
+                "for you — longer stretches of silence between writing days."
+            )
         if self.kind == "recurring_phrase":
-            return (f'The phrase "{self.label}" keeps returning — '
-                    f"{self.occurrences} times so far.")
+            return f'The phrase "{self.label}" keeps returning — {self.occurrences} times so far.'
         if self.kind == "mood_shift":
             direction = self.detail.get("direction", "lower")
             shift = self.detail.get("shift", 0.0)
-            return (f"Your entries have read {direction} than your usual "
-                    f"baseline lately (a shift of {shift:.1f}).")
+            return (
+                f"Your entries have read {direction} than your usual "
+                f"baseline lately (a shift of {shift:.1f})."
+            )
         if self.kind == "link":
             if self.detail.get("source") == "tag":
                 direction = self.detail.get("direction", "lower")
-                return (f"The day after you tag '{self.label}', your entries read "
-                        f"{direction} than usual for you.")
+                return (
+                    f"The day after you tag '{self.label}', your entries read "
+                    f"{direction} than usual for you."
+                )
             direction = self.detail.get("direction", "lower")
             lag = self.detail.get("lag_days", 1)
             # The lag reported is the MODAL exposed gap (see brain._detect_links);
             # "the day after" is only said when the data says it.
             if lag == 1:
-                return (f"The day after '{self.label}' comes up, your entries "
-                        f"read {direction}.")
-            return (f"In the days after '{self.label}' comes up, your entries "
-                    f"read {direction} (about {lag} days later).")
+                return f"The day after '{self.label}' comes up, your entries read {direction}."
+            return (
+                f"In the days after '{self.label}' comes up, your entries "
+                f"read {direction} (about {lag} days later)."
+            )
         if self.kind == "inertia":
-            return ("Your mood has been carrying over from day to day more "
-                    "than usual for you.")
+            return "Your mood has been carrying over from day to day more than usual for you."
         if self.kind == "instability":
-            return ("Your daily mood has swung more widely than usual for "
-                    "you these past weeks.")
+            return "Your daily mood has swung more widely than usual for you these past weeks."
         if self.kind == "rumination":
-            return (f'The thought "{self.label}" keeps returning — '
-                    f"{self.occurrences} times across different days.")
+            return (
+                f'The thought "{self.label}" keeps returning — '
+                f"{self.occurrences} times across different days."
+            )
         if self.kind == "topic":
             trend = self.detail.get("trend", "steady")
             share = self.detail.get("share")
             share_txt = f" ({share:.0%} of entries)" if isinstance(share, (int, float)) else ""
             if trend == "rising":
-                return (f"'{self.label}' has been taking up more space in your "
-                        f"writing lately{share_txt}.")
+                return (
+                    f"'{self.label}' has been taking up more space in your "
+                    f"writing lately{share_txt}."
+                )
             return f"'{self.label}' is a steady presence in your writing{share_txt}."
         return f"'{self.label}' appeared {self.occurrences} times."
 
@@ -273,14 +392,19 @@ def recurring_phrases(
         span = (max(dates_) - min(dates_)).days
         if span < min_span_days:
             continue
-        found.append(Pattern(
-            kind="recurring_phrase",
-            label=sentence,
-            occurrences=len(dates_),
-            confidence=min(1.0, len(dates_) / 8),
-            detail={"span_days": span, "first": min(dates_).isoformat(),
-                    "last": max(dates_).isoformat()},
-        ))
+        found.append(
+            Pattern(
+                kind="recurring_phrase",
+                label=sentence,
+                occurrences=len(dates_),
+                confidence=min(1.0, len(dates_) / 8),
+                detail={
+                    "span_days": span,
+                    "first": min(dates_).isoformat(),
+                    "last": max(dates_).isoformat(),
+                },
+            )
+        )
     return found
 
 
@@ -312,26 +436,30 @@ def analyze(entries: list[JournalEntry]) -> Analysis:
 
         day, fraction = _dominant_weekday(e.entry_date for e, _ in with_theme)
         if fraction >= TEMPORAL_DAY_FRACTION:
-            patterns.append(Pattern(
-                kind="temporal",
-                label=theme,
-                occurrences=count,
-                confidence=min(1.0, count / 12 * (0.5 + fraction / 2)),
-                detail={"day": DAY_NAMES[day], "day_fraction": round(fraction, 3)},
-            ))
+            patterns.append(
+                Pattern(
+                    kind="temporal",
+                    label=theme,
+                    occurrences=count,
+                    confidence=min(1.0, count / 12 * (0.5 + fraction / 2)),
+                    detail={"day": DAY_NAMES[day], "day_fraction": round(fraction, 3)},
+                )
+            )
 
         if without_theme:
             mood_with = fmean(s for _, s in with_theme)
             mood_without = fmean(s for _, s in without_theme)
             delta = mood_without - mood_with
             if delta >= MOOD_DELTA_THRESHOLD:
-                patterns.append(Pattern(
-                    kind="mood_correlation",
-                    label=theme,
-                    occurrences=count,
-                    confidence=min(1.0, count / 12 * delta),
-                    detail={"mood_delta": round(delta, 3)},
-                ))
+                patterns.append(
+                    Pattern(
+                        kind="mood_correlation",
+                        label=theme,
+                        occurrences=count,
+                        confidence=min(1.0, count / 12 * delta),
+                        detail={"mood_delta": round(delta, 3)},
+                    )
+                )
 
     patterns.extend(recurring_phrases(entries))
     patterns.sort(key=lambda p: (-p.confidence, -p.occurrences, p.label))

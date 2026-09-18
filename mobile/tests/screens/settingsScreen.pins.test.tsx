@@ -51,6 +51,7 @@ vi.mock("../../src/offlineQueue", () => ({
   rejectedEntryCount: vi.fn(async () => 0),
   requeueRejected: vi.fn(async () => 0),
   quarantinedQueueExists: vi.fn(async () => false),
+  hasLegacyQueueRecovery: vi.fn(async () => false),
 }));
 
 const signOut = vi.fn(async () => {});
@@ -189,42 +190,38 @@ describe("SettingsScreen pins: mount-state guards", () => {
   });
 });
 
-describe("SettingsScreen pins: insecure-HTTP consent policy", () => {
-  it("Allow-insecure records consent for THIS url immediately — a second save goes direct", async () => {
+describe("SettingsScreen pins: remote transport policy", () => {
+  it("delegates a cleartext URL to the fail-closed client without a consent modal", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await typeInto(root, "https://your-server:8000", "http://nas.lan:8000");
     await pressLabel(root, "Save server URL");
-    await pressAlertButton("Allow insecure HTTP");
     await flush();
     expect(setBaseUrl).toHaveBeenCalledTimes(1);
-
-    // Saving the SAME cleartext url again must not re-warn: the consent was
-    // saved per-URL the moment it was given.
-    await pressLabel(root, "Save server URL");
-    await flush();
-    expect(Alert.alert.mock.calls.filter((c) => c[0] === "Insecure server")).toHaveLength(1);
-    expect(setBaseUrl).toHaveBeenCalledTimes(2);
-    expect(setBaseUrl).toHaveBeenLastCalledWith("http://nas.lan:8000", { allowInsecure: true });
+    expect(setBaseUrl).toHaveBeenLastCalledWith("http://nas.lan:8000");
+    expect(Alert.alert.mock.calls.filter((c) => c[0] === "Insecure server")).toHaveLength(0);
   });
 
-  it("a SECURE url never inherits allowInsecure even when a stored consent string equals it", async () => {
+  it("a secure URL also has no obsolete allowInsecure option", async () => {
     vi.mocked(getInsecureConsentUrl).mockImplementation(async () => "https://api.example.com");
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await typeInto(root, "https://your-server:8000", "https://api.example.com");
     await pressLabel(root, "Save server URL");
     await flush();
-    expect(setBaseUrl).toHaveBeenCalledWith("https://api.example.com", { allowInsecure: false });
+    expect(setBaseUrl).toHaveBeenCalledWith("https://api.example.com");
   });
 
-  it("the direct-save success dialog quotes the saved URL exactly", async () => {
+  it("the success dialog explains the origin-switch sign-out boundary", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await typeInto(root, "https://your-server:8000", "https://api.example.com");
     await pressLabel(root, "Save server URL");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Saved", "Server URL updated (https://api.example.com).");
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Saved",
+      "Server URL updated. Changing server origins signs this device out to protect your session.",
+    );
   });
 });
 
@@ -238,7 +235,7 @@ describe("SettingsScreen pins: recovery flow", () => {
     const { firePress, act } = await import("../helpers/rtr");
     await firePress(root, "Try syncing them again");
     await flush();
-    expect(touchableByLabel(root, "Export my data (encrypted)").props.disabled).toBe(true);
+    expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(true);
     await act(async () => {
       resolveRequeue(1);
     });
@@ -251,9 +248,8 @@ describe("SettingsScreen pins: recovery flow", () => {
     vi.mocked(requeueRejected).mockResolvedValue(2);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    await pressLabel(root, "Try syncing them again");
-    await flush();
-    expect(requeueRejected).toHaveBeenCalledTimes(1);
+    expect(textOf(root)).not.toContain("Try syncing them again");
+    expect(requeueRejected).not.toHaveBeenCalled();
     expect(flushQueue).not.toHaveBeenCalled();
   });
 
@@ -276,7 +272,7 @@ describe("SettingsScreen pins: recovery flow", () => {
     await flush();
     await pressLabel(root, "Try syncing them again");
     await flush();
-    expect(touchableByLabel(root, "Export my data (encrypted)").props.disabled).toBe(false);
+    expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(false);
     expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(false);
   });
 });
@@ -342,7 +338,7 @@ describe("SettingsScreen pins: the password re-auth card", () => {
     expect(Alert.alert).toHaveBeenCalledWith("Could not verify", "Wrong password.");
     expect(textOf(root)).toContain("Enter your password to enable");
     expect((inputByPlaceholder(root, "password").props as { value: string }).value).toBe("");
-    expect(touchableByLabel(root, "Export my data (encrypted)").props.disabled).toBe(false);
+    expect(touchableByLabel(root, "Delete my account and data").props.disabled).toBe(false);
   });
 
   it("a completed flow clears the typed password — the next card starts empty", async () => {
@@ -436,47 +432,17 @@ describe("SettingsScreen pins: delete failure copy", () => {
   });
 });
 
-describe("SettingsScreen pins: export boundaries", () => {
-  /** A bundle whose pretty-printed JSON is exactly `size` characters. */
-  const bundleOfExactJsonSize = (size: number): { entries: { blob: string }[]; insights: [] } => {
-    const probe = JSON.stringify({ entries: [{ blob: "" }], insights: [] }, null, 2).length;
-    return { entries: [{ blob: "x".repeat(size - probe) }], insights: [] };
-  };
-
-  it("an export of exactly 4,000,000 characters still shares (the cap is strict >)", async () => {
-    vi.mocked(api.exportAccount).mockResolvedValue(bundleOfExactJsonSize(4_000_000) as never);
+describe("SettingsScreen pins: export safety gate", () => {
+  it("does not materialize, fetch, or share a full export until native streaming is available", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Share.share).toHaveBeenCalledTimes(1);
-    expect(Alert.alert).not.toHaveBeenCalledWith("Export too large", expect.any(String));
-    expect(Alert.alert).toHaveBeenCalledWith("Exported", expect.stringContaining("insights (encrypted)"));
-  });
-
-  it("an oversized export quotes its computed size exactly", async () => {
-    const bundle = { entries: Array.from({ length: 400 }, () => ({ blob: "x".repeat(10_000) })), insights: [] };
-    vi.mocked(api.exportAccount).mockResolvedValue(bundle as never);
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    const size = JSON.stringify(bundle, null, 2).length;
+    await pressLabel(root, "Why export is unavailable");
     expect(Alert.alert).toHaveBeenCalledWith(
-      "Export too large",
-      `Your export is ${(size / 1_000_000).toFixed(1)}M characters — too large for the device share sheet. Contact support for a bulk export.`,
+      "Export unavailable in this build",
+      expect.stringContaining("verified secure file-export component"),
     );
-  });
-
-  it("a Share result of undefined is a success, not a share failure", async () => {
-    vi.mocked(Share.share).mockResolvedValue(undefined as never);
-    vi.mocked(api.exportAccount).mockResolvedValue({ entries: [{}], insights: [{}] } as never);
-    const root = await render(<SettingsScreen navigation={nav} />);
-    await flush();
-    await pressLabel(root, "Export my data (encrypted)");
-    await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Exported", expect.stringContaining("insights (encrypted)"));
-    expect(Alert.alert).not.toHaveBeenCalledWith("Export did not complete", expect.any(String));
+    expect(api.exportAccount).not.toHaveBeenCalled();
+    expect(Share.share).not.toHaveBeenCalled();
   });
 });
 

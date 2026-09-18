@@ -149,11 +149,7 @@ def _betainc(a: float, b: float, x: float) -> float:
     if x >= 1.0:
         return 1.0
     log_bt = (
-        math.lgamma(a + b)
-        - math.lgamma(a)
-        - math.lgamma(b)
-        + a * math.log(x)
-        + b * math.log1p(-x)
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
     )
     bt = math.exp(log_bt)
     if x < (a + 1.0) / (a + b + 2.0):
@@ -236,9 +232,9 @@ def effective_sample_size(n: int, lag1: float | None) -> float:
     return max(3.0, min(float(n), n * (1.0 - r) / (1.0 + r)))
 
 
-def brown_forsythe_two_sided_p(xs: list[float], ys: list[float],
-                               n_eff_x: float | None = None,
-                               n_eff_y: float | None = None) -> float:
+def brown_forsythe_two_sided_p(
+    xs: list[float], ys: list[float], n_eff_x: float | None = None, n_eff_y: float | None = None
+) -> float:
     """Two-sided Brown-Forsythe (median-centered Levene) p for H0: equal spread.
 
     The instability detector replaced its variance-ratio F-test with this
@@ -282,7 +278,9 @@ def brown_forsythe_two_sided_p(xs: list[float], ys: list[float],
     return min(1.0, 2.0 * min(upper, 1.0 - upper))
 
 
-def fisher_z_difference_p(r_recent: float, n_recent: int, r_earlier: float, n_earlier: int) -> float:
+def fisher_z_difference_p(
+    r_recent: float, n_recent: int, r_earlier: float, n_earlier: int
+) -> float:
     """One-sided p for H0: rho_recent <= rho_earlier, Fisher z transform.
 
     The inertia claim is comparative — "mood is carrying over MORE than
@@ -302,8 +300,9 @@ def fisher_z_difference_p(r_recent: float, n_recent: int, r_earlier: float, n_ea
     return min(1.0, 0.5 * math.erfc(z / math.sqrt(2.0)))  # upper tail only
 
 
-def welch_test(a: list[float], b: list[float], variance_floor: float = 0.0,
-               lag1: float | None = None) -> tuple[float, float]:
+def welch_test(
+    a: list[float], b: list[float], variance_floor: float = 0.0, lag1: float | None = None
+) -> tuple[float, float]:
     """Welch's unequal-variance t-test: (t statistic, two-sided p-value).
 
     Degenerate inputs (n < 2 per side, or zero pooled standard error

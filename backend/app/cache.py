@@ -49,7 +49,9 @@ class FixedWindowCounter:
     """
 
     def __init__(self) -> None:
-        self._hits: dict[str, tuple[int, float, int]] = {}  # key -> (count, window_start, window_seconds)
+        self._hits: dict[
+            str, tuple[int, float, int]
+        ] = {}  # key -> (count, window_start, window_seconds)
         self._lock = threading.Lock()
 
     def hit(self, key: str, window_seconds: int, now: float | None = None) -> HitResult:
@@ -130,24 +132,18 @@ def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
     """Best-effort client identity for rate limiting.
 
     Behind a reverse proxy every request appears to come from the proxy's
-    IP; when the deployment is configured to trust forwarding headers
-    (MINDPATTERN_TRUST_PROXY_HEADERS=1, and uvicorn's --proxy-headers),
-    X-Forwarded-For is used instead — taking the RIGHTMOST entry across the
-    whole message (all header lines, not just the first), because that is
-    the address our own trusted proxy actually observed. Leftmost entries
-    are client-supplied and therefore spoofable: an attacker who sends a
-    fresh fake XFF per request would otherwise get a fresh rate-limit
-    bucket every time and never be throttled.
+    IP. Forwarding metadata is used only when HardeningMiddleware has
+    established that the direct socket peer belongs to the explicit
+    MINDPATTERN_TRUSTED_PROXY_IPS allowlist. That middleware parses the
+    right-to-left forwarding chain, skips trusted proxy hops, and records a
+    sanitized client address in request.state. This function intentionally
+    never treats a raw X-Forwarded-For header as proof: a direct client can
+    freely forge one.
     """
-    if trust_proxy_headers:
-        # getlist returns every header LINE; a proxy that appends its
-        # observation as a separate line (HAProxy add-header style) must not
-        # let the client's line win.
-        entries: list[str] = []
-        for line in request.headers.getlist("x-forwarded-for"):
-            entries.extend(part.strip() for part in line.split(",") if part.strip())
-        if entries:
-            return _aggregate_host(entries[-1])
+    if trust_proxy_headers and getattr(request.state, "mindpattern_trusted_proxy", False):
+        forwarded = getattr(request.state, "mindpattern_forwarded_client", None)
+        if isinstance(forwarded, str) and forwarded:
+            return _aggregate_host(forwarded)
     if request.client and request.client.host:
         return _aggregate_host(request.client.host)
     return "unknown-client"
@@ -180,7 +176,7 @@ def make_rate_limiter(bucket: str, limit_attr: str, window_attr: str):
 
 
 def check_keyed_limit_without_count(request: Request, key: str, limit: int, window: int) -> None:
-    """429 if the key is already over the limit, but do NOT count this request.
+    """429 once the key has reached its limit, without counting this request.
 
     Paired with record_keyed_failure() on the login path: only failed
     verifications for existing accounts consume the bucket, so an anonymous
@@ -189,7 +185,12 @@ def check_keyed_limit_without_count(request: Request, key: str, limit: int, wind
     """
     counter: FixedWindowCounter = request.app.state.rate_counter
     result = counter.check(key, window)
-    if result.count > limit:
+    # Unlike ``make_rate_limiter()``, the failing action is recorded *after*
+    # this preflight.  ``> limit`` therefore admitted one extra conflict:
+    # for a limit of three, counts 1..4 were recorded and only the sixth
+    # conflicting request was rejected.  At ``count == limit`` the budget is
+    # exhausted, so reject before doing another expensive verifier hash.
+    if result.count >= limit:
         raise _limit_response(result.retry_after)
 
 

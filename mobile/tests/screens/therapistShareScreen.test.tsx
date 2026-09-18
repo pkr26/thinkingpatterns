@@ -113,6 +113,15 @@ async function reauth(root: Awaited<ReturnType<typeof render>>, password = "corr
 }
 
 describe("consent list", () => {
+  it("fails closed when the server has not enabled verified clinician sharing", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ sharing_available: false } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Therapist sharing unavailable");
+    expect(textOf(root)).not.toContain("Add your therapist");
+    expect(vi.mocked(api.listConsents)).not.toHaveBeenCalled();
+  });
+
   it("renders the empty state when nothing is shared", async () => {
     const root = await render(<TherapistShareScreen navigation={nav} />);
     await flush();

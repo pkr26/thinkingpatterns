@@ -26,7 +26,7 @@
  * restores it even while the editor stays mounted underneath.
  */
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, ApiError } from "../api/client";
 import { decryptQuestion } from "../crypto/MindPatternCrypto";
 import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
@@ -265,10 +265,14 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   return (
     // Any touch on this screen is real interaction: restart the inactivity
     // countdown so the auto-lock only fires on a genuinely idle session.
-    <View
-      style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxl, gap: 18 }]}
-      onTouchStart={touchActivity}
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.colors.bg }}
+      contentContainerStyle={{ flexGrow: 1, paddingBottom: t.spacing.xxxl }}
     >
+      <View
+        style={[styles.container, { backgroundColor: t.colors.bg, padding: t.spacing.xxl, gap: 18 }]}
+        onTouchStart={touchActivity}
+      >
       {busy && <ActivityIndicator color={t.colors.primaryBright} size="large" />}
       {error && (
         <Text style={[styles.error, { color: t.colors.error }]} accessibilityRole="alert">
@@ -345,7 +349,8 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
         </Text>
       </View>
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
-    </View>
+      </View>
+    </ScrollView>
   );
 }
 

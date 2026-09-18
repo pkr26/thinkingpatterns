@@ -31,8 +31,7 @@ def _contract() -> dict:
     # Hard failure, never a silent skip: the JSON is committed; a missing
     # file means a broken checkout (same posture as test_encrypt_vectors).
     assert CRISIS_JSON_PATH.exists(), (
-        f"shared/crisis_phrases.json not found at {CRISIS_JSON_PATH} — "
-        "it is committed; restore it"
+        f"shared/crisis_phrases.json not found at {CRISIS_JSON_PATH} — it is committed; restore it"
     )
     return json.loads(CRISIS_JSON_PATH.read_text())
 
@@ -95,8 +94,7 @@ class TestRedteamCorpus:
         assert len(crisis_rows) >= 30, "the corpus must stay substantial"
         for row in crisis_rows:
             assert crisis.matches_suppress(row["sample"]), (
-                f"BYPASS: suppress tier missed {row['sample']!r} "
-                f"(technique {row['technique']})"
+                f"BYPASS: suppress tier missed {row['sample']!r} (technique {row['technique']})"
             )
 
     def test_observed_dialog_matches_contract_exactly(self):
@@ -112,8 +110,16 @@ class TestRedteamCorpus:
 
     def test_corpus_still_covers_the_original_techniques(self):
         techniques = {r["technique"] for r in _contract()["redteam_corpus"]}
-        for required in ("leetspeak", "homoglyph", "zero-width", "punct-split",
-                         "space-split", "unlisted-phrase", "non-english", "benign"):
+        for required in (
+            "leetspeak",
+            "homoglyph",
+            "zero-width",
+            "punct-split",
+            "space-split",
+            "unlisted-phrase",
+            "non-english",
+            "benign",
+        ):
             assert required in techniques, f"corpus lost its {required} coverage"
 
 
@@ -123,29 +129,42 @@ class TestDualVariantAndMasking:
 
     def test_orphan_splits_fire_the_dialog_tier(self):
         # The documented residual bypass ("k ill myself") and siblings.
-        for text in ("k ill myself", "o ff myself tonight", "k i ll myself",
-                     "s uicide is on my mind"):
+        for text in (
+            "k ill myself",
+            "o ff myself tonight",
+            "k i ll myself",
+            "s uicide is on my mind",
+        ):
             assert crisis.matches_dialog(text), f"orphan variant missed {text!r}"
 
     def test_orphan_variant_never_breaks_ordinary_prose(self):
         # Gluing single letters onto the next word must not create matches
         # where the primary variant has none.
-        for text in ("i am so sad today", "iwant to diet", "a way out of the city",
-                     "u s a won gold", "a e i o u are vowels"):
+        for text in (
+            "i am so sad today",
+            "iwant to diet",
+            "a way out of the city",
+            "u s a won gold",
+            "a e i o u are vowels",
+        ):
             assert not crisis.matches_dialog(text), f"orphan variant fired on {text!r}"
             assert not crisis.matches_suppress(text), f"orphan variant fired on {text!r}"
 
     def test_benign_compounds_do_not_fire(self):
-        for text in ("that movie was suicide squad and i liked it",
-                     "we discussed suicide prevention in class today",
-                     "listening to suicide silence again",
-                     "suicideboys dropped a new album"):
+        for text in (
+            "that movie was suicide squad and i liked it",
+            "we discussed suicide prevention in class today",
+            "listening to suicide silence again",
+            "suicideboys dropped a new album",
+        ):
             assert not crisis.matches_dialog(text), f"benign mask failed on {text!r}"
 
     def test_benign_mask_does_not_silence_real_phrasing(self):
         # The mask removes only the compound: surrounding ideation still fires.
-        for text in ("suicide prevention did not help, i still want to die",
-                     "after the suicide squad premiere i can't go on"):
+        for text in (
+            "suicide prevention did not help, i still want to die",
+            "after the suicide squad premiere i can't go on",
+        ):
             assert crisis.matches_dialog(text), f"mask over-reached on {text!r}"
 
     def test_bare_topic_word_still_fires(self):
@@ -165,24 +184,37 @@ class TestAuditRemediation2026_09_17:
     def test_mask_gap_ideation_adjacent_to_compound_word_fires(self):
         # Punctuation between the words is NOT the benign compound: the
         # pre-commit engine fired here and the mask had silenced it.
-        for text in ("thinking about suicide, silence and pain",
-                     "i keep thinking about suicide, silence is all i have",
-                     "thinking about suicide. Silence would be better.",
-                     "help me with suicide. Prevention is everyone's job."):
+        for text in (
+            "thinking about suicide, silence and pain",
+            "i keep thinking about suicide, silence is all i have",
+            "thinking about suicide. Silence would be better.",
+            "help me with suicide. Prevention is everyone's job.",
+        ):
             assert crisis.matches_dialog(text), f"mask silenced ideation: {text!r}"
             assert crisis.matches_suppress(text), f"suppress tier missed {text!r}"
 
     def test_residual_splits_and_concat_fire(self):
-        for text in ("su icide", "ki ll myself", "kil l myself",
-                     "kill my self", "su.i.cide", "sui cide", "su i cide",
-                     "suici de", "cu tting myself", "k y s", "end i t all",
-                     "killmyself", "i will killmyself tonight"):
+        for text in (
+            "su icide",
+            "ki ll myself",
+            "kil l myself",
+            "kill my self",
+            "su.i.cide",
+            "sui cide",
+            "su i cide",
+            "suici de",
+            "cu tting myself",
+            "k y s",
+            "end i t all",
+            "killmyself",
+            "i will killmyself tonight",
+        ):
             assert crisis.matches_dialog(text), f"split/concat bypass: {text!r}"
             assert crisis.matches_suppress(text), f"suppress tier missed {text!r}"
 
     def test_invisible_and_homoglyph_families_fire(self):
         assert crisis.matches_dialog("su͏icide")  # U+034F grapheme joiner
-        assert crisis.matches_dialog("su️icide")   # U+FE0F variation selector
+        assert crisis.matches_dialog("su️icide")  # U+FE0F variation selector
         assert crisis.matches_dialog("кill myself")  # Cyrillic к
         assert crisis.matches_dialog("kill мyself")  # Cyrillic м
         assert crisis.matches_dialog("5uicide") and crisis.matches_dialog("$uicide")
@@ -198,9 +230,11 @@ class TestAuditRemediation2026_09_17:
     def test_concat_variant_anchored_endings_stay_benign(self):
         # Concat patterns ending in an extendable word keep a trailing
         # boundary: diet/online prose must not fire.
-        for text in ("i wanna diet after the holidays",
-                     "my mom wants to diet with me",
-                     "i can't go online until the wifi is fixed"):
+        for text in (
+            "i wanna diet after the holidays",
+            "my mom wants to diet with me",
+            "i can't go online until the wifi is fixed",
+        ):
             assert not crisis.matches_dialog(text), f"concat FP on {text!r}"
             assert not crisis.matches_suppress(text), f"concat FP on {text!r}"
 
@@ -209,7 +243,10 @@ class TestAuditRemediation2026_09_17:
         # boundary re-added only for extendable endings.
         assert crisis._concat_pattern(r"\bkill(?:ing)?\s+myself\b") == "kill(?:ing)?myself"
         assert crisis._concat_pattern(r"\bwanna\s+(?:to\s+)?die\b") == r"wanna(?:to)?die(?![a-z])"
-        assert crisis._concat_pattern(r"\bno\s+reason\s+to\s+(?:live|go\s+on)\b") == r"noreasonto(?:live|goon)(?![a-z])"
+        assert (
+            crisis._concat_pattern(r"\bno\s+reason\s+to\s+(?:live|go\s+on)\b")
+            == r"noreasonto(?:live|goon)(?![a-z])"
+        )
 
 
 class TestEngineInterlock:
@@ -236,11 +273,11 @@ class TestEngineInterlock:
             "i can't go on anymore everything feels hopeless",
         )
         state = brain.update(brain.load_state(None), corpus, T0).new_state
-        state = brain.update(brain.load_state(brain.dump_state(state)), corpus,
-                             T0 + timedelta(days=1)).new_state
+        state = brain.update(
+            brain.load_state(brain.dump_state(state)), corpus, T0 + timedelta(days=1)
+        ).new_state
         dumped = brain.dump_state(state)  # persistence must not drop the flag's inputs
-        worries = [rec for rec in state["patterns"].values()
-                   if "can't go on" in rec.label]
+        worries = [rec for rec in state["patterns"].values() if "can't go on" in rec.label]
         assert worries, "the recurring worry must cluster and store"
         assert any(rec.kind == "rumination" for rec in worries)
 
@@ -263,21 +300,24 @@ class TestEngineInterlock:
         )
         result = brain.update(brain.load_state(None), corpus, T0)
         result = brain.update(
-            brain.load_state(brain.dump_state(result.new_state)), corpus,
-            T0 + timedelta(days=1))
-        cards = [p for p in result.surfaced
-                 if p.kind in ("recurring_phrase", "rumination")]
+            brain.load_state(brain.dump_state(result.new_state)), corpus, T0 + timedelta(days=1)
+        )
+        cards = [p for p in result.surfaced if p.kind in ("recurring_phrase", "rumination")]
         assert cards, "the non-crisis recurring thought must still surface"
         # (c) no sensitive flag, and its questions render normally.
         assert all("sensitive" not in p.detail for p in cards)
-        assert any("replaying that conversation" in q
-                   for q in questions.build_pool(result.surfaced))
+        assert any(
+            "replaying that conversation" in q for q in questions.build_pool(result.surfaced)
+        )
 
     def test_questions_sensitive_detail_is_excluded_even_without_label_match(self):
         # Belt and braces: a pattern whose LABEL is clean but whose stored
         # variants are suppress-tier is still excluded from questions.
         pattern = Pattern(
-            "recurring_phrase", "it keeps coming back", 6, 0.8,
+            "recurring_phrase",
+            "it keeps coming back",
+            6,
+            0.8,
             {"variants": ["it keeps coming back", "i want to disappear"]},
         )
         pool = questions.build_pool([pattern])
@@ -286,7 +326,10 @@ class TestEngineInterlock:
 
     def test_questions_sensitive_flag_is_excluded(self):
         pattern = Pattern(
-            "rumination", "the same heavy thought", 6, 0.8,
+            "rumination",
+            "the same heavy thought",
+            6,
+            0.8,
             {"sensitive": True},
         )
         pool = questions.build_pool([pattern])
@@ -306,8 +349,9 @@ class TestProbeCorpusRegression:
 
     def test_cutting_corpus_never_quotes_crisis_adjacent_patterns(self):
         filler = "watered the plants and walked past the old bookshop slowly"
-        cutting_line = ("thinking about cutting again tonight, "
-                        "the urge for cutting was loud after dinner")
+        cutting_line = (
+            "thinking about cutting again tonight, the urge for cutting was loud after dinner"
+        )
         start = T0 - timedelta(days=89)
         entries = [
             JournalEntry(
@@ -324,8 +368,9 @@ class TestProbeCorpusRegression:
         # the repeated sentence surfaces as the phrase/rumination card,
         # which is what the suppression contract actually guards.)
         cards = [p for p in result.surfaced if "cutting" in p.label]
-        assert any(p.kind in ("recurring_phrase", "rumination") for p in cards), \
+        assert any(p.kind in ("recurring_phrase", "rumination") for p in cards), (
             "the repeated sentence must still surface as a phrase card"
+        )
         # ...and every one carries sensitive: true (pre-fix: None), so the
         # client renders the gentle non-quoting variant.
         assert all(p.detail.get("sensitive") is True for p in cards)

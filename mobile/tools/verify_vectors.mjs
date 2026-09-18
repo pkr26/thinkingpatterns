@@ -13,7 +13,7 @@
  * REFERENCE check and says so loudly (that variant cannot detect bugs in
  * the app's own crypto code — run `npm install && npm test` for that).
  */
-import { readFileSync, rmSync, mkdirSync } from "node:fs";
+import { readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -58,6 +58,11 @@ async function loadRealModules() {
     console.error("tsc failed to compile src/crypto:\n" + compiled.stderr.toString());
     process.exit(1);
   }
+  // The mobile package is ESM so Vitest's config can use the native loader,
+  // but this verifier deliberately emits CommonJS: engine.ts then exercises
+  // its `require("node:crypto")` fallback. Scope that module format to the
+  // disposable output directory instead of changing the shipping package.
+  writeFileSync(join(buildDir, "package.json"), '{"type":"commonjs"}\n');
   // engine.js's conditional require: quick-crypto fails under node -> node:crypto.
   const kdf = await import(join(buildDir, "kdf.js"));
   const envelope = await import(join(buildDir, "envelope.js"));

@@ -19,7 +19,9 @@ def make_blobs(key, count=3):
         (crypto.build_aad("entry", "u1", f"e{i}"), f"secret plaintext {i}".encode())
         for i in range(count)
     ]
-    return aads_and_plaintexts, [(aad, crypto.encrypt(key, pt, aad)) for aad, pt in aads_and_plaintexts]
+    return aads_and_plaintexts, [
+        (aad, crypto.encrypt(key, pt, aad)) for aad, pt in aads_and_plaintexts
+    ]
 
 
 class TestInMemoryKeyStore:
@@ -50,6 +52,22 @@ class TestInMemoryKeyStore:
         assert store.destroy(token) is False  # idempotent second destroy
         with pytest.raises(KeyNotFound):
             store.get(token)
+
+    def test_foreign_owner_cannot_consume_or_destroy_a_session(self):
+        store = InMemoryKeyStore()
+        key = crypto.generate_key()
+        token = store.create(key, 60, owner="owner")
+
+        with pytest.raises(KeyNotFound):
+            store.pop(token, owner="other")
+        assert store.destroy(token, owner="other") is False
+
+        # The real owner can still consume the exact store-owned key.  This
+        # guards against a rejected cross-account request becoming a DoS.
+        consumed = store.pop(token, owner="owner")
+        assert consumed == key
+        for index in range(len(consumed)):
+            consumed[index] = 0
 
     def test_purge_expired(self):
         store = InMemoryKeyStore()
@@ -82,9 +100,7 @@ class TestSecureProcessingContext:
         key = crypto.generate_key()
         _, blobs = make_blobs(key)
         # Copy inside the analysis window: buffers themselves are zeroized after.
-        result = SecureProcessingContext(key).run(
-            blobs, lambda plains: [bytes(p) for p in plains]
-        )
+        result = SecureProcessingContext(key).run(blobs, lambda plains: [bytes(p) for p in plains])
         assert result == [b"secret plaintext 0", b"secret plaintext 1", b"secret plaintext 2"]
 
     def test_plaintext_zeroized_after_run(self):
@@ -173,8 +189,9 @@ class TestSecureProcessingContext:
         result = SecureProcessingContext(key).run(blobs, lambda plains: len(plains))
         assert result == 4
         assert len(seen_keys) == 4
-        assert all(k is seen_keys[0] for k in seen_keys), \
+        assert all(k is seen_keys[0] for k in seen_keys), (
             "every item must decrypt with the same working buffer"
+        )
         assert isinstance(seen_keys[0], bytearray)
         assert all(b == 0 for b in seen_keys[0]), "working key copy survived the window"
 

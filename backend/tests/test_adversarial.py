@@ -18,6 +18,7 @@ from starlette.requests import Request
 from app.cache import client_key
 from app.config import Settings
 from app.main import create_app
+from app.middleware import HardeningMiddleware
 from app.security import crypto, tokens
 from tests.helpers import ClientEmulator
 
@@ -27,40 +28,87 @@ TODAY = date.today()
 # --- rate limiting vs. spoofed X-Forwarded-For --------------------------------
 
 
-def test_xff_uses_rightmost_entry_when_trusted():
+async def _key_after_trusted_proxy_boundary(scope: dict) -> str:
+    observed: dict[str, str] = {}
+
+    async def app(inner_scope, _receive, send):
+        observed["key"] = client_key(Request(inner_scope), trust_proxy_headers=True)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def discard(_message):
+        return None
+
+    middleware = HardeningMiddleware(
+        app,
+        max_body_bytes=100,
+        trust_proxy_headers=True,
+        trusted_proxy_ips=["10.0.0.0/24"],
+    )
+    await middleware(scope, receive, discard)
+    return observed["key"]
+
+
+async def test_xff_uses_rightmost_entry_when_trusted():
     # A single trusted reverse proxy appends the IP it actually saw to
     # X-Forwarded-For; client-supplied (leftmost) entries are spoofable.
     scope = {
         "type": "http",
+        "method": "GET",
         "headers": [(b"x-forwarded-for", b"1.2.3.4, 5.6.7.8")],
         "client": ("10.0.0.9", 5000),
     }
-    assert client_key(Request(scope), trust_proxy_headers=True) == "5.6.7.8"
+    assert await _key_after_trusted_proxy_boundary(scope) == "5.6.7.8"
 
 
-def test_xff_rightmost_across_multiple_header_lines():
+async def test_xff_rightmost_across_multiple_header_lines():
     # Starlette's Headers.get() returns only the FIRST line. A proxy that
     # appends its observation as a SEPARATE header line (HAProxy
     # add-header style) must not let the client's spoofed first line win —
     # the rightmost entry across the whole message is the proxy's.
     scope = {
         "type": "http",
+        "method": "GET",
         "headers": [
             (b"x-forwarded-for", b"1.1.1.1"),
             (b"x-forwarded-for", b"2.2.2.2, 3.3.3.3"),
         ],
         "client": ("10.0.0.9", 5000),
     }
-    assert client_key(Request(scope), trust_proxy_headers=True) == "3.3.3.3"
+    assert await _key_after_trusted_proxy_boundary(scope) == "3.3.3.3"
 
 
-def test_xff_ignored_completely_when_proxy_not_trusted():
+async def test_xff_ignored_completely_when_proxy_not_trusted():
     scope = {
         "type": "http",
+        "method": "GET",
         "headers": [(b"x-forwarded-for", b"6.6.6.6")],
-        "client": ("10.0.0.9", 5000),
+        "client": ("192.0.2.9", 5000),
     }
-    assert client_key(Request(scope), trust_proxy_headers=False) == "10.0.0.9"
+    observed: dict[str, str] = {}
+
+    async def app(inner_scope, _receive, send):
+        observed["key"] = client_key(Request(inner_scope), trust_proxy_headers=True)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def discard(_message):
+        return None
+
+    middleware = HardeningMiddleware(
+        app,
+        max_body_bytes=100,
+        trust_proxy_headers=True,
+        trusted_proxy_ips=["10.0.0.0/24"],
+    )
+    await middleware(scope, receive, discard)
+    assert observed["key"] == "192.0.2.9"
 
 
 async def test_rotating_spoofed_xff_cannot_evade_rate_limit(client, settings):
@@ -68,11 +116,13 @@ async def test_rotating_spoofed_xff_cannot_evade_rate_limit(client, settings):
     # no matter what the client claims in X-Forwarded-For.
     settings.auth_rate_limit = 3
     statuses = [
-        (await client.post(
-            "/api/auth/salt",
-            json={"username": "anyone"},
-            headers={"X-Forwarded-For": f"10.1.{i}.{i}"},
-        )).status_code
+        (
+            await client.post(
+                "/api/auth/salt",
+                json={"username": "anyone"},
+                headers={"X-Forwarded-For": f"10.1.{i}.{i}"},
+            )
+        ).status_code
         for i in range(5)
     ]
     assert statuses[:3] == [200, 200, 200]
@@ -102,14 +152,19 @@ async def test_processing_token_is_bound_to_its_owner_at_api_level(client, setti
     assert stolen.status_code == 403
     assert "missing or expired" in stolen.json()["detail"]
 
+    # Rejecting Bob's request must not consume Alice's single-use session.
+    # Otherwise any caller who learned a token could force a cross-account
+    # processing failure without ever learning the data key.
+    owner_retry = await client.post(
+        "/api/insights/recompute",
+        headers={**alice.headers, "X-Processing-Token": alice_session},
+    )
+    assert owner_retry.status_code == 200, owner_retry.text
+
 
 async def test_signed_token_for_unknown_user_is_rejected(client, app):
-    ghost = tokens.issue_token(
-        "no-such-user-id", app.state.settings.token_secret, 3600
-    )
-    response = await client.get(
-        "/api/entries", headers={"Authorization": f"Bearer {ghost}"}
-    )
+    ghost = tokens.issue_token("no-such-user-id", app.state.settings.token_secret, 3600)
+    response = await client.get("/api/entries", headers={"Authorization": f"Bearer {ghost}"})
     assert response.status_code == 401
 
 
@@ -133,9 +188,7 @@ async def test_deleting_a_foreign_entry_id_is_404_not_silent_success(client):
     await bob.register(client)
     await alice.create_entry(client, "mine", TODAY, client_entry_id="shared-id")
 
-    attempted = await client.delete(
-        "/api/entries/shared-id", headers=bob.headers
-    )
+    attempted = await client.delete("/api/entries/shared-id", headers=bob.headers)
     assert attempted.status_code == 404
 
     listing = await client.get("/api/entries", headers=alice.headers)
@@ -169,8 +222,9 @@ async def test_export_is_isolated_per_user(client):
 async def test_deleted_account_bearer_token_is_dead(client):
     emu = ClientEmulator("gone", "pw")
     await emu.register(client)
-    response = await client.request("DELETE", "/api/account", headers=emu.headers,
-                                    json={"verifier": emu.auth_key_b64})
+    response = await client.request(
+        "DELETE", "/api/account", headers=emu.headers, json={"verifier": emu.auth_key_b64}
+    )
     assert response.status_code == 204
     stale = await client.get("/api/entries", headers=emu.headers)
     assert stale.status_code == 401
@@ -200,9 +254,7 @@ async def test_get_insights_respects_configured_threshold(client, settings):
 
     summary = await client.get("/api/insights", headers=emu.headers)
     assert summary.status_code == 200
-    assert summary.json()["phase"] == "insight", (
-        "GET /api/insights ignored MINDPATTERN_UNLOCK_DAYS"
-    )
+    assert summary.json()["phase"] == "insight", "GET /api/insights ignored MINDPATTERN_UNLOCK_DAYS"
 
 
 async def test_wrong_key_recompute_leaves_previous_insights_intact(client, settings):
@@ -286,8 +338,7 @@ async def test_authenticated_reads_are_rate_limited(client, settings):
     emu = ClientEmulator("reader", "pw")
     await emu.register(client)
     statuses = [
-        (await client.get("/api/entries", headers=emu.headers)).status_code
-        for _ in range(4)
+        (await client.get("/api/entries", headers=emu.headers)).status_code for _ in range(4)
     ]
     assert statuses[:2] == [200, 200]
     assert statuses[2:] == [429, 429]
@@ -299,8 +350,7 @@ async def test_export_has_a_dedicated_rate_bucket(client, settings):
     emu = ClientEmulator("exportcap", "pw")
     await emu.register(client)
     statuses = [
-        (await client.get("/api/account/export", headers=emu.headers)).status_code
-        for _ in range(7)
+        (await client.get("/api/account/export", headers=emu.headers)).status_code for _ in range(7)
     ]
     assert statuses[:5] == [200] * 5  # default export_rate_limit
     assert statuses[5:] == [429, 429]
@@ -331,7 +381,9 @@ async def test_decoy_salt_is_deterministic_and_well_formed(client):
     import re
 
     first = (await client.post("/api/auth/salt", json={"username": "ghost-user-42"})).json()["salt"]
-    second = (await client.post("/api/auth/salt", json={"username": "ghost-user-42"})).json()["salt"]
+    second = (await client.post("/api/auth/salt", json={"username": "ghost-user-42"})).json()[
+        "salt"
+    ]
     assert first == second
     assert re.fullmatch(r"[A-Za-z0-9+/=]+", first)
     assert 8 <= len(base64.b64decode(first)) <= 64

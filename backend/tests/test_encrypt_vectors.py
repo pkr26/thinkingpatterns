@@ -58,9 +58,7 @@ def test_backend_decrypts_fixed_nonce_blob():
     """The same pinned blob bytes the mobile test reproduces must decrypt here."""
     for vector in _encrypt_vectors():
         aad = crypto.build_aad(*vector["aad_parts"]) if vector["aad_parts"] else None
-        plaintext = crypto.decrypt(
-            _data_key(vector), base64.b64decode(vector["blob"]), aad
-        )
+        plaintext = crypto.decrypt(_data_key(vector), base64.b64decode(vector["blob"]), aad)
         assert base64.b64encode(plaintext).decode() == vector["plaintext"]
 
 

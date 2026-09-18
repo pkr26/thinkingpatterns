@@ -26,7 +26,12 @@ until alembic upgrade head; do
   attempt=$((attempt + 1))
 done
 
-# Flags documented in the Dockerfile: no access logs (they would record
-# usernames and journal-write timestamps) and no --proxy-headers (rate
-# limiting keys on the real peer unless a trusted proxy is configured).
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log
+# Do not rely on Uvicorn's default proxy-header behavior: it can rewrite
+# scope.client before HardeningMiddleware gets to verify the raw socket peer.
+# The app implements its own explicit MINDPATTERN_TRUSTED_PROXY_IPS boundary,
+# so proxy handling here must stay disabled even when Uvicorn changes its
+# defaults. Access logs are also off because they can record identifiers and
+# journal-write timing metadata. The hardening middleware limits a complete
+# request-body read to 30 seconds, and this cap prevents a slow-body flood
+# from consuming an unbounded number of ASGI tasks while those timers run.
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log --no-proxy-headers --limit-concurrency 100 --timeout-keep-alive 5

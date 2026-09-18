@@ -19,13 +19,16 @@ def test_empty_is_baseline():
     assert state.days_remaining == 30
 
 
-@pytest.mark.parametrize("days,expected_phase", [
-    (1, Phase.BASELINE),
-    (29, Phase.BASELINE),
-    (30, Phase.INSIGHT),
-    (31, Phase.INSIGHT),
-    (100, Phase.INSIGHT),
-])
+@pytest.mark.parametrize(
+    "days,expected_phase",
+    [
+        (1, Phase.BASELINE),
+        (29, Phase.BASELINE),
+        (30, Phase.INSIGHT),
+        (31, Phase.INSIGHT),
+        (100, Phase.INSIGHT),
+    ],
+)
 def test_phase_boundary(days, expected_phase):
     dates = [BASE + timedelta(days=i) for i in range(days)]
     assert evaluate(dates).phase is expected_phase
@@ -48,7 +51,10 @@ def test_gap_days_do_not_block_unlock():
 
 def test_days_remaining_counts_down_and_clamps():
     for active in (0, 10, 29):
-        assert evaluate([BASE + timedelta(days=i) for i in range(active)]).days_remaining == 30 - active
+        assert (
+            evaluate([BASE + timedelta(days=i) for i in range(active)]).days_remaining
+            == 30 - active
+        )
     assert evaluate([BASE + timedelta(days=i) for i in range(45)]).days_remaining == 0
 
 

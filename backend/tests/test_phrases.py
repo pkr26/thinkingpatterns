@@ -59,7 +59,9 @@ def test_near_duplicates_cluster_across_days():
 def test_unrelated_sentences_do_not_cluster():
     refs = [
         phrases.SentenceRef(text="went for a long walk by the river", day=BASE),
-        phrases.SentenceRef(text="meeting with the boss went fine today", day=BASE + timedelta(days=10)),
+        phrases.SentenceRef(
+            text="meeting with the boss went fine today", day=BASE + timedelta(days=10)
+        ),
         phrases.SentenceRef(text="cooked dinner and watched a film", day=BASE + timedelta(days=20)),
     ]
     assert phrases.near_duplicate_clusters(refs) == []
@@ -96,10 +98,14 @@ def test_representative_is_most_common_variant():
 
 
 def test_large_cluster_orders_first():
-    a = [phrases.SentenceRef(text=near_duplicates(1)[0], day=BASE + timedelta(days=d))
-         for d in (0, 8, 16, 24)]
-    b = [phrases.SentenceRef(text="the commute home was awful again", day=BASE + timedelta(days=d))
-         for d in (1, 9, 17)]
+    a = [
+        phrases.SentenceRef(text=near_duplicates(1)[0], day=BASE + timedelta(days=d))
+        for d in (0, 8, 16, 24)
+    ]
+    b = [
+        phrases.SentenceRef(text="the commute home was awful again", day=BASE + timedelta(days=d))
+        for d in (1, 9, 17)
+    ]
     clusters = phrases.near_duplicate_clusters(a + b)
     assert len(clusters) == 2
     assert len(clusters[0].members) == 4

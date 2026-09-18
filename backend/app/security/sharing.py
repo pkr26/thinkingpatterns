@@ -202,11 +202,27 @@ def pairing_code_digest(code: str, secret: str) -> str:
     secret (key separation, same standing as the decoy-salt key): a database
     leak yields digests, not live codes."""
     digest_key = hkdf_sha256(secret.encode("utf-8"), None, _PAIRING_DIGEST_INFO)
-    return hmac.new(digest_key, code.strip().upper().encode("ascii"), hashlib.sha256).hexdigest()
+    # The public lookup/grant endpoints intentionally answer every malformed
+    # code as the same flat 404.  Normalize here as well as at their boundary
+    # so a direct caller can never turn a non-ASCII code into UnicodeEncodeError
+    # (and therefore a 500) while deriving its harmless non-match digest.
+    return hmac.new(
+        digest_key, normalize_pairing_code(code).encode("ascii"), hashlib.sha256
+    ).hexdigest()
 
 
 def normalize_pairing_code(code: str) -> str:
     """Codes are typed by humans from a screen: case-insensitive, forgiving
-    of surrounding whitespace. The character set itself is not remapped —
-    an ambiguous typo stays a wrong code (404), never a different grant."""
-    return code.strip().upper()
+    of surrounding whitespace. Invalid/non-ASCII characters normalize to a
+    guaranteed non-code, so an ambiguous typo stays a flat 404 rather than
+    being remapped to a different grant or raising during ASCII HMAC input."""
+    # Check the ORIGINAL user input before trimming or case conversion:
+    # Unicode uppercase mappings such as ß -> SS could otherwise turn a
+    # non-ASCII typo into a valid generated code and accidentally redeem
+    # somebody else's share. ASCII whitespace remains intentionally forgiving.
+    if not code.isascii():
+        return ""
+    normalized = code.strip().upper()
+    if any(char not in PAIRING_ALPHABET for char in normalized):
+        return ""
+    return normalized

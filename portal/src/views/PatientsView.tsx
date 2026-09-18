@@ -5,7 +5,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type Patient } from "../api";
-import { keyFingerprint } from "../crypto";
+import { decryptInsights, keyFingerprint, unwrapPatientDataKey } from "../crypto";
+import type { Bytes } from "../crypto";
 import { localStore } from "../platform";
 import { Button, Card, ErrorBanner, Note, theme } from "../ui";
 import type { PortalSession } from "./PatientView";
@@ -75,7 +76,6 @@ export function PatientsView(props: {
     setError("");
     const rows: Record<string, CaseloadScanRow> = {};
     try {
-      const { decryptInsights, unwrapPatientDataKey } = await import("../crypto");
       for (const patient of patients.filter((p) => p.status === "active")) {
         try {
           const summary = await api.patientInsights(patient.user_id);
@@ -88,21 +88,32 @@ export function PatientsView(props: {
             lastReviewed: stamp ? dayOf(stamp) : null,
           };
           if (summary.blob && summary.phase === "insight" && patient.ephemeral_pub && patient.wrapped_key) {
-            const dataKey = await unwrapPatientDataKey(
-              props.session.privateKey,
-              patient.ephemeral_pub,
-              patient.wrapped_key,
-              patient.user_id,
-              props.session.userId,
-              props.session.publicKeyB64,
-            );
-            const payload = await decryptInsights(dataKey, patient.user_id, summary.blob);
-            const surfaced = payload.stats.patterns ?? [];
-            row.patterns = surfaced.length;
-            row.sensitive = surfaced.some((p) => p.detail.sensitive === true);
-            row.newSinceReviewed = stamp
-              ? surfaced.filter((p) => p.detail.first_seen && p.detail.first_seen > stamp).length
-              : surfaced.length;
+            // Keep the concrete ArrayBuffer-backed crypto type. A generic
+            // Uint8Array could include SharedArrayBuffer storage, which the
+            // WebCrypto helper intentionally rejects.
+            let dataKey: Bytes | null = null;
+            try {
+              dataKey = await unwrapPatientDataKey(
+                props.session.privateKey,
+                patient.ephemeral_pub,
+                patient.wrapped_key,
+                patient.user_id,
+                props.session.userId,
+                props.session.publicKeyB64,
+              );
+              const payload = await decryptInsights(dataKey, patient.user_id, summary.blob);
+              const surfaced = payload.stats.patterns ?? [];
+              row.patterns = surfaced.length;
+              row.sensitive = surfaced.some((p) => p.detail.sensitive === true);
+              row.newSinceReviewed = stamp
+                ? surfaced.filter((p) => p.detail.first_seen && p.detail.first_seen > stamp).length
+                : surfaced.length;
+            } finally {
+              // Caseload scans unwrap each patient's data key in turn. It is
+              // needed only for this one decrypt; retain no raw key bytes
+              // after either a successful scan or a decrypt failure.
+              dataKey?.fill(0);
+            }
           }
           rows[patient.user_id] = row;
         } catch {

@@ -109,15 +109,20 @@ from app.services.patterns import Pattern  # noqa: E402
 
 
 def _pattern(label: str, pid: str, occurrences: int) -> Pattern:
-    return Pattern(kind="recurring_phrase", label=label, occurrences=occurrences,
-                   confidence=0.9, detail={"pattern_pid": pid})
+    return Pattern(
+        kind="recurring_phrase",
+        label=label,
+        occurrences=occurrences,
+        confidence=0.9,
+        detail={"pattern_pid": pid},
+    )
 
 
 def _pool_owners(patterns, user_id: str) -> list[tuple[str | None, str]]:
     """Spec mirror of build_pool: top-5 by feedback rank FIRST, sensitive
     skipped AFTER the slice — the same ordering questions.question_for_today
     consumes."""
-    top = sorted(patterns, key=questions.feedback_rank)[:questions.MAX_PATTERN_QUESTIONS]
+    top = sorted(patterns, key=questions.feedback_rank)[: questions.MAX_PATTERN_QUESTIONS]
     owners: list[tuple[str | None, str]] = []
     for p in top:
         if questions.pattern_is_sensitive(p):
@@ -126,8 +131,11 @@ def _pool_owners(patterns, user_id: str) -> list[tuple[str | None, str]]:
             owners.append((p.detail["pattern_pid"], q))
     owners.extend((None, q) for q in questions.GENERIC_QUESTIONS)
     seen: set[str] = set()
-    return [(o, q) for o, q in owners
-            if not questions.crisis.matches_suppress(q) and not (q in seen or seen.add(q))]
+    return [
+        (o, q)
+        for o, q in owners
+        if not questions.crisis.matches_suppress(q) and not (q in seen or seen.add(q))
+    ]
 
 
 def test_chosen_pattern_pid_mirrors_build_pool_ordering():

@@ -76,15 +76,11 @@ class MetricsRegistry:
                     f'mindpattern_recompute_seconds_bucket{{le="{le}"}} '
                     f"{self._recompute_bucket_counts[bucket]}"
                 )
-            lines.append(
-                f"mindpattern_recompute_seconds_count {self._recompute_count}"
-            )
-            lines.append(
-                f"mindpattern_recompute_seconds_sum {self._recompute_sum:.6f}"
-            )
+            lines.append(f"mindpattern_recompute_seconds_count {self._recompute_count}")
+            lines.append(f"mindpattern_recompute_seconds_sum {self._recompute_sum:.6f}")
             lines.append("# TYPE mindpattern_llm_calls_total counter")
-            lines.append(f"mindpattern_llm_calls_total{{outcome=\"failure\"}} {self._llm_failures}")
-            lines.append(f"mindpattern_llm_calls_total{{outcome=\"success\"}} {self._llm_successes}")
+            lines.append(f'mindpattern_llm_calls_total{{outcome="failure"}} {self._llm_failures}')
+            lines.append(f'mindpattern_llm_calls_total{{outcome="success"}} {self._llm_successes}')
             lines.append("# TYPE mindpattern_keystore_sessions gauge")
             lines.append(f"mindpattern_keystore_sessions {keystore_sessions}")
             return "\n".join(lines) + "\n"

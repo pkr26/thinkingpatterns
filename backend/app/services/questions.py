@@ -168,17 +168,19 @@ def render_pattern_questions(pattern: Pattern) -> list[str]:
     for template in templates:
         # Extra kwargs are ignored by templates that don't reference them,
         # so legacy kinds render byte-identically to their pinned strings.
-        rendered.append(template.format(
-            label=pattern.label,
-            day=pattern.detail.get("day", "that day"),
-            direction=pattern.detail.get("direction", "lower"),
-            # Evidence anchoring (2026-09-17): percentages computed from the
-            # pattern's own numbers, so questions feel grounded ("31% of
-            # them") instead of templated. Ints only — no p-values, no
-            # statistics lecture in a daily question.
-            share=_percent(pattern.detail.get("share")),
-            mentions=pattern.occurrences,
-        ))
+        rendered.append(
+            template.format(
+                label=pattern.label,
+                day=pattern.detail.get("day", "that day"),
+                direction=pattern.detail.get("direction", "lower"),
+                # Evidence anchoring (2026-09-17): percentages computed from the
+                # pattern's own numbers, so questions feel grounded ("31% of
+                # them") instead of templated. Ints only — no p-values, no
+                # statistics lecture in a daily question.
+                share=_percent(pattern.detail.get("share")),
+                mentions=pattern.occurrences,
+            )
+        )
     return rendered
 
 

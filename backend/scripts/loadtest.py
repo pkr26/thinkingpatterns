@@ -17,6 +17,7 @@ Cost model to keep in mind while reading results:
   * recompute is brain-bound: ~1.2s per 2000-entry corpus (development
     core), 4 concurrent analyze slots -> ~3/s ceiling.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -120,11 +121,17 @@ class LoadUser:
 
         entry_id = f"load-{day}"
         payload = json.dumps({"v": 1, "text": text, "sentiment": None, "created_at": day}).encode()
-        blob = crypto.encrypt(self.data_key, payload, crypto.build_aad("entry", self.user_id or "", entry_id))
+        blob = crypto.encrypt(
+            self.data_key, payload, crypto.build_aad("entry", self.user_id or "", entry_id)
+        )
         r = await self.client.post(
             "/api/v1/entries",
             headers={"Authorization": f"Bearer {self.token}"},
-            json={"client_entry_id": entry_id, "blob": base64.b64encode(blob).decode(), "entry_date": day},
+            json={
+                "client_entry_id": entry_id,
+                "blob": base64.b64encode(blob).decode(),
+                "entry_date": day,
+            },
         )
         return r.status_code in (201, 409)
 
@@ -166,8 +173,12 @@ async def main() -> int:
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--users", type=int, default=20)
     parser.add_argument("--entries-per-user", type=int, default=5)
-    parser.add_argument("--days-back", type=int, default=35,
-                        help="entries spread over N days (drives the brain's window size)")
+    parser.add_argument(
+        "--days-back",
+        type=int,
+        default=35,
+        help="entries spread over N days (drives the brain's window size)",
+    )
     args = parser.parse_args()
 
     from datetime import date, timedelta
@@ -193,8 +204,14 @@ async def main() -> int:
         jobs = []
         for u in users:
             for e in range(args.entries_per_user):
-                day = (today - timedelta(days=(e * args.days_back) // max(args.entries_per_user, 1))).isoformat()
-                jobs.append(u.create_entry(day, "a calm load test day with ordinary words about tea and walking"))
+                day = (
+                    today - timedelta(days=(e * args.days_back) // max(args.entries_per_user, 1))
+                ).isoformat()
+                jobs.append(
+                    u.create_entry(
+                        day, "a calm load test day with ordinary words about tea and walking"
+                    )
+                )
         await phase(client, "create-entry", jobs)
 
         await phase(client, "recompute", [u.recompute() for u in users])

@@ -3,6 +3,7 @@
 Item 4: daily-cadence pure-noise false-statistical-card rate.
 Item 5: small-vocab noise presence-card flood + cluster structure.
 """
+
 from __future__ import annotations
 
 import random
@@ -22,9 +23,17 @@ FILLER = (
     "sorted the mail and paid the utility bill",
     "swept the hallway and shook out the rug",
 )
-THEME_WORDS = ("work boss deadline", "sleep tired bed", "friend party lonely",
-               "family mom dad", "gym doctor headache", "money rent salary",
-               "school exam homework", "food dinner cook", "rain sunny storm")
+THEME_WORDS = (
+    "work boss deadline",
+    "sleep tired bed",
+    "friend party lonely",
+    "family mom dad",
+    "gym doctor headache",
+    "money rent salary",
+    "school exam homework",
+    "food dinner cook",
+    "rain sunny storm",
+)
 
 
 def noise_corpus(rng: random.Random, days: int, start: date) -> list[JournalEntry]:
@@ -34,8 +43,13 @@ def noise_corpus(rng: random.Random, days: int, start: date) -> list[JournalEntr
             parts = [rng.choice(FILLER)]
             parts.extend(rng.choice(THEME_WORDS).split()[0] for _ in range(2))
             rng.shuffle(parts)
-            entries.append(JournalEntry(". ".join(parts), start + timedelta(days=i),
-                                        sentiment=round(rng.uniform(-0.6, 0.6), 3)))
+            entries.append(
+                JournalEntry(
+                    ". ".join(parts),
+                    start + timedelta(days=i),
+                    sentiment=round(rng.uniform(-0.6, 0.6), 3),
+                )
+            )
     return entries
 
 
@@ -52,8 +66,11 @@ def daily_cadence_stat_cards(seed: int, corpus_days: int = 98, recompute_days: i
         known = [e for e in entries if e.entry_date <= today]
         result = brain.update(state, known, today)
         state = result.new_state
-        ever |= {f"{p.kind}:{p.label}:{p.detail.get('direction', '')}"
-                 for p in result.surfaced if p.kind in brain.STATISTICAL_KINDS}
+        ever |= {
+            f"{p.kind}:{p.label}:{p.detail.get('direction', '')}"
+            for p in result.surfaced
+            if p.kind in brain.STATISTICAL_KINDS
+        }
     return ever
 
 
@@ -84,8 +101,13 @@ def small_vocab_corpus(rng: random.Random, days: int, start: date) -> list[Journ
     for i in range(days):
         n = rng.randint(6, 10)
         words = [rng.choice(VOCAB) for _ in range(n)]
-        entries.append(JournalEntry(" ".join(words), start + timedelta(days=i),
-                                    sentiment=round(rng.uniform(-0.4, 0.4), 3)))
+        entries.append(
+            JournalEntry(
+                " ".join(words),
+                start + timedelta(days=i),
+                sentiment=round(rng.uniform(-0.4, 0.4), 3),
+            )
+        )
     return entries
 
 
@@ -101,11 +123,16 @@ def templated_vocab_corpus(rng: random.Random, days: int, start: date) -> list[J
     entries = []
     for i in range(days):
         s1 = rng.choice(TEMPLATES).format(
-            a=rng.choice(VOCAB), b=rng.choice(VOCAB), c=rng.choice(VOCAB))
+            a=rng.choice(VOCAB), b=rng.choice(VOCAB), c=rng.choice(VOCAB)
+        )
         s2 = rng.choice(TEMPLATES).format(
-            a=rng.choice(VOCAB), b=rng.choice(VOCAB), c=rng.choice(VOCAB))
-        entries.append(JournalEntry(f"{s1}. {s2}", start + timedelta(days=i),
-                                    sentiment=round(rng.uniform(-0.4, 0.4), 3)))
+            a=rng.choice(VOCAB), b=rng.choice(VOCAB), c=rng.choice(VOCAB)
+        )
+        entries.append(
+            JournalEntry(
+                f"{s1}. {s2}", start + timedelta(days=i), sentiment=round(rng.uniform(-0.4, 0.4), 3)
+            )
+        )
     return entries
 
 
@@ -122,8 +149,10 @@ def measure_item5(runs: int = 8):
         presence = [p for p in r2.surfaced if p.kind == "topic" and p.detail.get("presence")]
         topics_all = [p for p in r2.surfaced if p.kind == "topic"]
         phrases = [p for p in r2.surfaced if p.kind in ("recurring_phrase", "rumination")]
-        print(f"seed {seed}: presence={[p.label for p in presence]} "
-              f"topics={[p.label for p in topics_all]} phrases={len(phrases)}")
+        print(
+            f"seed {seed}: presence={[p.label for p in presence]} "
+            f"topics={[p.label for p in topics_all]} phrases={len(phrases)}"
+        )
         # cluster structure for the first seed
         if seed == 2000 or True:
             sentences = []
@@ -144,8 +173,10 @@ def measure_item5(runs: int = 8):
                             if s in clustered_texts and word in s.split():
                                 in_cluster += 1
                                 break
-                print(f"   presence {word!r}: occurrences={total} in_cluster={in_cluster} "
-                      f"clusters={len(clusters)}")
+                print(
+                    f"   presence {word!r}: occurrences={total} in_cluster={in_cluster} "
+                    f"clusters={len(clusters)}"
+                )
 
 
 if __name__ == "__main__":

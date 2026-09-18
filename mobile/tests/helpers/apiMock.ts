@@ -22,10 +22,12 @@ export class ApiError extends Error {
 }
 
 export const SALT_B64 = Buffer.alloc(16, 7).toString("base64");
+export const ENTRY_PAGE_BYTES = 2 * 1024 * 1024;
 
 export function makeApiMock() {
+  const listEntries = vi.fn(async () => []);
   return {
-    meta: vi.fn(async () => ({ unlock_days: 30, llm_available: false })),
+    meta: vi.fn(async () => ({ unlock_days: 30, llm_available: false, sharing_available: true })),
     isLoggedIn: vi.fn(async () => false),
     getUserId: vi.fn(async () => "user-1"),
     getUsername: vi.fn(async () => "alice"),
@@ -39,7 +41,11 @@ export function makeApiMock() {
     login: vi.fn(async () => ({ token: "tok", user_id: "user-1" })),
     logout: vi.fn(async () => ({})),
     createEntry: vi.fn(async () => ({})),
-    listEntries: vi.fn(async () => []),
+    updateEntry: vi.fn(async () => ({})),
+    // Keep older screen tests that seed listEntries meaningful while the
+    // production client consumes bounded pages.
+    listEntriesPage: vi.fn(async () => ({ entries: await listEntries(), nextOffset: null, revision: null })),
+    listEntries,
     deleteEntry: vi.fn(async () => ({})),
     insights: vi.fn(async () => ({ phase: "baseline", active_days: 0, days_remaining: 30 })),
     questionToday: vi.fn(async () => ({ for_date: "2026-09-03", blob: "" })),
@@ -76,6 +82,16 @@ export function resetApi(api: ReturnType<typeof makeApiMock>): void {
   for (const key of Object.keys(defaults) as (keyof typeof api)[]) {
     const mock = api[key] as unknown as Mock;
     mock.mockReset();
-    mock.mockImplementation(defaults[key] as (...args: unknown[]) => unknown);
+    // Legacy component fixtures seed `listEntries`; preserve that ergonomic
+    // seam while production screens request bounded pages.
+    if (key === "listEntriesPage") {
+      mock.mockImplementation(async () => ({
+        entries: await (api.listEntries as unknown as () => Promise<unknown>)(),
+        nextOffset: null,
+        revision: null,
+      }));
+    } else {
+      mock.mockImplementation(defaults[key] as (...args: unknown[]) => unknown);
+    }
   }
 }

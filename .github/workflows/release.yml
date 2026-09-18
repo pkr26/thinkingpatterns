@@ -1,9 +1,10 @@
 name: Release
 
 # The delivery pipeline (2026-09-17). CI gates every push; THIS workflow
-# ships: on a v* tag it re-runs the fast verification spine, builds the
-# production image, pushes it to GHCR (multi-arch), and opens a GitHub
-# release seeded from the matching CHANGELOG entry.
+# ships: on a v* tag it re-runs every code-controlled release gate, builds
+# the API and backup-worker images, pushes both to GHCR (multi-arch +
+# provenance/SBOM), and opens a GitHub release seeded from the matching
+# CHANGELOG entry.
 #
 # Secrets/permissions: GITHUB_TOKEN only, image pushed to the same
 # repository's registry namespace. Nothing here touches production
@@ -22,44 +23,242 @@ on:
 permissions:
   contents: read
 
-env:
-  PYTEST_PINS: "pytest==9.1.1 pytest-asyncio==1.4.0 pytest-cov==7.1.0"
-
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate release tag and changelog contract before any artifact can publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME:?missing Git ref name}"
+          # Tags are public release identifiers and flow into image tags,
+          # asset names, and the GitHub release.  Accept conventional
+          # vMAJOR.MINOR.PATCH plus an optional prerelease suffix only.
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "invalid release tag $tag; expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-PRERELEASE" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## " ver { capture = 1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          test -s /tmp/notes.md || {
+            echo "no CHANGELOG.md section for $version" >&2
+            exit 1
+          }
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.lock.txt
+          cache-dependency-path: backend/requirements.dev.lock.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            mobile/package-lock.json
+            portal/package-lock.json
       - name: Install dependencies
         working-directory: backend
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.lock.txt
-          pip install $PYTEST_PINS
-      - name: Full backend suite (no coverage floor on the release spine — CI already gated it)
+          python -m pip install --require-hashes -r requirements.dev.lock.txt
+      - name: Backend tests, static checks, and supply-chain audit
         working-directory: backend
-        run: python -m pytest tests/ -m "not slow" -q
+        run: |
+          python -m pytest tests/ --cov=app --cov-report=term --cov-fail-under=97
+          ruff check .
+          ruff format --check .
+          python -m mypy
+          pip-audit -r requirements.lock.txt
       - name: Ground-truth probe (9/9)
         working-directory: backend
         run: python probe_brain.py
+      - name: Mobile test, type, crypto, and dependency gates
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run verify:vectors
+          npm audit --audit-level=moderate
+      - name: Portal test, build, and dependency gates
+        working-directory: portal
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+          npm audit --audit-level=moderate
+      - name: Package the verified portal deployment artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="mindpattern-portal-${GITHUB_REF_NAME:?missing Git ref name}.tar.gz"
+          tar -C portal -czf "$archive" dist
+          sha256sum "$archive" > "$archive.sha256"
+      - name: Preserve the verified portal deployment artifact for this release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: verified-portal-${{ github.sha }}
+          path: |
+            mindpattern-portal-${{ github.ref_name }}.tar.gz
+            mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256
+          if-no-files-found: error
+          # The GitHub Release below is the durable delivery artifact. This
+          # workflow artifact only bridges verified build -> release job.
+          retention-days: 1
 
-  image:
+  postgres:
+    # A tag must exercise the real production database dialect, not merely
+    # the in-memory SQLite unit path. This mirrors CI's Postgres contract
+    # and runs on the same Python version used in the production image.
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: write
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          POSTGRES_DB: mindpattern_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      MINDPATTERN_TEST_DB_URL: postgresql+asyncpg://postgres:ci-postgres-password@localhost:5432/mindpattern_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.dev.lock.txt
+      - name: Install locked test closure
+        working-directory: backend
+        run: python -m pip install --require-hashes -r requirements.dev.lock.txt
+      - name: Full suite against Postgres
+        working-directory: backend
+        run: python -m pytest tests/
+
+  production-integration:
+    # Pull and run the exact immutable candidate images built by `image`.
+    # This must happen before human-facing release/latest tags are created:
+    # no later Dockerfile rebuild may substitute a different artifact.
+    needs: [verify, image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Write a throwaway compose environment
+        run: |
+          {
+            echo "MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)"
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "BACKUP_KEY=$(openssl rand -base64 32)"
+            echo "MINDPATTERN_API_IMAGE=${{ needs.image.outputs.api_image }}"
+            echo "MINDPATTERN_BACKUP_IMAGE=${{ needs.image.outputs.backup_image }}"
+          } > .env
+      - name: Validate the digest-pinned production Compose contract
+        run: |
+          docker compose config --quiet
+          docker compose pull
+      - name: Start migrated stack and assert health
+        run: |
+          docker compose up -d --wait
+          curl --retry 10 --retry-delay 3 --retry-all-errors --fail --silent --show-error http://127.0.0.1:8000/healthz
+          curl --retry 10 --retry-delay 3 --retry-all-errors --fail --silent --show-error http://127.0.0.1:8000/readyz
+          docker compose exec -T api alembic current | grep -q "(head)"
+      - name: Seed a row that a backup restore must reproduce
+        run: |
+          curl --fail --silent --show-error --output /dev/null \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"backup-restore-probe","salt":"AAAAAAAAAAAAAAAAAAAAAA==","verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}' \
+            http://127.0.0.1:8000/api/v1/auth/register
+      - name: Create, authenticate, and actually restore a backup
+        run: |
+          set -euo pipefail
+          docker compose --profile backups up -d backup
+          found=0
+          attempt=1
+          while [ "$attempt" -le 20 ]; do
+            if docker compose --profile backups exec -T backup sh -ceu '
+              set -- /backups/mindpattern-*.dump.enc
+              test -f "$1"
+              test -f "$1.hmac"
+            '; then
+              found=1
+              break
+            fi
+            sleep 3
+            attempt=$((attempt + 1))
+          done
+          test "$found" = 1
+          restore_name="mindpattern-restore-${GITHUB_RUN_ID:-local}-${RANDOM}"
+          docker run --rm -d --name "$restore_name" -e POSTGRES_PASSWORD=restore \
+            postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 >/dev/null
+          cleanup_restore() { docker rm -f "$restore_name" >/dev/null 2>&1 || true; }
+          trap cleanup_restore EXIT
+          for attempt in $(seq 1 20); do
+            docker exec "$restore_name" pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec "$restore_name" pg_isready -U postgres >/dev/null
+          docker compose --profile backups exec -T backup sh -ceu '
+            set -- /backups/mindpattern-*.dump.enc
+            mindpattern-backup-mac verify "$1"
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_KEY -in "$1"
+          ' | docker exec -i "$restore_name" pg_restore --no-owner -U postgres -d postgres
+          docker exec "$restore_name" psql -U postgres -d postgres -tAc \
+            "SELECT count(*) FROM users WHERE username = 'backup-restore-probe'" | grep -qx '1'
+          docker exec "$restore_name" psql -U postgres -d postgres -tAc \
+            "SELECT to_regclass('public.alembic_version')" | grep -qx 'alembic_version'
+      - name: Tear down
+        if: always()
+        run: docker compose --profile backups down -v
+
+  image:
+    # A private-to-the-workflow candidate tag is pushed once, then this exact
+    # manifest-list digest is pulled by production-integration. Release tags
+    # are attached in the later `release-image-tags` job without rebuilding.
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      # Exposed separately so the release asset and any future deploy job
+      # can consume the immutable manifest-list digests rather than tags.
+      api_digest: ${{ steps.api-image.outputs.digest }}
+      backup_digest: ${{ steps.backup-image.outputs.digest }}
+      api_image: ${{ steps.image-references.outputs.api_image }}
+      backup_image: ${{ steps.image-references.outputs.backup_image }}
+      api_repository: ${{ steps.candidate-tags.outputs.api_repository }}
+      backup_repository: ${{ steps.candidate-tags.outputs.backup_repository }}
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -67,16 +266,69 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push the production image
+      - name: Select unique immutable-candidate tags
+        id: candidate-tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY,,}"
+          api_repository="ghcr.io/$repository"
+          backup_repository="ghcr.io/$repository-backup"
+          candidate="candidate-${GITHUB_RUN_ID:?missing run id}-${GITHUB_RUN_ATTEMPT:?missing run attempt}"
+          {
+            echo "api_tag=${api_repository}:${candidate}"
+            echo "backup_tag=${backup_repository}:${candidate}"
+            echo "api_repository=$api_repository"
+            echo "backup_repository=$backup_repository"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build and push the immutable candidate API image
+        id: api-image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: backend
+          platforms: linux/amd64,linux/arm64
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.candidate-tags.outputs.api_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+      - name: Build and push the immutable candidate backup-worker image
+        id: backup-image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backup
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.candidate-tags.outputs.backup_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+      - name: Expose immutable candidate deployment image references
+        id: image-references
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          API_IMAGE_REPOSITORY: ${{ steps.candidate-tags.outputs.api_repository }}
+          BACKUP_IMAGE_REPOSITORY: ${{ steps.candidate-tags.outputs.backup_repository }}
+          API_DIGEST: ${{ steps.api-image.outputs.digest }}
+          BACKUP_DIGEST: ${{ steps.backup-image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for digest_name in API_DIGEST BACKUP_DIGEST; do
+            digest=${!digest_name}
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || {
+              echo "$digest_name is not a manifest digest: $digest" >&2
+              exit 1
+            }
+          done
+          api_image="${API_IMAGE_REPOSITORY}@${API_DIGEST}"
+          backup_image="${BACKUP_IMAGE_REPOSITORY}@${BACKUP_DIGEST}"
+          {
+            echo "api_image=$api_image"
+            echo "backup_image=$backup_image"
+          } >> "$GITHUB_OUTPUT"
 
   release-notes:
     # Tag pushes only: publish a GitHub release seeded with the matching
@@ -90,6 +342,29 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download the portal artifact built and tested by verify
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: verified-portal-${{ github.sha }}
+          path: release-assets
+      - name: Write the digest-pinned production Compose env asset
+        env:
+          MINDPATTERN_API_IMAGE: ${{ needs.image.outputs.api_image }}
+          MINDPATTERN_BACKUP_IMAGE: ${{ needs.image.outputs.backup_image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_env="release-assets/mindpattern-release-${GITHUB_REF_NAME:?missing Git ref name}.env"
+          {
+            echo "# Generated by the MindPattern release workflow."
+            echo "# Format: deploy/release.env.example. This public fragment carries"
+            echo "# only immutable image references; put deployment secrets in a"
+            echo "# separate owner-only env file."
+            printf 'MINDPATTERN_API_IMAGE=%s\n' "$MINDPATTERN_API_IMAGE"
+            printf 'MINDPATTERN_BACKUP_IMAGE=%s\n' "$MINDPATTERN_BACKUP_IMAGE"
+          } > "$release_env"
+          ./deploy/verify-release-env.sh "$release_env"
+          sha256sum "$release_env" > "$release_env.sha256"
       - name: Extract the CHANGELOG section for this tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -106,5 +381,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body_path: /tmp/notes.md
+          files: |
+            release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz
+            release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256
+            release-assets/mindpattern-release-${{ github.ref_name }}.env
+            release-assets/mindpattern-release-${{ github.ref_name }}.env.sha256
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

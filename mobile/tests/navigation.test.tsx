@@ -21,6 +21,7 @@ vi.mock("../src/offlineQueue", () => ({
   rejectedEntryCount: vi.fn(async () => 0),
   requeueRejected: vi.fn(async () => 0),
   quarantinedQueueExists: vi.fn(async () => false),
+  hasLegacyQueueRecovery: vi.fn(async () => false),
 }));
 
 let sessionState: Record<string, unknown> = { authStatus: "loading", unlocked: false };

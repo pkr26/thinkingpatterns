@@ -21,10 +21,19 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.pool import StaticPool
 
 from .models import Base
+
+# Keep readiness independent of Alembic's CLI/runtime import path. Update
+# this with the newest single Alembic head whenever a revision is added.
+SCHEMA_HEAD = "e5a9c3d7f421"
 
 
 def rowcount(result: Any) -> int:
@@ -55,6 +64,7 @@ def build_engine(
             connect_args={"check_same_thread": False},
             echo=False,
         )
+
         # SQLite ships with foreign keys OFF by default, which silently turns
         # every ondelete=CASCADE in models.py into decoration — orphan rows
         # (e.g. entries written by a request racing account deletion) commit
@@ -64,6 +74,7 @@ def build_engine(
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+
         return engine
     # Production (asyncpg): bounded, env-tuned pool (MINDPATTERN_DB_POOL_*) —
     # the defaults otherwise come from SQLAlchemy and can't be sized for the

@@ -10,9 +10,12 @@ timezone normalization, and the atomic logout.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, select
@@ -42,8 +45,12 @@ async def test_load_rows_emits_a_sql_limit(client, app):
     await emu.register(client)
     await emu.backdate_account(client, days=10)
     for offset in range(3):
-        await emu.create_entry(client, f"day {offset}", TODAY - timedelta(days=offset),
-                               client_entry_id=f"e-lim-{offset}")
+        await emu.create_entry(
+            client,
+            f"day {offset}",
+            TODAY - timedelta(days=offset),
+            client_entry_id=f"e-lim-{offset}",
+        )
 
     statements: list[str] = []
 
@@ -211,16 +218,21 @@ async def test_tomorrow_dated_entry_is_accepted(client):
     emu = ClientEmulator("aotearoa", "pw-aotearoa")
     await emu.register(client)
     tomorrow = TODAY + timedelta(days=1)
-    created = await emu.create_entry(client, "morning pages", tomorrow,
-                                     client_entry_id="e-tomorrow")
+    created = await emu.create_entry(
+        client, "morning pages", tomorrow, client_entry_id="e-tomorrow"
+    )
     assert created["entry_date"] == tomorrow.isoformat()
 
     # Two days out is still beyond any real timezone skew: rejected.
-    beyond = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-plus2",
-        "blob": emu.encrypt_entry("too far", TODAY + timedelta(days=2), "e-plus2"),
-        "entry_date": (TODAY + timedelta(days=2)).isoformat(),
-    })
+    beyond = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-plus2",
+            "blob": emu.encrypt_entry("too far", TODAY + timedelta(days=2), "e-plus2"),
+            "entry_date": (TODAY + timedelta(days=2)).isoformat(),
+        },
+    )
     assert beyond.status_code == 422
     assert beyond.json()["code"] == "validation_error"
 
@@ -268,7 +280,10 @@ def test_is_fk_violation_classifier():
     sqlite = Exception("FOREIGN KEY constraint failed")
     assert _is_fk_violation(IntegrityError("INSERT", {}, sqlite)) is True
     # Unique violations and unwrapped errors are NOT the delete race.
-    assert _is_fk_violation(IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))) is False
+    assert (
+        _is_fk_violation(IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed")))
+        is False
+    )
 
 
 # --- P1-6: /api/v1 mounting ------------------------------------------------------
@@ -284,17 +299,28 @@ async def test_v1_and_legacy_mounts_serve_meta_identically(client):
 
 async def test_v1_mount_serves_the_full_flow(client):
     emu = ClientEmulator("v1flow", "pw-v1-flow")
-    registered = await client.post("/api/v1/auth/register", json={
-        "username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64,
-    })
+    registered = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+        },
+    )
     assert registered.status_code == 201, registered.text
     emu.user_id = registered.json()["user_id"]
     emu.token = registered.json()["token"]
 
     blob = emu.encrypt_entry("v1 entry", TODAY, "e-v1")
-    created = await client.post("/api/v1/entries", headers=emu.headers, json={
-        "client_entry_id": "e-v1", "blob": blob, "entry_date": TODAY.isoformat(),
-    })
+    created = await client.post(
+        "/api/v1/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-v1",
+            "blob": blob,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     assert created.status_code == 201, created.text
     listed = await client.get("/api/v1/entries", headers=emu.headers)
     assert [e["client_entry_id"] for e in listed.json()] == ["e-v1"]
@@ -309,8 +335,7 @@ async def test_v1_and_legacy_share_rate_buckets(client, settings):
     settings.auth_rate_limit = 3
     paths = ["/api/auth/salt", "/api/v1/auth/salt", "/api/auth/salt", "/api/v1/auth/salt"]
     statuses = [
-        (await client.post(path, json={"username": "shared-bucket"})).status_code
-        for path in paths
+        (await client.post(path, json={"username": "shared-bucket"})).status_code for path in paths
     ]
     assert statuses == [200, 200, 200, 429]
 
@@ -329,43 +354,72 @@ async def test_error_envelope_codes_across_endpoints(client, settings):
     # 405 wrong method
     _assert_envelope(await client.post("/api/meta"), 405, "method_not_allowed")
     # 401 login failure
-    bad_login = await client.post("/api/auth/login", json={
-        "username": emu.username, "verifier": base64.b64encode(b"\x00" * 32).decode(),
-    })
+    bad_login = await client.post(
+        "/api/auth/login",
+        json={
+            "username": emu.username,
+            "verifier": base64.b64encode(b"\x00" * 32).decode(),
+        },
+    )
     _assert_envelope(bad_login, 401, "invalid_credentials")
     # 409 duplicate username
-    dup = await client.post("/api/auth/register", json={
-        "username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64,
-    })
+    dup = await client.post(
+        "/api/auth/register",
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+        },
+    )
     _assert_envelope(dup, 409, "conflict")
     # 409 duplicate entry
     created = await emu.create_entry(client, "one", TODAY, client_entry_id="e-env")
-    replay = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-env", "blob": created["blob"], "entry_date": TODAY.isoformat(),
-    })
+    replay = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-env",
+            "blob": created["blob"],
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     _assert_envelope(replay, 409, "conflict")
     # 422 schema validation
     bad_schema = await client.post("/api/auth/register", json={"username": "!!"})
     _assert_envelope(bad_schema, 422, "validation_error")
     # 422 handler-level format check — same shape, string detail
-    bad_blob = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-bad", "blob": "!!!", "entry_date": TODAY.isoformat(),
-    })
+    bad_blob = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-bad",
+            "blob": "!!!",
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     _assert_envelope(bad_blob, 422, "validation_error")
     # 404 entry
     missing = await client.delete("/api/entries/never", headers=emu.headers)
     _assert_envelope(missing, 404, "not_found")
     # 403 wrong verifier on an authenticated request
     wrong_verifier = await client.request(
-        "DELETE", "/api/account", headers=emu.headers,
+        "DELETE",
+        "/api/account",
+        headers=emu.headers,
         json={"verifier": base64.b64encode(b"\x00" * 32).decode()},
     )
     _assert_envelope(wrong_verifier, 403, "verification_failed")
     # 413 body cap (middleware-produced — outside the exception handlers)
     huge = base64.b64encode(b"x" * 2_000_000).decode()
-    too_big = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-huge", "blob": huge, "entry_date": TODAY.isoformat(),
-    })
+    too_big = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-huge",
+            "blob": huge,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     _assert_envelope(too_big, 413, "payload_too_large")
     # 429 rate limiting keeps its Retry-After
     settings.auth_rate_limit = 1
@@ -381,22 +435,30 @@ async def test_quota_errors_carry_distinct_codes(client, settings):
     settings.max_entries_per_user = 1
     settings.max_user_blob_bytes = 10_000
     await emu.create_entry(client, "only one", TODAY, client_entry_id="e-q1")
-    count_full = await client.post("/api/entries", headers=emu.headers, json={
-        "client_entry_id": "e-q2",
-        "blob": emu.encrypt_entry("second", TODAY, "e-q2"),
-        "entry_date": TODAY.isoformat(),
-    })
+    count_full = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "e-q2",
+            "blob": emu.encrypt_entry("second", TODAY, "e-q2"),
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     _assert_envelope(count_full, 413, "quota_exceeded")
 
     emu2 = ClientEmulator("quotacodes2", "pw-quota-codes-2")
     await emu2.register(client)
     settings.max_entries_per_user = 100
     settings.max_user_blob_bytes = 64  # below one entry's ciphertext size
-    bytes_full = await client.post("/api/entries", headers=emu2.headers, json={
-        "client_entry_id": "e-qb",
-        "blob": emu2.encrypt_entry("too big for the byte cap", TODAY, "e-qb"),
-        "entry_date": TODAY.isoformat(),
-    })
+    bytes_full = await client.post(
+        "/api/entries",
+        headers=emu2.headers,
+        json={
+            "client_entry_id": "e-qb",
+            "blob": emu2.encrypt_entry("too big for the byte cap", TODAY, "e-qb"),
+            "entry_date": TODAY.isoformat(),
+        },
+    )
     _assert_envelope(bytes_full, 413, "blob_quota_exceeded")
 
 
@@ -453,7 +515,8 @@ async def test_delete_account_header_and_body_semantics(client):
     emu = ClientEmulator("headerwins", "pw-header-wins")
     await emu.register(client)
     response = await client.request(
-        "DELETE", "/api/account",
+        "DELETE",
+        "/api/account",
         headers={**emu.headers, "X-Account-Verifier": emu.auth_key_b64},
         json={"verifier": base64.b64encode(b"\x00" * 32).decode()},
     )
@@ -463,7 +526,8 @@ async def test_delete_account_header_and_body_semantics(client):
     emu2 = ClientEmulator("headerloses", "pw-header-loses")
     await emu2.register(client)
     refused = await client.request(
-        "DELETE", "/api/account",
+        "DELETE",
+        "/api/account",
         headers={**emu2.headers, "X-Account-Verifier": base64.b64encode(b"\x00" * 32).decode()},
         json={"verifier": emu2.auth_key_b64},
     )
@@ -525,6 +589,8 @@ def test_numeric_upper_bounds_abort_startup():
         Settings(**base, token_ttl_seconds=30 * 86_400 + 1)
     with pytest.raises(RuntimeError, match="processing_session_ttl must be <="):
         Settings(**base, processing_session_ttl=301)  # ceiling is 300 (consent copy)
+    with pytest.raises(RuntimeError, match="body_read_timeout_seconds must be <="):
+        Settings(**base, body_read_timeout_seconds=121)
     with pytest.raises(RuntimeError, match="auth_rate_window must be <="):
         Settings(**base, auth_rate_window=3601)
     with pytest.raises(RuntimeError, match="read_rate_limit must be <="):
@@ -534,6 +600,7 @@ def test_numeric_upper_bounds_abort_startup():
         **base,
         token_ttl_seconds=30 * 86_400,
         processing_session_ttl=300,  # 5 min — matches the mobile consent copy
+        body_read_timeout_seconds=120,
         export_rate_limit=100_000,
         export_rate_window=3600,
     )
@@ -597,8 +664,12 @@ async def test_get_insights_uses_a_distinct_date_scan(client, app):
     await emu.register(client)
     await emu.backdate_account(client, days=5)
     for offset in range(3):
-        await emu.create_entry(client, f"scan {offset}", TODAY - timedelta(days=offset),
-                               client_entry_id=f"e-scan-{offset}")
+        await emu.create_entry(
+            client,
+            f"scan {offset}",
+            TODAY - timedelta(days=offset),
+            client_entry_id=f"e-scan-{offset}",
+        )
 
     statements: list[str] = []
 
@@ -633,8 +704,10 @@ async def test_logout_epoch_bump_is_a_single_atomic_update(client, app):
     epoch_updates = [s for s in statements if "UPDATE" in s.upper() and "token_epoch" in s]
     assert epoch_updates, statements
     # SET token_epoch = token_epoch + 1 — atomic in the DB, not read-modify-write.
-    assert any("token_epoch +" in s or "token_epoch +(" in s or "(token_epoch +" in s
-               for s in epoch_updates), epoch_updates
+    assert any(
+        "token_epoch +" in s or "token_epoch +(" in s or "(token_epoch +" in s
+        for s in epoch_updates
+    ), epoch_updates
 
     from app.models import User
 
@@ -651,6 +724,220 @@ async def test_logout_purges_processing_sessions(client, app):
 
     assert (await client.post("/api/auth/logout", headers=emu.headers)).status_code == 204
     assert len(app.state.key_store) == 0
+
+
+async def test_logout_serializes_with_inflight_processing_session_creation(
+    client, app, monkeypatch
+):
+    """A session mint that got the lifecycle fence first is purged before
+    logout returns. The inverse ordering is covered below."""
+    from app.api import insights as insights_api
+    from app.locks import lifecycle_locks
+
+    emu = ClientEmulator("logoutsessionorder", "pw-logout-session-order")
+    await emu.register(client)
+    real_fresh = insights_api._fresh_processing_session_user
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_fresh(*args, **kwargs):
+        fresh = await real_fresh(*args, **kwargs)
+        entered.set()
+        await release.wait()
+        return fresh
+
+    monkeypatch.setattr(insights_api, "_fresh_processing_session_user", paused_fresh)
+    create = asyncio.create_task(
+        client.post(
+            "/api/processing/sessions", headers=emu.headers, json={"data_key": emu.data_key_b64}
+        )
+    )
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    logout = asyncio.create_task(client.post("/api/auth/logout", headers=emu.headers))
+    key = f"llm-lifecycle:{emu.user_id}"
+    for _ in range(200):
+        entry = lifecycle_locks._locks.get(key)  # noqa: SLF001 - lock-order regression
+        if entry is not None and entry.refs >= 2:
+            break
+        await asyncio.sleep(0.005)
+    else:
+        release.set()
+        await asyncio.gather(create, logout)
+        raise AssertionError("logout never queued behind processing-session creation")
+    assert logout.done() is False
+
+    release.set()
+    created, logged_out = await asyncio.gather(create, logout)
+    assert created.status_code == 201, created.text
+    assert logged_out.status_code == 204, logged_out.text
+    assert len(app.state.key_store) == 0
+
+
+async def test_prelogout_processing_session_cannot_mint_after_logout(client, app, monkeypatch):
+    """A request authenticated before logout re-checks its saved epoch after
+    it acquires the lifecycle fence, so it cannot repopulate the keystore."""
+    from app.api import insights as insights_api
+
+    emu = ClientEmulator("stalesessionmint", "pw-stale-session-mint")
+    await emu.register(client)
+    real_locks = insights_api.lifecycle_locks
+    reached_fence = asyncio.Event()
+    release = asyncio.Event()
+
+    @asynccontextmanager
+    async def delayed_hold(key):
+        reached_fence.set()
+        await release.wait()
+        async with real_locks.hold(key) as lock:
+            yield lock
+
+    # Delay only the processing-session endpoint after its auth dependency
+    # has accepted the old bearer. auth.logout retains the real lock object.
+    monkeypatch.setattr(insights_api, "lifecycle_locks", SimpleNamespace(hold=delayed_hold))
+    create = asyncio.create_task(
+        client.post(
+            "/api/processing/sessions", headers=emu.headers, json={"data_key": emu.data_key_b64}
+        )
+    )
+    await asyncio.wait_for(reached_fence.wait(), timeout=2)
+    logged_out = await client.post("/api/auth/logout", headers=emu.headers)
+    assert logged_out.status_code == 204, logged_out.text
+    release.set()
+    stale_create = await create
+    assert stale_create.status_code == 401, stale_create.text
+    assert stale_create.json()["code"] == "unauthorized"
+    assert len(app.state.key_store) == 0
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_status"),
+    [("create", 201), ("replace", 200), ("delete", 204)],
+)
+async def test_entry_mutations_serialize_with_account_deletion(
+    client, app, monkeypatch, operation, expected_status
+):
+    """An entry mutation that won the lifecycle fence completes before the
+    account cascade; deletion then removes every resulting row without a
+    stale-instance/FK 500. All three write routes use the same fence."""
+    from app.api import entries as entries_api
+    from app.locks import lifecycle_locks
+
+    emu = ClientEmulator(f"entrydelete{operation}", "pw-entry-delete-race")
+    await emu.register(client)
+    entry_id = f"e-delete-{operation}"
+    if operation != "create":
+        await emu.create_entry(client, "before deletion", TODAY, client_entry_id=entry_id)
+
+    real_fresh = entries_api._fresh_active_entry_user
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_fresh(*args, **kwargs):
+        fresh = await real_fresh(*args, **kwargs)
+        entered.set()
+        await release.wait()
+        return fresh
+
+    monkeypatch.setattr(entries_api, "_fresh_active_entry_user", paused_fresh)
+    if operation == "create":
+        mutation = asyncio.create_task(
+            client.post(
+                "/api/entries",
+                headers=emu.headers,
+                json={
+                    "client_entry_id": entry_id,
+                    "blob": emu.encrypt_entry("during deletion", TODAY, entry_id),
+                    "entry_date": TODAY.isoformat(),
+                },
+            )
+        )
+    elif operation == "replace":
+        mutation = asyncio.create_task(
+            client.put(
+                f"/api/entries/{entry_id}",
+                headers=emu.headers,
+                json={
+                    "blob": emu.encrypt_entry("replacement", TODAY, entry_id),
+                    "entry_date": TODAY.isoformat(),
+                },
+            )
+        )
+    else:
+        mutation = asyncio.create_task(
+            client.delete(f"/api/entries/{entry_id}", headers=emu.headers)
+        )
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    deletion = asyncio.create_task(
+        client.request(
+            "DELETE",
+            "/api/account",
+            headers=emu.headers,
+            json={"verifier": emu.auth_key_b64},
+        )
+    )
+    key = f"llm-lifecycle:{emu.user_id}"
+    for _ in range(200):
+        entry = lifecycle_locks._locks.get(key)  # noqa: SLF001 - lock-order regression
+        if entry is not None and entry.refs >= 2:
+            break
+        await asyncio.sleep(0.005)
+    else:
+        release.set()
+        await asyncio.gather(mutation, deletion)
+        raise AssertionError("account deletion never queued behind entry mutation")
+    assert deletion.done() is False
+
+    release.set()
+    mutation_response, deletion_response = await asyncio.gather(mutation, deletion)
+    assert mutation_response.status_code == expected_status, mutation_response.text
+    assert deletion_response.status_code == 204, deletion_response.text
+    assert (await client.get("/api/entries", headers=emu.headers)).status_code == 401
+
+
+async def test_entry_mutation_rechecks_account_after_deletion_wins(client, monkeypatch):
+    """A bearer authenticated before DELETE /account cannot later insert an
+    orphan: the entry route re-reads the user under the lifecycle fence."""
+    from app.api import entries as entries_api
+
+    emu = ClientEmulator("staleentrydelete", "pw-stale-entry-delete")
+    await emu.register(client)
+    real_locks = entries_api.lifecycle_locks
+    reached_fence = asyncio.Event()
+    release = asyncio.Event()
+
+    @asynccontextmanager
+    async def delayed_hold(key):
+        reached_fence.set()
+        await release.wait()
+        async with real_locks.hold(key) as lock:
+            yield lock
+
+    # Delay only the entry route after its auth dependency accepts the old
+    # bearer. Account deletion keeps the real lifecycle lock object.
+    monkeypatch.setattr(entries_api, "lifecycle_locks", SimpleNamespace(hold=delayed_hold))
+    mutation = asyncio.create_task(
+        client.post(
+            "/api/entries",
+            headers=emu.headers,
+            json={
+                "client_entry_id": "e-stale-delete",
+                "blob": emu.encrypt_entry("must not persist", TODAY, "e-stale-delete"),
+                "entry_date": TODAY.isoformat(),
+            },
+        )
+    )
+    await asyncio.wait_for(reached_fence.wait(), timeout=2)
+    deleted = await client.request(
+        "DELETE",
+        "/api/account",
+        headers=emu.headers,
+        json={"verifier": emu.auth_key_b64},
+    )
+    assert deleted.status_code == 204, deleted.text
+    release.set()
+    stale_mutation = await mutation
+    assert stale_mutation.status_code == 401, stale_mutation.text
+    assert stale_mutation.json()["code"] == "unauthorized"
 
 
 # --- P2-16: version single-sourcing ---------------------------------------------------
@@ -686,11 +973,15 @@ async def _call_asgi(app, scope, incoming):
     return sent
 
 
-def _xff_scope(with_xff: bool) -> dict:
+def _xff_scope(with_xff: bool, client: tuple[str, int] | None = None) -> dict:
     return {
-        "type": "http", "asgi": {"version": "2.3"}, "http_version": "1.1",
-        "method": "GET", "path": "/x",
+        "type": "http",
+        "asgi": {"version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "path": "/x",
         "headers": [(b"x-forwarded-for", b"1.2.3.4")] if with_xff else [],
+        "client": client,
     }
 
 
@@ -713,8 +1004,13 @@ async def test_xff_no_warning_when_trusted_or_absent(caplog):
         await send({"type": "http.response.body", "body": b"{}"})
 
     with caplog.at_level(logging.WARNING, logger="mindpattern"):
-        trusted = HardeningMiddleware(ok_app, max_body_bytes=100, trust_proxy_headers=True)
-        await _call_asgi(trusted, _xff_scope(with_xff=True), [])
+        trusted = HardeningMiddleware(
+            ok_app,
+            max_body_bytes=100,
+            trust_proxy_headers=True,
+            trusted_proxy_ips=["10.0.0.9"],
+        )
+        await _call_asgi(trusted, _xff_scope(with_xff=True, client=("10.0.0.9", 1234)), [])
         untrusted = HardeningMiddleware(ok_app, max_body_bytes=100, trust_proxy_headers=False)
         await _call_asgi(untrusted, _xff_scope(with_xff=False), [])
     assert not [r for r in caplog.records if "X-Forwarded-For" in r.message]

@@ -10,8 +10,16 @@
  * date stamp per patient, never content): patterns whose first_seen is
  * newer than the last visit are flagged — the pre-session delta.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type Note, type Patient, type PortalEntry } from "../api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiError,
+  api,
+  THERAPIST_ENTRY_PAGE_SIZE,
+  THERAPIST_NOTE_PAGE_SIZE,
+  type Note,
+  type Patient,
+  type PortalEntry,
+} from "../api";
 import {
   decryptEntry,
   decryptInsights,
@@ -37,12 +45,28 @@ interface OpenNote extends Note {
 }
 
 interface EntryRow {
+  id: string;
   entry_date: string;
   text: string;
   sentiment: number | null | undefined;
 }
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+// The server also caps each page at 2 MiB of raw ciphertext.  Keep the
+// client-side aggregate finite: an evidence card describes at most 60 dates,
+// and 200 entries is already substantially more than a clinician can review
+// in one drill-down without turning the browser into an unbounded cache.
+const ENTRY_PAGE_SIZE = THERAPIST_ENTRY_PAGE_SIZE;
+const MAX_ENTRY_PAGES = 8;
+const MAX_EVIDENCE_ENTRIES = ENTRY_PAGE_SIZE * MAX_ENTRY_PAGES;
+const NOTE_PAGE_SIZE = THERAPIST_NOTE_PAGE_SIZE;
+const MAX_NOTE_PAGES = 20;
+const MAX_NOTES_PER_LOAD = 1_000;
+// A revision mismatch means the server refused to combine pages from two
+// collection snapshots. Restart once from offset zero; retrying forever lets
+// a busy or hostile server turn a read-only chart into an unbounded request
+// loop.
+const MAX_COLLECTION_CHANGE_RESTARTS = 1;
 
 const lastVisitKey = (therapistId: string, userId: string): string =>
   `mindpattern.lastVisit.${therapistId}.${userId}`;
@@ -150,7 +174,32 @@ function newNoteId(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function PatientView(props: { patient: Patient; session: PortalSession; onBack: () => void }): React.JSX.Element {
+function patternKey(pattern: PatternPayload, index: number): string {
+  return pattern.detail.pattern_pid ?? `${pattern.kind}:${pattern.label}:${index}`;
+}
+
+function isRetryableCollectionChange(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409 && error.code === "collection_changed";
+}
+
+async function loadStableCollection<T>(load: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await load();
+    } catch (error) {
+      if (!isRetryableCollectionChange(error) || attempt >= MAX_COLLECTION_CHANGE_RESTARTS) {
+        throw error;
+      }
+    }
+  }
+}
+
+export function PatientView(props: {
+  patient: Patient;
+  session: PortalSession;
+  onBack: () => void;
+  onSignOut?: () => void;
+}): React.JSX.Element {
   const { patient, session } = props;
   const [patterns, setPatterns] = useState<PatternPayload[] | null>(null);
   const [phaseNote, setPhaseNote] = useState<string | null>(null);
@@ -167,43 +216,68 @@ export function PatientView(props: { patient: Patient; session: PortalSession; o
   const [noteQuery, setNoteQuery] = useState("");
   /** The note being edited (id + textarea buffer). */
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  // Every async decrypt/load carries this generation.  Leaving the patient,
+  // signing out, or selecting another pattern makes old plaintext results
+  // ineligible to repopulate React state.
+  const loadGeneration = useRef(0);
+  const drilldownGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const operation = ++loadGeneration.current;
     setError("");
-    try {
-      const summary = await api.patientInsights(patient.user_id);
-      if (!summary.blob || summary.phase !== "insight") {
-        setPhaseNote(
-          summary.phase === "baseline"
-            ? `Still in the baseline phase — ${summary.days_remaining} active day(s) until patterns surface.`
-            : "No pattern data has been computed yet for this patient.",
-        );
-        setPatterns([]);
-        return;
-      }
-      if (!patient.ephemeral_pub || !patient.wrapped_key) {
-        throw new Error("this consent carries no key material");
-      }
-      const dataKey = await unwrapPatientDataKey(
-        session.privateKey,
-        patient.ephemeral_pub,
-        patient.wrapped_key,
-        patient.user_id,
-        session.userId,
-        session.publicKeyB64,
-      );
-      const payload = await decryptInsights(dataKey, patient.user_id, summary.blob);
-      const surfaced = sortForReview(payload.stats.patterns ?? []);
-      // The pre-session delta (2026-09-17 fix): the stamp moves ONLY on the
-      // explicit "Mark reviewed" action — a 30-second glance no longer
-      // resets the delta, and a second browser sees the same anchor.
-      const stamp = localStore.get(lastVisitKey(session.userId, patient.user_id));
-      setLastReviewed(stamp ? dayOf(stamp) : null);
-      setNewCount(stamp ? surfaced.filter((p) => p.detail.first_seen && p.detail.first_seen > stamp).length : surfaced.length);
-      setStats(payload.stats);
-      setPatterns(surfaced);
+    setPatterns(null);
+    setPhaseNote(null);
+    setStats(null);
+    setNotes([]);
+    setSelected(null);
+    setEntries(null);
+    setNoteQuery("");
+    setEditing(null);
 
-      const noteRows = await api.notes(patient.user_id);
+    // Notes are intentionally available during the patient's baseline
+    // phase, and after a sharing revoke where the server permits the
+    // therapist's own record.  Load them independently of insights so an
+    // early baseline return cannot silently hide existing notes.
+    const notesLoad = (async (): Promise<void> => {
+      const noteRows = await loadStableCollection(async (): Promise<Note[]> => {
+        const rows: Note[] = [];
+        let offset = 0;
+        let revision: string | undefined;
+        // One extra request is a bounded terminal probe: compatibility mode
+        // infers a cursor from a headerless full final page, so exactly twenty
+        // complete pages must be allowed to prove there is no twenty-first.
+        for (let page = 0; page <= MAX_NOTE_PAGES; page += 1) {
+          const currentPage = await api.notes(
+            patient.user_id,
+            revision === undefined ? { offset } : { offset, expectedRevision: revision },
+          );
+          // A revision must be present on the first modern page and stay
+          // constant thereafter. A header appearing only after a legacy
+          // first page cannot prove that the already-retained rows belong to
+          // its snapshot, so fail rather than silently mixing histories.
+          if (revision === undefined && currentPage.revision !== undefined) {
+            if (offset !== 0) {
+              throw new Error("server changed the note pagination protocol mid-load");
+            }
+            revision = currentPage.revision;
+          } else if (revision !== undefined && currentPage.revision !== revision) {
+            throw new Error("server returned an inconsistent note snapshot revision");
+          }
+          if (page === MAX_NOTE_PAGES) {
+            if (currentPage.notes.length > 0) {
+              throw new Error("note history exceeds this portal's safe page limit");
+            }
+            break;
+          }
+          if (rows.length + currentPage.notes.length > MAX_NOTES_PER_LOAD) {
+            throw new Error("note history exceeds this portal's safe entry limit");
+          }
+          rows.push(...currentPage.notes);
+          if (currentPage.nextOffset === null) break;
+          offset = currentPage.nextOffset;
+        }
+        return rows;
+      });
       const opened: OpenNote[] = [];
       for (const row of noteRows) {
         try {
@@ -212,14 +286,67 @@ export function PatientView(props: { patient: Patient; session: PortalSession; o
           opened.push({ ...row, text: "(note could not be decrypted with this account's key)" });
         }
       }
-      setNotes(opened);
+      if (operation === loadGeneration.current) setNotes(opened);
+    })().catch((err: unknown) => {
+      if (operation === loadGeneration.current) {
+        setError(err instanceof Error ? err.message : "could not load therapist notes");
+      }
+    });
+
+    try {
+      const summary = await api.patientInsights(patient.user_id);
+      if (!summary.blob || summary.phase !== "insight") {
+        if (operation !== loadGeneration.current) return;
+        setPhaseNote(
+          summary.phase === "baseline"
+            ? `Still in the baseline phase — ${summary.days_remaining} active day(s) until patterns surface. Your private clinician notes remain available below.`
+            : "No pattern data has been computed yet for this patient.",
+        );
+        setPatterns([]);
+      } else {
+        if (!patient.ephemeral_pub || !patient.wrapped_key) {
+          throw new Error("this consent carries no key material");
+        }
+        const dataKey = await unwrapPatientDataKey(
+          session.privateKey,
+          patient.ephemeral_pub,
+          patient.wrapped_key,
+          patient.user_id,
+          session.userId,
+          session.publicKeyB64,
+        );
+        let payload: Awaited<ReturnType<typeof decryptInsights>>;
+        try {
+          payload = await decryptInsights(dataKey, patient.user_id, summary.blob);
+        } finally {
+          dataKey.fill(0);
+        }
+        if (operation !== loadGeneration.current) return;
+        const surfaced = sortForReview(payload.stats.patterns ?? []);
+        // The pre-session delta (2026-09-17 fix): the stamp moves ONLY on the
+        // explicit "Mark reviewed" action — a 30-second glance no longer
+        // resets the delta, and a second browser sees the same anchor.
+        const stamp = localStore.get(lastVisitKey(session.userId, patient.user_id));
+        setLastReviewed(stamp ? dayOf(stamp) : null);
+        setNewCount(stamp ? surfaced.filter((p) => p.detail.first_seen && p.detail.first_seen > stamp).length : surfaced.length);
+        setStats(payload.stats);
+        setPatterns(surfaced);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "could not load this patient");
+      if (operation === loadGeneration.current) {
+        setError(err instanceof Error ? err.message : "could not load this patient");
+      }
+    } finally {
+      await notesLoad;
     }
   }, [patient, session]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadGeneration.current += 1;
+      drilldownGeneration.current += 1;
+    };
   }, [load]);
 
   const selectedPid = selected?.detail.pattern_pid ?? null;
@@ -230,44 +357,92 @@ export function PatientView(props: { patient: Patient; session: PortalSession; o
   const generalNotes = useMemo(() => notes.filter((n) => n.pattern_pid === null), [notes]);
 
   const openDrilldown = async (pattern: PatternPayload) => {
+    const operation = ++drilldownGeneration.current;
     setSelected(pattern);
     setEntries(null);
     setError("");
     try {
       const dates = pattern.detail.evidence_dates ?? [];
       if (dates.length === 0) {
-        setEntries([]);
+        if (operation === drilldownGeneration.current) setEntries([]);
         return;
       }
-      const rows = await api.patientEntries(patient.user_id, {
-        since: dates[0],
-        until: dates[dates.length - 1]!,
-        limit: 500,
+      if (!patient.ephemeral_pub || !patient.wrapped_key) {
+        throw new Error("this consent carries no key material");
+      }
+      const orderedDates = [...dates].sort();
+      const rows = await loadStableCollection(async (): Promise<PortalEntry[]> => {
+        const snapshotRows: PortalEntry[] = [];
+        let offset = 0;
+        let revision: string | undefined;
+        // A headerless full page from an older backend has an ambiguous end.
+        // Permit one empty probe after the retained-page cap, but never retain
+        // its contents: an actual extra entry still fails closed below.
+        for (let page = 0; page <= MAX_ENTRY_PAGES; page += 1) {
+          const pageParams = {
+            since: orderedDates[0],
+            until: orderedDates[orderedDates.length - 1]!,
+            offset,
+          };
+          const currentPage = await api.patientEntries(
+            patient.user_id,
+            revision === undefined ? pageParams : { ...pageParams, expectedRevision: revision },
+          );
+          if (revision === undefined && currentPage.revision !== undefined) {
+            if (offset !== 0) {
+              throw new Error("server changed the evidence pagination protocol mid-load");
+            }
+            revision = currentPage.revision;
+          } else if (revision !== undefined && currentPage.revision !== revision) {
+            throw new Error("server returned an inconsistent evidence snapshot revision");
+          }
+          if (page === MAX_ENTRY_PAGES) {
+            if (currentPage.entries.length > 0) {
+              throw new Error("evidence window exceeds this portal's safe page limit");
+            }
+            break;
+          }
+          if (snapshotRows.length + currentPage.entries.length > MAX_EVIDENCE_ENTRIES) {
+            throw new Error("evidence window exceeds this portal's safe entry limit");
+          }
+          snapshotRows.push(...currentPage.entries);
+          if (currentPage.nextOffset === null) break;
+          offset = currentPage.nextOffset;
+        }
+        return snapshotRows;
       });
       const dataKey = await unwrapPatientDataKey(
         session.privateKey,
-        patient.ephemeral_pub ?? "",
-        patient.wrapped_key ?? "",
+        patient.ephemeral_pub,
+        patient.wrapped_key,
         patient.user_id,
         session.userId,
         session.publicKeyB64,
       );
       const keep = new Set(dates);
-      const evidenceDates = new Set(rows.map((r) => r.entry_date).filter((d) => keep.has(d)));
       const decrypted: EntryRow[] = [];
-      for (const row of rows as PortalEntry[]) {
-        if (!evidenceDates.has(row.entry_date)) continue;
-        const payload = await decryptEntry(dataKey, patient.user_id, row);
-        decrypted.push({
-          entry_date: row.entry_date,
-          text: payload.text,
-          sentiment: payload.sentiment,
-        });
+      const seen = new Set<string>();
+      try {
+        for (const row of rows) {
+          if (!keep.has(row.entry_date) || seen.has(row.id)) continue;
+          seen.add(row.id);
+          const payload = await decryptEntry(dataKey, patient.user_id, row);
+          decrypted.push({
+            id: row.id,
+            entry_date: row.entry_date,
+            text: payload.text,
+            sentiment: payload.sentiment,
+          });
+        }
+      } finally {
+        dataKey.fill(0);
       }
-      decrypted.sort((a, b) => (a.entry_date < b.entry_date ? 1 : -1));
-      setEntries(decrypted);
+      decrypted.sort((a, b) => b.entry_date.localeCompare(a.entry_date) || a.id.localeCompare(b.id));
+      if (operation === drilldownGeneration.current) setEntries(decrypted);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "could not load the evidence entries");
+      if (operation === drilldownGeneration.current) {
+        setError(err instanceof Error ? err.message : "could not load the evidence entries");
+      }
     }
   };
 
@@ -349,6 +524,7 @@ export function PatientView(props: { patient: Patient; session: PortalSession; o
         <div className="no-print" style={{ display: "flex", gap: 8 }}>
           <Button label="Print session summary" small onPress={() => window.print()} />
           <Button label="Back to patients" small onPress={props.onBack} />
+          {props.onSignOut && <Button label="Sign out" small danger onPress={props.onSignOut} />}
         </div>
       </header>
 
@@ -401,11 +577,15 @@ export function PatientView(props: { patient: Patient; session: PortalSession; o
               </div>
             ))}
           </div>
-          <Button label="Back to all patterns" small onPress={() => { setSelected(null); setEntries(null); }} />
+          <Button label="Back to all patterns" small onPress={() => {
+            drilldownGeneration.current += 1;
+            setSelected(null);
+            setEntries(null);
+          }} />
         </Card>
       ) : (
-        patterns?.map((pattern) => (
-          <Card key={`${pattern.kind}:${pattern.label}`} title={pattern.detail.sensitive ? "A difficult thought has been returning" : pattern.label}>
+        patterns?.map((pattern, index) => (
+          <Card key={patternKey(pattern, index)} title={pattern.detail.sensitive ? "A difficult thought has been returning" : pattern.label}>
             <NoteText>{describePattern(pattern)}</NoteText>
             {pattern.detail.is_new && <NoteText tone="ok">new since your last visit window</NoteText>}
             <Button label="See the evidence" small onPress={() => void openDrilldown(pattern)} />
@@ -421,7 +601,7 @@ export function PatientView(props: { patient: Patient; session: PortalSession; o
             <NoteText>No decryptable entries behind this pattern (the evidence window may predate the shared corpus).</NoteText>
           )}
           {entries?.map((entry) => (
-            <div key={entry.entry_date} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8 }}>
+            <div key={entry.id} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8 }}>
               <strong style={{ color: theme.text, fontSize: 13 }}>{entry.entry_date}</strong>
               {typeof entry.sentiment === "number" && (
                 <span style={{ color: theme.muted, fontSize: 12, marginLeft: 8 }}>mood {entry.sentiment.toFixed(2)}</span>
@@ -549,7 +729,9 @@ ${tpl}` : tpl)}
         <div>
           <Button label={busy ? "Saving…" : "Save note"} onPress={saveNote} disabled={busy || !draft.trim()} />
         </div>
-        <NoteText>Notes are encrypted under YOUR password before leaving this page — the patient never sees them.</NoteText>
+        <NoteText>
+          Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it.
+        </NoteText>
       </Card>
 
       {/* Print-only session summary (2026-09-17): everything a paper record
@@ -568,8 +750,8 @@ ${tpl}` : tpl)}
             {typeof stats.avg_sentiment === "number" && ` · average reading ${stats.avg_sentiment.toFixed(2)}`}
           </p>
         )}
-        {(patterns ?? []).map((pattern) => (
-          <div key={`${pattern.kind}:${pattern.label}`} style={{ borderTop: "1px solid #999", paddingTop: 6, marginTop: 6 }}>
+        {(patterns ?? []).map((pattern, index) => (
+          <div key={patternKey(pattern, index)} style={{ borderTop: "1px solid #999", paddingTop: 6, marginTop: 6 }}>
             <strong style={{ fontSize: 13 }}>{pattern.detail.sensitive ? "A difficult thought (non-quoting)" : `${pattern.kind} — ${pattern.label}`}</strong>
             <p style={{ fontSize: 12, margin: "2px 0" }}>{describePattern(pattern)}</p>
             <p style={{ fontSize: 11, color: "#333" }}>

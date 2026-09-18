@@ -20,6 +20,7 @@ Ground truth:
      dips swamp this contrast in the mixed corpus)
   H. NO other theme-mood association exists         → no other mood_correlation/link
 """
+
 from __future__ import annotations
 
 import random
@@ -79,11 +80,22 @@ SLEEP_VARIANTS = [
     "i can't sleep, my mind just won't stop tonight",
     "can't sleep, my mind won't stop racing",
 ]
-FAMILY_DAYS = {date(2026, 6, 21), date(2026, 6, 28), date(2026, 7, 2),
-               date(2026, 7, 7), date(2026, 7, 14), date(2026, 7, 21),
-               date(2026, 7, 26), date(2026, 8, 4), date(2026, 8, 10),
-               date(2026, 8, 11), date(2026, 8, 16), date(2026, 8, 18),
-               date(2026, 8, 25), date(2026, 9, 1)}
+FAMILY_DAYS = {
+    date(2026, 6, 21),
+    date(2026, 6, 28),
+    date(2026, 7, 2),
+    date(2026, 7, 7),
+    date(2026, 7, 14),
+    date(2026, 7, 21),
+    date(2026, 7, 26),
+    date(2026, 8, 4),
+    date(2026, 8, 10),
+    date(2026, 8, 11),
+    date(2026, 8, 16),
+    date(2026, 8, 18),
+    date(2026, 8, 25),
+    date(2026, 9, 1),
+}
 # Recalibrated 2026-09 (10 → 14 visit days, all four additions Tuesdays):
 # the honest engine — full-family Benjamini-Hochberg over PRE-gate
 # p-values, Welch n deflated for residual autocorrelation — needs more
@@ -93,10 +105,18 @@ FAMILY_DAYS = {date(2026, 6, 21), date(2026, 6, 28), date(2026, 7, 2),
 # mood tie and C's shift survive. Side effect accepted as honest: visits
 # now genuinely cluster on Tuesdays, so a true temporal:family pattern
 # may also store.
-SLEEP_PHRASE_DAYS = {date(2026, 6, 20), date(2026, 6, 30), date(2026, 7, 8),
-                     date(2026, 7, 17), date(2026, 7, 27), date(2026, 8, 3),
-                     date(2026, 8, 12), date(2026, 8, 22), date(2026, 8, 29),
-                     date(2026, 9, 2)}
+SLEEP_PHRASE_DAYS = {
+    date(2026, 6, 20),
+    date(2026, 6, 30),
+    date(2026, 7, 8),
+    date(2026, 7, 17),
+    date(2026, 7, 27),
+    date(2026, 8, 3),
+    date(2026, 8, 12),
+    date(2026, 8, 22),
+    date(2026, 8, 29),
+    date(2026, 9, 2),
+}
 # D: a non-lexicon topic, phrased differently every time (so phrase
 # clustering can NOT catch it), with a small early base and a strong late
 # rise — only topic discovery can surface it.
@@ -116,21 +136,21 @@ day = start
 carry = 0.0
 while day <= end:
     if day >= date(2026, 8, 8):
-        phi, amplitude = 0.60, 0.70   # F: carryover rises; G: marginal swings grow ~2.5x
+        phi, amplitude = 0.60, 0.70  # F: carryover rises; G: marginal swings grow ~2.5x
     else:
         phi, amplitude = 0.05, 0.15
     carry = phi * carry + (1 - phi) * rng.uniform(-amplitude, amplitude)
     value = 0.05 + carry
-    if day >= date(2026, 8, 15):      # C: sustained decline
+    if day >= date(2026, 8, 15):  # C: sustained decline
         value -= 0.55
     mood[day] = max(-1.0, min(1.0, value))
     day += timedelta(days=1)
 
-for d in FAMILY_DAYS:                 # E: day after a family visit reads low
+for d in FAMILY_DAYS:  # E: day after a family visit reads low
     for k in (1, 2):
         if d + timedelta(days=k) in mood:
             mood[d + timedelta(days=k)] = min(mood[d + timedelta(days=k)], -0.55)
-for d in mood:                        # A: Sundays read low (work dread)
+for d in mood:  # A: Sundays read low (work dread)
     if d.weekday() == 6:
         mood[d] = min(mood[d], -0.45)
 
@@ -200,16 +220,22 @@ def check(name: str, ok: bool) -> None:
 
 
 check("A temporal:work (Sundays)", "temporal:work" in pats)
-check("A mood_correlation:work lower",
-      pats.get("mood_correlation:work", None) is not None
-      and pats["mood_correlation:work"].detail.get("direction") == "lower")
+check(
+    "A mood_correlation:work lower",
+    pats.get("mood_correlation:work", None) is not None
+    and pats["mood_correlation:work"].detail.get("direction") == "lower",
+)
 check("B rumination (sleep phrase)", any(p.kind == "rumination" for p in pats.values()))
 check("C mood_shift:lower", "mood_shift:lower" in pats)
-check("D topic:guitar (rising, varied phrasing)", "topic:guitar" in pats
-      and pats["topic:guitar"].detail.get("trend") == "rising")
-check("E link:family lower",
-      pats.get("link:family", None) is not None
-      and pats["link:family"].detail.get("direction") == "lower")
+check(
+    "D topic:guitar (rising, varied phrasing)",
+    "topic:guitar" in pats and pats["topic:guitar"].detail.get("trend") == "rising",
+)
+check(
+    "E link:family lower",
+    pats.get("link:family", None) is not None
+    and pats["link:family"].detail.get("direction") == "lower",
+)
 # F (inertia) is asserted HERE on an isolated corpus (same convention as
 # G below): the main corpus's planted dips (A Sundays, E family days) and
 # the C decline cap the measured carryover at r ≈ 0.5, and under the
@@ -259,14 +285,17 @@ if not _g_ok:  # candidate on first qualification; a later recompute surfaces it
     _g_state = update(_g_state.new_state, _g_entries, end + timedelta(days=2))
     _g_ok = any(p.kind == "instability" for p in _g_state.surfaced)
 check("G instability (asserted on isolated corpus)", _g_ok)
-false_pos = [p for p in pats.values()
-             if p.kind in ("mood_correlation", "link")
-             and p.label not in ("work", "family")]
-false_topics = [p for p in pats.values()
-                if p.kind == "topic" and p.label != "guitar"]
-check("H no confound/false associations",
-      (not false_pos or str([(p.kind, p.label, p.detail.get("direction")) for p in false_pos]) == "")
-      and not false_topics)
+false_pos = [
+    p
+    for p in pats.values()
+    if p.kind in ("mood_correlation", "link") and p.label not in ("work", "family")
+]
+false_topics = [p for p in pats.values() if p.kind == "topic" and p.label != "guitar"]
+check(
+    "H no confound/false associations",
+    (not false_pos or str([(p.kind, p.label, p.detail.get("direction")) for p in false_pos]) == "")
+    and not false_topics,
+)
 
 # A FAILing probe must fail CI: exit nonzero so the ground-truth check can
 # gate builds instead of only printing.

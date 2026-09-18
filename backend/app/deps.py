@@ -29,6 +29,7 @@ DEFAULT_ERROR_CODES: dict[int, str] = {
     403: "forbidden",
     404: "not_found",
     405: "method_not_allowed",
+    408: "request_timeout",
     409: "conflict",
     410: "gone",
     413: "payload_too_large",
@@ -120,3 +121,14 @@ async def require_therapist(
             code="forbidden",
         )
     return user
+
+
+async def require_sharing_enabled(request: Request) -> None:
+    """Fail closed when the controlled therapist-sharing feature is off.
+
+    A disabled deployment must not expose either public therapist elevation
+    or patient pairing/grant routes. Use a flat 404 rather than advertising
+    whether a sensitive feature is merely administratively disabled.
+    """
+    if not bool(getattr(request.app.state.settings, "therapist_sharing_enabled", False)):
+        raise ApiError(status_code=404, detail="not found", code="not_found")

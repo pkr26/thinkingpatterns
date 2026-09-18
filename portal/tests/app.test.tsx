@@ -12,6 +12,7 @@ vi.mock("../src/api", async (importOriginal) => {
   return {
     ...actual,
     auth: {
+      meta: vi.fn(async () => ({ sharing_available: true })),
       saltFor: vi.fn(async () => ({ salt: "QUJDREVGR0hJSktMTU5P" })),
       login: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
       registerTherapist: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
@@ -25,8 +26,8 @@ vi.mock("../src/api", async (importOriginal) => {
       })),
       patients: vi.fn(async () => []),
       patientInsights: vi.fn(async () => ({ phase: "baseline", active_days: 0, streak: 0, days_remaining: 30, blob: null })),
-      patientEntries: vi.fn(async () => []),
-      notes: vi.fn(async () => []),
+      patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
+      notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
       createNote: vi.fn(async () => ({})),
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
@@ -60,7 +61,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
   };
 });
 
-const { api, clearSession } = await import("../src/api");
+const { api, clearSession, hasSession } = await import("../src/api");
 const { App } = await import("../src/App");
 const { render, flush, textOf, press, typeInto } = await import("./helpers/rtr");
 
@@ -129,6 +130,43 @@ describe("App", () => {
     await press(root, "Sign out");
     await flush();
     expect(textOf(root)).toContain("Create a therapist account instead");
+  });
+
+  it("sign-out from a patient chart aborts the portal session, wipes raw keys, and removes visit metadata", async () => {
+    const crypto = vi.mocked(await import("../src/crypto"));
+    const wrapKek = new Uint8Array(32).fill(7);
+    const noteKey = new Uint8Array(32).fill(9);
+    crypto.derivePortalKeys.mockResolvedValueOnce({ authKeyB64: "AUTHKEY==", wrapKek, noteKey });
+    vi.mocked(api.patients).mockResolvedValueOnce([
+      {
+        user_id: "user-1", username: "patienta", status: "active",
+        granted_at: "2026-09-01T00:00:00Z", revoked_at: null,
+        ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
+      },
+    ]);
+    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+    const root = await login();
+    await press(root, "Open patterns");
+    await flush();
+    await press(root, "Sign out");
+    await flush();
+
+    expect(hasSession()).toBe(false);
+    expect([...wrapKek]).toEqual(new Array(32).fill(0));
+    expect([...noteKey]).toEqual(new Array(32).fill(0));
+    expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
+    expect(textOf(root)).toContain("Your in-memory keys were cleared");
+  });
+
+  it("component teardown removes this therapist's visit metadata too", async () => {
+    const root = await login();
+    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+    window.localStorage.setItem("mindpattern.lastVisit.other-therapist.user-1", "2026-09-01T00:00:00.000Z");
+
+    await act(async () => { root.unmount(); });
+
+    expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
+    expect(window.localStorage.getItem("mindpattern.lastVisit.other-therapist.user-1")).toBeTruthy();
   });
 
   it("a 401 locks the app down, and a same-tab re-login re-arms the expiry hook", async () => {
