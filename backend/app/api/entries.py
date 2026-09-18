@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
+from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks
 from ..models import Entry, User
@@ -66,9 +67,12 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 
 
 def _blob_length(session: AsyncSession):
-    """Byte length of a LargeBinary column, per dialect: SQLite's length()
-    counts blob bytes; PostgreSQL's length() is text-only, so bytea needs
-    octet_length."""
+    """Byte length of a LargeBinary column, per dialect. Postgres's
+    octet_length is the unambiguous bytea size function (length() DOES
+    accept bytea there, but naming it explicitly keeps the intent obvious
+    and dialect-symmetric); SQLite's length() counts blob bytes. Shared by
+    the entries quota check and the recompute corpus loader (insights.py)
+    so the two can never drift apart."""
     if session.bind.dialect.name == "postgresql":
         return func.octet_length(Entry.blob)
     return func.length(Entry.blob)
@@ -212,6 +216,6 @@ async def delete_entry(
     result = await session.execute(
         delete(Entry).where(Entry.user_id == user.id, Entry.client_entry_id == client_entry_id)
     )
-    if result.rowcount == 0:
+    if db_rowcount(result) == 0:
         raise ApiError(status_code=404, detail="entry not found", code="not_found")
     await session.commit()

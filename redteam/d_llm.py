@@ -13,9 +13,17 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from common import (auth_headers, guard, make_app, make_client, make_settings,
-                    run, section, seed_unlocked_user, verdict)
-
+from common import (
+    auth_headers,
+    guard,
+    make_app,
+    make_client,
+    make_settings,
+    run,
+    section,
+    seed_unlocked_user,
+    verdict,
+)
 
 # ---------------------------------------------------------------------------
 # D1 — sanitizer corpus (model output is hostile; the corpus is the user's)
@@ -144,7 +152,7 @@ class FakeLLM:
         outer = self
 
         class H(BaseHTTPRequestHandler):
-            def do_POST(self):  # noqa: N802 - http.server API
+            def do_POST(self):
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append({

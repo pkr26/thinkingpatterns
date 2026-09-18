@@ -16,9 +16,19 @@ import resource
 import time
 from datetime import date, timedelta
 
-from common import (auth_headers, encrypt_entry, guard, make_app, make_client,
-                    make_settings, register_user, run, section,
-                    seed_unlocked_user, verdict)
+from common import (
+    auth_headers,
+    encrypt_entry,
+    guard,
+    make_app,
+    make_client,
+    make_settings,
+    register_user,
+    run,
+    section,
+    seed_unlocked_user,
+    verdict,
+)
 
 
 def _rss_mb() -> float:
@@ -46,7 +56,6 @@ async def c2_resource_exhaustion() -> None:
         codes = await asyncio.gather(*[one(i) for i in range(8)])
         dt = time.perf_counter() - t0
         peak = _rss_mb()
-        ok = all(c == 201 for c in codes)
         verdict("C2.scrypt-amplification", "BLOCKED",
                 f"8 concurrent registrations (64MiB scrypt each): {sorted(set(codes))}, "
                 f"{dt:.1f}s wall, RSS {before:.0f}->{peak:.0f}MB — bounded by the "
@@ -210,7 +219,6 @@ async def c3_logic_abuse() -> None:
         # the compromised-endpoint scenario, or a buggy/malicious client)
         from datetime import date as d_
 
-        from common import direct_insert_entry
 
         hostile_payload = json.dumps({"v": 1, "text": "x", "sentiment": "not-a-number",
                                       "created_at": "3000-01-01"}).encode()

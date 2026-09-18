@@ -20,7 +20,6 @@ import base64
 import json
 import os
 import sys
-import time
 import traceback
 import uuid
 from datetime import date, timedelta

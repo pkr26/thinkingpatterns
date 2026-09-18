@@ -18,7 +18,7 @@ import { Alert, StyleSheet, Text, TextInput, View } from "react-native";
 import { api, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
-import { wrapDataKeyForTherapist } from "../crypto/sharing";
+import { therapistKeyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { calmFallbackCopy } from "../components/errors";
@@ -233,6 +233,11 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       {lookup && !pending && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={[styles.cardTitle, { color: t.colors.text }]}>{lookup.display_name}</Text>
+          <Text style={themed.footnote}>
+            {`Key fingerprint: ${therapistKeyFingerprint(lookup.wrap_pub_key)}\n`}
+            Read it back to your therapist and check it matches the one their portal
+            shows — a mismatch means the key was substituted in transit.
+          </Text>
           <Text style={themed.footnote}>
             Sharing lets them read every entry and pattern (never change anything), and write their
             own private notes. You can stop at any time; what they already read cannot be unread.

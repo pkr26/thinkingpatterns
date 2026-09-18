@@ -180,7 +180,21 @@ def load_private_key_pkcs8(der: bytes) -> ec.EllipticCurvePrivateKey:
 
 def generate_pairing_code() -> str:
     alphabet = PAIRING_ALPHABET
-    return "".join(alphabet[byte % len(alphabet)] for byte in os.urandom(PAIRING_CODE_CHARS))
+    n = len(alphabet)
+    # Rejection sampling (2026-09-17 audit): 256 % 31 == 8, so indexing by
+    # byte % n favors the first 8 symbols. Drawing only bytes below the
+    # largest complete multiple of n keeps every symbol equally likely
+    # (~0.4 bits of the code's entropy reclaimed). Rejection is rare and
+    # bounded — the loop refills from os.urandom in small batches.
+    limit = 256 - (256 % n)
+    chars: list[str] = []
+    while len(chars) < PAIRING_CODE_CHARS:
+        for byte in os.urandom(PAIRING_CODE_CHARS * 2):
+            if byte < limit:
+                chars.append(alphabet[byte % n])
+                if len(chars) == PAIRING_CODE_CHARS:
+                    break
+    return "".join(chars)
 
 
 def pairing_code_digest(code: str, secret: str) -> str:

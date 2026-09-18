@@ -128,7 +128,8 @@
    "5uicide",
    "killmyself",
    "我想去死",
-   "자살하고 싶다"
+   "자살하고 싶다",
+   "i keep thinking about 5u1c1de"
   ],
   "dialog_silent": [
    "This traffic is killing me",
@@ -155,7 +156,10 @@
    "listening to suicide silence again",
    "i wanna diet after the holidays",
    "my mom wants to diet with me",
-   "i can't go online until the wifi is fixed"
+   "i can't go online until the wifi is fixed",
+   "i got my grade6test back today",
+   "covid2wave news is exhausting",
+   "the route9walk home was lovely"
   ],
   "suppress_only_fires": [
    "this traffic is killing me",
@@ -671,6 +675,34 @@
    "intent": "benign",
    "dialog": false,
    "suppress": false
+  },
+  {
+   "technique": "unmapped-digit-benign",
+   "sample": "grade6test study grind",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "unmapped-digit-benign",
+   "sample": "hello9world keeps ringing",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "unmapped-digit-benign",
+   "sample": "my6self and the team6win drill",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "leet-mapped-digit",
+   "sample": "i will 5u1c1de tonight",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
   }
  ]
 }

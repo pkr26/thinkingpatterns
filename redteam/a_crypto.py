@@ -8,7 +8,6 @@ A6 cross-platform AAD canonicalization fuzz (Python side; TS side in mobile spec
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import gc
 import json
@@ -17,10 +16,19 @@ import secrets
 import time
 from datetime import date
 
-from common import (RESULTS, auth_headers, derive_keys, direct_insert_entry, dump,
-                    encrypt_entry, guard, login_user, make_app, make_client,
-                    make_settings, register_user, run, section, seed_unlocked_user,
-                    verdict)
+from common import (
+    RESULTS,
+    auth_headers,
+    derive_keys,
+    guard,
+    make_app,
+    make_client,
+    make_settings,
+    run,
+    section,
+    seed_unlocked_user,
+    verdict,
+)
 
 
 async def a1_processing_sessions() -> None:
@@ -187,7 +195,6 @@ async def a5_key_lifecycle() -> None:
             f"raised or the seam above is used")
 
     # rotation / re-key existence
-    import inspect
     from app.api import account, auth
 
     routes = {getattr(r, "path", "") for r in auth.router.routes}

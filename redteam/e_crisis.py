@@ -12,7 +12,6 @@ This harness re-runs it live and reports any observed-vs-contract drift.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from common import RESULTS, guard, run, section, verdict
 
@@ -76,7 +75,6 @@ def e1_python_engine() -> None:
             if benign_fp else "benign controls correctly do not fire")
 
     # -- end-to-end impact: bypassed label -> quoted daily question ------------
-    from datetime import date
 
     from app.services.patterns import Pattern
     from app.services.questions import build_pool
@@ -108,7 +106,7 @@ def e3_boundary() -> None:
          str(root / "backend/app/services/questions.py"),
          str(root / "backend/app/services/llm.py")],
         capture_output=True, text=True).stdout.strip()
-    lines = [l for l in out.splitlines() if "No advice, no diagnosis" not in l]
+    lines = [ln for ln in out.splitlines() if "No advice, no diagnosis" not in ln]
     if lines:
         summary = "diagnosis/clinical vocabulary found: " + repr(lines[:3])
     else:

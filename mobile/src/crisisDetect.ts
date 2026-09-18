@@ -95,15 +95,19 @@ const HOMOGLYPHS: Record<string, string> = {
 };
 
 /** Leet substitutions applied ONLY between two letters ("k1ll" -> "kill"
- *  but "1 want" keeps its digit), or at a word's leading edge
- *  ("5uicide" -> "suicide") — a leading digit is never part of a number
- *  the way a trailing one can be. */
+ * but "1 want" keeps its digit), or at a word's leading edge
+ * ("5uicide" -> "suicide") — a leading digit is never part of a number
+ * the way a trailing one can be. The regex classes list EXACTLY the
+ * mapped characters: 2, 6 and 9 are deliberately unmapped (ambiguous
+ * leet: 2=z, 6=b/g, 9=g/q), and a wider class would look an unmapped
+ * digit up and splice "undefined" into the normalized text (2026-09-17
+ * audit — the Python twin of that bug raised KeyError instead). */
 const LEET: Record<string, string> = {
   "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b",
   "@": "a", "!": "i", $: "s",
 };
-const LEET_RE = /([a-z])([0-9@!$34578])([a-z])/g;
-const LEET_EDGE_RE = /(^|\s)([0-9@!$34578])([a-z])/g;
+const LEET_RE = /([a-z])([0134578@!$])([a-z])/g;
+const LEET_EDGE_RE = /(^|\s)([0134578@!$])([a-z])/g;
 
 /** Punctuation becomes a space; letters (any script), digits, ASCII
  *  apostrophes and hyphens survive (Hangul syllables included — a Korean

@@ -258,3 +258,28 @@ describe("MindPatternCrypto payload helpers", () => {
     });
   });
 });
+
+// Pairing key fingerprint (2026-09-17 audit): the human-verifiable hash of
+// a therapist's wrap key. The portal's WebCrypto twin computes the SAME
+// string — both suites pin this constant against the shared wrap vector's
+// fixed therapist key, so the two platforms can never drift apart.
+describe("therapist key fingerprint", () => {
+  const wrapVectors = JSON.parse(
+    readFileSync(join(here, "..", "..", "shared", "vectors.json"), "utf8"),
+  ).wrap_vectors as { therapist_pub_spki: string }[];
+  const FIXED_SPKI_B64 = wrapVectors[0].therapist_pub_spki;
+  const EXPECTED = "CB54 DE22 C976 DF43"; // sha256(spk)[0:8], hex groups — portal-pinned
+
+  it("formats the shared-vector key identically to the portal", async () => {
+    const { therapistKeyFingerprint } = await import("../src/crypto/sharing");
+    expect(therapistKeyFingerprint(FIXED_SPKI_B64)).toBe(EXPECTED);
+  });
+
+  it("is stable and depends on every key byte", async () => {
+    const { therapistKeyFingerprint } = await import("../src/crypto/sharing");
+    expect(therapistKeyFingerprint(FIXED_SPKI_B64)).toBe(therapistKeyFingerprint(FIXED_SPKI_B64));
+    const tampered = Buffer.from(FIXED_SPKI_B64, "base64");
+    tampered[tampered.length - 1] ^= 0x01;
+    expect(therapistKeyFingerprint(tampered.toString("base64"))).not.toBe(EXPECTED);
+  });
+});

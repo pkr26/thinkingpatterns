@@ -226,11 +226,16 @@ _HOMOGLYPHS = str.maketrans({
 # Leet substitutions applied ONLY between two letters ("k1ll"->"kill" but
 # "1 want" keeps its digit, and no date or phone number is rewritten), or
 # at a word's leading edge ("5uicide" -> "suicide") — a leading digit is
-# never part of a number the way a trailing one can be.
+# never part of a number the way a trailing one can be. The regex classes
+# list EXACTLY the mapped characters: 2, 6 and 9 are deliberately unmapped
+# (each is ambiguous leet: 2=z, 6=b/g, 9=g/q), and a class wider than the
+# map would look the unmapped digit up and crash (2026-09-17 audit: the
+# old [0-9@!$34578] class matched them — "grade6test" raised KeyError and
+# bricked every recompute for the account).
 _LEET = {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
          "8": "b", "@": "a", "!": "i", "$": "s"}
-_LEET_RE = re.compile(r"([a-z])([0-9@!$34578])([a-z])")
-_LEET_EDGE_RE = re.compile(r"(^|\s)([0-9@!$34578])([a-z])")
+_LEET_RE = re.compile(r"([a-z])([0134578@!$])([a-z])")
+_LEET_EDGE_RE = re.compile(r"(^|\s)([0134578@!$])([a-z])")
 
 # A single-letter token run this long is a spelled-out word ("s u i c i d e"),
 # not prose — ordinary English never strings 4+ one-letter words together

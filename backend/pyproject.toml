@@ -33,12 +33,12 @@ target-version = "py312"
 select = ["E4", "E7", "E9", "F", "W"]
 
 [tool.ruff.lint.per-file-ignores]
-# tests/ keeps deliberate unused imports (fixture-style modules) and has one
-# known F811: test_rate_limiter_buckets_clients_independently is defined
-# twice in test_mutation_pins.py (lines 435 and 474) — the first definition
-# is shadowed and never runs. Fixing it changes the test count, so it is
-# owned by the test suite's maintainers, not by lint config.
-"tests/**" = ["F401", "F811"]
+# tests/ keeps deliberate unused imports (fixture-style modules). The
+# former F811 exemption is history: the duplicate
+# test_rate_limiter_buckets_clients_independently in test_mutation_pins.py
+# was un-shadowed by the 2026-09-17 audit (renamed to
+# test_unlimited_endpoints_create_no_rate_buckets — both tests run now).
+"tests/**" = ["F401"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -49,11 +49,12 @@ warn_unused_configs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 strict_equality = true
-# Status (mypy 2.3.1, this config, measured 2026-09-07): 16 errors in 4
-# files (30 checked), concentrated in app/services/brain.py (untyped
-# JSON-blob state handling) plus single findings in api/entries.py and
-# api/insights.py; the count drifts as app/ evolves — re-run
-# `python -m mypy` for the current number. The CI gate runs with
+# Status (mypy 2.3.1, this config, measured 2026-09-17): 13 errors in 1
+# file (36 checked), all in app/services/brain.py (untyped JSON-blob
+# state handling). The 2026-09-17 audit wave fixed every finding outside
+# brain.py (main.py, singleprocess.py, questions.py, api/{entries,
+# insights, consents, therapist}.py); the count drifts as app/ evolves —
+# re-run `python -m mypy` for the current number. The CI gate runs with
 # continue-on-error until app/ types are tightened — do not silence these
 # with blanket `ignore` overrides; fix the annotations.
 

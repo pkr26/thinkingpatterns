@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, config, singleprocess
@@ -29,7 +30,7 @@ from .security.enclave import InMemoryKeyStore
 CROSS_HOST_ADVISORY_LOCK_ID = 727273
 
 
-async def _acquire_cross_host_guard(engine) -> object | None:
+async def _acquire_cross_host_guard(engine) -> AsyncConnection | None:
     """Postgres-only: hold a session-scoped advisory lock for the app
     lifetime so a SECOND HOST on the same database refuses to boot.
 
@@ -73,7 +74,7 @@ async def _acquire_cross_host_guard(engine) -> object | None:
     return conn
 
 
-async def _release_cross_host_guard(conn: object | None) -> None:
+async def _release_cross_host_guard(conn: AsyncConnection | None) -> None:
     if conn is None:
         return
     try:

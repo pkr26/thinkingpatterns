@@ -13,8 +13,17 @@ import base64
 import statistics
 import time
 
-from common import (auth_headers, guard, login_user, make_app, make_client,
-                    make_settings, register_user, run, section, verdict)
+from common import (
+    auth_headers,
+    guard,
+    make_app,
+    make_client,
+    make_settings,
+    register_user,
+    run,
+    section,
+    verdict,
+)
 
 
 async def b1_verifier_and_tokens() -> None:
@@ -65,7 +74,10 @@ async def b1_verifier_and_tokens() -> None:
         from app.security import tokens as tok
 
         def forged(exp):
-            import base64 as b64, hashlib, hmac, json as js
+            import base64 as b64
+            import hashlib
+            import hmac
+            import json as js
             payload = {"uid": user["user_id"], "iat": int(time.time()), "exp": exp, "ep": 1}
             body = b64.urlsafe_b64encode(js.dumps(payload, separators=(",", ":"),
                                                   sort_keys=True).encode()).rstrip(b"=").decode()

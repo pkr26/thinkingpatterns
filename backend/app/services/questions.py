@@ -233,8 +233,13 @@ def build_pool(patterns: Sequence[Pattern]) -> list[str]:
     # Belt and braces: no rendered question may quote crisis content even
     # if a label slipped past the pattern-side filter some other way.
     pool = [q for q in pool if not crisis.matches_suppress(q)]
+    unique: list[str] = []
     seen: set[str] = set()
-    unique = [q for q in pool if not (q in seen or seen.add(q))]
+    for q in pool:
+        if q in seen:
+            continue
+        seen.add(q)
+        unique.append(q)
     return unique
 
 

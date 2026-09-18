@@ -18,11 +18,24 @@ create_all will NOT apply changes to existing databases.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from .models import Base
+
+
+def rowcount(result: Any) -> int:
+    """rowcount of a DML execution() result.
+
+    SQLAlchemy types AsyncSession.execute as returning Result, whose stubs
+    carry no rowcount — but every DML execution returns a CursorResult at
+    runtime on all three drivers here (aiosqlite, asyncpg, tests' doubles).
+    getattr keeps the type-checkers honest without a cast at each site.
+    """
+    return int(getattr(result, "rowcount", 0))
 
 
 def build_engine(

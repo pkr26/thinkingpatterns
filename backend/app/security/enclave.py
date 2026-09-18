@@ -66,13 +66,13 @@ class InMemoryKeyStore:
             self._keys[token] = (bytearray(key), current + ttl_seconds, owner)
         return token
 
-    def get(self, token: str, now: float | None = None, owner: str | None = None) -> bytes:
+    def get(self, token: str, now: float | None = None, owner: str | None = None) -> bytearray:
         """Fetch (and do NOT destroy) the key for *token*.
 
-        Returns an owned copy: the caller may destroy the session (which
-        zeroizes the store's internal bytes) and still use the returned key
-        for the current operation. The caller is responsible for zeroizing
-        its copy when done (SecureProcessingContext does).
+        Returns an owned MUTABLE copy (a bytearray — zeroizable), not an
+        immutable bytes twin that would linger until GC: the caller is
+        responsible for zeroizing its copy when done. Production recompute
+        paths use pop() (single-use); get() exists for inspection/tests.
         """
         current = now if now is not None else time.time()
         with self._lock:
@@ -85,7 +85,7 @@ class InMemoryKeyStore:
                     raise KeyNotFound("processing session expired")
                 if owner is not None and bound_owner is not None and owner != bound_owner:
                     raise KeyNotFound("processing session belongs to another user")
-                return bytes(key)
+                return bytearray(key)
             self._purge_expired_locked(current)
             raise KeyNotFound("unknown processing session")
 

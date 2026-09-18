@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
+from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_therapist
 from ..models import AccessLog, Consent, Entry, PairingCode, TherapistNote, User, new_id, utcnow
 from ..schemas import (
@@ -375,12 +376,20 @@ async def read_patient_insights(
     state = threshold.evaluate(rows, request.app.state.settings.unlock_threshold_days)
     latest = await _latest_insight(session, consent.user_id, "patterns")
     await session.commit()  # the audit row
+    # Phase-gated like the patient's own GET /insights (2026-09-17 audit):
+    # a stored blob from the account's insight phase must not keep being
+    # served if entry deletions dropped it back into baseline.
+    blob = (
+        base64.b64encode(bytes(latest.blob)).decode("ascii")
+        if latest and state.phase is threshold.Phase.INSIGHT
+        else None
+    )
     return InsightsResponse(
         phase=state.phase.value,
         active_days=state.active_days,
         streak=state.streak,
         days_remaining=state.days_remaining,
-        blob=base64.b64encode(bytes(latest.blob)).decode("ascii") if latest else None,
+        blob=blob,
     )
 
 
@@ -520,6 +529,16 @@ async def create_note(
     if existing is not None:
         # Idempotent retry of an offline queue: rewrite in place (the
         # patient's entries do the same on client_entry_id conflicts).
+        # Patient-scoped (2026-09-17 audit): the idempotency key is
+        # (therapist, client_note_id) — reusing an id for a DIFFERENT
+        # patient must not silently rewrite the first patient's note; that
+        # is a client bug and answers a conflict, loudly.
+        if existing.user_id != patient_id:
+            raise ApiError(
+                status_code=409,
+                detail="note id already used for another patient",
+                code="conflict",
+            )
         existing.blob = blob
         existing.pattern_pid = body.pattern_pid
         existing.updated_at = utcnow()
@@ -597,6 +616,6 @@ async def delete_note(
             TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
         )
     )
-    if result.rowcount == 0:
+    if db_rowcount(result) == 0:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
     await session.commit()

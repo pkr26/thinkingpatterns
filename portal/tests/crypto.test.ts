@@ -232,3 +232,21 @@ const edge = edgeCases.aad_edge_cases ?? [];
     expect(Buffer.compare(Buffer.from(got), want)).toBe(0);
   });
 });
+
+// Pairing key fingerprint (2026-09-17 audit): the portal's WebCrypto
+// fingerprint must equal the mobile app's node:crypto one byte for byte —
+// both suites pin this constant against the shared wrap vector's fixed
+// therapist key, so the two humans always read the same string.
+describe("pairing key fingerprint", () => {
+  const wrapVectors = JSON.parse(readFileSync(vectorsPath, "utf8")) as {
+    wrap_vectors: { therapist_pub_spki: string }[];
+  };
+  const firstWrap = wrapVectors.wrap_vectors[0];
+  const FIXED_SPKI_B64 = firstWrap ? firstWrap.therapist_pub_spki : "";
+  const EXPECTED = "CB54 DE22 C976 DF43"; // sha256(spk)[0:8], hex groups — mobile-pinned
+
+  it("formats the shared-vector key identically to the mobile app", async () => {
+    const { keyFingerprint } = await import("../src/crypto");
+    expect(await keyFingerprint(FIXED_SPKI_B64)).toBe(EXPECTED);
+  });
+});

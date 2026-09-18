@@ -21,8 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import date
 
 import httpx
-
-from common import derive_keys, encrypt_entry, verdict, section, run
+from common import derive_keys, encrypt_entry, run, section, verdict
 
 PORT = 8971
 BASE = f"http://127.0.0.1:{PORT}"

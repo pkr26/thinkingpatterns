@@ -9,14 +9,21 @@ H3 erasure completeness — live DB after account deletion.
 from __future__ import annotations
 
 import base64
-import json
 from datetime import date, timedelta
 
+from common import (
+    auth_headers,
+    direct_insert_entry,
+    guard,
+    make_app,
+    make_client,
+    make_settings,
+    register_user,
+    run,
+    section,
+    verdict,
+)
 from sqlalchemy import select
-
-from common import (auth_headers, direct_insert_entry, guard, make_app,
-                    make_client, make_settings, register_user, run, section,
-                    verdict)
 
 
 async def h1_metadata_inference() -> None:

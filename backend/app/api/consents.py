@@ -26,11 +26,12 @@ import base64
 import binascii
 
 from fastapi import APIRouter, Depends, Header, Request
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
+from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user
 from ..models import (
     ROLE_THERAPIST,
@@ -220,13 +221,23 @@ async def grant_consent(
     if therapist is None:
         raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
 
-    # Burn the code FIRST (same transaction as the grant): a code consumed
-    # by a failed grant would be a code the therapist cannot reuse and the
-    # patient cannot retry — but the unique-consent race below must also
-    # not leave a burned code with no grant. Single transaction = both or
-    # neither.
-    code_row.consumed_at = utcnow()
+    # Burn the code atomically (2026-09-17 audit): the SELECT above is a
+    # fast-path pre-check only — two concurrent grants of the same code both
+    # see consumed_at IS NULL there. The conditional UPDATE is the authority:
+    # exactly one redeemer's WHERE matches, the loser gets the same 404 as an
+    # unknown code. Single transaction with the grant below = both or neither.
     now = utcnow()
+    claim = await session.execute(
+        update(PairingCode)
+        .where(
+            PairingCode.id == code_row.id,
+            PairingCode.consumed_at.is_(None),
+            PairingCode.expires_at > now,
+        )
+        .values(consumed_at=now)
+    )
+    if db_rowcount(claim) == 0:
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
     existing = (
         (
             await session.execute(

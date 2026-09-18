@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type Patient } from "../api";
+import { keyFingerprint } from "../crypto";
 import { localStore } from "../platform";
 import { Button, Card, ErrorBanner, Note, theme } from "../ui";
 import type { PortalSession } from "./PatientView";
@@ -35,6 +36,18 @@ export function PatientsView(props: {
   const [error, setError] = useState("");
   const [scan, setScan] = useState<Record<string, CaseloadScanRow> | null>(null);
   const [scanning, setScanning] = useState(false);
+  /** This therapist's own wrap-key fingerprint (shown beside the pairing
+   * code so the patient can verify it after lookup — 2026-09-17 audit). */
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!props.session) return;
+    let cancelled = false;
+    keyFingerprint(props.session.publicKeyB64)
+      .then((fp) => { if (!cancelled) setFingerprint(fp); })
+      .catch(() => { if (!cancelled) setFingerprint(null); });
+    return () => { cancelled = true; };
+  }, [props.session]);
 
   const refresh = useCallback(() => {
     api.patients().then(setPatients).catch((err) => setError(err instanceof Error ? err.message : "could not load patients"));
@@ -124,6 +137,14 @@ export function PatientsView(props: {
           <p data-testid="pairing-code" style={{ margin: 0, color: theme.text, fontSize: 28, letterSpacing: 6, fontWeight: 700 }}>
             {pairingCode}
           </p>
+        )}
+        {fingerprint && (
+          <p data-testid="key-fingerprint" style={{ margin: "2px 0 0", color: theme.text, fontSize: 15, letterSpacing: 2, fontWeight: 600 }}>
+            {fingerprint}
+          </p>
+        )}
+        {fingerprint && (
+          <Note>Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit.</Note>
         )}
         <Button label={busy ? "Generating…" : "Generate pairing code"} onPress={newCode} disabled={busy} />
       </Card>

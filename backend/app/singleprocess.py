@@ -28,12 +28,13 @@ import logging
 import os
 import tempfile
 from types import TracebackType
+from typing import IO
 
 logger = logging.getLogger("mindpattern")
 
 # token -> lock file handle, so repeated create_app() in ONE process (the
 # test suite does this constantly) never conflicts with itself.
-_held: dict[str, "os.IOBase"] = {}
+_held: dict[str, IO[bytes]] = {}
 
 
 class MultipleWorkersError(RuntimeError):

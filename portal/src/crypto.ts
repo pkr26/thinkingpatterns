@@ -303,3 +303,17 @@ export async function sealPrivateKeyForUpload(
   );
   return b64(blob);
 }
+
+/** Human-verifiable fingerprint of a P-256 SPKI public key: SHA-256 over
+ * the DER, first 8 bytes as four spaced hex groups ("A1B2 C3D4 E5F6
+ * 0718"). The patient's app derives the SAME string from the key the
+ * pairing lookup returned, so the two humans can read it to each other
+ * and notice a substituted key (the 2026-09-17 audit's out-of-band
+ * check). Formatting is pinned identical to the mobile implementation. */
+export async function keyFingerprint(spkiB64: string): Promise<string> {
+  const digest = new Uint8Array(await subtle().digest("SHA-256", unb64(spkiB64)));
+  let hex = "";
+  for (const byte of digest.subarray(0, 8)) hex += byte.toString(16).padStart(2, "0");
+  hex = hex.toUpperCase();
+  return hex.match(/.{4}/g)?.join(" ") ?? hex;
+}

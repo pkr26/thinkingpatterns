@@ -6,6 +6,83 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-17 (c) — Exhaustive full-codebase audit remediation
+
+A file-by-file exhaustive audit of every source file (backend, mobile,
+portal, red-team, infra, shared contracts) plus a re-run of the whole
+verification battery. One high-severity availability bug found and
+proven end-to-end, one red CI gate, and a dozen smaller findings —
+all fixed below, each with a regression pin where meaningful.
+
+**High**
+
+- RECOMPUTE BRICK FIXED (both engines): the crisis leet-fold regexes
+  matched ALL digits (`[0-9@!$34578]`) while the substitution map covers
+  only 0,1,3,4,5,7,8,@,!,$ — a 2, 6 or 9 between letters raised
+  `KeyError` on the server ("grade6test" → every future recompute 400s
+  with a misleading `entry_payload_malformed` once a digit-bearing
+  activity tag surfaced as a pattern label) and spliced the literal
+  string "undefined" into the mobile normalizer. The classes now list
+  exactly the mapped characters on both engines; regression fixtures
+  with 2/6/9 texts are in `shared/crisis_phrases.json` (replayed by both
+  suites) plus an end-to-end brain test (digit tag across four recompute
+  days). The unmapped digits remain unmapped by design (2=z, 6=b/g,
+  9=g/q are ambiguous leet).
+
+**Medium**
+
+- CI lint gate green again: `ruff check .` was RED at HEAD (unused
+  import in scripts/loadtest.py, unused variable in the language-gate
+  test); redteam/ carried 25+8 ungated F401/F841/E741 findings — all
+  cleaned; the stale "verified green" pyproject note is accurate again.
+- Pairing is now human-verifiable: both the portal (beside the pairing
+  code) and the patient's app (in the confirm step) show an 8-byte
+  SHA-256 fingerprint of the therapist's wrap key — read back to each
+  other, it detects a server-substituted key (the server relays the key
+  during lookup; that trust is now stated in the README security model).
+- Pairing-code single-use is now race-free: the burn is an atomic
+  conditional UPDATE (`consumed_at IS NULL AND expires_at > now`) — the
+  SELECT pre-check is fast-path only; two concurrent redeems cannot both
+  win (the loser gets the uniform 404).
+- mypy advisory count honest again and lower: every finding outside
+  brain.py fixed (typed AsyncConnection for the cross-host guard,
+  IO[bytes] lock registry, a typed rowcount() helper for DML results,
+  the dedupe-comprehension rewrite, two dialect-insert imports, one
+  over-wide annotation) — 21 errors in 7 files → 13 in brain.py only;
+  the pyproject status note reflects the measured 2026-09-17 numbers.
+
+**Low / hardening**
+
+- Keystore `get()` returns a zeroizable `bytearray` copy (was immutable
+  bytes contradicting its own docstring); production paths use `pop()`.
+- `GET /insights` and the therapist read path serve the patterns blob
+  only in the insight phase — deleting entries can drop an account back
+  below the 30-day threshold, and a stored blob from the insight phase
+  must not keep being served in baseline.
+- Note idempotency is patient-scoped: reusing a `client_note_id` for a
+  different patient answers 409 instead of silently rewriting the first
+  patient's note.
+- Recompute metrics are observed on EVERY exit (success, 4xx tamper,
+  410 account-deleted, 500) — a corpus that 400s after seconds of
+  analysis is exactly the spike an operator needs to see; the LLM
+  outcome counter only fires when the enricher actually ran.
+- Portal fetch has a 15 s deadline (the mobile client always had one) —
+  a hung backend can no longer park the clinic UI forever.
+- Pairing-code generation uses rejection sampling (256 % 31 = 8 used to
+  favor the first 8 alphabet symbols; ~0.4 bits reclaimed).
+- The shadowed duplicate `test_rate_limiter_buckets_clients_independently`
+  in test_mutation_pins.py is un-shadowed (renamed to
+  `test_unlimited_endpoints_create_no_rate_buckets`) — a rate-limit
+  regression that silently never ran for years now runs; the F811
+  exemption is retired.
+- The recompute corpus loader and the entries quota share ONE
+  dialect-aware blob-length expression (`octet_length` on Postgres).
+
+Test status after this wave: backend **903 passed** (+1 Postgres-gated
+skip), probe 9/9, mobile **1203 passed** (60 files), portal **90
+passed**, cross-platform crypto vectors green (4+6+16), `ruff check .`
+green in backend and redteam, mypy 13 (brain.py only, advisory).
+
 ### 2026-09-17 (b) — Independent-audit remediation
 
 A deep independent audit of the two 2026-09-17 commits (crisis safety,

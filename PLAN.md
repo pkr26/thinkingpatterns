@@ -4,8 +4,8 @@
 > build plan, kept for the record and updated only where it had drifted
 > from the shipped reality; the root `README.md` is authoritative. Where
 > the two disagree, believe the README. (Test status at this update:
-> backend 658 passed + 1 Postgres-gated skip, mobile 759 passed across 33
-> files, probe 9/9.)
+> backend 903 passed + 1 Postgres-gated skip, mobile 1,203 passed across 60
+> files, portal 90 passed, probe 9/9.)
 
 Personal pattern-recognition engine for mental state. Journal → encrypted sync →
 "mini-brain" analysis → pattern surfacing after a 30-day threshold → one

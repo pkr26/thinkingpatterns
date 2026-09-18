@@ -8,12 +8,9 @@ G3 production fail-closed verification (subprocess boots) + repo hygiene
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import subprocess
-import sys
-from pathlib import Path
 
 from common import RESULTS, guard, run, section, verdict
 
@@ -79,7 +76,7 @@ def g2_supply_chain() -> None:
         reqs = str(BACKEND / "requirements.lock.txt")
         r = subprocess.run([str(VENV_PY), "-m", "pip_audit", "-r", reqs, "--no-deps"],
                            capture_output=True, text=True, timeout=300)
-        vulns = [l for l in r.stdout.splitlines() if "vuln" in l.lower() or "Vulnerability" in l]
+        vulns = [ln for ln in r.stdout.splitlines() if "vuln" in ln.lower() or "Vulnerability" in ln]
         verdict("G2.pip-audit", "BLOCKED" if r.returncode == 0 and not vulns else "FINDING",
                 f"pip-audit on requirements.lock.txt: rc={r.returncode}, "
                 f"vulnerability lines={len(vulns)} {vulns[:3]}")
@@ -113,18 +110,15 @@ def g2_supply_chain() -> None:
 
     # Lockfile shape: hashes pin transitive deps?
     lock = (BACKEND / "requirements.lock.txt").read_text()
-    hashed = sum(1 for l in lock.splitlines() if "--hash=" in l)
-    total = sum(1 for l in lock.splitlines() if l.strip() and not l.startswith("#"))
+    hashed = sum(1 for ln in lock.splitlines() if "--hash=" in ln)
+    total = sum(1 for ln in lock.splitlines() if ln.strip() and not ln.startswith("#"))
     verdict("G2.lockfile-hashes", "BLOCKED" if hashed and hashed >= total * 0.9 else "FINDING",
             f"requirements.lock.txt: {hashed}/{total} requirement lines carry --hash "
             f"pins; Docker installs with --no-deps")
 
     # CI pinning
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    sha_pinned = ci.count("uses:") == len([l for l in ci.splitlines()
-                                           if l.strip().startswith("uses:") and "@" in l
-                                           and len(l.split("@")[-1].strip()) >= 20]) + ci.count("uses: ") * 0
-    uses_lines = [l.split("uses:", 1)[1].strip() for l in ci.splitlines() if "uses:" in l]
+    uses_lines = [ln.split("uses:", 1)[1].strip() for ln in ci.splitlines() if "uses:" in ln]
     unpinned = [u for u in uses_lines if "@" not in u or len(u.split("@")[-1]) < 20]
     verdict("G2.actions-pinning", "BLOCKED" if not unpinned else "FINDING",
             f"GitHub Actions refs: {len(uses_lines)} uses, unpinned/floating: {unpinned}")

@@ -25,6 +25,11 @@ export interface CryptoEngine {
     callback: (err: Error | null, derivedKey?: Buffer) => void,
   ): void;
   hkdfSync(digest: string, ikm: Buffer, salt: Buffer, info: Buffer, length: number): ArrayBuffer;
+  /** SHA-256 hash builder — used for the human-verifiable pairing key
+   * fingerprint. Same surface in node:crypto and quick-crypto. */
+  createHash(algorithm: string): {
+    update(data: Buffer): { digest(): Buffer };
+  };
   createCipheriv(algorithm: string, key: Buffer, iv: Buffer): {
     setAAD(aad: Buffer): unknown;
     update(data: Buffer): Buffer;

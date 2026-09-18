@@ -10,10 +10,9 @@ from __future__ import annotations
 import time
 from datetime import date, timedelta
 
-from common import guard, run, section, verdict
-
 from app.services import brain
 from app.services.patterns import JournalEntry
+from common import guard, run, section, verdict
 
 TODAY = date(2026, 9, 16)
 

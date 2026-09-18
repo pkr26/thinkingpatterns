@@ -44,7 +44,7 @@ from datetime import date as date_type, timedelta
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Header, Request, Body
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +65,7 @@ from ..security.enclave import KeyNotFound, SecureProcessingContext, zeroize
 from ..services import brain, llm, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
+from .entries import _blob_length as _entry_blob_length
 
 router = APIRouter(tags=["insights"])
 
@@ -91,12 +92,14 @@ def _decode_b64(value: str, what: str) -> bytes:
 def _dialect_insert(session: AsyncSession):
     """The insert() class with on_conflict_do_update for the session's
     dialect — both sqlite and postgresql ship one; the generic
-    sqlalchemy.insert() does not."""
+    sqlalchemy.insert() does not. Two distinct import names (never rebind
+    one): the sqlite and postgresql Insert types differ, and mypy flags a
+    same-name re-import as an incompatible assignment."""
     if session.bind.dialect.name == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert
-    else:
-        from sqlalchemy.dialects.sqlite import insert
-    return insert
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        return pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    return sqlite_insert
 
 
 async def _replace_insight(
@@ -285,7 +288,7 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
         p for p in sorted(patterns, key=question_engine.feedback_rank)[:question_engine.MAX_PATTERN_QUESTIONS]
         if not question_engine.pattern_is_sensitive(p)
     ]
-    rendered: list[str | None] = []
+    rendered: list[str] = []
     owners: list[str | None] = []
     for p in pool_patterns:
         for q in question_engine.render_pattern_questions(p):
@@ -297,11 +300,11 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
     # Mirror build_pool's dedupe + suppression filters.
     filtered: list[tuple[str | None, str]] = []
     seen: set[str] = set()
-    for owner, q in zip(owners, rendered):
-        if q in seen or question_engine.crisis.matches_suppress(q):
+    for pid_owner, question_text in zip(owners, rendered):
+        if question_text in seen or question_engine.crisis.matches_suppress(question_text):
             continue
-        seen.add(q)
-        filtered.append((owner, q))
+        seen.add(question_text)
+        filtered.append((pid_owner, question_text))
     pool = [q for _, q in filtered] or list(generic)
     index = (today.toordinal() + question_engine.user_rotation_offset(user_id)) % len(pool)
     chosen_owner = filtered[index][0] if index < len(filtered) else None
@@ -364,7 +367,9 @@ async def _load_rows(
     )
     id_rows = (
         await session.execute(
-            select(Entry.id, func.length(Entry.blob).label("size"))
+            # The same dialect-aware byte-length expression the entries
+            # quota uses — one definition of "how big is this blob".
+            select(Entry.id, _entry_blob_length(session).label("size"))
             .where(Entry.user_id == user_id)
             .order_by(*recency)
             .limit(limit)
@@ -498,6 +503,18 @@ async def recompute(
     # success, 400, 410, or an unexpected 500 alike. (str copies the parser
     # and analyzer make are immutable and still linger until GC — see the
     # enclave module docstring for what zeroization honestly covers.)
+    # Metrics state is initialized here (not inside the lock) so the
+    # finally below can observe a duration for ANY exit past this point —
+    # a recompute that 400s after real analysis work is the operational
+    # signal an operator most needs to see (2026-09-17 audit: only the
+    # success path used to be counted).
+    metrics = getattr(request.app.state, "metrics", None)
+    enricher: llm.LLMAnalyzer | None = None
+    # Set (from the worker thread; a plain bool store is atomic under the
+    # GIL) the moment the enricher is actually invoked — a recompute that
+    # dies before enrichment must not count an LLM outcome it never ran.
+    enricher_invoked = False
+    started = time.monotonic()
     try:
         async with _recompute_locks.hold(f"insights:{user.id}"):
             # READ phase: one short transaction, closed by the context
@@ -534,6 +551,7 @@ async def recompute(
                 # strip the wrong plaintexts as "state"/"feedback" on those
                 # paths.
                 def analyze_fn(plains: list[bytearray]):
+                    nonlocal enricher_invoked
                     tail = (1 if with_state else 0) + (1 if with_feedback else 0)
                     entry_plains = plains[:-tail] if tail else plains
                     state_plain = bytes(plains[-tail]) if with_state and tail else None
@@ -544,6 +562,7 @@ async def recompute(
                                           feedback=feedback_events or None)
                     merged = list(result.surfaced)
                     if enricher is not None:
+                        enricher_invoked = True
                         # Brain-first inversion (2026-09-17): the model
                         # receives the deterministic findings and can only
                         # attach a sanitized narrative to them — its output
@@ -570,8 +589,6 @@ async def recompute(
             # must never queue in front of login scrypt (or any other request's
             # worker) in the same FIFO pool. No DB session is open here.
             analyze_limiter = getattr(request.app.state, "analyze_limiter", None)
-            metrics = getattr(request.app.state, "metrics", None)
-            started = time.monotonic()
             try:
                 # Decryption + analysis is synchronous, potentially slow CPU (or an
                 # LLM round-trip); run it in a worker thread so the event loop that
@@ -707,10 +724,6 @@ async def recompute(
                             code="account_deleted",
                         ) from None
                     raise
-            if metrics is not None:
-                metrics.observe_recompute(time.monotonic() - started)
-                if enricher is not None:
-                    metrics.observe_llm(failed=enricher.last_error is not None)
             return RecomputeResponse(
                 phase=state.phase.value,
                 active_days=state.active_days,
@@ -731,6 +744,14 @@ async def recompute(
                 patterns_fading=result.patterns_fading,
             )
     finally:
+        # Observability on EVERY exit (2026-09-17 audit): failed recomputes
+        # used to be invisible in the histogram — a corpus that 400s after
+        # seconds of real analysis work is exactly the spike an operator
+        # needs to see. The LLM outcome rides the same path.
+        if metrics is not None:
+            metrics.observe_recompute(time.monotonic() - started)
+            if enricher is not None and enricher_invoked:
+                metrics.observe_llm(failed=enricher.last_error is not None)
         zeroize(data_key)
 
 
@@ -750,12 +771,21 @@ async def get_insights(
     rows = await _entry_dates(session, user.id)
     state = threshold.evaluate(rows, request.app.state.settings.unlock_threshold_days)
     latest = await _latest_insight(session, user.id, "patterns")
+    # Phase-gated (2026-09-17 audit): deleting entries can drop the account
+    # back below the threshold; a patterns blob stored while the account WAS
+    # in the insight phase must not keep being served in baseline — nothing
+    # is revealed before the threshold, including stored leftovers.
+    blob = (
+        base64.b64encode(bytes(latest.blob)).decode("ascii")
+        if latest and state.phase is Phase.INSIGHT
+        else None
+    )
     return InsightsResponse(
         phase=state.phase.value,
         active_days=state.active_days,
         streak=state.streak,
         days_remaining=state.days_remaining,
-        blob=base64.b64encode(bytes(latest.blob)).decode("ascii") if latest else None,
+        blob=blob,
     )
 
 

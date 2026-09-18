@@ -9,6 +9,11 @@
 
 const API_PREFIX = "/api/v1";
 
+/** Request deadline (2026-09-17 audit): without one, a hung backend parks
+ * the UI forever on a fetch that will never answer — the mobile client has
+ * had the same 15 s cap since v1. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -47,6 +52,23 @@ function message(detail: unknown, status: number): string {
   return `request failed (${status})`;
 }
 
+/** fetch with a deadline; a timeout surfaces as the same ApiError(0, …)
+ * shape as an unreachable server. */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Session-expiry hook (2026-09-17): any 401 fires this ONCE per session
  *  (setSession re-arms it) — App swaps the whole UI to an explicit
  *  "session expired" sign-in instead of a cryptic banner while keys sit
@@ -67,12 +89,13 @@ async function request<T>(method: string, path: string, body?: unknown, extraHea
   };
   let response: Response;
   try {
-    response = await fetch(`${session.baseUrl}${API_PREFIX}${path}`, {
+    response = await fetchWithTimeout(`${session.baseUrl}${API_PREFIX}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
     throw new ApiError(0, "server unreachable — check the server URL or your connection");
   }
   if (response.status === 401 && !unauthorizedFired) {
@@ -96,12 +119,13 @@ async function request<T>(method: string, path: string, body?: unknown, extraHea
 async function authRequest<T>(baseUrl: string, method: string, path: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${API_PREFIX}${path}`, {
+    response = await fetchWithTimeout(`${baseUrl}${API_PREFIX}${path}`, {
       method,
       headers: { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
     throw new ApiError(0, "server unreachable — check the server URL or your connection");
   }
   const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };

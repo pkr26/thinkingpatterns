@@ -447,8 +447,13 @@ def test_client_key_ignores_forwarded_headers_unless_trusted():
     assert client_key(request, trust_proxy_headers=True) == "8.8.8.8"
 
 
-async def test_rate_limiter_buckets_clients_independently(settings):
-    """key=None style mutants would collapse every client into one bucket."""
+async def test_unlimited_endpoints_create_no_rate_buckets(settings):
+    """key=None style mutants would collapse every client into one bucket.
+
+    (This test and test_rate_limiter_buckets_clients_independently below
+    accidentally shared one name for years — the first definition was
+    shadowed and never ran until the 2026-09-17 audit un-shadowed it.)
+    """
     settings.auth_rate_limit = 1
     settings.auth_rate_window = 60
     application = create_app(settings)

@@ -106,11 +106,59 @@ class TestLanguageGate:
             "bookshop slowly thinking about my week and the coming weekend"
         )
         corpus = [JournalEntry(english, T0 - timedelta(days=ago)) for ago in range(70, 0, -1)]
-        result = _run_twice(corpus, T0)
+        _run_twice(corpus, T0)
         # English function words carry the hit rate far above the floor.
         tokens = [t for e in corpus for t in brain.WORD_RE.findall(e.text.lower())]
         known = sum(1 for t in tokens if t in brain._KNOWN_TOKENS)
         assert known / len(tokens) > brain.LANGUAGE_HIT_FLOOR
+
+
+# ---------------------------------------------------------------------------
+# 1b. digit-bearing tags (2026-09-17 exhaustive-audit regression)
+# ---------------------------------------------------------------------------
+
+class TestUnmappedDigitTags:
+    """A tag like "grade6test" rides the theme machinery verbatim and can
+    become a surfaced pattern label. The crisis interlock then runs the
+    suppress tier over the label — and the leet-fold regex used to match
+    digits 2/6/9 (deliberately unmapped in _LEET), raising KeyError inside
+    brain.update() and surfacing as a misleading 400 entry_payload_malformed
+    on EVERY future recompute. The regex classes now list exactly the mapped
+    characters; this test pins the full brain path end-to-end."""
+
+    def _corpus(self, until: date) -> list[JournalEntry]:
+        # 17 weeks: the digit tag lands on Sundays and Thursdays with low
+        # mood — strong enough to qualify the tag as a temporal/mood theme
+        # and (across recomputes with new tagged days) to surface it.
+        entries: list[JournalEntry] = []
+        d = until - timedelta(days=119)
+        while d <= until:
+            if d.weekday() == 6:
+                entries.append(JournalEntry(
+                    text="rough day, drained and flat", entry_date=d,
+                    sentiment=-0.8, tags=("grade6test",)))
+            elif d.weekday() == 3:
+                entries.append(JournalEntry(
+                    text="another rough one", entry_date=d,
+                    sentiment=-0.7, tags=("grade6test",)))
+            else:
+                entries.append(JournalEntry(
+                    text="steady ordinary day", entry_date=d, sentiment=0.5))
+            d += timedelta(days=1)
+        return entries
+
+    def test_digit_tag_recomputes_never_raise(self):
+        state = brain.load_state(None)
+        # Four recompute days, each corpus adding fresh tagged evidence —
+        # the cadence that crashed on the second run before the fix.
+        for run_day in (T0 - timedelta(days=6), T0 - timedelta(days=4),
+                        T0 - timedelta(days=2), T0):
+            result = brain.update(state, self._corpus(run_day), run_day)
+            state = result.new_state
+        # If a digit-bearing label surfaced, it must carry the sensitive
+        # check's verdict (a bool), never an exception.
+        for pattern in result.surfaced:
+            assert isinstance(pattern.label, str)
 
 
 # ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ observation shows you its evidence.**
 | `RESEARCH.md` | The industry/clinical-research audit behind the engine: every detector mapped to its citation |
 | `CHANGELOG.md` | Release notes, plus the running log of the audit/remediation waves |
 | `backend/` | FastAPI service (Python 3.12+): entry sync, secure processing session, stateful deterministic "mini-brain" v3 (see below), 30-day threshold, daily questions |
-| `backend/tests/` | 877-test suite (+ 1 Postgres-gated skip): unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions + the promoted crisis/AAD corpora |
+| `backend/tests/` | 903-test suite (+ 1 Postgres-gated skip): unit + API integration + crypto vectors + production-hardening + adversarial red-team + remediation regressions + the promoted crisis/AAD corpora |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
 | `mobile/` | React Native (iOS/Android) client: encrypted journal with entry history (read/edit/delete), one-tap mood check-in, day-1 reflective questions, evidence-view pattern cards, crisis resources, first-run onboarding + offline privacy policy, dark/light theme, "Share with my therapist" (pairing-code consent, wrapped-key grant, revoke), persistent bottom navigation, readable Markdown export, history search + mood calendar, question feedback ("did this land?"), energy/sleep/tag check-ins, theme override, haptics, prompt chips |
@@ -82,7 +82,7 @@ deterministic and self-contained. The lexicon is curated: context-dependent
 words ("kind", "fed", "present") were removed after measurement, and
 "hardly"/"barely" are negation-only (VADER's treatment — never downtoners).
 
-**Honesty guarantees, enforced by 658 backend tests:** base-rate correction
+**Honesty guarantees, enforced by 903 backend tests:** base-rate correction
 (a Sunday-heavy journaler gets no fake "everything happens on Sundays"),
 one Benjamini–Hochberg FDR family per run spanning every statistical claim
 — every testable candidate's p-value is computed **pre-gate** and the
@@ -131,14 +131,21 @@ anything:
    tokens and therapist routes reject patient tokens (403 at the
    dependency layer). There is no therapist write path to patient data:
    read-only is the absence of endpoints, not a UI convention.
-2. **Pairing**: the portal shows a short-lived (15 min), single-use code;
-   the patient types it in the app, sees the therapist's NAME and public
-   key, confirms against an explicit disclosure, and re-authenticates
-   with their password. The app then wraps its data key to the
-   therapist's public key (ECDH → HKDF, salt = both SPKI keys →
+2. **Pairing**: the portal shows a short-lived (15 min), single-use code
+   plus the therapist's **key fingerprint** (SHA-256 of their wrap key,
+   first 8 bytes: `A1B2 C3D4 …`); the patient types the code, sees the
+   therapist's NAME and public key — including the same fingerprint —
+   confirms against an explicit disclosure, and re-authenticates with
+   their password. Reading the two fingerprints back to each other is the
+   out-of-band check: the server relays the wrap key during lookup, and a
+   dishonest server could otherwise substitute its own key — a matching
+   fingerprint read over the phone (or in the room) is the human proof
+   the key belongs to the therapist. The app then wraps its data key to
+   the therapist's public key (ECDH → HKDF, salt = both SPKI keys →
    AES-256-GCM, AAD bound to the patient/therapist pair) and uploads one
-   small blob. The code burns in the same transaction. Codes are stored
-   only as HMACs; unknown/expired/consumed all answer the same 404.
+   small blob. The code burns in the same transaction (an atomic
+   conditional UPDATE — concurrent redeems cannot both win). Codes are
+   stored only as HMACs; unknown/expired/consumed all answer the same 404.
 3. **Reads**: the portal unwraps the data key locally after login and
    decrypts the SAME blobs the patient's app decrypts — insights
    (byte-identical to `GET /insights`) and entries (paginated, date
@@ -197,6 +204,11 @@ anything:
 9. **Therapist sharing keeps the server blind.** The patient's client
    wraps the data key to the therapist's public P-256 key (the server
    stores the wrap, never a usable key); the portal unwraps it locally.
+   Honest residual: the server *relays* the therapist's public key during
+   pairing, so an actively dishonest server could substitute its own key
+   and read the grant — the pairing fingerprint check (both humans read
+   the same 8-byte SHA-256 of the key) is the out-of-band mitigation;
+   without it, pairing trusts the server for identity discovery.
    See "Sharing with a therapist" above for the full lifecycle, including
    the honest revocation limit: revocation ends ACCESS, it cannot unread
    what a browser already decrypted.
@@ -238,7 +250,7 @@ docker compose --profile backups up -d backup
 # Mobile (source; native projects are generated with the RN toolchain)
 cd mobile && npm install && npm run ios   # or android; point Settings at your API
 
-# Mobile tests: 1,169 tests across 60 files — real crypto modules against shared vectors + queue/client/screen regressions
+# Mobile tests: 1,203 tests across 60 files — real crypto modules against shared vectors + queue/client/screen regressions
 cd mobile && npm test
 
 # Cross-platform crypto check over the REAL compiled modules
@@ -291,7 +303,7 @@ transaction); and the connection pool is env-configurable
 ```bash
 cd backend
 
-.venv/bin/python -m pytest                     # full suite (658 passed + 1 Postgres-gated skip, ~30s, includes 600k-iter vectors)
+.venv/bin/python -m pytest                     # full suite (903 passed + 1 Postgres-gated skip, ~60s, includes 600k-iter vectors)
 .venv/bin/python -m pytest -m "not slow"      # fast path (what mutmut uses)
 
 # The same suite against real Postgres (what CI's backend-postgres job does):
@@ -530,8 +542,9 @@ A second multi-pass adversarial audit found and this pass fixed:
   redirects are refused.
 * `probe_brain.py` now exits non-zero on any FAIL (it can gate CI).
 
-Test status at HEAD: backend **658 passed** (+ 1 Postgres-gated skip),
-probe 9/9, mobile **759 passed** (33 files), cross-platform crypto vectors
+Test status at HEAD (2026-09-17 exhaustive-audit wave): backend
+**903 passed** (+ 1 Postgres-gated skip), probe 9/9, mobile **1,203
+passed** (60 files), portal **90 passed**, cross-platform crypto vectors
 green.
 
 ## License
