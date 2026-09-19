@@ -1,0 +1,618 @@
+[
+  {
+    "id": "O2",
+    "campaign": "O",
+    "name": "is_active check dropped (deactivated accounts authenticate)",
+    "expectation": "a deactivated account must 401 on bearer use",
+    "file": "backend/app/deps.py",
+    "find": "    if user is None or not user.is_active:\n        raise failure",
+    "replace": "    if user is None:\n        raise failure",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_suspended_account_is_refused_on_insights_reads"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_suspended_account_is_refused_on_insights_reads"
+          ]
+        ],
+        "seconds": 0.6
+      }
+    ]
+  },
+  {
+    "id": "O10",
+    "campaign": "O",
+    "name": "therapist enrollment-token gate removed (open self-enrollment)",
+    "expectation": "a wrong X-Therapist-Enrollment-Token must 404 registration",
+    "file": "backend/app/api/therapist.py",
+    "find": "        if not hmac.compare_digest(provided_enrollment.encode(), expected_enrollment.encode()):",
+    "replace": "        if False:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_therapist_registration_requires_the_enrollment_token"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_therapist_registration_requires_the_enrollment_token"
+          ]
+        ],
+        "seconds": 0.7
+      }
+    ]
+  },
+  {
+    "id": "P5",
+    "campaign": "P",
+    "name": "entries pagination loses the id tiebreak (unstable page order)",
+    "expectation": "pages must be stable across requests for paginating clients",
+    "file": "backend/app/api/entries.py",
+    "find": "                metadata_query.order_by(\n                    Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc()\n                )",
+    "replace": "                metadata_query.order_by(\n                    Entry.entry_date.asc(), Entry.received_at.asc()\n                )",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_entry_page_ordering_carries_the_id_tiebreak"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_entry_page_ordering_carries_the_id_tiebreak"
+          ]
+        ],
+        "seconds": 0.8
+      }
+    ]
+  },
+  {
+    "id": "P6",
+    "campaign": "P",
+    "name": "same-day question upsert no longer rewrites the blob",
+    "expectation": "a repeated same-day recompute must store the fresh question",
+    "file": "backend/app/api/insights.py",
+    "find": "            set_={\"blob\": blob, \"created_at\": now},",
+    "replace": "            set_={\"created_at\": now},",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_same_day_recompute_rewrites_the_question_blob"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_same_day_recompute_rewrites_the_question_blob"
+          ]
+        ],
+        "seconds": 1.1
+      }
+    ]
+  },
+  {
+    "id": "Q1",
+    "campaign": "Q",
+    "name": "legacy entry page byte budget x100 (413 removed)",
+    "expectation": "an unpaged request over 2 MiB ciphertext must 413",
+    "file": "backend/app/api/entries.py",
+    "find": "ENTRY_PAGE_BLOB_BYTES = 2 * 1024 * 1024",
+    "replace": "ENTRY_PAGE_BLOB_BYTES = 200 * 1024 * 1024",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_legacy_entry_page_budget_is_two_mebibytes"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_legacy_entry_page_budget_is_two_mebibytes"
+          ]
+        ],
+        "seconds": 1.2
+      }
+    ]
+  },
+  {
+    "id": "Q9",
+    "campaign": "Q",
+    "name": "therapist caseload cap 100 -> 10,000",
+    "expectation": "the caseload cap must 413 at the boundary",
+    "file": "backend/app/api/consents.py",
+    "find": "MAX_PATIENTS_PER_THERAPIST = 100",
+    "replace": "MAX_PATIENTS_PER_THERAPIST = 10_000",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_grant_rejects_when_the_therapist_caseload_is_full"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_grant_rejects_when_the_therapist_caseload_is_full"
+          ]
+        ],
+        "seconds": 1.5
+      }
+    ]
+  },
+  {
+    "id": "R8",
+    "campaign": "R",
+    "name": "grant commit conflict re-raises raw (409 contract lost)",
+    "expectation": "a concurrent same-pair grant must 409, not 500",
+    "file": "backend/app/api/consents.py",
+    "find": "                raise ApiError(\n                    status_code=409, detail=\"consent already being granted\", code=\"conflict\"\n                ) from exc",
+    "replace": "                raise",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_concurrent_pair_grant_answers_conflict_not_500"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_concurrent_pair_grant_answers_conflict_not_500"
+          ]
+        ],
+        "seconds": 1.7
+      }
+    ]
+  },
+  {
+    "id": "R10",
+    "campaign": "R",
+    "name": "pairing-code retry loop swallows non-unique IntegrityErrors",
+    "expectation": "only a unique violation may be retried; other errors raise",
+    "file": "backend/app/api/therapist.py",
+    "find": "            await session.rollback()\n            if not _is_unique_violation(exc):\n                raise",
+    "replace": "            await session.rollback()\n            if False:\n                raise",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_pairing_code_creation_only_retries_unique_violations"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_pairing_code_creation_only_retries_unique_violations"
+          ]
+        ],
+        "seconds": 1.8
+      }
+    ]
+  },
+  {
+    "id": "S3",
+    "campaign": "S",
+    "name": "per-owner processing-session cap removed",
+    "expectation": "one account must not hoard the store's session slots",
+    "file": "backend/app/security/enclave.py",
+    "find": "                if owner_sessions >= self._max_sessions_per_owner:",
+    "replace": "                if False:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_keystore_per_owner_session_cap"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_keystore_per_owner_session_cap"
+          ]
+        ],
+        "seconds": 1.8
+      }
+    ]
+  },
+  {
+    "id": "S5",
+    "campaign": "S",
+    "name": "stale marker comparison relaxed (!= -> <)",
+    "expectation": "ANY divergence of the collection marker must 409, ahead or behind",
+    "file": "backend/app/api/entries.py",
+    "find": "    if expected_revision is not None and expected_revision != current_revision:",
+    "replace": "    if expected_revision is not None and expected_revision < current_revision:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_ahead_of_server_snapshot_marker_also_conflicts"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_ahead_of_server_snapshot_marker_also_conflicts"
+          ]
+        ],
+        "seconds": 1.8
+      }
+    ]
+  },
+  {
+    "id": "S6",
+    "campaign": "S",
+    "name": "GET /insights serves the stored blob regardless of phase",
+    "expectation": "baseline must reveal nothing, including stored leftovers",
+    "file": "backend/app/api/insights.py",
+    "find": "        if latest and state.phase is Phase.INSIGHT\n        else None",
+    "replace": "        if latest\n        else None",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_insights_blob_not_served_after_threshold_regression"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_insights_blob_not_served_after_threshold_regression"
+          ]
+        ],
+        "seconds": 2.2
+      }
+    ]
+  },
+  {
+    "id": "S7",
+    "campaign": "S",
+    "name": "therapist insights read serves the blob regardless of phase",
+    "expectation": "the therapist view must phase-gate exactly like the patient's",
+    "file": "backend/app/api/therapist.py",
+    "find": "                if latest and state.phase is threshold.Phase.INSIGHT",
+    "replace": "                if latest",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_therapist_insights_read_phase_gates_the_blob"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_therapist_insights_read_phase_gates_the_blob"
+          ]
+        ],
+        "seconds": 2.5
+      }
+    ]
+  },
+  {
+    "id": "T6",
+    "campaign": "T",
+    "name": "XFF trusted whenever the flag is on (peer allowlist dropped)",
+    "expectation": "a direct client forging X-Forwarded-For must not choose its bucket",
+    "file": "backend/app/cache.py",
+    "find": "    if trust_proxy_headers and getattr(request.state, \"mindpattern_trusted_proxy\", False):",
+    "replace": "    if trust_proxy_headers:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_forwarded_identity_requires_the_trusted_peer_decision"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_forwarded_identity_requires_the_trusted_peer_decision"
+          ]
+        ],
+        "seconds": 2.4
+      }
+    ]
+  },
+  {
+    "id": "T8",
+    "campaign": "T",
+    "name": "lock overflow discipline dropped (fresh keys bypass the fallback)",
+    "expectation": "absent keys must stay on the overflow lock until it drains",
+    "file": "backend/app/locks.py",
+    "find": "            if self._overflow_refs:",
+    "replace": "            if False:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_mutation_pins_2026_09_19.py",
+        "tests/test_mutation_pins_2026_09_19.py::test_absent_keys_stay_on_the_overflow_lock_until_it_drains"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins_2026_09_19.py::test_absent_keys_stay_on_the_overflow_lock_until_it_drains"
+          ]
+        ],
+        "seconds": 2.9
+      }
+    ]
+  }
+]

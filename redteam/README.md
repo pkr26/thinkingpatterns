@@ -21,6 +21,7 @@ bash redteam/run_all.sh
 | `../mobile/redteam/f_mobile.test.ts` | E1-TS, A2, A3, A4-TS, A6-TS, F1, F2, F4 | real mobile modules under vitest |
 | `mutation_campaign_2026-09-18/` | — | behavioral mutation campaign: 36 mutants over the non-negotiables (see `../../reports/mutation_campaign_2026-09-18.md`) |
 | `mutation_campaign_2026-09-18_round2/` | — | round 2: 70 mutants over brain round 2, threshold, crypto contracts, crisis, ops, idiographic isolation, sync queue, and REDTEAM-AS-ORACLE (mutate a control, check these harnesses notice) — which found and fixed the harness rot below (see `../../reports/mutation_campaign_2026-09-18_round2.md`) |
+| `mutation_campaign_2026-09-19/` | — | round 3: 62 mutants over backend infrastructure — authorization & access control, database/ORM, boundaries & business logic, error handling & transactions, cache & invalidation, rate limiting & concurrency (see `../../reports/mutation_campaign_2026-09-19.md`; adds `pin_check.py`, the hand-verification driver that re-applies each mutant against its pin) |
 | `run_pr_mutation_gate.py` | — | per-PR gate: re-applies every behavioral mutant whose target file is in the diff (wired in `.github/workflows/mutation-pr.yml` with a bounded diff-scoped mutmut job) |
 
 Artefacts: `results/*.json` (verdicts), `aad_corpus.json`, `crisis_corpus.json`

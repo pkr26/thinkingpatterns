@@ -1,0 +1,926 @@
+[
+  {
+    "id": "P1",
+    "campaign": "P",
+    "name": "entries idempotency unique constraint dropped from the model",
+    "expectation": "(user_id, client_entry_id) uniqueness must be enforced by the DB",
+    "file": "backend/app/models.py",
+    "find": "        UniqueConstraint(\"user_id\", \"client_entry_id\", name=\"uq_user_client_entry\"),",
+    "replace": "",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entries_api.py",
+          "tests/test_migrations.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_migrations.py::test_migrations_reproduce_create_all_schema"
+          ]
+        ],
+        "seconds": 1.6
+      }
+    ]
+  },
+  {
+    "id": "P2",
+    "campaign": "P",
+    "name": "undated-insight partial unique index dropped (one-current-row backstop)",
+    "expectation": "one current undated insight row per (user, kind) must be DB-enforced",
+    "file": "backend/app/models.py",
+    "find": "        Index(\n            \"uq_insights_user_kind_undated\",\n            \"user_id\",\n            \"kind\",\n            unique=True,\n            sqlite_where=text(\"for_date IS NULL\"),\n            postgresql_where=text(\"for_date IS NULL\"),\n        ),",
+    "replace": "",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_insights_api.py",
+          "tests/test_migrations.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_migrations.py::test_migrations_reproduce_create_all_schema"
+          ]
+        ],
+        "seconds": 2.9
+      }
+    ]
+  },
+  {
+    "id": "P3",
+    "campaign": "P",
+    "name": "Entry.user_id FK loses ondelete=CASCADE",
+    "expectation": "oracle question: the explicit deletes make the cascade defense-in-depth?",
+    "file": "backend/app/models.py",
+    "find": "    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)\n    user_id: Mapped[str] = mapped_column(ForeignKey(\"users.id\", ondelete=\"CASCADE\"))\n    client_entry_id: Mapped[str] = mapped_column(String(64))",
+    "replace": "    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)\n    user_id: Mapped[str] = mapped_column(ForeignKey(\"users.id\"))\n    client_entry_id: Mapped[str] = mapped_column(String(64))",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_account_api.py",
+          "tests/test_adversarial.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 4.4
+      }
+    ]
+  },
+  {
+    "id": "P4",
+    "campaign": "P",
+    "name": "_entry_dates drops SQL DISTINCT (duplicates to the threshold)",
+    "expectation": "oracle question: does the service-level dedupe subsume the SQL one?",
+    "file": "backend/app/api/insights.py",
+    "find": "                select(Entry.entry_date)\n                .distinct()",
+    "replace": "                select(Entry.entry_date)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_threshold.py",
+          "tests/test_insights_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 2.8
+      }
+    ]
+  },
+  {
+    "id": "P5",
+    "campaign": "P",
+    "name": "entries pagination loses the id tiebreak (unstable page order)",
+    "expectation": "pages must be stable across requests for paginating clients",
+    "file": "backend/app/api/entries.py",
+    "find": "                metadata_query.order_by(\n                    Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc()\n                )",
+    "replace": "                metadata_query.order_by(\n                    Entry.entry_date.asc(), Entry.received_at.asc()\n                )",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entry_pagination_bytes.py",
+          "tests/test_snapshot_revisions.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 1.8
+      }
+    ]
+  },
+  {
+    "id": "P6",
+    "campaign": "P",
+    "name": "same-day question upsert no longer rewrites the blob",
+    "expectation": "a repeated same-day recompute must store the fresh question",
+    "file": "backend/app/api/insights.py",
+    "find": "            set_={\"blob\": blob, \"created_at\": now},",
+    "replace": "            set_={\"created_at\": now},",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_api_hardening_r3.py",
+          "tests/test_insights_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.2
+      }
+    ]
+  },
+  {
+    "id": "P7",
+    "campaign": "P",
+    "name": "undated insight replace deletes EVERY kind for the user",
+    "expectation": "replacing patterns must not wipe the brain state or questions",
+    "file": "backend/app/api/insights.py",
+    "find": "            delete(Insight).where(Insight.user_id == user_id, Insight.kind == kind)",
+    "replace": "            delete(Insight).where(Insight.user_id == user_id)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_insights_api.py",
+          "tests/test_brain_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_insights_api.py::test_full_pipeline_unlocks_at_threshold"
+          ]
+        ],
+        "seconds": 0.8
+      }
+    ]
+  },
+  {
+    "id": "P9",
+    "campaign": "P",
+    "name": "entry-user re-fetch drops populate_existing (stale identity map)",
+    "expectation": "the fresh authorization re-check must really re-read the row",
+    "file": "backend/app/api/entries.py",
+    "find": "    fresh = await session.get(User, user_id, populate_existing=True)",
+    "replace": "    fresh = await session.get(User, user_id)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entries_api.py",
+          "tests/test_api_resilience_coverage.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_api_resilience_coverage.py::test_entry_paging_retries_when_metadata_row_disappears"
+          ]
+        ],
+        "seconds": 1.5
+      }
+    ]
+  },
+  {
+    "id": "P10",
+    "campaign": "P",
+    "name": "list_entries metadata query inverted (!= owner)",
+    "expectation": "one user's page must never contain another's entries",
+    "file": "backend/app/api/entries.py",
+    "find": "            metadata_query = select(Entry.id, _blob_length(session).label(\"blob_bytes\")).where(\n                Entry.user_id == fresh_user.id\n            )",
+    "replace": "            metadata_query = select(Entry.id, _blob_length(session).label(\"blob_bytes\")).where(\n                Entry.user_id != fresh_user.id\n            )",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entries_api.py",
+          "tests/test_adversarial.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_entries_api.py::test_create_list_delete_roundtrip"
+          ]
+        ],
+        "seconds": 0.6
+      }
+    ]
+  },
+  {
+    "id": "P11",
+    "campaign": "P",
+    "name": "revision-advance rowcount guard removed (unmarked mutation commits)",
+    "expectation": "an entry write whose marker cannot advance must fail, not commit",
+    "file": "backend/app/api/entries.py",
+    "find": "    if db_rowcount(result) != 1:",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_snapshot_revisions.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_snapshot_revisions.py::test_revision_helpers_fail_closed_when_an_owner_is_missing_or_at_limit"
+          ]
+        ],
+        "seconds": 1.2
+      }
+    ]
+  },
+  {
+    "id": "Q1",
+    "campaign": "Q",
+    "name": "legacy entry page byte budget x100 (413 removed)",
+    "expectation": "an unpaged request over 2 MiB ciphertext must 413",
+    "file": "backend/app/api/entries.py",
+    "find": "ENTRY_PAGE_BLOB_BYTES = 2 * 1024 * 1024",
+    "replace": "ENTRY_PAGE_BLOB_BYTES = 200 * 1024 * 1024",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entry_pagination_bytes.py",
+          "tests/test_api_hardening_r3.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 6.0
+      }
+    ]
+  },
+  {
+    "id": "Q2",
+    "campaign": "Q",
+    "name": "has_more probe row dropped (limit+1 -> limit)",
+    "expectation": "a full page must still advertise a continuation",
+    "file": "backend/app/api/entries.py",
+    "find": "                .limit(limit + 1)",
+    "replace": "                .limit(limit)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entry_pagination_bytes.py",
+          "tests/test_snapshot_revisions.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_snapshot_revisions.py::test_entries_snapshot_revision_is_strict_and_tracks_real_mutations"
+          ]
+        ],
+        "seconds": 0.8
+      }
+    ]
+  },
+  {
+    "id": "Q3",
+    "campaign": "Q",
+    "name": "per-chart note count quota disabled",
+    "expectation": "note count over the cap must 413",
+    "file": "backend/app/api/therapist.py",
+    "find": "    if is_new and int(count) >= MAX_NOTES_PER_PATIENT:",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_api_resilience_coverage.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_api_resilience_coverage.py::test_therapist_note_quota_rejects_count_and_total_byte_overflow"
+          ]
+        ],
+        "seconds": 3.7
+      }
+    ]
+  },
+  {
+    "id": "Q4",
+    "campaign": "Q",
+    "name": "per-chart note byte quota x1000",
+    "expectation": "chart ciphertext over the cap must 413",
+    "file": "backend/app/api/therapist.py",
+    "find": "    if int(total) - previous_size + incoming > MAX_NOTE_BYTES_PER_PATIENT:",
+    "replace": "    if int(total) - previous_size + incoming > MAX_NOTE_BYTES_PER_PATIENT * 1000:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_api_resilience_coverage.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_api_resilience_coverage.py::test_therapist_note_quota_rejects_count_and_total_byte_overflow"
+          ]
+        ],
+        "seconds": 3.7
+      }
+    ]
+  },
+  {
+    "id": "Q5",
+    "campaign": "Q",
+    "name": "therapist evidence page size 25 -> 2500",
+    "expectation": "the drill-down page must stay count-bounded",
+    "file": "backend/app/api/therapist.py",
+    "find": "THERAPIST_ENTRY_PAGE_SIZE = 25",
+    "replace": "THERAPIST_ENTRY_PAGE_SIZE = 2500",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestTherapistReads::test_entries_default_page_is_25_and_exposes_an_exact_continuation"
+          ]
+        ],
+        "seconds": 12.5
+      }
+    ]
+  },
+  {
+    "id": "Q6",
+    "campaign": "Q",
+    "name": "continuation advances by limit, not rows received",
+    "expectation": "X-Next-Offset must be exactly offset + rows returned",
+    "file": "backend/app/api/entries.py",
+    "find": "                response.headers[\"X-Next-Offset\"] = str(offset + len(result))",
+    "replace": "                response.headers[\"X-Next-Offset\"] = str(offset + limit)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_entry_pagination_bytes.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_entry_pagination_bytes.py::test_entries_byte_paginate_without_legacy_silent_truncation"
+          ]
+        ],
+        "seconds": 0.6
+      }
+    ]
+  },
+  {
+    "id": "Q7",
+    "campaign": "Q",
+    "name": "question retention window 90 -> 900 days",
+    "expectation": "dated question history older than 90 days must age out on recompute",
+    "file": "backend/app/api/insights.py",
+    "find": "QUESTION_RETENTION_DAYS = 90",
+    "replace": "QUESTION_RETENTION_DAYS = 900",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_api_hardening_r3.py",
+          "tests/test_deep_mutation_pins.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_api_hardening_r3.py::test_question_rows_older_than_90_days_are_purged"
+          ]
+        ],
+        "seconds": 1.3
+      }
+    ]
+  },
+  {
+    "id": "Q8",
+    "campaign": "Q",
+    "name": "access-log retention x100 (prune never fires)",
+    "expectation": "audit rows past the retention window must be deleted",
+    "file": "backend/app/api/therapist.py",
+    "find": "    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days))",
+    "replace": "    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days * 100))",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_ops_fixes_2026_09_17b.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_ops_fixes_2026_09_17b.py::test_prune_once_deletes_only_rows_past_retention"
+          ]
+        ],
+        "seconds": 0.5
+      }
+    ]
+  },
+  {
+    "id": "Q9",
+    "campaign": "Q",
+    "name": "therapist caseload cap 100 -> 10,000",
+    "expectation": "the caseload cap must 413 at the boundary",
+    "file": "backend/app/api/consents.py",
+    "find": "MAX_PATIENTS_PER_THERAPIST = 100",
+    "replace": "MAX_PATIENTS_PER_THERAPIST = 10_000",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 18.0
+      }
+    ]
+  },
+  {
+    "id": "Q10",
+    "campaign": "Q",
+    "name": "wrapped-key size bound 256 -> 256,000",
+    "expectation": "an oversized wrapped_key must 422",
+    "file": "backend/app/api/consents.py",
+    "find": "MAX_WRAPPED_KEY_BYTES = 256",
+    "replace": "MAX_WRAPPED_KEY_BYTES = 256_000",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_sharing_crypto.py",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestConsentGrant::test_grant_validation"
+          ]
+        ],
+        "seconds": 4.8
+      }
+    ]
+  },
+  {
+    "id": "Q11",
+    "campaign": "Q",
+    "name": "inner-date tolerance 1 -> 30 days",
+    "expectation": "a far-off inner created_at must 400, not feed the decay math",
+    "file": "backend/app/api/insights.py",
+    "find": "INNER_DATE_TOLERANCE_DAYS = 1",
+    "replace": "INNER_DATE_TOLERANCE_DAYS = 30",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain_api.py",
+          "tests/test_brain_hardening_2026_09_17.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 3.6
+      }
+    ]
+  }
+]

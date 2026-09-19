@@ -1,0 +1,484 @@
+[
+  {
+    "id": "O1",
+    "campaign": "O",
+    "name": "token-epoch kill switch disabled (pre-logout bearer stays valid)",
+    "expectation": "logout must retire every previously issued token",
+    "file": "backend/app/deps.py",
+    "find": "    if payload.get(\"ep\", 1) != user.token_epoch:",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_auth_api.py",
+          "tests/test_api_hardening_r3.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_auth_api.py::test_logout_revokes_every_token"
+          ]
+        ],
+        "seconds": 1.4
+      }
+    ]
+  },
+  {
+    "id": "O2",
+    "campaign": "O",
+    "name": "is_active check dropped (deactivated accounts authenticate)",
+    "expectation": "a deactivated account must 401 on bearer use",
+    "file": "backend/app/deps.py",
+    "find": "    if user is None or not user.is_active:\n        raise failure",
+    "replace": "    if user is None:\n        raise failure",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_hardening.py",
+          "tests/test_auth_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 2.3
+      }
+    ]
+  },
+  {
+    "id": "O3",
+    "campaign": "O",
+    "name": "journal role wall removed (therapist token reaches journal endpoints)",
+    "expectation": "a therapist token must 403 on /entries and friends",
+    "file": "backend/app/deps.py",
+    "find": "    if user.role != ROLE_USER:",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestRoleSeparation::test_therapist_cannot_use_journal_endpoints"
+          ]
+        ],
+        "seconds": 1.4
+      }
+    ]
+  },
+  {
+    "id": "O4",
+    "campaign": "O",
+    "name": "sharing role wall removed (patient token reaches therapist endpoints)",
+    "expectation": "a patient token must 403 on /therapist/*",
+    "file": "backend/app/deps.py",
+    "find": "    if user.role != ROLE_THERAPIST:",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestRoleSeparation::test_patient_cannot_use_therapist_endpoints"
+          ]
+        ],
+        "seconds": 1.5
+      }
+    ]
+  },
+  {
+    "id": "O5",
+    "campaign": "O",
+    "name": "revoked consent still authorizes therapist reads",
+    "expectation": "revoked consent must read 404 everywhere",
+    "file": "backend/app/api/therapist.py",
+    "find": "    if consent is None or consent.status != \"active\":",
+    "replace": "    if consent is None:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestTherapistReads::test_revoked_consent_reads_404"
+          ]
+        ],
+        "seconds": 10.6
+      }
+    ]
+  },
+  {
+    "id": "O6",
+    "campaign": "O",
+    "name": "note re-fetch drops therapist scoping (cross-therapist update/delete by id)",
+    "expectation": "one therapist must never touch another's note id",
+    "file": "backend/app/api/therapist.py",
+    "find": "                    select(TherapistNote).where(\n                        TherapistNote.id == note_id, TherapistNote.therapist_id == user.id\n                    )",
+    "replace": "                    select(TherapistNote).where(\n                        TherapistNote.id == note_id\n                    )",
+    "count": 2,
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 17.0
+      }
+    ]
+  },
+  {
+    "id": "O7",
+    "campaign": "O",
+    "name": "revoke drops patient ownership (any patient revokes any consent id)",
+    "expectation": "a consent id from another patient must 404",
+    "file": "backend/app/api/consents.py",
+    "find": "                    select(Consent)\n                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)",
+    "replace": "                    select(Consent)\n                    .where(Consent.id == consent_id)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestConsentRevoke::test_cannot_revoke_another_patients_consent"
+          ]
+        ],
+        "seconds": 7.3
+      }
+    ]
+  },
+  {
+    "id": "O8",
+    "campaign": "O",
+    "name": "sharing feature flag fails open (disabled deployment serves sharing routes)",
+    "expectation": "therapist_sharing_enabled=False must 404 the sharing surface",
+    "file": "backend/app/deps.py",
+    "find": "    if not bool(getattr(request.app.state.settings, \"therapist_sharing_enabled\", False)):",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py",
+          "tests/test_hardening.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_therapist_api.py::TestAuditAndCascades::test_therapist_can_delete_account_after_sharing_is_disabled"
+          ]
+        ],
+        "seconds": 15.9
+      }
+    ]
+  },
+  {
+    "id": "O9",
+    "campaign": "O",
+    "name": "keystore owner binding removed (get + pop accept foreign tokens)",
+    "expectation": "a token minted for one account must not serve another",
+    "file": "backend/app/security/enclave.py",
+    "find": "            if owner is not None and bound_owner is not None and owner != bound_owner:",
+    "replace": "            if False:",
+    "count": 2,
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_enclave.py",
+          "tests/test_hardening.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_enclave.py::TestInMemoryKeyStore::test_foreign_owner_cannot_consume_or_destroy_a_session"
+          ]
+        ],
+        "seconds": 0.4
+      }
+    ]
+  },
+  {
+    "id": "O10",
+    "campaign": "O",
+    "name": "therapist enrollment-token gate removed (open self-enrollment)",
+    "expectation": "a wrong X-Therapist-Enrollment-Token must 404 registration",
+    "file": "backend/app/api/therapist.py",
+    "find": "        if not hmac.compare_digest(provided_enrollment.encode(), expected_enrollment.encode()):",
+    "replace": "        if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_therapist_api.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 17.1
+      }
+    ]
+  },
+  {
+    "id": "O11",
+    "campaign": "O",
+    "name": "recompute pops the processing token without the owner pin",
+    "expectation": "one user's session token must not steer another's recompute",
+    "file": "backend/app/api/insights.py",
+    "find": "        data_key = key_store.pop(x_processing_token, owner=user.id)",
+    "replace": "        data_key = key_store.pop(x_processing_token, owner=None)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain_api.py",
+          "tests/test_enclave.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 3.0
+      }
+    ]
+  }
+]

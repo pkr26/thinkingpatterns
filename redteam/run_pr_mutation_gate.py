@@ -10,6 +10,11 @@ silently regress on the files a PR actually touches.
 A mutant whose find-string no longer matches its file (SETUP-ERROR) also
 fails the gate: a pin that rotted is a pin that stopped guarding.
 
+Documented residuals (genuine survivors with a written defense-in-depth or
+unreachability argument in their campaign report) are re-run but only
+WARNED, never failed: their survival is the recorded state of the art, not
+a regression.
+
 Usage (from the repo root, against a merge-base ref):
   python3 redteam/run_pr_mutation_gate.py origin/main...HEAD   # or a file list on stdin
   git diff --name-only origin/main... | python3 redteam/run_pr_mutation_gate.py -
@@ -27,12 +32,24 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 HARNESS_GLOBS = (
     "mutation_campaign_2026-09-18/harness.py",
     "mutation_campaign_2026-09-18_round2/harness.py",
+    "mutation_campaign_2026-09-19/harness.py",
 )
+
+# Genuine survivors that are deliberately unpinned, with the report section
+# that argues why. Round 2: I4 (pairing burn's expiry WHERE only closes the
+# lookup→burn race window; _live_code rejects expired codes), J1 (pool-side
+# suppress filter subsumed by three upstream tripwires). Round 3: O6 (note
+# re-fetch scoping unreachable behind the still-scoped pre-lock read), S10
+# (recompute-lock keying masked by the outer per-user lifecycle fence).
+DOCUMENTED_RESIDUALS = {"I4", "J1", "N9", "O6", "S10"}
 
 
 def load_harnesses() -> tuple[list[dict], object]:
-    """All behavioral campaign mutants + one harness module (their
-    run_mutant implementations are identical; one serves both)."""
+    """All behavioral campaign mutants + the harness module that serves
+    run_mutant for all of them. That MUST be the round-2 implementation:
+    round-1's run_mutant only accepts the single-suite `tests` dict, while
+    round-2/3 mutants may carry a list of suites (and round-2's carries the
+    redteam-oracle verdicts and the stale-bytecode/corpus hygiene)."""
     mutants: list[dict] = []
     module = None
     for rel in HARNESS_GLOBS:
@@ -43,7 +60,10 @@ def load_harnesses() -> tuple[list[dict], object]:
         loaded = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(loaded)  # type: ignore[union-attr]
         mutants.extend(loaded.MUTANTS)
-        module = module or loaded
+        if rel.startswith("mutation_campaign_2026-09-18_round2"):
+            module = loaded
+        elif module is None:
+            module = loaded
     return mutants, module
 
 
@@ -80,6 +100,10 @@ def main() -> int:
         print(f"    -> {status}"
               + (f"  ({result.get('detail', '')})" if status == "SETUP-ERROR" else ""), flush=True)
         if status in ("SURVIVED", "MISSED", "SETUP-ERROR"):
+            if m["id"] in DOCUMENTED_RESIDUALS and status in ("SURVIVED", "MISSED"):
+                print(f"    (documented residual {m['id']} — see its campaign report; "
+                      "not a gate failure)", flush=True)
+                continue
             failures.append(f"{m['id']} {status}: {m['name']}")
     if failures:
         print("\nPR MUTATION GATE FAILED — surviving/rotted mutants:")

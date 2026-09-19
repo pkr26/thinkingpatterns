@@ -499,7 +499,7 @@ MUTANTS: list[dict] = [
         file="backend/app/main.py",
         find='        docs_url="/docs" if is_development else None,',
         replace='        docs_url="/docs",',
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py", "tests/test_mutation_pins_2026_09_18b.py"),
     ),
     dict(
         id="K5", campaign="K", name="HSTS header dropped from the response set",
@@ -507,7 +507,7 @@ MUTANTS: list[dict] = [
         file="backend/app/middleware.py",
         find='    (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),\n',
         replace="",
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py", "tests/test_mutation_pins.py"),
     ),
     dict(
         id="K6", campaign="K", name="request body cap effectively removed (x 1,000,000)",
@@ -791,6 +791,12 @@ def run_mutant(m: dict) -> dict:
     corpus_paths = [ROOT / "redteam" / "crisis_corpus.json",
                     ROOT / "redteam" / "aad_corpus.json"]
     corpus_backup = {p: p.read_bytes() for p in corpus_paths if p.exists()}
+    # Same hazard, found live 2026-09-19 via the PR gate: the redteam
+    # scripts WRITE redteam/results/*.json on every run, so an oracle-mutant
+    # replay records mutant-conditioned verdicts into TRACKED files.
+    # Snapshot the whole results directory alongside the corpora.
+    results_dir = ROOT / "redteam" / "results"
+    results_backup = {p: p.read_bytes() for p in results_dir.glob("*.json")} if results_dir.is_dir() else {}
     try:
         per_cmd: list[dict] = []
         killed = False
@@ -812,6 +818,9 @@ def run_mutant(m: dict) -> dict:
     finally:
         for p, original_corpus in corpus_backup.items():
             p.write_bytes(original_corpus)
+        for p, original_results in results_backup.items():
+            if p.read_bytes() != original_results:
+                p.write_bytes(original_results)
         target.write_bytes(original)
         if target.read_bytes() != original:
             raise RuntimeError(f"RESTORE FAILED for {m['id']} — {m['file']}")

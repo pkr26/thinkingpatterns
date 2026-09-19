@@ -218,7 +218,7 @@ MUTANTS: list[dict] = [
         file="backend/app/security/enclave.py",
         find="            # Only the authorized caller consumes the store-owned buffer.\n            del self._keys[token]\n            return key",
         replace="            # Only the authorized caller consumes the store-owned buffer.\n            return key",
-        tests=backend_pytest("tests/test_enclave.py"),
+        tests=backend_pytest("tests/test_enclave.py", "tests/test_mutation_pins_2026_09_19.py"),
     ),
     dict(
         id="C4", campaign="C", name="decrypt ignores AAD (context binding dropped)",

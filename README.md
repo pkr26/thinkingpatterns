@@ -351,7 +351,11 @@ brain round 2, the threshold, crypto contracts, crisis handling, ops,
 idiographic isolation, the sync queue, and the red-team harnesses
 themselves as oracles (`reports/mutation_campaign_2026-09-18_round2.md`,
 which also records the first portal Stryker campaign — baseline 1.41% —
-and the scoped mobile re-runs).
+and the scoped mobile re-runs); round 3 — 62 mutants over backend
+infrastructure: authorization & access control, database/ORM, boundaries,
+error handling & transactions, cache/invalidation, and rate
+limiting/concurrency (`reports/mutation_campaign_2026-09-19.md`, 46 killed
++ 14 new pins + 2 documented residuals).
 `.pre-commit-config.yaml` mirrors the ruff gate locally.
 
 ## Environment variables

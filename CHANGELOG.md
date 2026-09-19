@@ -6,6 +6,72 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-19 — Mutation campaign round 3: backend infrastructure (authz, ORM, boundaries, transactions, cache, rate limiting)
+
+Six campaigns (`redteam/mutation_campaign_2026-09-19/`, report:
+`reports/mutation_campaign_2026-09-19.md`). 62 hand-written mutants: 36
+killed at their targeted suites, 26 survivors → full-suite re-verification
+(10 more killed there) → 16 genuine → 14 pinned
+(`backend/tests/test_mutation_pins_2026_09_19.py`, hand-verified 14/14 by
+re-applying each mutant) + 2 documented residuals.
+
+- **Authorization & access control** (11): epoch kill switch, is_active
+  gate, both role walls, revoked-consent reads, note chart scoping, revoke
+  ownership, sharing feature flag, keystore owner binding, enrollment
+  token, recompute owner pin. Genuine gaps pinned: a suspended account is
+  now refused on routes WITHOUT the route-level re-check (`GET /insights`),
+  and the therapist enrollment-token gate is route-level tested for the
+  first time.
+- **Database & ORM** (10): the load-bearing unique constraints, FK cascade,
+  SQL DISTINCT, pagination tiebreak, same-day upsert, insight delete scope,
+  `populate_existing`, ownership filter, revision guard. Pins: the page
+  metadata query's full deterministic ordering (SQL shape), and a same-day
+  recompute must rewrite the question blob (the existing upsert test never
+  checked that new content wins).
+- **Boundaries & business logic** (11): byte budgets, has_more detection,
+  note quotas, page sizes, continuation arithmetic, retention windows,
+  caseload caps, wrapped-key bound, inner-date tolerance. The
+  self-referential test trap struck a THIRD time: the legacy byte-budget
+  test imported the budget constant from the code under test, so the ×100
+  mutant scaled the test along with it — the pin uses independent
+  literals. Caseload cap pinned with literal filler counts.
+- **Error handling & transactions** (10): envelope fallback, deep-JSON 400,
+  edge headers, FK→410, unique-violation classification, atomic epoch
+  bump, export admission release, grant conflict mapping, revoke recheck,
+  pairing retry filter. Pins: the losing concurrent same-pair grant answers
+  the 409 contract (session-proxy bomb armed on the atomic claim UPDATE),
+  and only unique violations are retried during pairing-code allocation
+  (direct route call with fakes — an app-level session-poisoning pin is
+  impossible: the mutant's retry crashes the poisoned session into a
+  different 500).
+- **Cache & invalidation** (10): processing-session TTL, owner purge,
+  per-owner cap, revision markers (delete advance, stale comparison in BOTH
+  directions), phase-gated blob serving, note marker advance, periodic key
+  sweep, recompute serialization. Pins: per-owner session cap, ahead-of-
+  server markers conflict too, and a threshold regression stops serving the
+  stored blob on BOTH the patient's and the therapist's view.
+- **Rate limiting & concurrency** (10): limit off-by-one, window rollover
+  boundary, probe-vs-failure counting, eviction policy, stale drop, XFF
+  trust, IPv6 /64 aggregation, lock overflow discipline, live-lock
+  eviction, single-process guard. Pins: forwarded identity requires the
+  trusted-peer decision (not just the flag), and absent lock keys stay on
+  the overflow lock until it drains.
+- **Documented residuals** (genuine but deliberately unpinned): O6
+  (cross-therapist note access via the under-lock re-fetch is unreachable
+  behind the still-scoped pre-lock read) and S10 (the per-user recompute
+  lock's keying is masked by the outer per-user lifecycle fence).
+- **PR mutation gate hardened while integrating round 3** (168 behavioral
+  mutants now visible to it; validated 83/83 killed/caught over a synthetic
+  diff touching every campaign target file): the gate now serves all
+  mutants with the round-2 `run_mutant` (round-1's crashed on
+  list-of-suites mutants), carries an explicit `DOCUMENTED_RESIDUALS`
+  allowlist (I4, J1, N9, O6, S10 — previously permanent red gates on their
+  files), and the mutants' targeted lists now include their actual killing
+  suites (round-3's full-suite killers, round-2's K4/K5 pins, and this
+  campaign's pins file). The gate also caught a ROTTED round-1 pin — C3
+  (keystore pop single-use) is killed by nothing in the current suite and
+  is re-pinned in `tests/test_mutation_pins_2026_09_19.py`.
+
 ### 2026-09-18 (b) — Mutation campaign round 2: portal/mobile Stryker, brain round 2, redteam-as-oracle, PR mutation gate
 
 Ten campaigns (`redteam/mutation_campaign_2026-09-18_round2/`, report:
