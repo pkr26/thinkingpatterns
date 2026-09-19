@@ -2,7 +2,7 @@
   {
     "id": "H1.metadata-inference",
     "status": "FINDING",
-    "summary": "operator-view inference from entry_date+length only: subject journals on ['Sunday'] exclusively (15 entries over 120 days); a 21-day silence ending 2026-08-02; 40% of entries are 10x longer than the rest (crisis-length writes vs routine updates) \u2014 an operator can infer religious observance or work schedules, episode timing, and possibly severity from SIZE alone, with zero decryption"
+    "summary": "operator-view inference from entry_date+length only: subject journals on ['Sunday'] exclusively (15 entries over 120 days); a 21-day silence ending 2026-08-02; 33% of entries are 10x longer than the rest (crisis-length writes vs routine updates) \u2014 an operator can infer religious observance or work schedules, episode timing, and possibly severity from SIZE alone, with zero decryption"
   },
   {
     "id": "H2.export-cleartext-fields",

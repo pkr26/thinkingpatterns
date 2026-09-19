@@ -20,7 +20,19 @@ bash redteam/run_all.sh
 | `h_privacy.py` | H1–H3 | metadata inference, export, erasure |
 | `../mobile/redteam/f_mobile.test.ts` | E1-TS, A2, A3, A4-TS, A6-TS, F1, F2, F4 | real mobile modules under vitest |
 | `mutation_campaign_2026-09-18/` | — | behavioral mutation campaign: 36 mutants over the non-negotiables (see `../../reports/mutation_campaign_2026-09-18.md`) |
+| `mutation_campaign_2026-09-18_round2/` | — | round 2: 70 mutants over brain round 2, threshold, crypto contracts, crisis, ops, idiographic isolation, sync queue, and REDTEAM-AS-ORACLE (mutate a control, check these harnesses notice) — which found and fixed the harness rot below (see `../../reports/mutation_campaign_2026-09-18_round2.md`) |
+| `run_pr_mutation_gate.py` | — | per-PR gate: re-applies every behavioral mutant whose target file is in the diff (wired in `.github/workflows/mutation-pr.yml` with a bounded diff-scoped mutmut job) |
 
 Artefacts: `results/*.json` (verdicts), `aad_corpus.json`, `crisis_corpus.json`
 (promote both into the main suites as regression fixtures). Everything runs
 against throwaway in-process or localhost servers; nothing leaves the machine.
+
+Harness health notes (2026-09-18 round 2): the shared `make_settings` now
+uses a per-process temp FILE sqlite (in-memory gave every pool connection
+its own empty database since the Alembic-first startup — `/auth/register`
+500'd with "no such table"); `direct_insert_entry` writes tz-aware
+`received_at`; `e2_brain.py` imports `common` before `app.*` (sys.path
+bootstrap). Never regenerate corpus fixtures while the engine is mutated,
+and never let a campaign run write `.pyc` (the round-2 harness sets
+`PYTHONDONTWRITEBYTECODE=1` — same-size mutants reverted inside one clock
+second otherwise leave poisoned bytecode behind).

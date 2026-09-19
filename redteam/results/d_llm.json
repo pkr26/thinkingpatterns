@@ -27,7 +27,7 @@
   {
     "id": "D2.plaintext-egress",
     "status": "FINDING",
-    "summary": "consent-ON recompute (200): decrypted journal text arrives at the endpoint verbatim (leaked=True, 4235 chars of entries JSON, bearer auth=ok, model=audit-model) \u2014 this is the documented, consent-gated design; recorded because it is THE plaintext disclosure path"
+    "summary": "consent-ON recompute (200): decrypted journal text arrives at the endpoint verbatim (leaked=True, 4377 chars of entries JSON, bearer auth=ok, model=audit-model) \u2014 this is the documented, consent-gated design; recorded because it is THE plaintext disclosure path"
   },
   {
     "id": "D2.missing-generation-limits",

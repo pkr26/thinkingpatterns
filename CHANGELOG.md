@@ -6,6 +6,80 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-18 (b) — Mutation campaign round 2: portal/mobile Stryker, brain round 2, redteam-as-oracle, PR mutation gate
+
+Ten campaigns (`redteam/mutation_campaign_2026-09-18_round2/`, report:
+`reports/mutation_campaign_2026-09-18_round2.md`). 70 hand-written
+mutants: 55 killed at their targeted suites, 13 targeted survivors →
+full-suite re-verification → 10 genuine → 8 pinned (verified 8/8 by
+hand-applying each mutant) + 2 documented defense-in-depth.
+
+- **Portal had effectively no mutation coverage** — first-ever Stryker
+  run (`portal/stryker.config.json`, `npm run test:mutation`): 2,262
+  mutants, score 1.41%. The security-critical crypto seams are now
+  pinned (`portal/tests/crypto.pins.test.ts`): the two portal-only HKDF
+  subkeys byte-pinned against backend-derived references, identity
+  cross-bindings (key sealed for therapist A must not unlock under B;
+  notes fail under every wrong id), wrong-key-size guards. `views/*`
+  (~1,266 mutants, ~0.5%) is the recorded follow-up front. A `qs`
+  override keeps `npm audit` clean with the Stryker devDependencies.
+- **Mobile scoped Stryker re-runs** (first measurement since the
+  2026-09-15 99.64% campaign): crypto 83.5%, offlineQueue 87.4%,
+  InsightsScreen 84.1%, mood/calendar 73.4%, crisis 75.1% — the drop is
+  post-09-15 code without equivalent pins; the semantic non-negotiables
+  remain guarded by the hand-written campaigns (M 6/6). Per-mutant
+  triage is the recorded follow-up.
+- **Brain round 2** (20 mutants): EWMA λ, MinHash/LSH (perms, banding,
+  threshold), lag-1 links (direction, lag-0, gap-2-only), replication
+  independence, residuals-vs-pooled, lifecycle boundaries 44/45/46 —
+  the v2 confound mutants (residuals removed) are killed by the suite
+  AND the probe; the ground-truth probe alone catches 2/20 (it detects
+  missing planted patterns, not loosened thresholds — the EWMA honesty
+  pins now live in `test_mutation_pins_2026_09_18b.py`).
+- **Threshold campaign** (7/7 killed): distinct-vs-total days, 29/30/31
+  boundaries, streak grace, ±1-day backdating windows, baseline-phase
+  reveal-nothing — all pinned.
+- **Crypto contract campaign**: HKDF auth/data info swap killed on all
+  platforms, fixed-zero nonce killed, pairing single-use killed;
+  tampering `shared/vectors.json` / `crisis_phrases.json` /
+  `generic_questions.json` fails every consuming suite (portal pins the
+  fields it consumes — `encrypt_vectors`, not the legacy
+  `vectors[].blob`); the pairing-burn expiry condition is documented
+  defense-in-depth (closes only the lookup→burn race).
+- **Redteam-as-oracle campaign** (new discipline: mutate a security
+  control, check whether the attack harnesses notice): 8/10 caught.
+  The two that sailed through are now harness pins — a_crypto's KDF
+  floor probe was self-referential (it read the contract value from the
+  code under test; now pinned as constants), and b_auth never sent a
+  WRONG verifier (new `B1.wrong-verifier-rejected` audit). One residual
+  (ALPHA inflation is absorbed by the layered effect gates on the
+  harness's corpora), one equivalent-by-cascade (entry deletion).
+- **The red-team harnesses had silently rotted**: 5 of 8 backend attack
+  scripts crashed at `/auth/register` (in-memory SQLite assumption
+  broken by the Alembic-first startup) and `e2_brain` was un-runnable
+  (import order). All repaired; every script reports 0 harness errors
+  and the full `run_all.sh` is green again.
+- **Two harness hazards found live and closed**: (1) stale-bytecode
+  poisoning — CPython validates `.pyc` by source mtime at second
+  granularity, so a same-size mutant applied and reverted inside one
+  clock second leaves the mutated bytecode cached on a byte-clean tree
+  (67 phantom suite failures mid-campaign); the harness now runs with
+  `PYTHONDONTWRITEBYTECODE=1` and purges the target's `__pycache__`
+  after each restore, and all verdicts were re-computed from a purged,
+  re-confirmed-green baseline. (2) corpus-regenerating harnesses poison
+  fixtures when run under mutation (e_crisis re-exported every crisis
+  sample as suppress=false); the corpus was restored and the rule
+  recorded.
+- **Per-PR incremental mutation gate**
+  (`.github/workflows/mutation-pr.yml` +
+  `redteam/run_pr_mutation_gate.py`): every behavioral campaign mutant
+  (106 across both rounds) whose target file is in the PR diff is
+  re-applied and must stay killed (rotted find-strings fail too), plus
+  a bounded 20-minute diff-scoped `mutmut run` over changed backend
+  files where survivors fail the PR. Validated both ways locally.
+- Backend suite grows to 1,037 tests (9 new pins); portal to 131 (7 new
+  crypto pins).
+
 ### 2026-09-18 — Behavioral mutation campaign over the non-negotiables
 
 36 hand-written semantic mutants across six campaigns (BH/FDR statistics,

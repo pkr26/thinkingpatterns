@@ -1,0 +1,1140 @@
+[
+  {
+    "id": "G1",
+    "campaign": "G",
+    "name": "EWMA lambda 0.18 -> 1.0 (no smoothing; chart becomes Shewhart)",
+    "expectation": "EWMA chart regressions must fail",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_SHIFT_LAMBDA = 0.18",
+    "replace": "MOOD_SHIFT_LAMBDA = 1.0",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.4,
+        "output": ""
+      },
+      {
+        "kind": "probe",
+        "cmd": ".venv/bin/python probe_brain.py",
+        "failed": true,
+        "failures": [],
+        "seconds": 0.4,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G2",
+    "campaign": "G",
+    "name": "EWMA control limit 2.7sigma -> 1.0sigma (false alarms)",
+    "expectation": "AR(1) false-alarm regression sim must fail",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_SHIFT_LIMIT = 2.7",
+    "replace": "MOOD_SHIFT_LIMIT = 1.0",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.2,
+        "output": ""
+      },
+      {
+        "kind": "probe",
+        "cmd": ".venv/bin/python probe_brain.py",
+        "failed": false,
+        "failures": [],
+        "seconds": 0.4,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G3",
+    "campaign": "G",
+    "name": "EWMA baseline seeded over the WHOLE window (no post-baseline points)",
+    "expectation": "probe scenario: the planted mood shift must vanish",
+    "file": "backend/app/services/brain.py",
+    "find": "baseline = day_sentiments[: max(MOOD_SHIFT_BASELINE_MIN, n // 4)]",
+    "replace": "baseline = day_sentiments[:n]",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected"
+          ]
+        ],
+        "seconds": 1.2,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G4",
+    "campaign": "G",
+    "name": "EWMA autocorrelation limit inflation disabled",
+    "expectation": "stationary AR(1) series must false-alarm <=2/12 (regression sim)",
+    "file": "backend/app/services/brain.py",
+    "find": "    if phi is not None and phi >= 0.35:",
+    "replace": "    if False:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.1,
+        "output": ""
+      },
+      {
+        "kind": "probe",
+        "cmd": ".venv/bin/python probe_brain.py",
+        "failed": false,
+        "failures": [],
+        "seconds": 0.4,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G5",
+    "campaign": "G",
+    "name": "EWMA run rule 3 -> 1 (single point beyond limit = shift)",
+    "expectation": "sustained-run requirement must be pinned",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_SHIFT_RUN = 3",
+    "replace": "MOOD_SHIFT_RUN = 1",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.6,
+        "output": ""
+      },
+      {
+        "kind": "probe",
+        "cmd": ".venv/bin/python probe_brain.py",
+        "failed": false,
+        "failures": [],
+        "seconds": 0.3,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G6",
+    "campaign": "G",
+    "name": "MinHash NUM_PERM 64 -> 8 (signature collapse)",
+    "expectation": "phrase clustering precision/determinism pins must fail",
+    "file": "backend/app/services/phrases.py",
+    "find": "NUM_PERM = 64",
+    "replace": "NUM_PERM = 8",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_phrases.py",
+          "tests/test_brain.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_phrases.py::test_near_duplicates_cluster_across_days"
+          ]
+        ],
+        "seconds": 0.8,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G7",
+    "campaign": "G",
+    "name": "LSH BANDS 16 -> 32 (band/row split changed; recall-only?)",
+    "expectation": "oracle question: is the banding itself observable?",
+    "file": "backend/app/services/phrases.py",
+    "find": "BANDS = 16",
+    "replace": "BANDS = 32",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_phrases.py",
+          "tests/test_brain.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestTopicDiscovery::test_steady_presence_surfaces_without_test"
+          ]
+        ],
+        "seconds": 7.8,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G8",
+    "campaign": "G",
+    "name": "Jaccard confirmation threshold 0.5 -> 0.1 (unrelated sentences cluster)",
+    "expectation": "unrelated-pair non-clustering pin must fail",
+    "file": "backend/app/services/phrases.py",
+    "find": "DEFAULT_JACCARD = 0.5",
+    "replace": "DEFAULT_JACCARD = 0.1",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_phrases.py",
+          "tests/test_brain.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestTopicDiscovery::test_steady_presence_surfaces_without_test"
+          ]
+        ],
+        "seconds": 7.2,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G9",
+    "campaign": "G",
+    "name": "lag-1 link direction flipped (exposed/unexposed swapped)",
+    "expectation": "link direction copy + probe scenario E must fail",
+    "file": "backend/app/services/brain.py",
+    "find": "        delta = sum(unexposed) / len(unexposed) - sum(exposed) / len(exposed)",
+    "replace": "        delta = sum(exposed) / len(exposed) - sum(unexposed) / len(unexposed)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"
+          ]
+        ],
+        "seconds": 2.4,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G10",
+    "campaign": "G",
+    "name": "link outcome day lag-1 -> lag-0 (same-day mood, not day-after)",
+    "expectation": "the day-after claim must not become a same-day claim unnoticed",
+    "file": "backend/app/services/brain.py",
+    "find": "        exposed = [day_residuals[cur] for _, cur in exposed_pairs]",
+    "replace": "        exposed = [day_residuals[prev] for prev, _ in exposed_pairs]",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"
+          ]
+        ],
+        "seconds": 2.2,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G11",
+    "campaign": "G",
+    "name": "link transitions admit gap==2 only (day-after excluded)",
+    "expectation": "probe scenario E (day-after family link) must FAIL",
+    "file": "backend/app/services/brain.py",
+    "find": "        if 1 <= gap <= LINK_MAX_GAP_DAYS:",
+    "replace": "        if gap == LINK_MAX_GAP_DAYS:",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"
+          ]
+        ],
+        "seconds": 2.2,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G12",
+    "campaign": "G",
+    "name": "evidence-date replication: new-evidence requirement -> True",
+    "expectation": "consecutive same-corpus recomputes must not count as independent",
+    "file": "backend/app/services/brain.py",
+    "find": "    if record.kind in EVIDENCE_DATE_KINDS:\n        return any(_iso(day) not in prior_evidence for day in signal.evidence_days)",
+    "replace": "    if record.kind in EVIDENCE_DATE_KINDS:\n        return True",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestLifecycle::test_statistical_kinds_never_surface_on_first_qualification"
+          ]
+        ],
+        "seconds": 0.9,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G13",
+    "campaign": "G",
+    "name": "REPLICATION_MIN_SPREAD_DAYS 2 -> 1 (consecutive days independent)",
+    "expectation": "window-stat fluke re-qualification must be pinned",
+    "file": "backend/app/services/brain.py",
+    "find": "REPLICATION_MIN_SPREAD_DAYS = 2",
+    "replace": "REPLICATION_MIN_SPREAD_DAYS = 1",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected"
+          ]
+        ],
+        "seconds": 0.9,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G14",
+    "campaign": "G",
+    "name": "lifecycle boundary: GRACE_DAYS 7 -> 6",
+    "expectation": "exact fade boundary pin (round 1 only tested 7->7000)",
+    "file": "backend/app/services/brain.py",
+    "find": "GRACE_DAYS = 7  # unqualified days before active \u2192 fading",
+    "replace": "GRACE_DAYS = 6  # unqualified days before active \u2192 fading",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.2,
+        "output": ""
+      },
+      {
+        "kind": "probe",
+        "cmd": ".venv/bin/python probe_brain.py",
+        "failed": false,
+        "failures": [],
+        "seconds": 0.4,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G15",
+    "campaign": "G",
+    "name": "lifecycle boundary: ARCHIVE_DAYS 45 -> 44",
+    "expectation": "exact archive boundary pin",
+    "file": "backend/app/services/brain.py",
+    "find": "ARCHIVE_DAYS = 45  # unqualified days before fading \u2192 archived",
+    "replace": "ARCHIVE_DAYS = 44  # unqualified days before fading \u2192 archived",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": false,
+        "failures": [],
+        "seconds": 7.3,
+        "output": ""
+      },
+      {
+        "kind": "probe",
+        "cmd": ".venv/bin/python probe_brain.py",
+        "failed": false,
+        "failures": [],
+        "seconds": 0.3,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G16",
+    "campaign": "G",
+    "name": "lifecycle boundary: CONFIRM_AGE_DAYS 21 -> 0 (instant confirm)",
+    "expectation": "emerging must not confirm without age",
+    "file": "backend/app/services/brain.py",
+    "find": "CONFIRM_AGE_DAYS = 21  # emerging \u2192 confirmed by age",
+    "replace": "CONFIRM_AGE_DAYS = 0  # emerging \u2192 confirmed by age",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestLifecycle::test_candidate_hidden_until_requalified"
+          ]
+        ],
+        "seconds": 0.8,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G17",
+    "campaign": "G",
+    "name": "lifecycle boundary: evidence half-life 45 -> 44 days",
+    "expectation": "exact decay boundary pin (round 1 only tested x1000)",
+    "file": "backend/app/services/brain.py",
+    "find": "HALF_LIFE_DAYS = 45.0  # recent mentions outweigh old ones; the brain forgets",
+    "replace": "HALF_LIFE_DAYS = 44.0  # recent mentions outweigh old ones; the brain forgets",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestMemoryAndDecay::test_strength_decays_with_half_life"
+          ]
+        ],
+        "seconds": 0.9,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G18",
+    "campaign": "G",
+    "name": "residuals dropped: day residuals = raw moods (v2 confound, day level)",
+    "expectation": "probe zero-false-associations gate \u2014 the oracle question",
+    "file": "backend/app/services/brain.py",
+    "find": "    day_residuals = {day: mood - baselines.get(day, mood) for day, mood in day_sentiments}",
+    "replace": "    day_residuals = dict(day_sentiments)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"
+          ]
+        ],
+        "seconds": 2.0,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G19",
+    "campaign": "G",
+    "name": "residuals dropped: per-entry residuals = raw moods (v2 confound, entry level)",
+    "expectation": "probe zero-false-associations gate \u2014 the oracle question",
+    "file": "backend/app/services/brain.py",
+    "find": "        (entry, tokens, themes, sentiment - baselines.get(entry.entry_date, sentiment))",
+    "replace": "        (entry, tokens, themes, sentiment)",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestMoodCorrelation::test_effect_and_significance_gates"
+          ]
+        ],
+        "seconds": 0.9,
+        "output": ""
+      }
+    ]
+  },
+  {
+    "id": "G20",
+    "campaign": "G",
+    "name": "topic presence cluster-cover bar 0.8 -> 1.1 (never suppresses)",
+    "expectation": "boilerplate presence must stay suppressed (40/40 noise pin)",
+    "file": "backend/app/services/brain.py",
+    "find": "TOPIC_PRESENCE_CLUSTER_COVER = 0.8",
+    "replace": "TOPIC_PRESENCE_CLUSTER_COVER = 1.1",
+    "tests": [
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-x",
+          "--no-header",
+          "-p",
+          "no:cacheprovider",
+          "-m",
+          "not slow",
+          "tests/test_brain.py",
+          "tests/test_patterns.py"
+        ],
+        "timeout": 900,
+        "kind": "pytest"
+      },
+      {
+        "cwd": "backend",
+        "cmd": [
+          ".venv/bin/python",
+          "probe_brain.py"
+        ],
+        "timeout": 300,
+        "kind": "probe"
+      }
+    ],
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": ".venv/bin/python -m pytest -q -x --no-header",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain.py::TestTopicDiscovery::test_cluster_covered_presence_is_suppressed"
+          ]
+        ],
+        "seconds": 6.3,
+        "output": ""
+      }
+    ]
+  }
+]

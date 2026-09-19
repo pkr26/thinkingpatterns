@@ -57,6 +57,25 @@ async def b1_verifier_and_tokens() -> None:
                 f"credential chain reaches the plaintext-egress switch, the most sensitive "
                 f"setting in the system")
 
+        # 2026-09-18 round-2 oracle campaign (N8): the checks above never
+        # send a WRONG verifier, so a mutant that stops verifying replays
+        # entirely still read "BLOCKED" here. Re-authentication must reject
+        # a wrong password-equivalent on every destructive surface.
+        wrong_verifier = base64.b64encode(b"\x00" * 32).decode()
+        wrong_codes = {}
+        r = await client.put("/api/v1/account/llm-consent",
+                             headers=auth_headers(fresh),
+                             json={"enabled": True, "verifier": wrong_verifier})
+        wrong_codes["llm-consent"] = r.status_code
+        r = await client.delete("/api/v1/account",
+                                headers={**auth_headers(fresh),
+                                         "X-Account-Verifier": wrong_verifier})
+        wrong_codes["account-delete"] = r.status_code
+        verdict("B1.wrong-verifier-rejected",
+                "BLOCKED" if set(wrong_codes.values()) == {403} else "FINDING",
+                f"a WRONG verifier on destructive ops -> {wrong_codes} (must be flat 403; "
+                f"anything else means re-authentication stopped comparing the proof)")
+
         # Hostile token shapes at the API boundary: all must be flat 401, no 500
         hostile = [
             "", "Bearer", "Bearer x", "Bearer a.b", "Bearer ..", "Bearer %00.%00",

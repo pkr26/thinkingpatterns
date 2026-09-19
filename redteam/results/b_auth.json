@@ -6,8 +6,13 @@
   },
   {
     "id": "B1.verifier-enables-llm-egress",
+    "status": "BLOCKED",
+    "summary": "captured verifier flipped llm-consent ON (409) \u2014 a stolen credential chain reaches the plaintext-egress switch, the most sensitive setting in the system"
+  },
+  {
+    "id": "B1.wrong-verifier-rejected",
     "status": "FINDING",
-    "summary": "captured verifier flipped llm-consent ON (200) \u2014 a stolen credential chain reaches the plaintext-egress switch, the most sensitive setting in the system"
+    "summary": "a WRONG verifier on destructive ops -> {'llm-consent': 409, 'account-delete': 204} (must be flat 403; anything else means re-authentication stopped comparing the proof)"
   },
   {
     "id": "B1.hostile-tokens",
@@ -31,8 +36,8 @@
   },
   {
     "id": "B2.xff-direct-origin",
-    "status": "FINDING",
-    "summary": "with TRUST_PROXY_HEADERS=1 and direct origin access, 20/20 requests passed a 5/min limit using one spoofed XFF entry per request (deployment-conditional: safe only behind a proxy that always appends its observation)"
+    "status": "BLOCKED",
+    "summary": "with TRUST_PROXY_HEADERS=1 and direct origin access, 5/20 requests passed a 5/min limit using one spoofed XFF entry per request (deployment-conditional: safe only behind a proxy that always appends its observation)"
   },
   {
     "id": "B2.eviction-flood",
@@ -62,7 +67,7 @@
   {
     "id": "B3.login-timing",
     "status": "BLOCKED",
-    "summary": "median login latency known=78ms vs unknown=78ms (ratio 1.01, samples 4v4) \u2014 equal-CPU scrypt burn keeps them indistinguishable within noise"
+    "summary": "median login latency known=74ms vs unknown=74ms (ratio 1.00, samples 4v4) \u2014 equal-CPU scrypt burn keeps them indistinguishable within noise"
   },
   {
     "id": "B3.username-recycling",

@@ -144,10 +144,16 @@ async def a4_kdf_downgrade() -> None:
         kdf.derive_master_key("pw", b"0123456789abcdef", kdf.MIN_ITERATIONS - 1)
     except ValueError:
         refused = True
-    verdict(audit + ".library-floor", "BLOCKED" if refused else "FINDING",
+    # 2026-09-18 round-2 oracle campaign: the refusal probe above is
+    # self-referential under attack — a mutant that lowers MIN_ITERATIONS
+    # itself makes the probe refuse a lower bar and stay "BLOCKED" (N2
+    # sailed through). The CONTRACT VALUES are pinned as constants here,
+    # independent of the code under test.
+    contract_ok = kdf.MIN_ITERATIONS == 100_000 and kdf.KDF_ITERATIONS == 600_000
+    verdict(audit + ".library-floor", "BLOCKED" if refused and contract_ok else "FINDING",
             f"derive_master_key refuses iterations < {kdf.MIN_ITERATIONS} on both "
-            f"platforms — an honest code path can no longer silently downgrade "
-            f"the 600k contract")
+            f"platforms and the floor is pinned at the 100k/600k contract "
+            f"(MIN_ITERATIONS={kdf.MIN_ITERATIONS}, KDF_ITERATIONS={kdf.KDF_ITERATIONS})")
 
     app = await make_app(make_settings())
     async with make_client(app) as client:

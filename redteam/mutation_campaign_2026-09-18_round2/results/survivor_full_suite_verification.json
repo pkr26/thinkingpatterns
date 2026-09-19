@@ -1,0 +1,515 @@
+[
+  {
+    "id": "G2",
+    "campaign": "G",
+    "name": "EWMA control limit 2.7sigma -> 1.0sigma (false alarms)",
+    "expectation": "AR(1) false-alarm regression sim must fail",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_SHIFT_LIMIT = 2.7",
+    "replace": "MOOD_SHIFT_LIMIT = 1.0",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_audit_fixes.py::test_ewma_limits_are_autocorrelation_aware"
+          ]
+        ],
+        "seconds": 62.3,
+        "output": ""
+      }
+    ],
+    "seconds": 62.3
+  },
+  {
+    "id": "G4",
+    "campaign": "G",
+    "name": "EWMA autocorrelation limit inflation disabled",
+    "expectation": "stationary AR(1) series must false-alarm <=2/12 (regression sim)",
+    "file": "backend/app/services/brain.py",
+    "find": "    if phi is not None and phi >= 0.35:",
+    "replace": "    if False:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 62.2,
+        "output": ""
+      }
+    ],
+    "seconds": 62.2
+  },
+  {
+    "id": "G5",
+    "campaign": "G",
+    "name": "EWMA run rule 3 -> 1 (single point beyond limit = shift)",
+    "expectation": "sustained-run requirement must be pinned",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_SHIFT_RUN = 3",
+    "replace": "MOOD_SHIFT_RUN = 1",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 62.0,
+        "output": ""
+      }
+    ],
+    "seconds": 62.0
+  },
+  {
+    "id": "G14",
+    "campaign": "G",
+    "name": "lifecycle boundary: GRACE_DAYS 7 -> 6",
+    "expectation": "exact fade boundary pin (round 1 only tested 7->7000)",
+    "file": "backend/app/services/brain.py",
+    "find": "GRACE_DAYS = 7  # unqualified days before active \u2192 fading",
+    "replace": "GRACE_DAYS = 6  # unqualified days before active \u2192 fading",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 62.1,
+        "output": ""
+      }
+    ],
+    "seconds": 62.1
+  },
+  {
+    "id": "G15",
+    "campaign": "G",
+    "name": "lifecycle boundary: ARCHIVE_DAYS 45 -> 44",
+    "expectation": "exact archive boundary pin",
+    "file": "backend/app/services/brain.py",
+    "find": "ARCHIVE_DAYS = 45  # unqualified days before fading \u2192 archived",
+    "replace": "ARCHIVE_DAYS = 44  # unqualified days before fading \u2192 archived",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 62.7,
+        "output": ""
+      }
+    ],
+    "seconds": 62.7
+  },
+  {
+    "id": "I4",
+    "campaign": "I",
+    "name": "pairing-code burn drops the expiry condition (expired code redeems)",
+    "expectation": "15-minute code lifetime must be enforced at redemption",
+    "file": "backend/app/api/consents.py",
+    "find": "                .where(\n                    PairingCode.id == code_row.id,\n                    PairingCode.consumed_at.is_(None),\n                    PairingCode.expires_at > now,\n                )",
+    "replace": "                .where(\n                    PairingCode.id == code_row.id,\n                    PairingCode.consumed_at.is_(None),\n                )",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 71.9,
+        "output": ""
+      }
+    ],
+    "seconds": 71.9
+  },
+  {
+    "id": "J1",
+    "campaign": "J",
+    "name": "question pool belt-and-braces suppress filter removed",
+    "expectation": "no rendered question may quote suppress-tier content",
+    "file": "backend/app/services/questions.py",
+    "find": "    pool = [q for q in pool if not crisis.matches_suppress(q)]",
+    "replace": "    pool = pool",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 73.0,
+        "output": ""
+      }
+    ],
+    "seconds": 73.0
+  },
+  {
+    "id": "J2",
+    "campaign": "J",
+    "name": "surfaced cards never carry detail.sensitive",
+    "expectation": "crisis-adjacent cards must render non-quoting on BOTH clients",
+    "file": "backend/app/services/brain.py",
+    "find": "    if crisis.matches_suppress(record.label):\n        return True",
+    "replace": "    if False:\n        return True",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 74.3,
+        "output": ""
+      }
+    ],
+    "seconds": 74.3
+  },
+  {
+    "id": "K1",
+    "campaign": "K",
+    "name": "environment normalization drops .lower() (PRODUCTION escapes gates)",
+    "expectation": "case typos must hit production gates",
+    "file": "backend/app/config.py",
+    "find": "        self.environment = self.environment.strip().lower()",
+    "replace": "        self.environment = self.environment.strip()",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 73.6,
+        "output": ""
+      }
+    ],
+    "seconds": 73.6
+  },
+  {
+    "id": "K4",
+    "campaign": "K",
+    "name": "OpenAPI docs always mounted",
+    "expectation": "/docs must 404 outside development",
+    "file": "backend/app/main.py",
+    "find": "        docs_url=\"/docs\" if is_development else None,",
+    "replace": "        docs_url=\"/docs\",",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 73.4,
+        "output": ""
+      }
+    ],
+    "seconds": 73.4
+  },
+  {
+    "id": "K5",
+    "campaign": "K",
+    "name": "HSTS header dropped from the response set",
+    "expectation": "every response carries the full header set",
+    "file": "backend/app/middleware.py",
+    "find": "    (b\"strict-transport-security\", b\"max-age=31536000; includeSubDomains\"),\n",
+    "replace": "",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_mutation_pins.py::test_crypto_and_auth_constants_are_pinned"
+          ],
+          [
+            "FAILED",
+            "tests/test_redteam_fixes.py::test_security_headers_on_unhandled_500"
+          ]
+        ],
+        "seconds": 70.0,
+        "output": ""
+      }
+    ],
+    "seconds": 70.0
+  },
+  {
+    "id": "L2",
+    "campaign": "L",
+    "name": "poor-sleep split against a fixed 3.0 norm (not the user's own median)",
+    "expectation": "the split must be within-person (own median)",
+    "file": "backend/app/services/brain.py",
+    "find": "        poor_sleep_days = {day for day, q in day_sleep_mean.items() if q < median}",
+    "replace": "        poor_sleep_days = {day for day, q in day_sleep_mean.items() if q < 3.0}",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": false,
+        "failures": [],
+        "seconds": 70.6,
+        "output": ""
+      }
+    ],
+    "seconds": 70.6
+  },
+  {
+    "id": "L4",
+    "campaign": "L",
+    "name": "language-gate hit floor 0.10 -> 0.0 (gate always passes)",
+    "expectation": "non-English prose must not feed English-lexicon detectors",
+    "file": "backend/app/services/brain.py",
+    "find": "LANGUAGE_HIT_FLOOR = 0.10",
+    "replace": "LANGUAGE_HIT_FLOOR = 0.0",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1200,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "commands": [
+      {
+        "kind": "pytest",
+        "cmd": "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python -m pytest -q --no-header -p",
+        "failed": true,
+        "failures": [
+          [
+            "FAILED",
+            "tests/test_brain_hardening_2026_09_17.py::TestAuditRemediation2026_09_17::test_negation_dense_spanish_is_gated"
+          ]
+        ],
+        "seconds": 72.5,
+        "output": ""
+      }
+    ],
+    "seconds": 72.5
+  }
+]

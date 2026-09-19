@@ -14,7 +14,7 @@ import json
 import os
 import resource
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from common import (
     auth_headers,
@@ -231,7 +231,8 @@ async def c3_logic_abuse() -> None:
         async with app2.state.sessionmaker() as s:
             s.add(Entry(user_id=u["user_id"], client_entry_id="e-evil",
                         blob=base64.b64decode(blob),
-                        entry_date=d_.today(), received_at=d_.today()))
+                        entry_date=d_.today(),
+                        received_at=datetime.now(tz=timezone.utc)))
             await s.commit()
         t5 = await session_for(u["data_key"])
         r5 = await recompute(t5)

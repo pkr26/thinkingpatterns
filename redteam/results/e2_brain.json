@@ -32,7 +32,7 @@
   {
     "id": "E2.max-corpus-timing",
     "status": "BLOCKED",
-    "summary": "200 entries x 20k chars (engine caps): 0.6s, ok=True"
+    "summary": "200 entries x 20k chars (engine caps): 0.3s, ok=True"
   },
   {
     "id": "E2.non-latin-corpus",

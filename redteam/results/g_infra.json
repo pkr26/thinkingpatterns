@@ -21,13 +21,13 @@
   },
   {
     "id": "G2.lockfile-hashes",
-    "status": "FINDING",
-    "summary": "requirements.lock.txt: 0/27 requirement lines carry --hash pins; Docker installs with --no-deps"
+    "status": "BLOCKED",
+    "summary": "requirements.lock.txt: 976/1008 requirement lines carry --hash pins; Docker installs with --no-deps"
   },
   {
     "id": "G2.actions-pinning",
     "status": "BLOCKED",
-    "summary": "GitHub Actions refs: 15 uses, unpinned/floating: []"
+    "summary": "GitHub Actions refs: 17 uses, unpinned/floating: []"
   },
   {
     "id": "G2.mutation-gate",
@@ -67,7 +67,7 @@
   {
     "id": "G3.tracked-secrets",
     "status": "BLOCKED",
-    "summary": "git-tracked secret/db files: none (205 files tracked)"
+    "summary": "git-tracked secret/db files: none (337 files tracked)"
   },
   {
     "id": "G3.dockerignore-db",

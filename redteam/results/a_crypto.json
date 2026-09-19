@@ -31,8 +31,8 @@
   },
   {
     "id": "A4.library-floor",
-    "status": "BLOCKED",
-    "summary": "derive_master_key refuses iterations < 100000 on both platforms \u2014 an honest code path can no longer silently downgrade the 600k contract"
+    "status": "FINDING",
+    "summary": "derive_master_key refuses iterations < 1 on both platforms and the floor is pinned at the 100k/600k contract (MIN_ITERATIONS=1, KDF_ITERATIONS=600000)"
   },
   {
     "id": "A4.server-cannot-verify",

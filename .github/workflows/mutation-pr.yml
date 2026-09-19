@@ -1,0 +1,128 @@
+name: PR mutation gate
+
+# Policy: the scheduled deep campaigns (weekly mutmut, per-platform
+# Stryker) are far too slow for pull-request feedback, but a PR that
+# touches mutation-guarded code must not silently regress the killed-by-
+# default standard between schedules. Two bounded layers:
+#
+#  1. BEHAVIORAL RE-RUN (fast, exact): every hand-written campaign mutant
+#     (redteam/mutation_campaign_*/harness.py) whose target file is in
+#     the diff is re-applied and must stay killed. A mutant whose
+#     find-string no longer matches (SETUP-ERROR) also fails: a rotted
+#     pin is a pin that stopped guarding.
+#  2. BOUNDED MUTMUT (diff-scoped): mutmut restricted to the PR's changed
+#     backend files, under a hard 20-minute timeout. Survivors fail the
+#     gate; a timeout is neutral (annotated) so a large PR cannot turn
+#     the gate into a hang — the weekly deep run covers it instead.
+#
+# No mutmut cache here on purpose: verdicts must be computed against this
+# PR's code, never restored from a previous campaign state.
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/**"
+      - "backend/scripts/mutmut_runner.sh"
+      - "redteam/mutation_campaign*/**"
+      - "redteam/run_pr_mutation_gate.py"
+      - "shared/vectors.json"
+      - "shared/crisis_phrases.json"
+      - "shared/generic_questions.json"
+      - "mobile/src/**"
+      - "portal/src/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.dev.lock.txt
+      - uses: actions/setup-node@f452870c6f7a63b1fcf4b0ee5d54aa6c1a46e4ad # v6.0.0
+        with:
+          node-version: "22"
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --require-hashes -r requirements.dev.lock.txt
+          # The campaign harnesses invoke .venv/bin/python relative to
+          # backend/; point that seam at the runner's interpreter.
+          mkdir -p .venv/bin
+          ln -s "$(command -v python)" .venv/bin/python
+      - name: Install JS suites when the diff touches them
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git diff --name-only "$BASE_SHA"...HEAD > /tmp/pr_files.txt
+          if grep -q '^mobile/' /tmp/pr_files.txt; then (cd mobile && npm ci); fi
+          if grep -q '^portal/' /tmp/pr_files.txt; then (cd portal && npm ci); fi
+      - name: Re-run behavioral mutants targeting changed files
+        run: |
+          cat /tmp/pr_files.txt
+          python redteam/run_pr_mutation_gate.py - < /tmp/pr_files.txt
+
+  mutmut-diff:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.dev.lock.txt
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install --require-hashes -r requirements.dev.lock.txt
+      - name: Diff-scoped mutmut over changed backend files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        working-directory: backend
+        run: |
+          set -u
+          FILES=$(git diff --name-only "$BASE_SHA"...HEAD -- 'backend/app/*.py' 'backend/app/**/*.py' | sed 's|^backend/||' | grep -v '^app/models.py$' || true)
+          if [ -z "$FILES" ]; then
+            echo "no changed backend/app files in mutmut scope — job passes trivially"
+            exit 0
+          fi
+          echo "mutmut scope: $FILES"
+          # Comma-joined paths for mutmut's --paths-to-mutate.
+          SCOPE=$(echo "$FILES" | paste -sd, -)
+          rm -f .mutmut-cache
+          set +e
+          timeout 20m mutmut run --paths-to-mutate "$SCOPE" --no-progress --CI
+          MUTMUT_STATUS=$?
+          set -e
+          if [ "$MUTMUT_STATUS" -eq 124 ]; then
+            echo "::warning::diff-scoped mutmut hit the 20-minute budget — run incomplete, survivors (if any) not gated; the weekly deep campaign covers this scope"
+            exit 0
+          fi
+          mutmut results | tee mutmut-results.txt
+          if grep -E '^Survived.*\([1-9][0-9]*\)' mutmut-results.txt; then
+            echo "::error::surviving mutants in the PR's changed files — kill them or extend the suite (the weekly run is not an excuse: these are YOUR diff's mutants)"
+            exit 1
+          fi
+      - name: Upload diff-scoped mutmut results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutmut-pr-results
+          path: backend/mutmut-results.txt
+          if-no-files-found: ignore

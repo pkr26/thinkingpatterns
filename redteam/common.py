@@ -78,7 +78,16 @@ def make_settings(**overrides: Any):
     from app.config import Settings
 
     s = Settings(environment="development")
-    s.database_url = "sqlite+aiosqlite://"  # in-memory, per-app
+    # File-backed temp SQLite (2026-09-18 repair): a bare in-memory URL
+    # gives every new pool connection its OWN empty database, so the
+    # dev-mode startup create_all laid the schema down on one connection
+    # while /auth/register 500'd with "no such table: users" on the next
+    # (found by the round-2 redteam-as-oracle campaign: the harnesses had
+    # silently rotted since the Alembic-first startup change). A per-process
+    # temp FILE persists across connections like any real database.
+    import tempfile
+
+    s.database_url = "sqlite+aiosqlite:///" + tempfile.mkdtemp(prefix="redteam-harness-") + "/harness.db"  # noqa: E501
     s.token_secret = "redteam-audit-secret-32-chars-min!!"
     s.processing_session_ttl = 300
     s.unlock_threshold_days = 30
@@ -174,9 +183,16 @@ async def direct_insert_entry(app, user_id: str, data_key: bytes, text: str,
     blob_b64 = encrypt_entry(data_key, user_id, cid, text,
                              created_at=entry_date.isoformat(), sentiment=sentiment)
     async with app.state.sessionmaker() as session:
+        # received_at is a tz-aware DateTime column; the direct-insert path
+        # used to hand it a bare date, which the async driver now rejects
+        # (2026-09-18 harness repair, found by the round-2 oracle campaign).
+        from datetime import datetime, timezone
+
         session.add(Entry(user_id=user_id, client_entry_id=cid,
                           blob=base64.b64decode(blob_b64),
-                          entry_date=entry_date, received_at=entry_date))
+                          entry_date=entry_date,
+                          received_at=datetime(entry_date.year, entry_date.month,
+                                               entry_date.day, tzinfo=timezone.utc)))
         await session.commit()
     return cid
 

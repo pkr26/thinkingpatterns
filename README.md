@@ -340,6 +340,18 @@ move the `latest` image tag.
 Deep mutation testing runs weekly via `.github/workflows/mutation.yml`
 (scheduled, resumable cache, results artifact — deliberately not a PR
 gate), and Dependabot watches pip, npm, github-actions, and docker.
+Between schedules, `.github/workflows/mutation-pr.yml` gates pull
+requests incrementally: every hand-written behavioral mutant
+(`redteam/mutation_campaign_*/`) whose target file is in the diff is
+re-applied and must stay killed, plus a bounded diff-scoped `mutmut` run
+where survivors fail the PR. Hand-written campaign history: round 1 —
+36 mutants over the non-negotiables, 36/36 post-pins
+(`reports/mutation_campaign_2026-09-18.md`); round 2 — 70 mutants over
+brain round 2, the threshold, crypto contracts, crisis handling, ops,
+idiographic isolation, the sync queue, and the red-team harnesses
+themselves as oracles (`reports/mutation_campaign_2026-09-18_round2.md`,
+which also records the first portal Stryker campaign — baseline 1.41% —
+and the scoped mobile re-runs).
 `.pre-commit-config.yaml` mirrors the ruff gate locally.
 
 ## Environment variables
