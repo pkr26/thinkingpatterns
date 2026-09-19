@@ -44,11 +44,10 @@ from ..services import llm
 
 router = APIRouter(prefix="/account", tags=["account"])
 
-# Version of the disclosure copy the client shows in the consent flow.
-# Recorded on every enable so the account can demonstrate WHICH text it
-# agreed to (GDPR Art. 7); bump it whenever that copy changes — a consent
-# recorded against an older version is the honest answer, not a bug.
-LLM_DISCLOSURE_VERSION = "v1"
+# Canonical home is services/llm.py (it feeds the consent-policy
+# fingerprint). Re-exported here for the established account-API import
+# path used by tests and any older callers.
+LLM_DISCLOSURE_VERSION = llm.LLM_DISCLOSURE_VERSION
 
 # Export is intentionally complete rather than paginated for the user, but
 # each short-lived database page must remain small.  Metadata pages permit a

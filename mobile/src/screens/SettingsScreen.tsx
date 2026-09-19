@@ -57,7 +57,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [llmAvailable, setLlmAvailable] = useState(false);
-  const [sharingAvailable, setSharingAvailable] = useState(false);
+  // null = the server could not be reached, so availability is UNKNOWN —
+  // a very different message from an authoritative "disabled by this
+  // server". Confusing the two erodes trust in a mental-health app.
+  const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);
@@ -73,12 +76,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // Stryker disable next-line OptionalChaining: a null/undefined meta makes m.llm_available throw inside this .then, and the chained .catch(() => {}) swallows it — llmAvailable stays false exactly as with the chain
         setLlmAvailable(Boolean(m?.llm_available));
         // Sharing is fail-closed: only a server that explicitly advertises
-        // verified-clinician sharing may expose a pairing flow.
+        // verified-clinician sharing may expose a pairing flow. On success
+        // the answer is authoritative; a failure leaves the state UNKNOWN
+        // (null) so the copy below never blames the server for being
+        // unreachable.
         setSharingAvailable(m?.sharing_available === true);
         // Stryker disable next-line OptionalChaining: with m null/undefined, typeof m.version throws into the same .catch(() => {}) — no observable difference (the typeof guard itself stays live)
         if (typeof m?.version === "string") setServerVersion(m.version);
       })
-      .catch(() => {});
+      .catch(() => setSharingAvailable(null));
     // Stryker disable next-line OptionalChaining: an undefined consent payload makes c.enabled throw into the .catch(() => {}) — setLlmEnabled is never reached either way
     api.getLlmConsent().then((c) => setLlmEnabled(Boolean(c?.enabled))).catch(() => {});
     // Sync-recovery surfaces are scoped to the authenticated account and
@@ -448,16 +454,20 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         )}
       </View>
 
-      {sharingAvailable ? (
+      {sharingAvailable === true ? (
         <GhostButton
           label="Share with my therapist"
           center={false}
           onPress={() => navigation.navigate("TherapistShare")}
           accessibilityLabel="Share your entries and patterns with a therapist"
         />
-      ) : (
+      ) : sharingAvailable === false ? (
         <Text style={themed.footnote}>
           Therapist sharing is not available on this server. It stays disabled until verified clinician enrollment is configured.
+        </Text>
+      ) : (
+        <Text style={themed.footnote}>
+          Can’t reach the server to confirm therapist-sharing availability — check your connection and reopen Settings. Nothing is shared in the meantime.
         </Text>
       )}
       <GhostButton

@@ -1790,7 +1790,6 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
     days: dict[str, set[date]] = {}
     for entry in window:
         raw = entry.text.split()
-        lowered = [t.lower().strip(".,!?:;()\"'") for t in raw]
         found: set[str] = set()
         for i, token in enumerate(raw):
             clean = token.strip(".,!?:;()\"'")
@@ -1804,10 +1803,10 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
                 continue
             if low in _KNOWN_TOKENS or theme_for(low) is not None:
                 continue
+            # A mid-sentence capitalized alpha token is a plausible person
+            # mention; "my <relation>" is only one of its spellings, so the
+            # unigram alone records it (a set makes a bigram re-add a no-op).
             found.add(low)
-            # "my <capitalized or plain relation>" bigram
-            if i >= 1 and lowered[i - 1] == "my":
-                found.add(low)
         for name in found:
             counts[name] = counts.get(name, 0) + 1
             days.setdefault(name, set()).add(entry.entry_date)
@@ -2296,7 +2295,11 @@ def _detect_avoidance(
                 observed += 1
                 probs.append(day_rate(d))
                 continue
-            if d == last_day and not any(x > d for x in days_sorted):
+            # The last observed day's absence is not evidence of avoidance:
+            # the journal may simply have continued past the window (the
+            # day is censored). days_sorted is ascending, so d == last_day
+            # IS the max — no further scan needed.
+            if d == last_day:
                 continue  # censored tail
             observed += 1
             skips += 1

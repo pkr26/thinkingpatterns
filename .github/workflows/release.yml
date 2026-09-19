@@ -333,8 +333,10 @@ jobs:
   release-notes:
     # Tag pushes only: publish a GitHub release seeded with the matching
     # CHANGELOG.md section (everything between the version heading and the
-    # next heading).
-    needs: image
+    # next heading). Gated on the Postgres suite and the pull-run-restore
+    # integration check of the exact candidate digests: the release assets
+    # are the deployment contract and must never publish while those fail.
+    needs: [image, postgres, production-integration]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 5

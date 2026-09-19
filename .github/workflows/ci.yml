@@ -263,6 +263,42 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile backups down -v
 
+  release-env-contract:
+    # Exercises deploy/verify-release-env.sh on every push: the script is
+    # the digest-pinning enforcement point for releases and the documented
+    # operator flow, and it once shipped non-executable (mode 644) without
+    # any CI path noticing. Both halves are pinned: it must execute as
+    # committed (proving the +x bit), accept a valid digest-pinned env,
+    # and reject every invalid shape.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prove the committed script is executable
+        run: |
+          test -x deploy/verify-release-env.sh
+      - name: Accepts a valid digest-pinned environment
+        run: |
+          printf 'MINDPATTERN_API_IMAGE=ghcr.io/example/mindpattern-api@sha256:%s\nMINDPATTERN_BACKUP_IMAGE=ghcr.io/example/mindpattern-backup@sha256:%s\n' \
+            "$(printf 'a%.0s' {1..64})" "$(printf 'b%.0s' {1..64})" > /tmp/valid.env
+          deploy/verify-release-env.sh /tmp/valid.env
+      - name: Rejects every invalid shape
+        run: |
+          reject() {
+            printf '%s\n' "$2" > "/tmp/bad-$1.env"
+            if deploy/verify-release-env.sh "/tmp/bad-$1.env" >/dev/null 2>&1; then
+              echo "::error::verify-release-env.sh accepted invalid case: $1"
+              exit 1
+            fi
+          }
+          reject floating-tag 'MINDPATTERN_API_IMAGE=ghcr.io/example/api:latest'
+          reject missing-digest 'MINDPATTERN_BACKUP_IMAGE=ghcr.io/example/backup'
+          reject short-digest "MINDPATTERN_API_IMAGE=ghcr.io/example/api@sha256:abc123"
+          reject unknown-key 'SOME_OTHER_KEY=value'
+          reject malformed-line 'this is not an assignment'
+          reject duplicate-key "$(printf 'MINDPATTERN_API_IMAGE=ghcr.io/e/a@sha256:%s\nMINDPATTERN_API_IMAGE=ghcr.io/e/b@sha256:%s\n' \
+            "$(printf 'a%.0s' {1..64})" "$(printf 'b%.0s' {1..64})")"
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10

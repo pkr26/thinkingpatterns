@@ -348,6 +348,23 @@ interface RequestOptions {
    * common request path and all of its redirect/auth/error hardening rather
    * than reimplementing fetch for a single header. */
   includeResponse?: boolean;
+  /** Pin this request to one API origin. The offline queue sets it so a
+   *  server switch (and re-login) between two queue uploads can never send
+   *  the old origin's ciphertext — under the new account's bearer — to the
+   *  newly selected server. Checked after the current base URL is resolved
+   *  and BEFORE a token is read or attached. */
+  expectedOrigin?: string;
+}
+
+/** Raised locally (no request is sent) when an origin-pinned request finds
+ *  the persisted server selection has moved. Not an ApiError: nothing
+ *  reached the network, so callers must not classify it as a server
+ *  response. */
+export class OriginPinnedError extends Error {
+  constructor(expected: string, actual: string) {
+    super(`refusing to send data pinned to ${expected} while ${actual} is selected`);
+    this.name = "OriginPinnedError";
+  }
 }
 
 async function request(
@@ -358,6 +375,9 @@ async function request(
   opts: RequestOptions = {},
 ): Promise<any> {
   const base = await getBaseUrl();
+  if (opts.expectedOrigin !== undefined && new URL(base).origin !== opts.expectedOrigin) {
+    throw new OriginPinnedError(opts.expectedOrigin, new URL(base).origin);
+  }
   // Settings validates before persisting, but AsyncStorage can be restored
   // from an older backup or tampered with. Enforce the transport boundary at
   // the send point too, before reading/attaching a bearer credential.
@@ -617,6 +637,18 @@ export const api = {
 
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string) =>
     request("POST", `${API_PREFIX}/entries`, { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
+  /** Offline-queue upload. Identical to createEntry but pinned to the origin
+   *  the queue is scoped to: the request refuses to ship (OriginPinnedError,
+   *  nothing sent) if the selected server moved, so queued ciphertext can
+   *  never ride a different origin's credentials. */
+  createQueuedEntry: (clientEntryId: string, blobB64: string, entryDate: string, expectedOrigin: string) =>
+    request(
+      "POST",
+      `${API_PREFIX}/entries`,
+      { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate },
+      {},
+      { expectedOrigin },
+    ),
   /** Atomically replace an existing encrypted entry. The client id stays
    * stable, so the encrypted blob remains AAD-bound to the same account and
    * record. This deliberately avoids delete-then-create data loss. */

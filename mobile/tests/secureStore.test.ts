@@ -1,6 +1,6 @@
 /** Device-key custody regression tests: ciphertext may use AsyncStorage;
  * its key must not. */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import storage from "./helpers/storageMock";
 import * as Keychain from "react-native-keychain";
 import { secureStore, setSecureStoreBackend } from "../src/secureStore";
@@ -87,5 +87,108 @@ describe("secureStore", () => {
     } finally {
       setSecureStoreBackend(null);
     }
+  });
+
+  it("reuses the persisted Keychain key across a restart instead of regenerating it", async () => {
+    await secureStore.setItem("first", "value-one");
+    const persisted = (await Keychain.getGenericPassword({ service: "com.mindpattern.session-device-key.v1" })) as {
+      password: string;
+    };
+
+    // Simulate a process restart: nothing in memory, same Keychain bytes.
+    setSecureStoreBackend(null);
+    await secureStore.setItem("second", "value-two");
+
+    const after = (await Keychain.getGenericPassword({ service: "com.mindpattern.session-device-key.v1" })) as {
+      password: string;
+    };
+    expect(after.password).toBe(persisted.password);
+    // Ciphertext from before the restart still decrypts — proof the key
+    // was reused, not rotated.
+    expect(await secureStore.getItem("first")).toBe("value-one");
+  });
+
+  it("regenerates a corrupt (wrong-length) Keychain key and keeps the store usable", async () => {
+    await Keychain.setGenericPassword("mindpattern-device-key", Buffer.alloc(16, 3).toString("base64"), {
+      service: "com.mindpattern.session-device-key.v1",
+    });
+    await secureStore.setItem("k", "v");
+    const after = (await Keychain.getGenericPassword({ service: "com.mindpattern.session-device-key.v1" })) as {
+      password: string;
+    };
+    expect(Buffer.from(after.password, "base64")).toHaveLength(32);
+    expect(await secureStore.getItem("k")).toBe("v");
+  });
+
+  it("concurrent first callers share ONE device-key generation (single flight)", async () => {
+    let reads = 0;
+    const slowBackend = {
+      readDeviceKey: async () => {
+        reads += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return null;
+      },
+      writeDeviceKey: async (value: string) => {
+        await Keychain.setGenericPassword("mindpattern-device-key", value, {
+          service: "com.mindpattern.session-device-key.v1",
+        });
+      },
+      getItem: async (key: string) => storage.getItem(key),
+      setItem: async (key: string, value: string) => storage.setItem(key, value),
+      removeItem: async (key: string) => storage.removeItem(key),
+    };
+    setSecureStoreBackend(slowBackend);
+    await Promise.all([
+      secureStore.setItem("a", "one"),
+      secureStore.setItem("b", "two"),
+      secureStore.setItem("c", "three"),
+    ]);
+
+    // Without the single-flight keyPromise, the three overlapping first
+    // calls each read null, generate DIFFERENT keys, and race their writes:
+    // half the ciphertext becomes undecryptable after a restart.
+    expect(reads).toBe(1);
+    expect(await secureStore.getItem("a")).toBe("one");
+    expect(await secureStore.getItem("b")).toBe("two");
+    expect(await secureStore.getItem("c")).toBe("three");
+    setSecureStoreBackend(null);
+    // Still decryptable after the backend swap drops the in-memory cache.
+    expect(await secureStore.getItem("a")).toBe("one");
+  });
+
+  it("migrates a legacy bare-base64 value envelope on read and rewrites it as v1", async () => {
+    await secureStore.setItem("seed", "x"); // establish the device key
+    const direct = await storage.getItem("seed");
+    expect(direct).toBeTruthy();
+
+    // Write a legacy-format value (bare base64 ciphertext, no envelope)
+    // encrypted under the SAME device key, as an older build would have.
+    const { encrypt } = await import("../src/crypto/envelope");
+    const persisted = (await Keychain.getGenericPassword({ service: "com.mindpattern.session-device-key.v1" })) as {
+      password: string;
+    };
+    const key = Buffer.from(persisted.password, "base64");
+    const legacyBlob = encrypt(key, Buffer.from("legacy-secret", "utf8")).toString("base64");
+    await storage.setItem("legacy-value", legacyBlob);
+    expect((await storage.getItem("legacy-value")) as string).not.toContain("{");
+
+    expect(await secureStore.getItem("legacy-value")).toBe("legacy-secret");
+    const rewritten = await storage.getItem("legacy-value");
+    expect(rewritten).toBeTruthy();
+    expect(rewritten!.startsWith("{")).toBe(true); // now a v1 envelope
+    expect(rewritten).not.toContain("legacy-secret");
+  });
+
+  it("reads unknown envelope versions and malformed ciphertext as absent", async () => {
+    await secureStore.setItem("seed", "x");
+    await storage.setItem("v2-envelope", JSON.stringify({ v: 2, c: "AAAA" }));
+    await storage.setItem("c-array", JSON.stringify({ v: 1, c: ["not", "a", "string"] }));
+    await storage.setItem("not-json-object", "{not json");
+    await storage.setItem("bare-short", "AAAA");
+
+    expect(await secureStore.getItem("v2-envelope")).toBeNull();
+    expect(await secureStore.getItem("c-array")).toBeNull();
+    expect(await secureStore.getItem("not-json-object")).toBeNull();
+    expect(await secureStore.getItem("bare-short")).toBeNull();
   });
 });

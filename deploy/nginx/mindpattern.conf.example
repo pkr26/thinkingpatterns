@@ -17,6 +17,13 @@
 # that fixed address/CIDR. If nginx runs in another container/host, use its
 # fixed private address/CIDR instead.
 
+# Edge rate limiting: shed request floods BEFORE they occupy an application
+# concurrency slot (--limit-concurrency 100) or a scrypt worker. The API's
+# own fixed-window limiter remains the authoritative policy; this zone is
+# coarse outer armor sized for a clinical-caseload deployment, not a
+# substitute for it. 10 requests/second/IP with a small burst allowance.
+limit_req_zone $binary_remote_addr zone=edge_api:10m rate=10r/s;
+
 server {
     listen 80;
     listen [::]:80;
@@ -25,8 +32,9 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name portal.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/portal.example.com/fullchain.pem;
@@ -65,6 +73,7 @@ server {
     index index.html;
 
     location /api/ {
+        limit_req zone=edge_api burst=20 nodelay;
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
         # Keep Host canonical too.  `$host` is client-derived and can feed
@@ -80,6 +89,12 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Connection "";
+        # The streamed account export legitimately holds an unbuffered
+        # upstream connection open for the whole download; the nginx default
+        # upstream read timeout (60s) can cut a very large journal mid-page.
+        # 300s matches the backup window's patience without making a wedged
+        # worker permanent.
+        proxy_read_timeout 300s;
         proxy_buffering off;
         proxy_no_cache 1;
         proxy_cache_bypass 1;

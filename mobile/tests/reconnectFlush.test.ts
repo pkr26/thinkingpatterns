@@ -12,16 +12,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 
 vi.mock("../src/api/client", () => {
-  class ApiError extends Error {
+  class OriginPinnedError extends Error {
+      constructor(public expected: string, public actual: string) {
+        super(`refusing to send data pinned to ${expected} while ${actual} is selected`);
+      }
+    }
+    class ApiError extends Error {
     constructor(public status: number, message: string) {
       super(message);
     }
   }
   return {
     ApiError,
+    OriginPinnedError,
     api: {
       getUserId: vi.fn(async () => "alice"),
       createEntry: vi.fn(async () => ({})),
+      createQueuedEntry: vi.fn(async () => ({})),
     },
     getBaseUrl: vi.fn(async () => "http://localhost:8000"),
   };
@@ -46,8 +53,8 @@ beforeEach(() => {
   storage.__reset();
   vi.mocked(api.getUserId).mockClear();
   vi.mocked(api.getUserId).mockImplementation(async () => "alice");
-  vi.mocked(api.createEntry).mockClear();
-  vi.mocked(api.createEntry).mockImplementation(async () => ({}));
+  vi.mocked(api.createQueuedEntry).mockClear();
+  vi.mocked(api.createQueuedEntry).mockImplementation(async () => ({}));
   vi.useFakeTimers();
   clock = (clock ?? Date.parse("2026-09-07T00:00:00Z")) + 60_000;
   vi.setSystemTime(clock);
@@ -61,7 +68,7 @@ describe("flushQueueOnReconnect", () => {
   it("flushes a non-empty queue when a session exists", async () => {
     await enqueue(entry(1));
     await flushQueueOnReconnect();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.createQueuedEntry).toHaveBeenCalledTimes(1);
     expect(await queueLength()).toBe(0);
   });
 
@@ -69,7 +76,7 @@ describe("flushQueueOnReconnect", () => {
     vi.mocked(api.getUserId).mockResolvedValue(null as never);
     await enqueue(entry(1));
     await flushQueueOnReconnect();
-    expect(api.createEntry).not.toHaveBeenCalled();
+    expect(api.createQueuedEntry).not.toHaveBeenCalled();
     expect(await queueLength("alice")).toBe(1); // the entry waits for its owner
 
     // Empty queue: no upload, and the flush itself is skipped cheaply.
@@ -77,33 +84,33 @@ describe("flushQueueOnReconnect", () => {
     vi.advanceTimersByTime(11_000);
     vi.mocked(api.getUserId).mockResolvedValue("alice" as never);
     await clearQueue("alice");
-    vi.mocked(api.createEntry).mockClear();
+    vi.mocked(api.createQueuedEntry).mockClear();
     await flushQueueOnReconnect();
-    expect(api.createEntry).not.toHaveBeenCalled();
+    expect(api.createQueuedEntry).not.toHaveBeenCalled();
   });
 
   it("throttles rapid foreground/background flaps", async () => {
     await enqueue(entry(1));
-    vi.mocked(api.createEntry).mockRejectedValue(new Error("offline")); // stays queued
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new Error("offline")); // stays queued
     await flushQueueOnReconnect();
     await flushQueueOnReconnect(); // seconds later: throttled, not a stampede
     await flushQueueOnReconnect();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.createQueuedEntry).toHaveBeenCalledTimes(1);
   });
 
   it("flushes again once the throttle window has passed", async () => {
     await enqueue(entry(1));
-    vi.mocked(api.createEntry).mockRejectedValue(new Error("offline"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new Error("offline"));
     await flushQueueOnReconnect();
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.createQueuedEntry).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(31_000); // past BOTH the 10s throttle and the item's ≤30s backoff
     await flushQueueOnReconnect();
-    expect(api.createEntry).toHaveBeenCalledTimes(2);
+    expect(api.createQueuedEntry).toHaveBeenCalledTimes(2);
   });
 
   it("a failed flush never throws and keeps the ciphertext queued", async () => {
     await enqueue(entry(1));
-    vi.mocked(api.createEntry).mockRejectedValue(new Error("offline"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new Error("offline"));
     await expect(flushQueueOnReconnect()).resolves.toBeUndefined();
     expect(await queueLength()).toBe(1);
   });

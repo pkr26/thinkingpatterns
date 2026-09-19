@@ -25,10 +25,11 @@ const IDLE_LOCK_MS = 10 * 60 * 1000;
 
 /** Best-effort overwrite for extractable raw key bytes. CryptoKey instances
  * are deliberately non-extractable; dropping their last reference is the
- * browser-supported way to clear those. */
-function wipePortalSession(value: Pick<PortalSession, "wrapKek" | "noteKey"> | null): void {
+ * browser-supported way to clear those. The wrap KEK is zeroed the moment
+ * the private key is unwrapped (see onLoginReady), so it never reaches the
+ * session this function retires. */
+function wipePortalSession(value: Pick<PortalSession, "noteKey"> | null): void {
   if (!value) return;
-  value.wrapKek.fill(0);
   value.noteKey.fill(0);
 }
 
@@ -104,6 +105,11 @@ export function App(): React.JSX.Element {
     try {
       const me = await api.me();
       const privateKey = await unlockWrapPrivateKey(keys.wrapKek, me.wrap_key_blob, keys.username);
+      // The wrap KEK's only job is this one unwrap; the session keeps the
+      // non-extractable private-key handle instead. Zero the raw KEK bytes
+      // now so a memory disclosure for the rest of the session (extension,
+      // crash dump) cannot recover the key that decrypts wrap_key_blob.
+      keys.wrapKek.fill(0);
       // A 401, explicit logout, or component teardown may have occurred
       // while the encrypted wrap key was being fetched/decrypted.  Never
       // resurrect a completed session after that boundary.
@@ -114,7 +120,6 @@ export function App(): React.JSX.Element {
       replacePortalSession({
         username: keys.username,
         userId: keys.userId,
-        wrapKek: keys.wrapKek,
         noteKey: keys.noteKey,
         privateKey,
         publicKeyB64: me.wrap_pub_key,

@@ -156,7 +156,7 @@ describe("pairing lookup", () => {
   });
 
   it("a dead code explains itself without leaking anything", async () => {
-    vi.mocked(api.pairingLookup).mockRejectedValue(new ApiError(404, "pairing code not found"));
+    vi.mocked(api.pairingLookup).mockRejectedValue(new RealApiError(404, "pairing code not found"));
     const root = await render(<TherapistShareScreen navigation={nav} />);
     await flush();
     await typeInto(root, "e.g. 7X2KQM4N", "ZZZZZZZZ");
@@ -360,6 +360,26 @@ describe("guard rails", () => {
     expect(textOf(root)).toContain("Stopped ");
     // touchableByLabel throws when absent — absence is exactly the claim.
     expect(() => touchableByLabel(root, "Stop sharing")).toThrow(/no Text node/);
+  });
+});
+
+describe("availability gate copy", () => {
+  it("explains honestly when the server cannot be reached (nothing sent)", async () => {
+    vi.mocked(api.meta).mockRejectedValue(new Error("offline"));
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Can’t reach the server");
+    expect(textOf(root)).toContain("No pairing code or journal data is sent until it is");
+    expect(textOf(root)).not.toContain("has not enabled verified clinician sharing");
+    expect(vi.mocked(api.pairingLookup)).not.toHaveBeenCalled();
+  });
+
+  it("keeps the distinct, authoritative message for a server that disabled sharing", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ sharing_available: false } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("This server has not enabled verified clinician sharing");
+    expect(textOf(root)).not.toContain("Can’t reach the server");
   });
 });
 

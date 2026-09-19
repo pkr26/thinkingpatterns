@@ -929,3 +929,22 @@ describe("listEntries drift hardening", () => {
     expect(entries.filter((e) => e.client_entry_id === "e-499")).toHaveLength(1);
   });
 });
+
+describe("origin-pinned queue uploads", () => {
+  it("refuses to send — and never attaches a token — when the selected origin moved", async () => {
+    await setBaseUrl("https://one.example.test");
+    // The stubbed response must carry the pinned origin as its final URL or
+    // the client's own redirect check (correctly) rejects it first.
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ ok: true }, 200, "https://one.example.test"));
+    const pinned = api.createQueuedEntry("e-1", "AAAA", "2026-09-01", "https://one.example.test");
+    await expect(pinned).resolves.toBeDefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    await setBaseUrl("https://two.example.test");
+    vi.mocked(fetch).mockClear();
+    await expect(
+      api.createQueuedEntry("e-1", "AAAA", "2026-09-01", "https://one.example.test"),
+    ).rejects.toMatchObject({ name: "OriginPinnedError" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

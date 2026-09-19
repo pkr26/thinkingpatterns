@@ -3,14 +3,18 @@
 # backend/pyproject.toml was verified against.
 #
 # The backend is format-clean under the same Ruff version CI enforces.
+#
+# revs are pinned to each tag's commit SHA (resolved via git ls-remote),
+# matching the SHA-pinning posture used for CI actions: a moved tag must
+# never silently repoint developer-machine hooks.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+    rev: 321478e58f4938179c6b86e4ddfa923d1547a49b # v0.16.6
     hooks:
       - id: ruff
       - id: ruff-format
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
     hooks:
       - id: end-of-file-fixer
         files: ^backend/

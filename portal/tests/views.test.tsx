@@ -108,7 +108,6 @@ const patient = {
 const session = {
   username: "drportal",
   userId: "therapist-1",
-  wrapKek: new Uint8Array(32),
   noteKey: new Uint8Array(32),
   privateKey: {} as CryptoKey,
   publicKeyB64: "P".repeat(124),

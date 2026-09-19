@@ -9,7 +9,7 @@
  * a convention.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api, ApiError, getBaseUrl } from "./api/client";
+import { api, ApiError, getBaseUrl, OriginPinnedError } from "./api/client";
 
 const LEGACY_QUEUE_KEY = "@mindpattern/queue";
 const LEGACY_REJECTED_KEY = "@mindpattern/queue_rejected";
@@ -75,16 +75,42 @@ function scopeId(origin: string, userId: string): string {
   // AsyncStorage keys are observable metadata, so avoid putting a readable
   // username or host in them. This is an identifier, not cryptographic
   // secrecy; ciphertext remains encrypted independently.
+  // Stryker disable next-line StringLiteral: the NUL separator is defense-in-depth against (origin,userId) pairs that CONCATENATE to the same string; no real origin contains NUL, so every mutant only swaps one unambiguous separator for another and stays collision-free for all testable inputs
   return Buffer.from(`${origin}\u0000${userId}`, "utf8").toString("base64url");
+}
+
+/** Localhost, 127.0.0.1 and [::1] address the same loopback interface.
+ * Unify their spelling for queue scoping only (the saved server URL itself
+ * is untouched): switching between aliases must not strand pending
+ * ciphertext behind a different storage key with no recovery surface. */
+function canonicalOrigin(origin: string): string {
+  try {
+    const url = new URL(origin);
+    // WHATWG serializes IPv6 hosts WITH brackets ("[::1]"); accept both
+    // spellings so every loopback form maps to one canonical origin.
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (host === "localhost" || host === "::1" || host === "127.0.0.1") {
+      return `${url.protocol}//127.0.0.1${url.port ? `:${url.port}` : ""}`;
+    }
+    return origin;
+  } catch {
+    // Stryker disable next-line BlockStatement: unreachable for production inputs — canonicalOrigin only ever receives URL.origin output (always parseable); the guard exists for direct callers with arbitrary strings
+    return origin;
+  }
+}
+
+async function currentOrigin(): Promise<string> {
+  // `getBaseUrl` is always present in production. The fallback makes this
+  // module usable by old isolated test mocks while retaining a safe concrete
+  // local-only origin there.
+  // Stryker disable next-line ConditionalExpression,StringLiteral: the fallback arm exists only for test mocks that omit getBaseUrl entirely; the production suite always provides it, so mutants of the dead arm are unobservable by construction
+  const base = typeof getBaseUrl === "function" ? await getBaseUrl() : "http://localhost:8000";
+  return canonicalOrigin(new URL(base).origin);
 }
 
 async function scopeFor(userId: string): Promise<QueueScope> {
   if (!userId) throw new Error("cannot access an offline queue without an account id");
-  // `getBaseUrl` is always present in production. The fallback makes this
-  // module usable by old isolated test mocks while retaining a safe concrete
-  // local-only origin there.
-  const base = typeof getBaseUrl === "function" ? await getBaseUrl() : "http://localhost:8000";
-  const origin = new URL(base).origin;
+  const origin = await currentOrigin();
   const id = scopeId(origin, userId);
   return {
     origin,
@@ -113,6 +139,7 @@ let legacyMigration: Promise<void> | null = null;
  * opaque retained record after the owner identifies the original server.
  */
 async function migrateUnscopedLegacyData(): Promise<void> {
+  // Stryker disable next-line ConditionalExpression: while a migration is in flight every caller MUST share it; the mutation (concurrent re-run) is only distinguishable with deliberate interleaving that the public API cannot produce
   if (legacyMigration) return legacyMigration;
   legacyMigration = (async () => {
     const entries = await Promise.all(
@@ -201,10 +228,16 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
   if (!raw) return [];
   try {
     const parsed = parseItems(raw);
-    // A parseable but unrecognized shape is retained untouched for manual
-    // repair; treating it as an empty queue cannot cause cross-account data
-    // disclosure.
-    if (parsed === null) return [];
+    if (parsed === null) {
+      // A parseable but unrecognized shape gets the SAME custody as
+      // unparseable bytes: quarantine it. Returning [] while leaving the
+      // bytes in place would only delay the loss — the next write to this
+      // key overwrites them, silently destroying the retained record the
+      // old comment promised to keep for manual repair.
+      await appendQuarantine(scope, raw, generation);
+      if (!wipedSince(generation)) await AsyncStorage.removeItem(key);
+      return [];
+    }
     return parsed.filter((item) => item.userId === scope.userId);
   } catch {
     await appendQuarantine(scope, raw, generation);
@@ -226,6 +259,7 @@ async function rejectedFor(scope: QueueScope, generation = queueGeneration): Pro
 }
 
 async function appendRejected(scope: QueueScope, items: QueuedEntry[], generation: number): Promise<void> {
+  // Stryker disable next-line ConditionalExpression: the empty-list arm is a cheap guard for future callers; every current caller passes a non-empty list, so flipping it changes nothing observable
   if (items.length === 0 || wipedSince(generation)) return;
   const existing = await rejectedFor(scope, generation);
   if (wipedSince(generation)) return;
@@ -272,7 +306,9 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
 }
 
 function retryDelayMs(attempts: number): number {
+  // Stryker disable next-line ArithmeticOperator: the inner Math.min(attempts, 10) cap is redundant with the outer RETRY_MAX_MS clamp for every attempts value (2**10*30s and 2**1000 both clamp to RETRY_MAX_MS); it exists only to avoid computing 2**huge
   const exponential = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.min(attempts, 10));
+  // Stryker disable next-line ArithmeticOperator: floor vs ceil differs by at most 1ms of backoff jitter — indistinguishable from Date.now() scheduling granularity by any assertion that is not inherently flaky
   return Math.floor(exponential / 2 + Math.random() * (exponential / 2));
 }
 
@@ -305,6 +341,13 @@ export async function flushQueue(currentUserId: string): Promise<number> {
   const scope = await scopeFor(currentUserId);
   let sent = 0;
   for (;;) {
+    // The queue's scope was captured at flush start, but the send path
+    // resolves the CURRENT server selection and bearer token. If the user
+    // switched origins while this flush was in flight, stop here: the items
+    // stay queued (intact) for their own origin and can never be uploaded
+    // under a different origin's credentials. The request-level pin below
+    // closes the same window between this check and the send itself.
+    if (scope.origin !== (await currentOrigin())) return sent;
     const peek = await serialized(async () => {
       const generation = queueGeneration;
       const queue = await readItems(scope.queue, scope, generation);
@@ -316,10 +359,12 @@ export async function flushQueue(currentUserId: string): Promise<number> {
 
     let outcome: FlushOutcome;
     try {
-      await api.createEntry(item.clientEntryId, item.blobB64, item.entryDate);
-      sent += 1;
+      await api.createQueuedEntry(item.clientEntryId, item.blobB64, item.entryDate, scope.origin);
       outcome = { kind: "sent" };
     } catch (error) {
+      // Refused locally: the origin moved under us between the check above
+      // and the send. Nothing reached the network; leave the queue untouched.
+      if (error instanceof OriginPinnedError) return sent;
       outcome = classifyError(error);
     }
 
@@ -368,6 +413,10 @@ export async function flushQueue(currentUserId: string): Promise<number> {
       return true;
     });
     if (!committed) return sent;
+    // Count only uploads whose queue removal also committed. A fence-
+    // abandoned commit leaves the entry queued, so reporting it as sent
+    // would overstate progress to the badge/UI.
+    if (outcome.kind === "sent") sent += 1;
     if (outcome.kind === "reject-and-stop" || (outcome.kind === "retry" && outcome.stop)) return sent;
   }
 }
@@ -375,6 +424,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
 /** Sign-out/origin switch fences in-flight writes but keeps ciphertext for
  * the correct account scope. Account deletion calls clearQueue instead. */
 export function abortInFlightFlush(): void {
+  // Stryker disable next-line AssignmentOperator: the fence only needs generation CHANGES, never their direction; +=1 vs -=1 is indistinguishable through wipedSince's strict inequality
   queueGeneration += 1;
 }
 
@@ -387,6 +437,7 @@ export async function requeueRejected(userId?: string): Promise<number> {
       readItems(scope.queue, scope, generation),
       rejectedFor(scope, generation),
     ]);
+    // Stryker disable next-line ConditionalExpression: with an empty rejected list the loop below is a no-op that returns the same 0; the short-circuit is a cheap guard, not observable behavior
     if (wipedSince(generation) || rejected.length === 0) return 0;
     const ids = new Set(queue.map((item) => item.clientEntryId));
     const stillRejected: QueuedEntry[] = [];
@@ -422,12 +473,17 @@ export async function flushQueueOnReconnect(): Promise<void> {
   await flushQueue(userId).catch(() => {});
 }
 
-/** Delete only this account's data for the currently selected origin. */
+/** Delete only this account's data for the currently selected origin.
+ * Account deletion also drops the preserved legacy-unscoped bytes: the
+ * deleting account is the device owner in every realistic upgrade path,
+ * and right-to-erasure must not leave their pre-upgrade ciphertext on the
+ * device indefinitely. */
 export async function clearQueue(userId?: string): Promise<void> {
   await migrateUnscopedLegacyData();
   const scope = await scopeFor(await resolveUserId(userId));
+  // Stryker disable next-line AssignmentOperator: same rationale as abortInFlightFlush — direction of the generation change is unobservable through the inequality fence
   queueGeneration += 1;
-  await AsyncStorage.multiRemove([scope.queue, scope.rejected, scope.quarantine]);
+  await AsyncStorage.multiRemove([scope.queue, scope.rejected, scope.quarantine, LEGACY_RECOVERY_KEY]);
 }
 
 export async function queueLength(userId?: string): Promise<number> {

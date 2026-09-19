@@ -34,7 +34,6 @@ import { localStore } from "../platform";
 export interface PortalSession {
   username: string;
   userId: string;
-  wrapKek: Uint8Array<ArrayBuffer>;
   noteKey: Uint8Array<ArrayBuffer>;
   privateKey: CryptoKey;
   publicKeyB64: string;

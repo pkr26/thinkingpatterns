@@ -108,6 +108,35 @@ async function reauth(root: Awaited<ReturnType<typeof render>>, password = "corr
   await flush();
 }
 
+describe("therapist-sharing availability copy", () => {
+  it("offers the sharing button only when the server advertises it", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ sharing_available: true } as never);
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    expect(textOf(root)).toContain("Share with my therapist");
+    expect(textOf(root)).not.toContain("not available on this server");
+    expect(textOf(root)).not.toContain("Can’t reach the server");
+  });
+
+  it("an explicit server 'disabled' answer never blames connectivity", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ sharing_available: false } as never);
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    expect(textOf(root)).toContain("Therapist sharing is not available on this server");
+    expect(textOf(root)).not.toContain("Can’t reach the server");
+    expect(textOf(root)).not.toContain("Share with my therapist");
+  });
+
+  it("an unreachable server says so instead of claiming the server disabled sharing", async () => {
+    vi.mocked(api.meta).mockRejectedValue(new Error("network down"));
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    expect(textOf(root)).toContain("Can’t reach the server to confirm therapist-sharing availability");
+    expect(textOf(root)).not.toContain("not available on this server");
+    expect(textOf(root)).not.toContain("Share with my therapist");
+  });
+});
+
 describe("SettingsScreen chrome", () => {
   it("loads the stored URL, insecure consent and LLM state on mount", async () => {
     vi.mocked(getBaseUrl).mockImplementation(async () => "https://sync.example.com");

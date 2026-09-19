@@ -386,3 +386,76 @@ def test_postgres_alembic_upgrade_head_and_current(monkeypatch):
         return [row[0] for row in rows]
 
     assert asyncio.run(_stamp()) == heads
+
+
+def test_dated_insight_unique_constraint_deduplicates_before_enforcing(tmp_path, monkeypatch):
+    """e930dbc4f001 must not rely on "duplicates cannot exist": a legacy
+    duplicate pair (e.g. from a recompute race predating the per-user lock)
+    is reduced to the row `_latest_insight()` selects before CREATE UNIQUE
+    runs, so an upgrade never aborts mid-deploy. (2026-09-18 audit fix.)
+    """
+
+    db_file = tmp_path / "dated-insights.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    command.upgrade(cfg, "73031d06d71b")
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            INSERT INTO users
+                (id, username, salt, verifier, scrypt_salt, created_at,
+                 is_active, token_epoch, llm_consent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("user-1", "dated-user", "s", b"v", b"k", "2026-01-01T00:00:00+00:00", 1, 1, 0),
+        )
+        # Two rows for the SAME (user, kind, for_date) with distinct
+        # created_at: exactly what a pre-lock concurrent recompute could
+        # have committed under delete-then-insert.
+        for row_id, blob, created in (
+            ("stale", b"stale", "2026-01-01T00:00:00+00:00"),
+            ("fresh", b"fresh", "2026-01-02T00:00:00+00:00"),
+            ("tie-a", b"a", "2026-01-02T00:00:00+00:00"),
+        ):
+            conn.exec_driver_sql(
+                """
+                INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (row_id, "user-1", "question", "2026-01-03", blob, created),
+            )
+        # A different (user, kind, for_date) row must be untouched.
+        conn.exec_driver_sql(
+            """
+            INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("other", "user-1", "question", "2026-01-04", b"other", "2026-01-01T00:00:00+00:00"),
+        )
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT id FROM insights WHERE user_id = ? AND kind = ? AND for_date = ?",
+            ("user-1", "question", "2026-01-03"),
+        ).all()
+        # created_at DESC, id DESC keeps "tie-a" (the tie broken by id),
+        # matching _latest_insight()'s selection rule.
+        assert rows == [("tie-a",)]
+        survivors = conn.exec_driver_sql("SELECT id FROM insights ORDER BY id").all()
+        assert survivors == [("other",), ("tie-a",)]
+        with pytest.raises(IntegrityError):
+            conn.exec_driver_sql(
+                """
+                INSERT INTO insights (id, user_id, kind, for_date, blob, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("dupe", "user-1", "question", "2026-01-03", b"x", "2026-02-01T00:00:00+00:00"),
+            )
+    engine.dispose()

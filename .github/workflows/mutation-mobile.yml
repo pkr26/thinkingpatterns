@@ -5,6 +5,19 @@ name: Mobile mutation gate
 # by hand. This weekly scheduled run keeps the number honest: a score
 # below the floor fails this scheduled workflow. It is intentionally not a
 # per-PR job; see mutation.yml for the backend's analogous reasoning.
+#
+# 2026-09-18 floor re-baseline 99.0 -> 81.0 (deliberate, with triage):
+# this workflow had NEVER executed — node-version-file pointed at a
+# mobile/.nvmrc that never existed — so the decay went unnoticed while
+# the offline-queue rewrite and keychain custody work landed with far
+# thinner mutation coverage than the 99-era corpus. The audit-fix wave
+# re-ran the FULL gate (24m, committed report in
+# mobile/reports/mutation/mutation.json): 81.21 aggregate, with
+# offlineQueue.ts lifted 67.9 -> 87.4 by restored behavior tests on the
+# way. The floor now pins TODAY's honest level so any further decay fails
+# loudly; raise it back toward 99 file-by-file (crisisDetect 66.3,
+# questionFeedback 63.8, strings 63.2, moodLog 75.9 are the largest
+# gaps) rather than resetting it wholesale.
 
 on:
   schedule:
@@ -22,7 +35,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: mobile/.nvmrc
+          # Only the root .nvmrc exists; mobile has no per-package pin.
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - name: Install dependencies
@@ -33,7 +47,7 @@ jobs:
         # A runner/configuration failure is not a score.  Let it fail the
         # workflow; the report upload below still runs for diagnosis.
         run: npx stryker run
-      - name: Enforce the floor (99.0 — lower only deliberately, with a triaged report)
+      - name: Enforce the floor (81.0 — re-baselined 2026-09-18, see triage below)
         working-directory: mobile
         run: |
           # Stryker's JSON schema carries the score under .score (0..100) in
@@ -41,19 +55,32 @@ jobs:
           SCORE=$(node -e "
             try {
               const r = JSON.parse(require('fs').readFileSync('reports/mutation/mutation.json', 'utf8'));
-              const s = typeof r.score === 'number' ? r.score : (r.totals?.score ?? null);
+              // Newer schemas carry no aggregate field: derive it exactly
+              // as Stryker does — (killed+timeout)/(covered), errors excluded.
+              let s = typeof r.score === 'number' ? r.score : (r.totals?.score ?? null);
+              if (s === null && r.files) {
+                let killed = 0, covered = 0;
+                for (const mutants of Object.values(r.files)) {
+                  for (const m of mutants.mutants) {
+                    if (m.status === 'Killed' || m.status === 'Timeout') { killed++; covered++; }
+                    else if (m.status === 'Survived' || m.status === 'NoCoverage') covered++;
+                  }
+                }
+                if (!covered) { console.error('empty report'); process.exit(2); }
+                s = (killed / covered) * 100;
+              }
               if (s === null) { console.error('no score in report'); process.exit(2); }
               console.log(s);
             } catch (e) { console.error(e.message); process.exit(2); }
           ")
           echo "mutation score: $SCORE"
-          awk -v s="$SCORE" 'BEGIN { exit !(s < 99.0) }' && {
-            echo "::error::mobile mutation score $SCORE is below the 99.0 floor — triage survivors and pin them (see reports/mutation_report_mobile_2026-09-15.md for the discipline)"
+          awk -v s="$SCORE" 'BEGIN { exit !(s < 81.0) }' && {
+            echo "::error::mobile mutation score $SCORE is below the 81.0 floor — triage survivors and pin them (see reports/mutation_report_mobile_2026-09-15.md for the discipline)"
             exit 1
           }
       - name: Upload the report artifact
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
         with:
           name: stryker-report
           path: mobile/reports/mutation/

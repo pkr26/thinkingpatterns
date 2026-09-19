@@ -41,6 +41,7 @@ export function makeApiMock() {
     login: vi.fn(async () => ({ token: "tok", user_id: "user-1" })),
     logout: vi.fn(async () => ({})),
     createEntry: vi.fn(async () => ({})),
+    createQueuedEntry: vi.fn(async () => ({})),
     updateEntry: vi.fn(async () => ({})),
     // Keep older screen tests that seed listEntries meaningful while the
     // production client consumes bounded pages.

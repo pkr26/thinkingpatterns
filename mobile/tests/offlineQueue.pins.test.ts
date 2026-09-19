@@ -9,10 +9,20 @@ vi.mock("../src/api/client", () => {
       super(message);
     }
   }
+  class OriginPinnedError extends Error {
+    constructor(public expected: string, public actual: string) {
+      super(`refusing to send data pinned to ${expected} while ${actual} is selected`);
+    }
+  }
   return {
     ApiError,
+    OriginPinnedError,
     getBaseUrl: vi.fn(async () => baseUrl),
-    api: { createEntry: vi.fn(async () => ({})), getUserId: vi.fn(async () => "alice") },
+    api: {
+      createEntry: vi.fn(async () => ({})),
+      createQueuedEntry: vi.fn(async () => ({})),
+      getUserId: vi.fn(async () => "alice"),
+    },
   };
 });
 
@@ -28,14 +38,14 @@ const item = (id: string) => ({
 beforeEach(() => {
   storage.__reset();
   baseUrl = "https://queue.example.test";
-  vi.mocked(api.createEntry).mockReset();
-  vi.mocked(api.createEntry).mockImplementation(async () => ({}));
+  vi.mocked(api.createQueuedEntry).mockReset();
+  vi.mocked(api.createQueuedEntry).mockImplementation(async () => ({}));
 });
 
 describe("queue regression pins", () => {
   it("does not make a 409 duplicate into a rejected recovery item", async () => {
     await enqueue(item("duplicate"));
-    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(409, "already exists"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(409, "already exists"));
     expect(await flushQueue("alice")).toBe(0);
     expect(await queueLength("alice")).toBe(0);
     expect(await rejectedEntries("alice")).toEqual([]);
@@ -43,14 +53,14 @@ describe("queue regression pins", () => {
 
   it("keeps a non-validation 422 terminal even when its message says future", async () => {
     await enqueue(item("bad"));
-    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "future date", "entry_blob_invalid"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(422, "future date", "entry_blob_invalid"));
     await flushQueue("alice");
     expect((await rejectedEntries("alice")).map((x: any) => x.clientEntryId)).toEqual(["bad"]);
   });
 
   it("makes a validation future-date response retryable, without uploading it to another origin", async () => {
     await enqueue(item("future"));
-    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "entry date is in the future", "validation_error"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(422, "entry date is in the future", "validation_error"));
     await flushQueue("alice");
     expect(await queueLength("alice")).toBe(1);
     baseUrl = "https://other.example.test";

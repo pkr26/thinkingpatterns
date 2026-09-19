@@ -373,3 +373,38 @@ async def test_export_bundle_carries_the_consent_record(client, monkeypatch, set
     assert datetime.fromisoformat(bundle["llm_consent_at"]) == t1
     assert bundle["llm_consent_disclosure"] == "v1"
     assert bundle["llm_consent_policy"]
+
+
+async def test_disclosure_version_change_makes_stale_consent_inert(client, monkeypatch, settings):
+    """Re-worded consent copy must invalidate persisted consent even when
+    the operator forgets to bump MINDPATTERN_LLM_POLICY_VERSION: the
+    disclosure version is part of the policy fingerprint (2026-09-18 audit
+    fix), so journal plaintext never keeps flowing under the old text.
+    """
+    from app.services import llm as llm_service
+
+    settings.llm_url = "https://llm.example.test/v1"
+    emu = ClientEmulator("consentstale", "p")
+    await emu.register(client)
+    on = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert on.json()["active_for_current_policy"] is True
+
+    # The operator ships re-worded disclosure copy and bumps only the
+    # disclosure version — NOT llm_policy_version.
+    monkeypatch.setattr(llm_service, "LLM_DISCLOSURE_VERSION", "v2")
+
+    stale = await client.get("/api/account/llm-consent", headers=emu.headers)
+    assert stale.json()["enabled"] is True  # the historic choice is preserved
+    assert stale.json()["active_for_current_policy"] is False  # but no longer authorizes
+
+    # Re-consenting under the new disclosure restores currency.
+    again = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert again.json()["active_for_current_policy"] is True

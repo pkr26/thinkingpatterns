@@ -148,11 +148,15 @@ describe("App", () => {
     const root = await login();
     await press(root, "Open patterns");
     await flush();
+    // The wrap KEK's only job is the one-time unwrap of the private key:
+    // it must be zeroed the moment that succeeds (2026-09-18 audit), not
+    // retained in the session until sign-out.
+    expect([...wrapKek]).toEqual(new Array(32).fill(0));
+    expect([...noteKey]).not.toEqual(new Array(32).fill(0)); // still live for note decryption
     await press(root, "Sign out");
     await flush();
 
     expect(hasSession()).toBe(false);
-    expect([...wrapKek]).toEqual(new Array(32).fill(0));
     expect([...noteKey]).toEqual(new Array(32).fill(0));
     expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
     expect(textOf(root)).toContain("Your in-memory keys were cleared");

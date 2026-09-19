@@ -43,5 +43,15 @@ describe("static-host security policy", () => {
     expect(nginx).toContain("client_body_timeout 30s;");
     expect(nginx).toContain("proxy_set_header Host portal.example.com;");
     expect(nginx).not.toContain("https://$host");
+    // Edge flood armor and the streamed-export read budget (2026-09-18
+    // audit): the proxy template must keep shedding load before app
+    // concurrency slots, and must not cut a large export at nginx's 60s
+    // default upstream read timeout.
+    expect(nginx).toContain("limit_req_zone $binary_remote_addr zone=edge_api:");
+    expect(nginx).toContain("limit_req zone=edge_api burst=");
+    expect(nginx).toContain("proxy_read_timeout 300s;");
+    // The deprecated `listen … ssl http2` form warns on nginx >= 1.25.1.
+    expect(nginx).toContain("http2 on;");
+    expect(nginx).not.toContain("listen 443 ssl http2");
   });
 });

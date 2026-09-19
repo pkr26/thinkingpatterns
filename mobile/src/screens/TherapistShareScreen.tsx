@@ -15,7 +15,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { api, type ListedConsent, type PairingLookup } from "../api/client";
+import { api, ApiError, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
 import { therapistKeyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
@@ -52,7 +52,9 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         else setConsents([]);
       })
       .catch(() => {
-        setSharingAvailable(false);
+        // Unreachable is UNKNOWN, not a server policy decision: null keeps
+        // the two situations distinct in the copy (and sends nothing).
+        setSharingAvailable(null);
         setConsents([]);
       });
   }, []);
@@ -67,11 +69,15 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
     } catch (err) {
       if (isSessionExpiredError(err)) {
         Alert.alert("Session expired", "Please unlock again.");
-      } else {
+      } else if (err instanceof ApiError && err.status === 404) {
         Alert.alert(
           "Code not found",
           "Check the code with your therapist — it expires 15 minutes after they generate it.",
         );
+      } else {
+        // Offline and server errors are NOT "wrong code": blaming the code
+        // (or the therapist) for a dead connection erodes trust.
+        Alert.alert("Couldn’t look up the code", calmFallbackCopy(err, "Something went wrong — try again."));
       }
     } finally {
       setBusy(false);
@@ -191,11 +197,21 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
     >
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
 
-      {sharingAvailable !== true && (
+      {sharingAvailable === false && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
           <Text style={[styles.cardTitle, { color: t.colors.text }]}>Therapist sharing unavailable</Text>
           <Text style={themed.footnote}>
             This server has not enabled verified clinician sharing. No pairing code or journal data will be sent.
+          </Text>
+          <GhostButton label="Back" center={false} onPress={() => navigation.goBack?.()} />
+        </View>
+      )}
+
+      {sharingAvailable === null && (
+        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
+          <Text style={[styles.cardTitle, { color: t.colors.text }]}>Can’t reach the server</Text>
+          <Text style={themed.footnote}>
+            Sharing availability could not be confirmed — check your connection and try again. No pairing code or journal data is sent until it is.
           </Text>
           <GhostButton label="Back" center={false} onPress={() => navigation.goBack?.()} />
         </View>

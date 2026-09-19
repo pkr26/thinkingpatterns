@@ -46,6 +46,13 @@ MAX_OCCURRENCES = 100_000
 # individual read timeout.
 LLM_CONNECT_TIMEOUT_SECONDS = 3.0
 LLM_TOTAL_TIMEOUT_SECONDS = 10.0
+# Version of the disclosure copy the client shows in the consent flow.
+# Recorded on every enable so the account can demonstrate WHICH text it
+# agreed to (GDPR Art. 7); bump it whenever that copy changes — a consent
+# recorded against an older version is the honest answer, not a bug. It is
+# also part of processing_policy_fingerprint, so bumping it makes persisted
+# consent inert until the account re-opts-in.
+LLM_DISCLOSURE_VERSION = "v1"
 # A completion containing a handful of short narratives should be only a few
 # KiB.  One MiB leaves generous room for provider envelope changes while
 # preventing a compromised endpoint from making a processing worker buffer an
@@ -172,9 +179,12 @@ def processing_policy_fingerprint(settings: Settings) -> str | None:
 
     A boolean consent cannot safely survive an operator switching vendors,
     endpoints, models, or retention terms. The fingerprint deliberately
-    excludes the API key but includes every user-relevant declaration; a
-    changed value makes persisted consent inert until the account explicitly
-    opts in again. JSON avoids delimiter ambiguity and sorted keys keeps the
+    excludes the API key but includes every user-relevant declaration —
+    including the human-facing disclosure version, so re-worded consent
+    copy invalidates persisted consent even when the operator forgets to
+    bump MINDPATTERN_LLM_POLICY_VERSION (2026-09-18 audit fix). A changed
+    value makes persisted consent inert until the account explicitly opts
+    in again. JSON avoids delimiter ambiguity and sorted keys keeps the
     result stable across process restarts.
     """
     if not settings.llm_url.strip():
@@ -185,6 +195,7 @@ def processing_policy_fingerprint(settings: Settings) -> str | None:
         "provider": settings.llm_provider_name.strip(),
         "retention": settings.llm_data_retention.strip(),
         "version": settings.llm_policy_version.strip(),
+        "disclosure": LLM_DISCLOSURE_VERSION,
     }
     encoded = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
