@@ -285,7 +285,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
       - name: Build and push the immutable candidate API image
         id: api-image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: backend
           platforms: linux/amd64,linux/arm64
@@ -297,7 +297,7 @@ jobs:
           sbom: true
       - name: Build and push the immutable candidate backup-worker image
         id: backup-image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: backup
           platforms: linux/amd64,linux/arm64
