@@ -6,6 +6,69 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-19 — Second pentest round: 4 verified findings + 2 informational, all fixed and pinned
+
+A second authorized red-team engagement (4 parallel audit surfaces — request
+layer/config, insights/services, sharing/account, portal/mobile/deploy — plus
+live black-box batteries against a booted instance: IDOR, forgery, mass
+assignment, header-spoofed rate evasion, raw-socket smuggling, timing
+oracles, redemption races, analyzer DoS). 4 verified findings scored, 2
+informational; ~25 attack classes verified blocked. Every fix is pinned by
+`backend/tests/test_pentest_fixes_2026_09_19.py` (17 tests) and every
+original PoC was re-run against the hardened code. Backend 1096 tests /
+ruff / mypy green.
+
+- **MEDIUM — quadratic LSH bucket confirmation in
+  `phrases.near_duplicate_clusters`** (the same-day caps from this
+  morning's round bounded each bucket, not the sum: ~14 disjoint
+  near-identical clusters just under `MAX_BUCKET_SIGNATURES` drove ~4.3M
+  pair comparisons ≈ 11s CPU per recompute while respecting every cap,
+  saturating the analysis pool from 1-2 IPs). A candidate pair is now
+  confirmed at most once per RUN (pairs were re-compared in every shared
+  band — union is idempotent, so cluster output is unchanged; existing
+  pins green), with a global `MAX_PAIRWISE_COMPARISONS` (200k) budget and
+  a `MAX_PAIRWISE_PROPOSALS` (1M) walk cap, both degrading
+  deterministically. Attack corpus re-measured at 3.8s — the residual is
+  the linear MinHash-per-byte cost of a maximal 2M-char window (profiled),
+  the same complexity class as every other analyzer pass. Verbatim
+  sentence repeats now share a cached signature.
+- **LOW — `feedback_blob` wasted-work amplification** (a tampered
+  feedback blob decrypted last, so the primary run decrypted the whole
+  corpus and analyzed it, the tamper-retry repeated the full analysis,
+  and the `else` branch discarded it: ~1.5x free CPU per request). The
+  feedback blob is now pre-flighted — one small decrypt + the analyzer's
+  own shape check — before any corpus work; tampered/malformed feedback
+  is a 400 with zero `brain.update` invocations (spy-pinned), valid
+  feedback unchanged, retry ladder kept as backstop.
+- **LOW — pairing-code single-use defeated under concurrency on
+  file-backed SQLite** (`StaticPool` for every `sqlite://` URL ran
+  concurrent transactions over ONE shared connection; two racing grants
+  both won the conditional claim UPDATE, ~10-20% per attempt pair).
+  File-backed engines now use per-checkout connections (`NullPool`) with
+  WAL + a 30s busy timeout — production per-connection semantics;
+  `:memory:` keeps `StaticPool` (structurally required, pytest-only, the
+  residual documented in `db.py`). The concurrent-grant race is pinned on
+  the file topology: 5 rounds, exactly one 201/one 404/one consent row
+  each, burned code 404s afterward.
+- **LOW — `MINDPATTERN_TRUSTED_PROXY_IPS` accepted `0.0.0.0/0`/`::/0`
+  silently** (every XFF chain entry then landed in the trusted set, the
+  rightmost-untrusted walk found nothing, and ALL rate limiting collapsed
+  to one global bucket keyed on the proxy — with the misconfig warning
+  suppressed because the header was nominally trusted). `/0` entries are
+  now rejected at boot; prefixes wider than /24 (v4) or /64 (v6) warn;
+  and the middleware logs once when a trusted chain contains no untrusted
+  entry (the silent-collapse symptom).
+- **INFO — `/questions/today` was not phase-gated** (unlike `GET
+  /insights`, a question stored during the insight phase kept being
+  served after entry deletions dropped the account back to baseline).
+  Now withholds stored leftovers below the threshold; pinned alongside
+  the insights discipline.
+- **INFO — `InMemoryKeyStore.create()` accepted `owner=None`** (unbound
+  sessions are consumable by any caller; latent, since the only
+  production creator always bound). `owner` is now a required keyword —
+  a future caller cannot silently mint a cross-account-consumable
+  session.
+
 ### 2026-09-19 — Penetration-test remediation: 7 verified findings fixed
 
 A full authorized red-team engagement (5 specialized attack agents + dynamic

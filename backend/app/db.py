@@ -21,13 +21,14 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import event
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from .models import Base
 
@@ -55,12 +56,32 @@ def build_engine(
     pool_timeout: int = 30,
 ) -> AsyncEngine:
     if database_url.startswith("sqlite"):
-        # A single shared connection keeps in-memory SQLite alive across
-        # sessions. No pool sizing args: aiosqlite + StaticPool has one
-        # connection, and pool_size/max_overflow would break or mislead it.
+        # Two SQLite topologies, deliberately different pools:
+        #
+        # :memory: keeps StaticPool — one shared connection is the only
+        # thing keeping an in-memory database alive across sessions.  This
+        # is the pytest topology only; the shared connection means two
+        # concurrent transactions CAN interleave in ways a real deployment
+        # never sees (e.g. the pairing-code claim race the 2026-09-19
+        # round demonstrated), so concurrency invariants are pinned on the
+        # FILE topology below, which matches production semantics.
+        #
+        # File-backed SQLite (dev servers, file-based test runs) gets a
+        # connection PER CHECKOUT, matching production's per-session
+        # connections. StaticPool here ran every concurrent transaction
+        # over ONE DBAPI connection, interleaving their statement/commit
+        # streams: two pairing-code grants racing on one "single-use" code
+        # could BOTH pass the conditional claim UPDATE (rowcount 1 each)
+        # and both create consent rows. The conditional UPDATE is sound
+        # under per-connection isolation; it cannot close a race between
+        # two sessions sharing one connection's transaction state. WAL
+        # plus a busy timeout make concurrent writers block briefly like a
+        # real server instead of failing fast with SQLITE_BUSY.
+        database = make_url(database_url).database
+        in_memory = not database or database == ":memory:"
         engine = create_async_engine(
             database_url,
-            poolclass=StaticPool,
+            poolclass=StaticPool if in_memory else NullPool,
             connect_args={"check_same_thread": False},
             echo=False,
         )
@@ -70,9 +91,12 @@ def build_engine(
         # (e.g. entries written by a request racing account deletion) commit
         # cleanly. Postgres enforces FKs natively; make SQLite match.
         @event.listens_for(engine.sync_engine, "connect")
-        def _enable_sqlite_fk(dbapi_connection, _record):  # pragma: no cover - driver hook
+        def _configure_sqlite(dbapi_connection, _record):  # pragma: no cover - driver hook
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            if not in_memory:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
 
         return engine

@@ -715,6 +715,32 @@ async def recompute(
                 if feedback_blob
                 else None
             )
+            if feedback_item is not None:
+                # Pre-flight the client-controlled tail BEFORE any corpus
+                # work. The feedback blob is the last item in the encrypted
+                # list, so a tampered one used to fail GCM only after the
+                # full corpus had been decrypted and analyzed — and the
+                # tamper-retry ladder then repeated that analysis just to
+                # discard it with a 400 (~1.5x free CPU per request, the
+                # processing session burned for nothing). Authenticated-
+                # but-malformed feedback had the same shape. One standalone
+                # decrypt + shape check of this one blob (bounded by the
+                # 2 MiB body cap) rejects both for the price of a small
+                # decrypt; the in-run decrypt then cannot fail and the
+                # ladder below remains as a backstop, not the gate.
+                try:
+                    feedback_plain = crypto.decrypt(
+                        data_key, feedback_item[1], feedback_item[0]
+                    )
+                except TamperError:
+                    raise ApiError(
+                        status_code=400,
+                        detail="feedback blob failed authentication",
+                        code="feedback_blob_invalid",
+                    ) from None
+                # Shape-check with the same parser the analysis path uses;
+                # its ApiError (400, entry_payload_malformed) propagates.
+                _parse_feedback(feedback_plain)
             encrypted = (
                 entry_items
                 + ([state_item] if state_item else [])
@@ -955,10 +981,24 @@ async def get_insights(
     ],
 )
 async def get_question_today(
+    request: Request,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
     today = date_type.today()
+    # Phase-gated like GET /insights (2026-09-19 round): a question stored
+    # while the account was in the insight phase is not served after entry
+    # deletions drop it back to baseline — the threshold's "reveal nothing
+    # early" discipline covers stored leftovers here too, not only the
+    # patterns blob.
+    dates = await _entry_dates(session, user.id)
+    state = threshold.evaluate(dates, request.app.state.settings.unlock_threshold_days)
+    if state.phase is not Phase.INSIGHT:
+        raise ApiError(
+            status_code=404,
+            detail="no question for today; open a processing session and run /insights/recompute",
+            code="not_found",
+        )
     row = (
         (
             await session.execute(

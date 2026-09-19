@@ -115,6 +115,7 @@ class HardeningMiddleware:
         # authoritative for X-Forwarded-For.
         self.trust_proxy_headers = trust_proxy_headers and bool(self.trusted_proxy_networks)
         self._xff_warned = False
+        self._no_untrusted_xff_warned = False
 
     def _direct_peer_is_trusted(self, scope) -> bool:
         client = scope.get("client")
@@ -149,6 +150,21 @@ class HardeningMiddleware:
                 state["mindpattern_forwarded_client"] = forwarded
             else:
                 state.pop("mindpattern_forwarded_client", None)
+                # Every chain entry was inside the trusted networks: the
+                # request's rate-limit identity silently degrades to the
+                # proxy's own address (all clients share ONE bucket). A
+                # well-formed deployment never does this — the rightmost
+                # entry is the client the proxy actually observed — so say
+                # so once instead of failing quietly (2026-09-19 round).
+                if not self._no_untrusted_xff_warned:
+                    self._no_untrusted_xff_warned = True
+                    logger.warning(
+                        "X-Forwarded-For chain contained only trusted-proxy "
+                        "addresses; rate limiting falls back to the proxy "
+                        "address for such requests (one shared bucket). If "
+                        "this recurs, MINDPATTERN_TRUSTED_PROXY_IPS is "
+                        "probably too broad."
+                    )
         else:
             state.pop("mindpattern_forwarded_client", None)
         if b"x-forwarded-for" in headers and not trusted_forwarding and not self._xff_warned:

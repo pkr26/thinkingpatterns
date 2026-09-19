@@ -68,8 +68,17 @@ class InMemoryKeyStore:
         key: bytes | bytearray,
         ttl_seconds: int,
         now: float | None = None,
-        owner: str | None = None,
+        *,
+        owner: str,
     ) -> str:
+        """Mint a processing-session token for *owner*.
+
+        Owner is REQUIRED at mint time (2026-09-19 round): an unbound
+        session is consumable by any caller — the access-side owner check
+        only fires for sessions that HAVE an owner, so a caller that
+        forgot the binding would silently ship a cross-account primitive.
+        Tests that do not care about binding pass an explicit sentinel.
+        """
         if len(key) != KEY_SIZE:
             raise ValueError(f"key must be {KEY_SIZE} bytes")
         if ttl_seconds <= 0:

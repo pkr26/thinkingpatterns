@@ -40,6 +40,30 @@ DEFAULT_MIN_DISTINCT_DAYS = 3
 # hundred KB of crafted near-identical text costs minutes of CPU.
 MAX_SENTENCE_TOKENS = 120
 MAX_BUCKET_SIGNATURES = 256
+# Two further ceilings from the 2026-09-19 pen-test round, closing the
+# quadratic-work gap the caps above left open.  A candidate pair sharing
+# all 16 band buckets used to be confirmed 16 times — the SAME union,
+# purchased 16 times.  And the per-bucket cap alone bounds one bucket, not
+# the sum: ~14 disjoint near-identical clusters, each just under the cap,
+# drove ~4.3M pair comparisons (~11s CPU) per recompute while respecting
+# every per-bucket limit.  A pair is now compared at most once per RUN
+# (union is idempotent, so cluster output is unchanged), and the run may
+# spend at most this many signature comparisons in total.  Past the
+# budget, later candidates are simply not confirmed — an adversarial
+# corpus degrades to fewer links, never to unbounded CPU.  Degradation is
+# deterministic: buckets are visited in insertion order and the budget
+# decrements identically on every platform, so the same corpus always
+# yields the same clusters.
+MAX_PAIRWISE_COMPARISONS = 200_000
+# The dedupe set lookup happens once per PROPOSAL, and a crafted corpus
+# proposes the same pairs from all 16 bands: ~4.3M proposals walked ~3s of
+# pure set traffic even after comparisons were capped. Proposals are
+# bounded separately: past this many candidates walked in one run, the
+# pairwise loops of remaining buckets are skipped (identical-signature
+# unions still run). Real journals sit orders of magnitude below (a
+# pathological 4000-sentence corpus of 200 recurring thoughts proposes
+# ~600k); the ceiling only clips adversarial bucket crowding.
+MAX_PAIRWISE_PROPOSALS = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -157,7 +181,17 @@ def near_duplicate_clusters(
     n = len(sentences)
     if n < min_size:
         return []
-    signatures = [signature(s.text.split()) for s in sentences]
+    signatures: list[list[int]] = []
+    # Verbatim repeats share a signature: signing is the dominant linear
+    # cost of this pass, and recurring journals repeat sentences word for
+    # word far more often than they vary them.
+    sig_cache: dict[str, list[int]] = {}
+    for s in sentences:
+        cached = sig_cache.get(s.text)
+        if cached is None:
+            cached = signature(s.text.split())
+            sig_cache[s.text] = cached
+        signatures.append(cached)
 
     buckets: dict[tuple[int, str], list[int]] = {}
     for idx, sig in enumerate(signatures):
@@ -177,6 +211,9 @@ def near_duplicate_clusters(
         if rx != ry:
             parent[max(rx, ry)] = min(rx, ry)
 
+    compared_pairs: set[tuple[int, int]] = set()
+    comparisons_left = MAX_PAIRWISE_COMPARISONS
+    proposals_left = MAX_PAIRWISE_PROPOSALS
     for members in buckets.values():
         if len(members) < 2:
             continue
@@ -201,9 +238,26 @@ def near_duplicate_clusters(
             # identical-signature unions above already ran; skip the rest.
             continue
         for i in range(len(distinct)):
+            if comparisons_left <= 0 or proposals_left <= 0:
+                break
             for j in range(i + 1, len(distinct)):
-                if estimated_jaccard(signatures[distinct[i]], signatures[distinct[j]]) >= jaccard:
-                    union(distinct[i], distinct[j])
+                lo, hi = distinct[i], distinct[j]
+                if lo > hi:
+                    lo, hi = hi, lo
+                if proposals_left <= 0:
+                    break
+                proposals_left -= 1
+                # One confirmation per pair per RUN: a pair sharing several
+                # band buckets is proposed once per bucket, but the second
+                # comparison could only repeat the first union.
+                if (lo, hi) in compared_pairs:
+                    continue
+                if comparisons_left <= 0:
+                    break
+                compared_pairs.add((lo, hi))
+                comparisons_left -= 1
+                if estimated_jaccard(signatures[lo], signatures[hi]) >= jaccard:
+                    union(lo, hi)
 
     groups: dict[int, list[int]] = {}
     for idx in range(n):

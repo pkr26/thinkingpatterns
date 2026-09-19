@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from ipaddress import ip_network
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -250,9 +251,35 @@ class Settings:
         normalized_proxy_ips: list[str] = []
         for value in self.trusted_proxy_ips:
             try:
-                normalized_proxy_ips.append(str(ip_network(value.strip(), strict=False)))
+                network = ip_network(value.strip(), strict=False)
             except ValueError as exc:
                 raise RuntimeError(f"trusted_proxy_ips contains invalid IP/CIDR {value!r}") from exc
+            # 2026-09-19 pen-test round: trust-the-world entries boot cleanly
+            # and fail SILENTLY — every XFF chain entry lands inside the
+            # trusted set, the rightmost-untrusted walk finds nothing, and
+            # rate limiting collapses to ONE global bucket keyed on the
+            # proxy's address (ten requests a minute from anyone then 429s
+            # auth for the whole deployment, with the misconfig warning
+            # suppressed because the header is nominally "trusted").
+            if network.prefixlen == 0:
+                raise RuntimeError(
+                    f"trusted_proxy_ips entry {value!r} matches every address; "
+                    "it would collapse all rate limiting into one global "
+                    "bucket. List the proxy's actual address(es) or CIDR."
+                )
+            # Wide-but-not-total ranges are a legitimate private-network
+            # shorthand, so they only warn — but the operator should see that
+            # every host inside the range can forge rate-limit identities.
+            if network.prefixlen < (24 if network.version == 4 else 64):
+                warnings.warn(
+                    f"trusted_proxy_ips entry {value!r} is wider than /"
+                    f"{24 if network.version == 4 else 64}: every host inside "
+                    "it can forge X-Forwarded-For identities and spend other "
+                    "clients' rate-limit budgets. Prefer the narrowest CIDR "
+                    "that actually covers the proxy tier.",
+                    stacklevel=2,
+                )
+            normalized_proxy_ips.append(str(network))
         self.trusted_proxy_ips = normalized_proxy_ips
         if self.trust_proxy_headers and not self.trusted_proxy_ips:
             raise RuntimeError(
