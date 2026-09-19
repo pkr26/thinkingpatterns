@@ -114,7 +114,10 @@ describe("client pins: sanitizeDetail regex vectors", () => {
     // "https://" followed by whitespace matches neither the http nor the
     // generic scheme regex (both require \\S+ right after "://") — replacing
     // \\S with \\s here would swallow the "https://" and change the message.
-    expect(detailToMessage("see https:// evil.example now", 400)).toBe("see https:// evil.example now");
+    // The bare "evil.example" domain IS stripped (2026-09-19: every alpha
+    // TLD now, not an allowlist), so the surviving scheme text is the
+    // observable pin; a \\s regression would yield "see now".
+    expect(detailToMessage("see https:// evil.example now", 400)).toBe("see https:// now");
   });
 
   it("an 'xhttp://' URL loses only its http:// part — the 'x' prefix survives", () => {

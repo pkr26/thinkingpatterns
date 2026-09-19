@@ -15,6 +15,23 @@ database URL); any SECOND process serving the same deployment refuses to
 start. Same-process re-entrancy (the test suite creating many apps) is
 allowed via a module-level holder map.
 
+Lock-file placement (2026-09-19 hardening). The file used to sit directly
+in the SHARED temp directory under a predictable name with default
+permissions, which made the guard itself an attack surface for any local
+user: pre-holding the flock permanently blocked boot, the file's existence
+leaked a keyed digest of (token secret, database URL) plus the service PID
+to every reader, and ``open(..., "a+b").truncate(0)`` followed symlinks.
+The file now lives in a private per-uid 0700 subdirectory (or an explicit
+``MINDPATTERN_LOCK_DIR``), is created 0600, and is opened with
+``O_NOFOLLOW`` so a symlink planted at the path fails boot LOUDLY instead
+of truncating the symlink's target. Residual, documented honestly: a
+process running as the SAME uid can still pre-hold the lock (that is what
+an advisory flock is), and if something unlinks the lock file mid-run a
+second boot would create a fresh inode and silently fragment the
+in-process guarantees — bare-metal deployments should point
+``MINDPATTERN_LOCK_DIR`` at a persistent, un-cleaned directory (inside the
+container image the default private /tmp subdir already is one).
+
 Not covered: multiple HOSTS sharing one database — that was never a
 supported topology (the in-memory guarantees do not cross hosts regardless
 of this lock); the README and docker-compose remain the contract for that.
@@ -22,30 +39,60 @@ of this lock); the README and docker-compose remain the contract for that.
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import logging
 import os
 import tempfile
 from types import TracebackType
-from typing import IO
 
 logger = logging.getLogger("mindpattern")
 
-# token -> lock file handle, so repeated create_app() in ONE process (the
+LOCK_DIR_ENV = "MINDPATTERN_LOCK_DIR"
+
+# path -> lock file descriptor, so repeated create_app() in ONE process (the
 # test suite does this constantly) never conflicts with itself.
-_held: dict[str, IO[bytes]] = {}
+_held: dict[str, int] = {}
 
 
 class MultipleWorkersError(RuntimeError):
     """Another process is already serving this deployment."""
 
 
+class LockPathError(RuntimeError):
+    """The lock path exists but is not a safe regular file to lock."""
+
+
+def _lock_dir() -> str:
+    """A directory only this uid can write to.
+
+    ``MINDPATTERN_LOCK_DIR`` wins when set (deployments on shared hosts
+    should point it at a persistent private directory); the default is a
+    per-uid 0700 subdir of the temp directory, so other local users can
+    neither create nor read the lock file.
+    """
+    override = os.environ.get(LOCK_DIR_ENV, "").strip()
+    if override:
+        base = override
+        os.makedirs(base, mode=0o700, exist_ok=True)
+    else:
+        base = os.path.join(tempfile.gettempdir(), f"mindpattern-{os.getuid()}")
+        os.makedirs(base, mode=0o700, exist_ok=True)
+    # makedirs' mode is only applied at creation: tighten a pre-existing
+    # directory too, best-effort (a shared host may have created it looser).
+    try:
+        os.chmod(base, 0o700)
+    except OSError:
+        logger.warning("could not tighten permissions on lock dir %r", base)
+    return base
+
+
 def _lock_path(token_secret: str, database_url: str) -> str:
     digest = hashlib.sha256(
         f"mindpattern:{token_secret}:{database_url}".encode("utf-8")
     ).hexdigest()[:24]
-    return os.path.join(tempfile.gettempdir(), f"mindpattern-single-{digest}.lock")
+    return os.path.join(_lock_dir(), f"mindpattern-single-{digest}.lock")
 
 
 def acquire_single_process_lock(token_secret: str, database_url: str) -> str:
@@ -54,11 +101,20 @@ def acquire_single_process_lock(token_secret: str, database_url: str) -> str:
     existing = _held.get(path)
     if existing is not None:
         return path  # this process already holds it (re-entrant)
-    fd = open(path, "a+b")
     try:
-        fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise LockPathError(
+                f"single-process lock path {path!r} is a symlink; refusing to "
+                "lock or truncate it. Remove the symlink (or set "
+                f"{LOCK_DIR_ENV} to a private directory) and restart."
+            ) from exc
+        raise
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        fd.close()
+        os.close(fd)
         raise MultipleWorkersError(
             "another worker/process is already serving this deployment: the "
             "rate limiter, per-user locks, and processing-session keystore "
@@ -66,9 +122,25 @@ def acquire_single_process_lock(token_secret: str, database_url: str) -> str:
             "ONE worker per instance; put shared counters/locks in Redis &c. "
             "before ever scaling horizontally."
         ) from None
-    fd.truncate(0)
-    fd.write(f"pid={os.getpid()}\n".encode())
-    fd.flush()
+    # Unlink detection (best-effort, at boot): if the path no longer leads
+    # to our inode somebody removed the lock file after a previous run
+    # acquired it — a tmp-cleaner pattern that would let the NEXT boot
+    # silently fragment every in-process guarantee. Loud warning, not a
+    # crash: this process holds a valid exclusive lock on a live inode.
+    try:
+        if os.stat(path).st_ino != os.fstat(fd).st_ino:
+            logger.warning(
+                "single-process lock path %r no longer names the locked "
+                "inode; an external unlinked it — a second boot could now "
+                "fragment in-process guarantees. Point %s at a persistent "
+                "directory.",
+                path,
+                LOCK_DIR_ENV,
+            )
+    except OSError:
+        pass
+    os.ftruncate(fd, 0)
+    os.write(fd, f"pid={os.getpid()}\n".encode())
     _held[path] = fd
     return path
 
@@ -79,9 +151,9 @@ def release_single_process_lock(token_secret: str, database_url: str) -> None:
     if fd is None:
         return
     try:
-        fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
+        fcntl.flock(fd, fcntl.LOCK_UN)
     finally:
-        fd.close()
+        os.close(fd)
 
 
 class single_process_guard:

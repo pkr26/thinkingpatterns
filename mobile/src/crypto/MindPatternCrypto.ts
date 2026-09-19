@@ -86,6 +86,12 @@ export const INSIGHTS_PAYLOAD_VERSION = 2;
 export interface InsightsPayload {
   v: number;
   stats?: { patterns?: unknown };
+  /** Analysis generation (2026-09-19): must equal the GET /insights echo
+   *  of the same name and never decrease across sessions — the
+   *  rollback-replay detection contract (see stateSeqGuard.ts). Absent on
+   *  pre-2026-09-19 servers; consumers must treat absence as "nothing to
+   *  verify", never as zero. */
+  state_seq?: number;
 }
 
 export function decryptInsights(keys: Pick<Keys, "dataKey">, userId: string, blobB64: string): InsightsPayload {

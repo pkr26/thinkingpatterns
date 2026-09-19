@@ -105,7 +105,12 @@ def _dialect_insert(session: AsyncSession):
 
 
 async def _replace_insight(
-    session: AsyncSession, user_id: str, kind: str, for_date: date_type | None, blob: bytes
+    session: AsyncSession,
+    user_id: str,
+    kind: str,
+    for_date: date_type | None,
+    blob: bytes,
+    state_seq: int = 0,
 ) -> None:
     """Write the current insight of (user, kind[, for_date]) idempotently.
 
@@ -122,17 +127,23 @@ async def _replace_insight(
         await session.execute(
             delete(Insight).where(Insight.user_id == user_id, Insight.kind == kind)
         )
-        session.add(Insight(user_id=user_id, kind=kind, for_date=None, blob=blob))
+        session.add(Insight(user_id=user_id, kind=kind, for_date=None, blob=blob, state_seq=state_seq))
         return
     now = utcnow()
     stmt = (
         _dialect_insert(session)(Insight)
         .values(
-            id=new_id(), user_id=user_id, kind=kind, for_date=for_date, blob=blob, created_at=now
+            id=new_id(),
+            user_id=user_id,
+            kind=kind,
+            for_date=for_date,
+            blob=blob,
+            created_at=now,
+            state_seq=state_seq,
         )
         .on_conflict_do_update(
             index_elements=["user_id", "kind", "for_date"],
-            set_={"blob": blob, "created_at": now},
+            set_={"blob": blob, "created_at": now, "state_seq": state_seq},
         )
     )
     await session.execute(stmt)
@@ -184,8 +195,16 @@ async def create_processing_session(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
-    data_key = _decode_b64(body.data_key, "data_key")
+    # Zeroization discipline (2026-09-19 audit fix): the decoded data key is
+    # held as a bytearray and scrubbed on EVERY exit path below, matching the
+    # enclave's contract that every holder of key material is a buffer this
+    # process can overwrite — it used to be an immutable bytes object that
+    # lingered until GC after the keystore took its copy. The base64 STRING
+    # the JSON parser held is the same documented residual as the enclave's
+    # analyzer strings: Python cannot overwrite a str in place.
+    data_key = bytearray(_decode_b64(body.data_key, "data_key"))
     if len(data_key) != crypto.KEY_SIZE:
+        zeroize(data_key)
         raise ApiError(
             status_code=422,
             detail=f"data_key must be {crypto.KEY_SIZE} bytes",
@@ -198,28 +217,33 @@ async def create_processing_session(
     # logout/delete key purge. Merely checking ``is_active`` would still let a
     # pre-logout bearer mint a fresh in-memory data-key token after the purge.
     expected_epoch = user.token_epoch
-    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
-        fresh = await _fresh_processing_session_user(session, user.id, expected_epoch)
-        # Return the pooled connection before touching the in-memory keystore;
-        # this is only a short authorization re-check, not a transaction that
-        # must remain open for the token's TTL.
-        await session.commit()
-        try:
-            token = request.app.state.key_store.create(
-                data_key, settings.processing_session_ttl, owner=fresh.id
-            )
-        except KeyStoreFull:
-            # Do not let one account or a fleet of abandoned uploads turn this
-            # memory-only key store into an unbounded secret cache. Clients
-            # can consume an existing token or wait for its short TTL.
-            raise ApiError(
-                status_code=503,
-                detail=(
-                    "processing session capacity reached; consume an existing session or retry shortly"
-                ),
-                code="service_unavailable",
-                headers={"Retry-After": "1"},
-            ) from None
+    try:
+        async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+            fresh = await _fresh_processing_session_user(session, user.id, expected_epoch)
+            # Return the pooled connection before touching the in-memory keystore;
+            # this is only a short authorization re-check, not a transaction that
+            # must remain open for the token's TTL.
+            await session.commit()
+            try:
+                # The keystore copies the buffer into its own zeroizable
+                # bytearray; ours is scrubbed in the finally below.
+                token = request.app.state.key_store.create(
+                    data_key, settings.processing_session_ttl, owner=fresh.id
+                )
+            except KeyStoreFull:
+                # Do not let one account or a fleet of abandoned uploads turn this
+                # memory-only key store into an unbounded secret cache. Clients
+                # can consume an existing token or wait for its short TTL.
+                raise ApiError(
+                    status_code=503,
+                    detail=(
+                        "processing session capacity reached; consume an existing session or retry shortly"
+                    ),
+                    code="service_unavailable",
+                    headers={"Retry-After": "1"},
+                ) from None
+    finally:
+        zeroize(data_key)
     return ProcessingSessionResponse(
         session_token=token, expires_in=settings.processing_session_ttl
     )
@@ -634,6 +658,7 @@ async def recompute(
                 # the secure context as one more encrypted item and comes back
                 # out updated.
                 prior = await _latest_insight(session, user.id, "brain")
+                prior_seq = prior.state_seq if prior is not None else 0
                 entry_items = [
                     (crypto.build_aad("entry", row.user_id, row.client_entry_id), bytes(row.blob))
                     for row in rows
@@ -775,9 +800,16 @@ async def recompute(
                     code="entry_payload_malformed",
                 ) from None
 
+            # Rollback visibility (2026-09-19): one monotonic generation per
+            # recompute, embedded in the ENCRYPTED payload and echoed in the
+            # plaintext response / row column. A replayed-older valid-GCM
+            # blob now disagrees with its echo, and a client's pinned
+            # high-water mark catches even a both-copies rollback.
+            state_seq = prior_seq + 1
             insights_payload = {
                 "v": 2,
                 "phase": state.phase.value,
+                "state_seq": state_seq,
                 "stats": {**result.stats, "patterns": [p.to_dict() for p in merged]},
             }
             blob = crypto.encrypt(
@@ -811,11 +843,17 @@ async def recompute(
             # analysis and encryption are done. Nothing here decrypts.
             async with sessionmaker() as session:
                 try:
-                    await _replace_insight(session, user.id, "patterns", None, blob)
-                    await _replace_insight(session, user.id, "brain", None, state_blob)
+                    await _replace_insight(
+                        session, user.id, "patterns", None, blob, state_seq=state_seq
+                    )
+                    await _replace_insight(
+                        session, user.id, "brain", None, state_blob, state_seq=state_seq
+                    )
                     question_stored = False
                     if question_blob is not None:
-                        await _replace_insight(session, user.id, "question", today, question_blob)
+                        await _replace_insight(
+                            session, user.id, "question", today, question_blob, state_seq=state_seq
+                        )
                         question_stored = True
                     # Retention: age out dated question history past the
                     # window (today's upsert above is never affected).
@@ -845,6 +883,7 @@ async def recompute(
                 days_remaining=state.days_remaining,
                 patterns_stored=len(merged),
                 question_stored=question_stored,
+                state_seq=state_seq,
                 # Honest analyzer reporting: "llm" only when the enricher
                 # exists AND its last call actually succeeded (a failed
                 # endpoint contributed nothing — the response must not
@@ -904,6 +943,7 @@ async def get_insights(
         streak=state.streak,
         days_remaining=state.days_remaining,
         blob=blob,
+        state_seq=latest.state_seq if latest is not None else 0,
     )
 
 

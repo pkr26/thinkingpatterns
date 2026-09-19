@@ -842,6 +842,16 @@ CADENCE_MIN_DAYS = 12  # journaling days per window half
 # are possible without the usual gating and correction.
 PERSON_MIN_DISTINCT_DAYS = 6
 PERSON_MIN_TOTAL_MENTIONS = 8
+# Hard ceiling on how many person candidates ride the theme machinery per
+# run (2026-09-19 DoS remediation). The corpus budgets bound chars and
+# entries but never distinct-name cardinality: a 30-day-old account can
+# pack tens of thousands of qualifying names into the 2M-char analysis
+# budget, and the per-name corpus rescan made ONE recompute cost minutes
+# of CPU on the single-process deployment. Real journals name a handful
+# of people; the most-established names win, selected deterministically
+# (mentions, then distinct days, then name) — the same contract as
+# TOPIC_MAX_CANDIDATES.
+PERSON_MAX_CANDIDATES = 24
 
 TOPIC_MIN_ENTRIES = 6  # entries mentioning it before it can be tested
 TOPIC_MIN_DISTINCT_DAYS = 4
@@ -865,6 +875,13 @@ TOPIC_PRESENCE_MIN_CONTEXTS = 4
 # presence card on top would be the same measurement wearing a second hat.
 TOPIC_PRESENCE_CLUSTER_COVER = 0.8
 TOPIC_MAX_CANDIDATES = 12  # tested per run (by document frequency)
+# Same cardinality bound for the client-controlled tag vocabulary (2026-09-19
+# DoS remediation): tags are capped per entry (<=8) but unbounded across a
+# corpus, and every distinct tag rides the same O(entries) theme machinery
+# a hostile corpus can drive to tens of thousands. Top tags by (distinct
+# days, mentions, tag) — deterministic; origin marking still reports
+# source="tag" for any survivor.
+TAG_MAX_THEMES = 24
 TOPIC_MAX_SIGNALS = 6  # surfaced per run, rising first
 
 # Function words, auxiliaries, time/filler boilerplate and mood carriers —
@@ -1775,6 +1792,26 @@ def _mentions_name(text: str, name: str) -> bool:
     return re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) is not None
 
 
+def _select_tag_themes(
+    tag_entries_count: dict[str, int], tag_distinct_days: dict[str, set[date]]
+) -> set[str]:
+    """The tag vocabulary that rides the theme machinery this run.
+
+    Tags are client-controlled (<=8 per entry, unbounded across a corpus),
+    and every distinct tag costs the per-theme O(entries) detectors a full
+    pass — so the tested set is capped (TAG_MAX_THEMES) exactly like topic
+    and person candidates. Most distinct days first, then mentions, then
+    tag: a total, deterministic order for any corpus size.
+    """
+    if len(tag_distinct_days) <= TAG_MAX_THEMES:
+        return set(tag_distinct_days)
+    ranked = sorted(
+        tag_distinct_days,
+        key=lambda tag: (-len(tag_distinct_days[tag]), -tag_entries_count[tag], tag),
+    )
+    return set(ranked[:TAG_MAX_THEMES])
+
+
 def _person_candidates(window: list[JournalEntry]) -> set[str]:
     """Recurring proper-name/possessive candidates, deterministically.
 
@@ -1810,11 +1847,20 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
         for name in found:
             counts[name] = counts.get(name, 0) + 1
             days.setdefault(name, set()).add(entry.entry_date)
-    return {
+    qualified = {
         name
         for name, n in counts.items()
         if n >= PERSON_MIN_TOTAL_MENTIONS and len(days.get(name, set())) >= PERSON_MIN_DISTINCT_DAYS
     }
+    if len(qualified) <= PERSON_MAX_CANDIDATES:
+        return qualified
+    # Cardinality ceiling (see PERSON_MAX_CANDIDATES): the theme machinery
+    # rescans the corpus once per surviving name, so the qualified set must
+    # be bounded no matter how the corpus was constructed. Most-mentioned
+    # first, then most distinct days, then name — a total, deterministic
+    # order, mirroring the topic candidate cap.
+    ranked = sorted(qualified, key=lambda name: (-counts[name], -len(days[name]), name))
+    return set(ranked[:PERSON_MAX_CANDIDATES])
 
 
 def _detect_themes(
@@ -2969,8 +3015,17 @@ def update(
         # Strictly below the user's own median = a rough night FOR THEM.
         poor_sleep_days = {day for day, q in day_sleep_mean.items() if q < median}
     tag_vocab: set[str] = set()
+    tag_entries_count: dict[str, int] = {}
+    tag_distinct_days: dict[str, set[date]] = {}
     for entry in window:
         tag_vocab.update(entry.tags)
+        for tag in entry.tags:
+            tag_entries_count[tag] = tag_entries_count.get(tag, 0) + 1
+            tag_distinct_days.setdefault(tag, set()).add(entry.entry_date)
+    # Cardinality ceiling for tag-derived themes (see TAG_MAX_THEMES):
+    # ``tag_vocab`` stays complete for origin marking, but only the kept
+    # tags ride the per-theme O(entries) detectors.
+    kept_tags = _select_tag_themes(tag_entries_count, tag_distinct_days)
 
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
     for entry in window:
@@ -2988,7 +3043,7 @@ def update(
             sentiment = max(-1.0, min(1.0, entry.sentiment))
         else:
             sentiment = sentiment_score(tokens)
-        themes = extract_themes(tokens) | set(entry.tags)
+        themes = extract_themes(tokens) | (set(entry.tags) & kept_tags)
         if entry.entry_date in poor_sleep_days:
             themes.add(SLEEP_CHANNEL_THEME)
         per_entry.append((entry, tokens, themes, sentiment))

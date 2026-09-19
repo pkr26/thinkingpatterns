@@ -52,7 +52,7 @@ jobs:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/requirements.dev.lock.txt
-      - uses: actions/setup-node@f452870c6f7a63b1fcf4b0ee5d54aa6c1a46e4ad # v6.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
       - name: Install backend dependencies

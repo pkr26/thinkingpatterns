@@ -103,6 +103,12 @@ class RecomputeResponse(BaseModel):
     # v2 mini-brain lifecycle counters (absent/0 for old clients is fine).
     patterns_new: int = 0
     patterns_fading: int = 0
+    # Analysis generation (2026-09-19): equals the ``state_seq`` embedded in
+    # the encrypted patterns payload just stored. Clients verify equality
+    # after decrypting and alarm if the value ever moves BACKWARDS across
+    # sessions — that is the rollback-replay detection contract (a valid-GCM
+    # old blob otherwise replays silently; see the Insight.state_seq note).
+    state_seq: int = 0
 
 
 class AccountDeleteRequest(BaseModel):
@@ -158,6 +164,10 @@ class InsightsResponse(BaseModel):
     streak: int
     days_remaining: int
     blob: str | None = None
+    # Analysis generation of the stored patterns blob (0 when none): must
+    # equal the ``state_seq`` inside the decrypted payload and must never
+    # decrease across a client's sessions (rollback-replay detection).
+    state_seq: int = 0
 
 
 class QuestionResponse(BaseModel):

@@ -181,6 +181,18 @@ class Insight(Base):
     kind: Mapped[str] = mapped_column(String(32))  # "patterns" | "brain" | "question"
     for_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     blob: Mapped[bytes] = mapped_column(LargeBinary)  # encrypted pattern/question payload
+    # Rollback visibility (2026-09-19): a per-account monotonic counter for
+    # the analysis generation this row belongs to, echoed by the API next to
+    # the ciphertext AND embedded inside the encrypted patterns payload.
+    # AES-GCM authenticates WHO/WHAT context, not WHICH VERSION — without a
+    # sequence number, a compromised server could replay an earlier valid
+    # state blob and the client had no way to notice. The server cannot
+    # defend against its own storage (it owns both copies), but it CAN make
+    # every rollback client-detectable: the payload's embedded value must
+    # equal the echoed one, and neither may ever move backwards.
+    state_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 

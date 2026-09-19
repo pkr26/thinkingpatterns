@@ -45,8 +45,13 @@ done < "$env_file"
 
 for name in api_image backup_image; do
   image_ref=${!name}
-  if [[ ! "$image_ref" =~ ^ghcr\.io/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$ ]]; then
-    echo "$name must be a lowercase ghcr.io image manifest digest (…@sha256:<64 lowercase hex>)" >&2
+  # The repository path is matched per segment — `name` runs of
+  # `[._-]-joined` alphanumerics — instead of a single `[a-z0-9._/-]*`
+  # run: a run also admits `..`/`.`/empty path segments, which a registry
+  # resolves differently and which no legitimate release image uses.
+  # Segments must start and end with an alphanumeric.
+  if [[ ! "$image_ref" =~ ^ghcr\.io/[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*@sha256:[a-f0-9]{64}$ ]]; then
+    echo "$name must be a lowercase ghcr.io image manifest digest (…@sha256:<64 lowercase hex>, without dot-path segments)" >&2
     exit 65
   fi
 done

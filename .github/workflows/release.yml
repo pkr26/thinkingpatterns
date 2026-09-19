@@ -134,7 +134,9 @@ jobs:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mindpattern_test
         ports:
-          - 5432:5432
+          # Loopback-only: a bare 5432:5432 would publish the throwaway
+          # database on the runner's public interface too.
+          - "127.0.0.1:5432:5432"
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 5s
@@ -225,7 +227,7 @@ jobs:
           docker compose --profile backups exec -T backup sh -ceu '
             set -- /backups/mindpattern-*.dump.enc
             mindpattern-backup-mac verify "$1"
-            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_KEY -in "$1"
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -in "$1"
           ' | docker exec -i "$restore_name" pg_restore --no-owner -U postgres -d postgres
           docker exec "$restore_name" psql -U postgres -d postgres -tAc \
             "SELECT count(*) FROM users WHERE username = 'backup-restore-probe'" | grep -qx '1'

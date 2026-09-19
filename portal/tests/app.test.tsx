@@ -173,6 +173,43 @@ describe("App", () => {
     expect(window.localStorage.getItem("mindpattern.lastVisit.other-therapist.user-1")).toBeTruthy();
   });
 
+  it("2026-09-19: a FAILED key unlock wipes the password-derived wrap KEK too", async () => {
+    // The audit path: login succeeds, the unlock (me() or TamperError)
+    // fails, onLoginReady catches its own error — so LoginView's finally
+    // wipeKeys never ran and the wrap KEK (the key that decrypts the
+    // therapist's stored private key) stayed live in the heap until GC.
+    const crypto = vi.mocked(await import("../src/crypto"));
+    const wrapKek = new Uint8Array(32).fill(7);
+    const noteKey = new Uint8Array(32).fill(9);
+    crypto.derivePortalKeys.mockResolvedValueOnce({ authKeyB64: "AUTHKEY==", wrapKek, noteKey });
+    crypto.unlockWrapPrivateKey.mockRejectedValueOnce(new Error("network down"));
+    const root = await login();
+    await flush();
+    expect(textOf(root)).toContain("network down");
+    expect([...wrapKek]).toEqual(new Array(32).fill(0));
+    expect([...noteKey]).toEqual(new Array(32).fill(0));
+  });
+
+  it("2026-09-19: a bfcache restore (persisted pageshow) locks the app down", async () => {
+    // Navigating away and pressing Back past the idle window restores the
+    // tab from the back/forward cache with the decrypted DOM frozen in it;
+    // the overdue idle timer only fires AFTER restore. A persisted
+    // pageshow must lock down synchronously, before paint.
+    const root = await login();
+    expect(textOf(root)).toContain("Patients — Dr. Portal");
+    const pageshow = { type: "pageshow", persisted: true };
+    await act(async () => { window.dispatchEvent(pageshow as unknown as Event); });
+    expect(textOf(root)).toContain("Restored from the browser cache");
+    expect(textOf(root)).toContain("Sign in");
+  });
+
+  it("a normal (non-persisted) pageshow does NOT lock the app", async () => {
+    const root = await login();
+    const initial = { type: "pageshow", persisted: false };
+    await act(async () => { window.dispatchEvent(initial as unknown as Event); });
+    expect(textOf(root)).toContain("Patients — Dr. Portal");
+  });
+
   it("a 401 locks the app down, and a same-tab re-login re-arms the expiry hook", async () => {
     // The mock above replaces the api object only — setSession and the
     // 401 latch are the real module state, so drive a genuine 401 through

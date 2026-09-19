@@ -120,7 +120,7 @@ describe("LoginScreen chrome", () => {
 });
 
 describe("registration", () => {
-  it("rejects passwords shorter than 8 characters before any network call", async () => {
+  it("rejects passwords shorter than 12 characters before any network call", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "short");
@@ -128,17 +128,55 @@ describe("registration", () => {
     await pressLabel(root, "Create account");
     expect(Alert.alert).toHaveBeenCalledWith(
       "Password too short",
-      expect.stringContaining("8 characters"),
+      expect.stringContaining("12 characters"),
     );
     expect(api.register).not.toHaveBeenCalled();
   });
 
-  it("accepts a password of exactly 8 characters (the boundary)", async () => {
+  it("rejects the old policy's 8-character boundary password (now below the 12 minimum)", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "12345678");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "12345678");
+    await pressLabel(root, "Create account");
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Password too short",
+      expect.stringContaining("12 characters"),
+    );
+    expect(api.register).not.toHaveBeenCalled();
+  });
+
+  it("rejects 12–15 characters from fewer than three character types", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "abcdefghijkl");
+    await pressLabel(root, "New here? Create an account");
+    await pressLabel(root, "Create account");
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Password needs more variety",
+      expect.stringContaining("three character types"),
+    );
+    expect(api.register).not.toHaveBeenCalled();
+  });
+
+  it("accepts a password of exactly 12 characters from three character types (the boundary)", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "abcdEFGH1234");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "abcdEFGH1234");
+    await pressLabel(root, "Create account");
+    await flush();
+    expect(api.register).toHaveBeenCalledTimes(1);
+    expect(vault.isUnlocked()).toBe(true);
+  });
+
+  it("accepts a 16-character single-type passphrase (the portal's length exemption)", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "abcdefghijklmnop");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "abcdefghijklmnop");
     await pressLabel(root, "Create account");
     await flush();
     expect(api.register).toHaveBeenCalledTimes(1);
@@ -148,13 +186,13 @@ describe("registration", () => {
   it("derives keys locally, registers, stores the session and unlocks the vault", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", " alice ");
-    await typeInto(root, "password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
 
-    expect(deriveKeysAsync).toHaveBeenCalledWith("correct horse", expect.any(Buffer));
+    expect(deriveKeysAsync).toHaveBeenCalledWith("Correct horse!", expect.any(Buffer));
     expect(api.register).toHaveBeenCalledWith("alice", expect.any(String), expect.any(String));
     expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
     expect(vault.isUnlocked()).toBe(true);
@@ -167,9 +205,9 @@ describe("registration", () => {
   it("a successful REGISTRATION queues first-run onboarding (the navigator consumes it once)", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
-    await typeInto(root, "password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
     expect(markLoggedIn).toHaveBeenCalledTimes(1);
@@ -182,9 +220,9 @@ describe("registration", () => {
     vi.mocked(api.register).mockRejectedValue(new ApiError(409, "username already taken"));
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
-    await typeInto(root, "password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
     expect(markLoggedIn).not.toHaveBeenCalled();
@@ -205,9 +243,9 @@ describe("registration", () => {
     vi.mocked(api.register).mockRejectedValue(new ApiError(409, "username already taken"));
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
-    await typeInto(root, "password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
 
@@ -394,9 +432,9 @@ describe("register-mode edge cases", () => {
   it("uses exactly 16 random salt bytes", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
-    await typeInto(root, "password", "long enough pw");
+    await typeInto(root, "password", "Long enough pw!");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "long enough pw");
+    await typeInto(root, "confirm password", "Long enough pw!");
     await pressLabel(root, "Create account");
     await flush();
     const saltB64 = vi.mocked(api.register).mock.calls[0][1];
@@ -467,12 +505,22 @@ describe("registration honesty (audit fix)", () => {
     );
   });
 
+  it("states the password requirement up front in register mode", async () => {
+    const root = await render(<LoginScreen />);
+    await flush();
+    expect(textOf(root)).not.toContain("Choose a password");
+    await pressLabel(root, "New here? Create an account");
+    expect(textOf(root)).toContain(
+      "Choose a password of at least 12 characters — a 16-character passphrase, or 12–15 characters from at least three character types.",
+    );
+  });
+
   it("requires the confirmation to match before any network call", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
-    await typeInto(root, "password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "confirm password", "correct HORSE");
+    await typeInto(root, "confirm password", "Correct HORSE!");
     // Live inline mismatch hint…
     expect(textOf(root)).toContain("Passwords don't match.");
     // …and a gate at submit.
@@ -481,7 +529,7 @@ describe("registration honesty (audit fix)", () => {
     expect(Alert.alert).toHaveBeenCalledWith("Passwords don't match", expect.stringContaining("no reset"));
     expect(api.register).not.toHaveBeenCalled();
     // Fixing the typo clears the hint.
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "confirm password", "Correct horse!");
     expect(textOf(root)).not.toContain("Passwords don't match.");
   });
 
@@ -533,5 +581,43 @@ describe("passwordStrength heuristic", () => {
     expect(passwordStrength("a Quite long sentence, with 5 things!").label).toBe("strong");
     expect(passwordStrength("weak").hint).toContain("Longer is stronger");
     expect(passwordStrength("a Quite long sentence, with 5 things!").hint).toBe("");
+  });
+});
+
+describe("passwordPolicyError (mirrors the portal's policy)", () => {
+  it("requires 12+ characters regardless of variety", async () => {
+    const { passwordPolicyError } = await import("../../src/screens/LoginScreen");
+    expect(passwordPolicyError("")).toContain("12 characters");
+    expect(passwordPolicyError("Ab1!x")).toContain("12 characters");
+    // 11 characters from all four classes: still too short.
+    expect(passwordPolicyError("aB1!aB1!aB1")).toContain("12 characters");
+  });
+
+  it("requires three character types at 12–15 characters", async () => {
+    const { passwordPolicyError } = await import("../../src/screens/LoginScreen");
+    // 12 characters, one class.
+    expect(passwordPolicyError("abcdefghijkl")).toContain("three character types");
+    // 14 characters, two classes.
+    expect(passwordPolicyError("Abcdefghijklmn")).toContain("three character types");
+    // 15 characters, exactly three classes: the boundary before the exemption.
+    expect(passwordPolicyError("Abcdefghijklm12")).toBe("");
+    // 12 characters, three classes: the minimum.
+    expect(passwordPolicyError("abcdEFGH1234")).toBe("");
+  });
+
+  it("exempts 16+ character passphrases from the class rule", async () => {
+    const { passwordPolicyError } = await import("../../src/screens/LoginScreen");
+    expect(passwordPolicyError("abcdefghijklmnop")).toBe(""); // 16, one class
+    expect(passwordPolicyError("aaaaaaaaaaaaaaaaaaaaaaaa")).toBe(""); // 25, one class
+  });
+
+  it("keeps unicode and long passwords usable", async () => {
+    const { passwordPolicyError } = await import("../../src/screens/LoginScreen");
+    // A 16+ non-ASCII passphrase rides the length exemption.
+    expect(passwordPolicyError("mötivátiön jöurnal çafé")).toBe("");
+    // Below 16, non-ASCII characters count as the symbol class.
+    expect(passwordPolicyError("Cafébrûlée123")).toBe("");
+    // A password-manager-length string is fine (no maximum).
+    expect(passwordPolicyError("a".repeat(100))).toBe("");
   });
 });

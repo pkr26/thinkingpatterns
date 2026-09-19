@@ -106,7 +106,7 @@ echo "==> authenticating then decrypting $FILE (to /dev/null in backup image)"
 "${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
   -e FILE="$FILE" --entrypoint sh backup -ceu '
     mindpattern-backup-mac verify "/backups/$FILE"
-    openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_KEY \
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY \
       < "/backups/$FILE" > /dev/null
   ' || { echo "DECRYPTION FAILED — is BACKUP_KEY the backup service key?" >&2; exit 1; }
 
@@ -147,11 +147,13 @@ fi
 
 # Verify and decrypt inside the checked-in backup image, then pipe straight
 # into pg_restore in the throwaway database (decrypted bytes never touch the
-# host disk). Verify MUST precede EVERY decrypt operation.
+# host disk). Verify MUST precede EVERY decrypt operation. -iter is pinned to
+# the compose backup service's encryptor — the counts must match exactly or
+# decryption fails closed.
 "${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
   -e FILE="$FILE" --entrypoint sh backup -ceu '
     mindpattern-backup-mac verify "/backups/$FILE"
-    openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_KEY \
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY \
       < "/backups/$FILE"
   ' | docker exec -i "db-$SUFFIX" pg_restore -U postgres -d postgres --no-owner >/dev/null
 

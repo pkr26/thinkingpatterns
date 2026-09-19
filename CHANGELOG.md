@@ -6,6 +6,78 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-19 — Penetration-test remediation: 7 verified findings fixed
+
+A full authorized red-team engagement (5 specialized attack agents + dynamic
+black-box batteries: races, raw-socket smuggling, enumeration, crypto
+differentials, supply chain). 7 verified findings, each now fixed and pinned
+by tests; every original PoC re-run against the fixed code.
+
+- **HIGH — algorithmic DoS via unbounded candidate cardinality** (the
+  measured attack: one recompute = 105.7s wall / 105.5s CPU from a single
+  30-day-old account, 100× cross-user degradation). The corpus budgets
+  bounded chars/entries but never distinct candidates: person names
+  (`_person_candidates`) had no cap (topics cap at 12) and every qualifying
+  name re-scanned the whole corpus per entry; the client-controlled tag
+  vocabulary rode the same per-theme O(entries) machinery uncapped. Fixed
+  with deterministic caps — `PERSON_MAX_CANDIDATES`/`TAG_MAX_THEMES` (24,
+  ranked mentions→days→name, mirroring `TOPIC_MAX_CANDIDATES`; zero
+  behavior change under the caps). The attack corpus now computes in
+  0.9s/1.7s CPU (117×). Pins: `test_dos_hardening_2026_09_19.py`.
+- **Session tokens committed in an e2e artifact** (git history, expired
+  by discovery — the pattern re-armed on every campaign rerun). The
+  generator is out of the tree; the CLASS is now guarded by
+  `test_repo_secret_scan.py`: no tracked file may carry a three-part
+  base64url string with `exp`/`iat` claims or a GitHub-PAT shape. History
+  rewrite deliberately left as an operator decision (destructive).
+- **Mobile anti-phishing sanitizer defeated by a TLD allowlist**
+  (`bit.ly`, `.de`, `discord.gg`, `.to` and a U+2060 word-joiner inside the
+  domain sailed through verbatim). Domain stripping is now generic
+  (any 2-24-char alpha TLD) and the invisible-character strip set covers
+  U+2060-U+206F/U+FEFF; the full audit corpus is pinned in
+  `mobile/tests/redteamFixes2026.test.ts`.
+- **Portal wrap KEK survived a failed post-login unlock un-wiped**
+  (`onLoginReady` swallowed its error, so `LoginView`'s `wipeKeys` never
+  ran; only `noteKey` was zeroed). `wipePortalSession` now fills every
+  buffer it is handed (`wrapKek` included). Pinned in
+  `portal/tests/app.test.tsx`.
+- **Single-process guard lock in the shared temp dir** (predictable
+  world-readable path; any local user could pre-hold the flock for a
+  permanent boot DoS; `truncate(0)` followed symlinks). The lock now lives
+  in a private per-uid 0700 directory (or `MINDPATTERN_LOCK_DIR`), is
+  created 0600 with `O_NOFOLLOW` (a planted symlink fails boot LOUDLY
+  without truncating the target), and an unlinked lock file is detected
+  and warned at boot. Same-uid pre-hold remains the documented flock
+  residual. Pins: `test_singleprocess_lock_2026_09_19.py`.
+- **Data-key upload copy escaped the enclave zeroization discipline**
+  (immutable `bytes` + base64 string lingered until GC, contradicting the
+  "every holder is a scrubbed bytearray" contract). The decoded key is a
+  bytearray scrubbed on every exit path (the parser-held base64 string is
+  the same documented residual as analyzer strings). Pins:
+  `test_key_zeroize_2026_09_19.py` (captures the endpoint's own buffer).
+- **Brain-state rollback replay was silently accepted** (valid-GCM old
+  blob swapped in → recompute 200, no signal). Server-side refusal is
+  impossible (the server owns storage), so every rollback is now
+  CLIENT-DETECTABLE: each recompute stamps a monotonic `state_seq`
+  (`a3f8d1e6c942` migration; schema head bumped) — row column, plaintext
+  echo on `POST /insights/recompute` + `GET /insights`, and the same value
+  embedded inside the encrypted patterns payload. The mobile app verifies
+  equality and pins a device-local high-water mark
+  (`mobile/src/stateSeqGuard.ts`, wired into InsightsScreen). Pins:
+  `test_state_seq_2026_09_19.py` (replays the audit's exact attack) +
+  `mobile/tests/stateSeqGuard.test.ts`.
+
+Hardening bundle from the same engagement: backup encryption raised from
+OpenSSL's default 10k PBKDF2 iterations to `-iter 600000` (all 6 encrypt/
+decrypt sites, kept consistent), the release-image regex now rejects `..`
+path segments, CI postgres binds `127.0.0.1` only, `mutation-pr.yml`'s
+`setup-node` realigned to the pinned v7.0.0 SHA, the mobile password gate
+aligned to the portal's contract (12+ chars, 3-of-4 classes under 16, 16+
+passphrase exempt — the patient key is the more valuable one), and the
+portal blanks on a persisted `pageshow` (bfcache restore) before first
+paint instead of flashing decrypted journal text after an overdue idle
+lock.
+
 ### 2026-09-19 — Mutation campaign round 3: backend infrastructure (authz, ORM, boundaries, transactions, cache, rate limiting)
 
 Six campaigns (`redteam/mutation_campaign_2026-09-19/`, report:

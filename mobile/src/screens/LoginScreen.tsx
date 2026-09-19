@@ -9,6 +9,12 @@
  * Registration says so in plain sight, asks for the password twice, and
  * shows a simple strength hint (length + variety heuristic, on-device only).
  *
+ * PASSWORD POLICY: identical to the therapist portal (portal/src/views/
+ * LoginView.tsx) so both clients share one contract — and this password
+ * derives the MORE valuable key, the patient data key. Minimum 12
+ * characters; at 12–15 characters, at least three of the four character
+ * types. A 16+ character passphrase is accepted without symbol rules.
+ *
  * Errors never leak raw server text: ApiError maps to calm copy by status.
  */
 import React, { useState } from "react";
@@ -57,6 +63,21 @@ export function passwordStrength(password: string): { label: "weak" | "fair" | "
   return { label: "strong", hint: "" };
 }
 
+/**
+ * Registration password policy — mirrors the portal's passwordPolicyError
+ * exactly (same thresholds, same character classes). Returns "" when the
+ * password is acceptable; otherwise calm copy for the alert.
+ */
+export function passwordPolicyError(password: string): string {
+  if (password.length < 12) return "Use at least 12 characters — this password derives your encryption keys.";
+  const classes = [/[a-z]/.test(password), /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)]
+    .filter(Boolean).length;
+  if (password.length < 16 && classes < 3) {
+    return "Use a 16-character passphrase, or 12+ characters from at least three character types.";
+  }
+  return "";
+}
+
 export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { refreshActiveDays, markLoggedIn } = useSession();
@@ -71,8 +92,12 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     const name = username.trim();
     if (!name || !password || busy) return;
     if (mode === "register") {
-      if (password.length < 8) {
-        Alert.alert("Password too short", "Use at least 8 characters — this password derives your encryption keys.");
+      const policyError = passwordPolicyError(password);
+      if (policyError) {
+        Alert.alert(
+          password.length < 12 ? "Password too short" : "Password needs more variety",
+          policyError,
+        );
         return;
       }
       if (password !== confirm) {
@@ -198,6 +223,12 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       {mismatch && (
         <Text style={{ color: t.colors.error, fontSize: t.type.meta.fontSize }} accessibilityRole="alert">
           Passwords don't match.
+        </Text>
+      )}
+      {mode === "register" && (
+        <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, lineHeight: 19 }}>
+          Choose a password of at least 12 characters — a 16-character passphrase, or 12–15
+          characters from at least three character types.
         </Text>
       )}
       {mode === "register" && (

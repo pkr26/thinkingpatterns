@@ -88,6 +88,39 @@ describe("F2: error-dialog sanitizer (scheme-less domains, phone digits)", () =>
     expect(detailToMessage("open mindpattern-support://x", 400)).not.toContain("://");
   });
 
+  it("2026-09-19 audit corpus: no TLD allowlist — EVERY domain TLD is stripped", () => {
+    // The old sanitizer hardcoded com|net|org|io|dev|app|co|edu|gov|info|
+    // xyz|me|tv|uk; everything else (shorteners, ccTLDs, new gTLDs) sailed
+    // through verbatim into the error dialog.
+    expect(detailToMessage("Account locked. Unlock at bit.ly/mp-verify", 403))
+      .not.toContain("bit.ly");
+    expect(detailToMessage("Verify your account at mindpattern-support.de/login", 403))
+      .not.toContain("mindpattern-support.de");
+    expect(detailToMessage("Join the support chat: discord.gg/mindpattern", 403))
+      .not.toContain("discord.gg");
+    expect(detailToMessage("Recover data at mp-recover.to/help", 403))
+      .not.toContain("mp-recover.to");
+    expect(detailToMessage("see status.example.xyzzy now", 400)).not.toContain("example.xyzzy");
+  });
+
+  it("2026-09-19 audit corpus: invisible characters cannot split a domain", () => {
+    // A word joiner (U+2060) inside "bit<joiner>.ly" used to defeat the
+    // domain regex while rendering invisibly.
+    expect(detailToMessage("Unlock at bit\u2060.ly/mp-verify", 403))
+      .not.toContain(".ly");
+    expect(detailToMessage("Unlock at bit\u2060.ly/mp-verify", 403))
+      .not.toContain("\u2060");
+    expect(detailToMessage("Unlock at evil\ufeff.com/verify", 403))
+      .not.toContain("evil");
+    expect(detailToMessage("go bit\u200b.ly now", 400)).not.toContain(".ly");
+  });
+
+  it("honest text still reads fine after the wider strip", () => {
+    const out = detailToMessage("your journal entry was saved; sync continues in 5 minutes", 201);
+    expect(out).toContain("journal entry was saved");
+    expect(out).toContain("5 minutes");
+  });
+
   it("keeps ordinary messages readable", () => {
     const out = detailToMessage("username is taken; try another in 5 minutes", 409);
     expect(out).toContain("username is taken");

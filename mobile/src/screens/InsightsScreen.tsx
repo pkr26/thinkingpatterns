@@ -20,6 +20,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { api } from "../api/client";
 import { decryptInsights } from "../crypto/MindPatternCrypto";
+import { checkAnalysisGeneration } from "../stateSeqGuard";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { MoodDay, localStreak, recentMoods } from "../moodLog";
@@ -435,6 +436,11 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       if (summary.blob) {
         const userId = (await api.getUserId()) ?? "";
         const payload = decryptInsights(vault.get(), userId, summary.blob);
+        // Rollback guard (2026-09-19): the payload's embedded analysis
+        // generation must equal the plaintext echo and never move below
+        // this device's pinned high-water mark — a silent replay of an
+        // older valid-GCM blob otherwise renders as today's truth.
+        await checkAnalysisGeneration(userId, payload.state_seq, summary.state_seq);
         const list = sanitizePatterns(payload.stats?.patterns);
         for (const p of list) {
           p.describe = describe(p);

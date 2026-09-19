@@ -246,14 +246,23 @@ function sanitizeDetail(text: string): string {
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     // Bidi overrides / isolates and zero-width characters: invisible
     // homoglyph tricks that can flip or disguise error-dialog text.
-    .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+    // U+2060-U+206F (word joiner, invisible math/operators) and U+FEFF
+    // joined the strip set on 2026-09-19: the audit smuggled a word joiner
+    // INSIDE a domain ("bit\u2060.ly") so the domain rules below never
+    // matched it. Invisibles go FIRST so the domain regexes see the
+    // cleaned text.
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
     .replace(/https?:\/\/\S+/gi, "")
     // Any other scheme://… (evilapp://pay, ftp://…) — same phishing class;
     // the scheme AND its payload go, like the http case above.
     .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "")
     // Scheme-less domains ("go to evil.com/support") — the 2026-09-16
     // red-team corpus showed the scheme regexes alone leave these intact.
-    .replace(/\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|dev|app|co|edu|gov|info|xyz|me|tv|uk)\b(?:\/\S*)?/gi, "")
+    // ANY alpha TLD of 2-24 chars, never an allowlist: the 2026-09-19
+    // audit walked bit.ly / mindpattern-support.de / discord.gg straight
+    // through the old com|net|org|… list. Over-stripping ("node.js" in a
+    // stack trace) is the safe direction for attacker-controlled text.
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\b(?::\d+)?(?:\/\S*)?/gi, "")
     // Phone-like digit runs ("call 555-0134") — separators included.
     .replace(/\d[\d\s().-]{2,}\d/g, " ")
     .replace(/\s+/g, " ")

@@ -91,12 +91,16 @@ services:
     # including retries after a failed dump.
     #
     # ENCRYPTION (2026-09-16 remediation, finding G1): dumps are piped
-    # through `openssl enc -aes-256-cbc -pbkdf2` with a key from
-    # BACKUP_KEY (REQUIRED — the service refuses to start without it, so a
-    # plaintext dump can never happen by accident). The dump still contains
+    # through `openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000` with a
+    # key from BACKUP_KEY (REQUIRED — the service refuses to start without
+    # it, so a plaintext dump can never happen by accident). `-iter` is
+    # explicit (2026-09-19 hardening) because openssl's -pbkdf2 default is
+    # only 10k iterations; 600k matches OWASP's PBKDF2-SHA-256 floor, and
+    # every decrypt side (restore example below, rehearse_restore.sh, CI)
+    # must pass the SAME count or decryption fails. The dump still contains
     # usernames/dates/ciphertext sizes, but a stolen volume/file is now
     # ciphertext at rest. Restore:
-    #   openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_KEY \
+    #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY \
     #     -in mindpattern-<stamp>.dump.enc | pg_restore --clean ...
     #
     # RETENTION IS PART OF THE DELETION PROMISE. `DELETE /api/account`
@@ -183,7 +187,7 @@ services:
           mac="$$out.hmac"
           mac_tmp="$$mac.tmp"
           if PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
-              | openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:BACKUP_KEY -out "$$tmp" \
+              | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -out "$$tmp" \
               && mindpattern-backup-mac write "$$tmp" "$$mac_tmp"; then
             # Sidecar first, ciphertext last: a visible final .dump.enc is
             # therefore never left without its integrity tag if the process

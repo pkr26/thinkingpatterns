@@ -672,7 +672,7 @@ async def test_recompute_malformed_payload_contract(client, app):
 async def test_recompute_fk_violation_maps_to_410_contract(client, app, monkeypatch):
     emu = await _insight_user(client, app)
 
-    async def fk_bomb(session, user_id, kind, for_date, blob):
+    async def fk_bomb(session, user_id, kind, for_date, blob, state_seq=0):
         raise IntegrityError("INSERT", {}, Exception("FOREIGN KEY constraint failed"))
 
     monkeypatch.setattr(insights, "_replace_insight", fk_bomb)

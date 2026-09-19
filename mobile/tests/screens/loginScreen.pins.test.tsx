@@ -170,8 +170,8 @@ describe("LoginScreen pins: confirm-field lifecycle", () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "password", "correct horse");
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
+    await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
     expect((inputByPlaceholder(root, "confirm password").props as { value: string }).value).toBe("");
@@ -193,8 +193,8 @@ describe("LoginScreen pins: vault account binding", () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await pressLabel(root, "New here? Create an account");
-    await typeInto(root, "password", "correct horse");
-    await typeInto(root, "confirm password", "correct horse");
+    await typeInto(root, "password", "Correct horse!");
+    await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
     expect(vault.isUnlocked()).toBe(true);

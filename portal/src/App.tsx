@@ -26,11 +26,16 @@ const IDLE_LOCK_MS = 10 * 60 * 1000;
 /** Best-effort overwrite for extractable raw key bytes. CryptoKey instances
  * are deliberately non-extractable; dropping their last reference is the
  * browser-supported way to clear those. The wrap KEK is zeroed the moment
- * the private key is unwrapped (see onLoginReady), so it never reaches the
- * session this function retires. */
-function wipePortalSession(value: Pick<PortalSession, "noteKey"> | null): void {
+ * the private key is unwrapped (see onLoginReady) — AND here too, because
+ * the 2026-09-19 audit showed the FAILED-unlock path (me() error or
+ * TamperError) used to return with the password-derived KEK still live:
+ * onLoginReady swallows its own error, so LoginView's finally-block
+ * wipeKeys never ran. Every holder that reaches this function leaves
+ * zeroed. */
+function wipePortalSession(value: { noteKey?: Uint8Array; wrapKek?: Uint8Array } | null): void {
   if (!value) return;
-  value.noteKey.fill(0);
+  value.wrapKek?.fill(0);
+  value.noteKey?.fill(0);
 }
 
 export function App(): React.JSX.Element {
@@ -96,6 +101,20 @@ export function App(): React.JSX.Element {
       events.forEach((ev) => window.removeEventListener(ev, bump));
     };
   }, [session]);
+
+  // bfcache restore (2026-09-19): navigating away and pressing Back past
+  // the idle window restores the tab from the back/forward cache with the
+  // decrypted journal DOM frozen in it — Cache-Control cannot touch bfcache
+  // and the overdue idle setTimeout only fires AFTER the restore, so the
+  // old code flashed decrypted patient text for a beat before locking. A
+  // persisted pageshow locks down synchronously, before first paint.
+  useEffect(() => {
+    const onPageshow = (event: PageTransitionEvent): void => {
+      if (event.persisted) lockDown("Restored from the browser cache — sign in again.");
+    };
+    window.addEventListener("pageshow", onPageshow);
+    return () => window.removeEventListener("pageshow", onPageshow);
+  }, [lockDown]);
 
   const onLoginReady = async (keys: PortalKeys) => {
     const startedAt = lifecycle.current;

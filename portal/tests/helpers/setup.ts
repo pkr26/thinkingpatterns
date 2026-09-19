@@ -1,15 +1,29 @@
 /** Node-runtime window shim: the views read location.origin and
  * localStorage through the platform seam; tests need both to exist. */
 const mem = new Map<string, string>();
+// Minimal EventTarget (2026-09-19): the App registers real listeners
+// (idle-lock bump, bfcache pageshow) — a no-op addEventListener left them
+// untestable. dispatchEvent takes any object with a .type so tests can
+// synthesize events (e.g. a persisted pageshow) without a DOM.
+const listeners = new Map<string, Set<(event: unknown) => void>>();
 
 Object.defineProperty(globalThis, "window", {
   configurable: true,
   value: {
     location: { origin: "http://localhost:5173" },
-    // 2026-09-17: App's idle auto-lock + session-expiry hook need
-    // add/removeEventListener and print.
-    addEventListener: (_type: string, _listener: () => void) => undefined,
-    removeEventListener: (_type: string, _listener: () => void) => undefined,
+    addEventListener: (type: string, listener: (event?: unknown) => void) => {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(listener as (event: unknown) => void);
+    },
+    removeEventListener: (type: string, listener: (event?: unknown) => void) => {
+      listeners.get(type)?.delete(listener as (event: unknown) => void);
+    },
+    dispatchEvent: (event: { type: string }) => {
+      for (const listener of listeners.get(event.type) ?? []) {
+        listener(event);
+      }
+      return true;
+    },
     print: () => undefined,
     localStorage: {
       get length() { return mem.size; },
