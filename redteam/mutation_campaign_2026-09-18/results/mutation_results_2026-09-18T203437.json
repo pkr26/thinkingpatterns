@@ -1,0 +1,1244 @@
+[
+  {
+    "id": "A1",
+    "campaign": "A",
+    "name": "BH q-threshold doubled (q=0.05 -> 0.10)",
+    "expectation": "FDR simulations / brain noise regressions must fail",
+    "file": "backend/app/services/statsig.py",
+    "find": "        if pvalues[idx] <= q * rank / m:",
+    "replace": "        if pvalues[idx] <= 2.0 * q * rank / m:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_statsig.py",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_statsig.py::TestBenjaminiHochberg::test_partial_rejection_step_up"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": "..........F\n=================================== FAILURES ===================================\n_____________ TestBenjaminiHochberg.test_partial_rejection_step_up _____________\n\nself = <tests.test_statsig.TestBenjaminiHochberg object at 0x10d98a060>\n\n    def test_partial_rejection_step_up(self):\n        # Largest rank passing the threshold decides; everything smaller is\n        # rejected with it.\n>       assert statsig.benjamini_hochberg([0.001, 0.05, 0.9], q=0.05) == [True, False, False]\nE       assert [True, True, False] == [True, False, False]\nE         \nE         At index 1 diff: True != False\nE         \nE         Full diff:\nE           [\nE               True,\nE         -     False,\nE         +     True,\nE               False,\nE           ]\n\ntests/test_statsig.py:67: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_statsig.py::TestBenjaminiHochberg::test_partial_rejection_step_up - assert [True, True, False] == [True, False, False]\n  \n  At index 1 diff: True != False\n  \n  Full diff:\n    [\n        True,\n  -     False,\n  +     True,\n        False,\n    ]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "A2",
+    "campaign": "A",
+    "name": "BH rank multiplier dropped (p <= q, no k/m)",
+    "expectation": "step-up correction disabled -> false discoveries flow",
+    "file": "backend/app/services/statsig.py",
+    "find": "        if pvalues[idx] <= q * rank / m:",
+    "replace": "        if pvalues[idx] <= q:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_statsig.py",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_statsig.py::TestBenjaminiHochberg::test_partial_rejection_step_up"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": "..........F\n=================================== FAILURES ===================================\n_____________ TestBenjaminiHochberg.test_partial_rejection_step_up _____________\n\nself = <tests.test_statsig.TestBenjaminiHochberg object at 0x10b86a060>\n\n    def test_partial_rejection_step_up(self):\n        # Largest rank passing the threshold decides; everything smaller is\n        # rejected with it.\n>       assert statsig.benjamini_hochberg([0.001, 0.05, 0.9], q=0.05) == [True, False, False]\nE       assert [True, True, False] == [True, False, False]\nE         \nE         At index 1 diff: True != False\nE         \nE         Full diff:\nE           [\nE               True,\nE         -     False,\nE         +     True,\nE               False,\nE           ]\n\ntests/test_statsig.py:67: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_statsig.py::TestBenjaminiHochberg::test_partial_rejection_step_up - assert [True, True, False] == [True, False, False]\n  \n  At index 1 diff: True != False\n  \n  Full diff:\n    [\n        True,\n  -     False,\n  +     True,\n        False,\n    ]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "A3",
+    "campaign": "A",
+    "name": "BH rejects one hypothesis beyond the step-up cutoff",
+    "expectation": "exact rejection set is pinned",
+    "file": "backend/app/services/statsig.py",
+    "find": "    for idx in order[:cutoff_rank]:",
+    "replace": "    for idx in order[:cutoff_rank + 1]:",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_statsig.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_statsig.py::TestBenjaminiHochberg::test_none_rejected"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": ".........F\n=================================== FAILURES ===================================\n___________________ TestBenjaminiHochberg.test_none_rejected ___________________\n\nself = <tests.test_statsig.TestBenjaminiHochberg object at 0x10e4d8050>\n\n    def test_none_rejected(self):\n>       assert statsig.benjamini_hochberg([0.06, 0.9], q=0.05) == [False, False]\nE       assert [True, False] == [False, False]\nE         \nE         At index 0 diff: True != False\nE         \nE         Full diff:\nE           [\nE         -     False,\nE         +     True,\nE               False,\nE           ]\n\ntests/test_statsig.py:62: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_statsig.py::TestBenjaminiHochberg::test_none_rejected - assert [True, False] == [False, False]\n  \n  At index 0 diff: True != False\n  \n  Full diff:\n    [\n  -     False,\n  +     True,\n        False,\n    ]\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "A4",
+    "campaign": "A",
+    "name": "engine-wide ALPHA inflated 0.05 -> 0.25",
+    "expectation": "noise-regression tests must fail",
+    "file": "backend/app/services/brain.py",
+    "find": "ALPHA = 0.05",
+    "replace": "ALPHA = 0.25",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestFullFamilyCorrection::test_daily_cadence_pure_noise_replication_bound"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 5.3,
+    "output_tail": "append(\n                        JournalEntry(\n                            \". \".join(parts),\n                            start + timedelta(days=i),\n                            sentiment=round(rng.uniform(-0.6, 0.6), 3),\n                        )\n                    )\n            state = brain.load_state(None)\n            run_cards: set[str] = set()\n            for k in range(14):\n                today = T0 - timedelta(days=13 - k)\n                known = [e for e in entries if e.entry_date <= today]\n                result = brain.update(state, known, today)\n                state = result.new_state\n                run_cards.update(\n                    f\"{p.kind}:{p.label}\"\n                    for p in result.surfaced\n                    if p.kind in brain.STATISTICAL_KINDS\n                )\n            runs_with_cards += bool(run_cards)\n>       assert runs_with_cards <= 1, (\n            f\"{runs_with_cards}/24 daily-cadence noise runs surfaced false statistical cards\"\n        )\nE       AssertionError: 4/24 daily-cadence noise runs surfaced false statistical cards\nE       assert 4 <= 1\n\ntests/test_brain.py:1060: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestFullFamilyCorrection::test_daily_cadence_pure_noise_replication_bound - AssertionError: 4/24 daily-cadence noise runs surfaced false statistical cards\nassert 4 <= 1\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "A5",
+    "campaign": "A",
+    "name": "Cohen's d effect gate zeroed (0.5 -> 0.0)",
+    "expectation": "trivial-effect patterns must be refused by regressions",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_MIN_EFFECT = 0.5  # Cohen's d",
+    "replace": "MOOD_MIN_EFFECT = 0.0  # Cohen's d",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 5.4,
+    "output_tail": "........................................................................ [ 94%]\n....                                                                     [100%]\n"
+  },
+  {
+    "id": "A6",
+    "campaign": "A",
+    "name": "effect gate AND -> OR (mood_correlation + link)",
+    "expectation": "a significant-but-trivial effect must not surface",
+    "file": "backend/app/services/brain.py",
+    "find": "gate_ok=abs(delta) >= MOOD_MIN_DELTA and abs(effect) >= MOOD_MIN_EFFECT,",
+    "replace": "gate_ok=abs(delta) >= MOOD_MIN_DELTA or abs(effect) >= MOOD_MIN_EFFECT,",
+    "count": 2,
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestFullFamilyCorrection::test_mood_tie_is_emitted_pre_gate"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 1.6,
+    "output_tail": "((e, tokens, brain.extract_themes(tokens), e.sentiment))\n        weekday_total = {\n            d.weekday(): sum(1 for e in entries if e.entry_date.weekday() == d.weekday())\n            for d in days\n        }\n        signals = [\n            s\n            for s in brain._detect_themes(residual_per, weekday_total, len(entries))\n            if s.pid == \"mood_correlation:work\"\n        ]\n        assert len(signals) == 1\n        assert signals[0].pvalue is not None\n>       assert signals[0].gate_ok is False  # |delta| ~ 0.15 < MOOD_MIN_DELTA\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       AssertionError: assert True is False\nE        +  where True = _Signal(pid='mood_correlation:work', kind='mood_correlation', label='work', occurrences=10, pvalue=1.0, detail={'mood_..., 9), datetime.date(2026, 8, 16), datetime.date(2026, 8, 23), datetime.date(2026, 8, 30)], gate_ok=True, fallback=None).gate_ok\n\ntests/test_brain.py:944: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestFullFamilyCorrection::test_mood_tie_is_emitted_pre_gate - AssertionError: assert True is False\n +  where True = _Signal(pid='mood_correlation:work', kind='mood_correlation', label='work', occurrences=10, pvalue=1.0, detail={'mood_..., 9), datetime.date(2026, 8, 16), datetime.date(2026, 8, 23), datetime.date(2026, 8, 30)], gate_ok=True, fallback=None).gate_ok\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "A7",
+    "campaign": "A",
+    "name": "30-day gate lowered to >= 1 active day",
+    "expectation": "progressive revelation must stay server-enforced at 30",
+    "file": "backend/app/services/threshold.py",
+    "find": "    phase = Phase.INSIGHT if active >= threshold else Phase.BASELINE",
+    "replace": "    phase = Phase.INSIGHT if active >= 1 else Phase.BASELINE",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_threshold.py",
+        "tests/test_insights_api.py",
+        "tests/test_brain_api.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_threshold.py::test_phase_boundary[1-baseline]"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": ", expected_phase = <Phase.BASELINE: 'baseline'>\n\n    @pytest.mark.parametrize(\n        \"days,expected_phase\",\n        [\n            (1, Phase.BASELINE),\n            (29, Phase.BASELINE),\n            (30, Phase.INSIGHT),\n            (31, Phase.INSIGHT),\n            (100, Phase.INSIGHT),\n        ],\n    )\n    def test_phase_boundary(days, expected_phase):\n        dates = [BASE + timedelta(days=i) for i in range(days)]\n>       assert evaluate(dates).phase is expected_phase\nE       AssertionError: assert <Phase.INSIGHT: 'insight'> is <Phase.BASELINE: 'baseline'>\nE        +  where <Phase.INSIGHT: 'insight'> = ThresholdState(active_days=1, streak=0, phase=<Phase.INSIGHT: 'insight'>, days_remaining=29).phase\nE        +    where ThresholdState(active_days=1, streak=0, phase=<Phase.INSIGHT: 'insight'>, days_remaining=29) = evaluate([datetime.date(2026, 7, 1)])\n\ntests/test_threshold.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_threshold.py::test_phase_boundary[1-baseline] - AssertionError: assert <Phase.INSIGHT: 'insight'> is <Phase.BASELINE: 'baseline'>\n +  where <Phase.INSIGHT: 'insight'> = ThresholdState(active_days=1, streak=0, phase=<Phase.INSIGHT: 'insight'>, days_remaining=29).phase\n +    where ThresholdState(active_days=1, streak=0, phase=<Phase.INSIGHT: 'insight'>, days_remaining=29) = evaluate([datetime.date(2026, 7, 1)])\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "A8",
+    "campaign": "A",
+    "name": "temporal weekday gate disabled (ground-truth probe)",
+    "expectation": "probe_brain.py must FAIL: planted 'work on Sundays' missed",
+    "file": "backend/app/services/brain.py",
+    "find": "            gate_ok = k >= TEMPORAL_MIN_DAY_K and fraction >= TEMPORAL_MIN_FRACTION",
+    "replace": "            gate_ok = False and k >= TEMPORAL_MIN_DAY_K and fraction >= TEMPORAL_MIN_FRACTION",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "probe_brain.py"
+      ],
+      "timeout": 300,
+      "kind": "probe"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.3,
+    "output_tail": "entries: 60  active days: 60\n\n=== STORED PATTERNS (final run 2026-09-04) ===\n  [SURFACED] emerging  link               'family'                                         occ=12 lower delta=0.263 p=0.002956\n  [SURFACED] emerging  mood_correlation   'work'                                           occ=10 lower delta=0.229 p=0.004241\n  [hidden  ] candidate mood_shift         'recent mood'                                    occ=5\n  [SURFACED] emerging  recurring_phrase   \"i can't sleep my mind won't stop\"               occ=7\n  [SURFACED] emerging  recurring_phrase   'visited the family mom and dad were there'      occ=12\n  [SURFACED] emerging  rumination         'big deadline pressure at work again boss email' occ=10\n  [SURFACED] emerging  topic              'guitar'                                         occ=11\n\n=== VERDICT vs ground truth ===\n  FAIL  A temporal:work (Sundays)\n  PASS  A mood_correlation:work lower\n  PASS  B rumination (sleep phrase)\n  PASS  C mood_shift:lower\n  PASS  D topic:guitar (rising, varied phrasing)\n  PASS  E link:family lower\n  PASS  F inertia (asserted on isolated corpus)\n  PASS  G instability (asserted on isolated corpus)\n  PASS  H no confound/false associations\nprobe_brain: 1 check(s) failed: ['A temporal:work (Sundays)']\n"
+  },
+  {
+    "id": "A9",
+    "campaign": "A",
+    "name": "probe corpus: Sunday 'work' plant replaced by neutral text",
+    "expectation": "probe_brain.py must FAIL: scenario A no longer present",
+    "file": "backend/probe_brain.py",
+    "find": "        if wd == 6:\n            text = \"big deadline pressure at work again, boss emailed twice about monday\"",
+    "replace": "        if wd == 6:\n            text = \"quiet sunday, made tea and read a bit\"",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "probe_brain.py"
+      ],
+      "timeout": 300,
+      "kind": "probe"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.3,
+    "output_tail": "entries: 60  active days: 60\n\n=== STORED PATTERNS (final run 2026-09-04) ===\n  [SURFACED] emerging  link               'family'                                         occ=12 lower delta=0.263 p=0.002956\n  [hidden  ] candidate mood_shift         'recent mood'                                    occ=5\n  [SURFACED] emerging  recurring_phrase   'quiet sunday made tea and read a bit'           occ=10\n  [SURFACED] emerging  recurring_phrase   \"i can't sleep my mind won't stop\"               occ=7\n  [SURFACED] emerging  recurring_phrase   'visited the family mom and dad were there'      occ=12\n  [hidden  ] candidate temporal           'family'                                         occ=13\n  [SURFACED] emerging  temporal           'food'                                           occ=16\n  [SURFACED] emerging  topic              'guitar'                                         occ=11\n\n=== VERDICT vs ground truth ===\n  FAIL  A temporal:work (Sundays)\n  FAIL  A mood_correlation:work lower\n  FAIL  B rumination (sleep phrase)\n  PASS  C mood_shift:lower\n  PASS  D topic:guitar (rising, varied phrasing)\n  PASS  E link:family lower\n  PASS  F inertia (asserted on isolated corpus)\n  PASS  G instability (asserted on isolated corpus)\n  PASS  H no confound/false associations\nprobe_brain: 3 check(s) failed: ['A temporal:work (Sundays)', 'A mood_correlation:work lower', 'B rumination (sleep phrase)']\n"
+  },
+  {
+    "id": "B1",
+    "campaign": "B",
+    "name": "statistical kinds promote without replication",
+    "expectation": "single lucky p-value must stay a candidate",
+    "file": "backend/app/services/brain.py",
+    "find": "            if record.kind in STATISTICAL_KINDS:\n                if _replication_satisfied(record, signal, prior_evidence):\n                    record.state = \"emerging\"",
+    "replace": "            if record.kind in STATISTICAL_KINDS:\n                if True:\n                    record.state = \"emerging\"",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestBaseRateCorrection::test_true_sunday_concentration_is_detected"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": "___\n\nself = <tests.test_brain.TestBaseRateCorrection object at 0x10beb02d0>\n\n    def test_true_sunday_concentration_is_detected(self):\n        # Daily journaler (even weekday base rate), work mentioned ONLY on\n        # the 10 Sundays of the range.\n        days = consecutive(T0 - timedelta(days=69), 70)\n        entries = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]\n        # Statistical kinds replicate before surfacing: candidate on first\n        # qualification, emerging once it re-qualifies with INDEPENDENT\n        # evidence \u2014 a fresh work entry. (A next-day recompute of the\n        # UNCHANGED corpus is the same observation scored twice and no\n        # longer promotes; see _replication_satisfied.)\n        first = brain.update(brain.load_state(None), entries, T0)\n>       assert all(p.kind != \"temporal\" for p in first.surfaced)\nE       assert False\nE        +  where False = all(<generator object TestBaseRateCorrection.test_true_sunday_concentration_is_detected.<locals>.<genexpr> at 0x10be858a0>)\n\ntests/test_brain.py:112: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestBaseRateCorrection::test_true_sunday_concentration_is_detected - assert False\n +  where False = all(<generator object TestBaseRateCorrection.test_true_sunday_concentration_is_detected.<locals>.<genexpr> at 0x10be858a0>)\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "B2",
+    "campaign": "B",
+    "name": "replication spread requirement dropped (return True)",
+    "expectation": "consecutive same-window recomputes must not count as independent",
+    "file": "backend/app/services/brain.py",
+    "find": "    return spread >= REPLICATION_MIN_SPREAD_DAYS",
+    "replace": "    return True",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": "............F\n=================================== FAILURES ===================================\n_______________ TestMoodShift.test_sustained_decline_is_detected _______________\n\nself = <tests.test_brain.TestMoodShift object at 0x109dd0690>\n\n    def test_sustained_decline_is_detected(self):\n        entries = self._series(baseline_days=20, shift_days=10, today=T0)\n        first = brain.update(brain.load_state(None), entries, T0)\n        assert all(p.kind != \"mood_shift\" for p in first.surfaced)  # needs replication\n        # Window-stat replication: a next-day recompute re-scores the SAME\n        # EWMA excursion (its memory is ~11 days) \u2014 not a second\n        # observation, so the claim stays a candidate...\n        next_day = brain.update(\n            brain.load_state(brain.dump_state(first.new_state)), entries, T0 + timedelta(days=1)\n        )\n>       assert all(p.kind != \"mood_shift\" for p in next_day.surfaced)\nE       assert False\nE        +  where False = all(<generator object TestMoodShift.test_sustained_decline_is_detected.<locals>.<genexpr> at 0x109daadc0>)\n\ntests/test_brain.py:198: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected - assert False\n +  where False = all(<generator object TestMoodShift.test_sustained_decline_is_detected.<locals>.<genexpr> at 0x109daadc0>)\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "B3",
+    "campaign": "B",
+    "name": "GRACE_DAYS 7 -> 7000 (patterns never fade)",
+    "expectation": "stale patterns must transition to fading",
+    "file": "backend/app/services/brain.py",
+    "find": "GRACE_DAYS = 7  # unqualified days before active \u2192 fading",
+    "replace": "GRACE_DAYS = 7000  # unqualified days before active \u2192 fading",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestLifecycle::test_statistical_candidate_fades_to_archived_without_a_card"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.6,
+    "output_tail": "..F\n=================================== FAILURES ===================================\n__ TestLifecycle.test_statistical_candidate_fades_to_archived_without_a_card ___\n\nself = <tests.test_brain.TestLifecycle object at 0x10e06f360>\n\n    def test_statistical_candidate_fades_to_archived_without_a_card(self):\n        # A statistical claim that qualifies once and never again never\n        # surfaces at all \u2014 not even as a \"fading\" card (that would be the\n        # same single-run fluke wearing a sadder label).\n        days = consecutive(T0 - timedelta(days=69), 70)\n        corpus = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]\n        state = brain.update(brain.load_state(None), corpus, T0).new_state\n        quiet = [JournalEntry(CALM, e.entry_date) for e in corpus]\n        aged = brain.update(\n            brain.load_state(brain.dump_state(state)), quiet, T0 + timedelta(days=10)\n        )\n>       assert dates_only(aged.new_state).get(\"temporal:work\") == \"archived\"\nE       AssertionError: assert 'candidate' == 'archived'\nE         \nE         - archived\nE         + candidate\n\ntests/test_brain.py:316: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestLifecycle::test_statistical_candidate_fades_to_archived_without_a_card - AssertionError: assert 'candidate' == 'archived'\n  \n  - archived\n  + candidate\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "B4",
+    "campaign": "B",
+    "name": "ARCHIVE_DAYS 45 -> 4500 (fading never archives)",
+    "expectation": "fading patterns must archive after the window",
+    "file": "backend/app/services/brain.py",
+    "find": "ARCHIVE_DAYS = 45  # unqualified days before fading \u2192 archived",
+    "replace": "ARCHIVE_DAYS = 4500  # unqualified days before fading \u2192 archived",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestLifecycle::test_fading_then_archived_then_dropped"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.6,
+    "output_tail": "ify with fresh evidence so the pattern has SURFACED\n        # (emerging) before the corpus goes quiet.\n        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3))]\n        state = brain.update(\n            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=3)\n        ).new_state  # emerging\n        # The theme stops appearing entirely.\n        quiet = [JournalEntry(CALM, e.entry_date) for e in corpus]\n    \n        faded = brain.update(\n            brain.load_state(brain.dump_state(state)), quiet, T0 + timedelta(days=12)\n        )\n        assert dates_only(faded.new_state).get(\"temporal:work\") == \"fading\"\n        fading_surfaced = [p for p in faded.surfaced if p.kind == \"temporal\" and p.label == \"work\"]\n        assert fading_surfaced and faded.patterns_fading >= 1\n    \n        archived = brain.update(\n            brain.load_state(brain.dump_state(faded.new_state)), quiet, T0 + timedelta(days=50)\n        )\n>       assert dates_only(archived.new_state).get(\"temporal:work\") == \"archived\"\nE       AssertionError: assert 'fading' == 'archived'\nE         \nE         - archived\nE         + fading\n\ntests/test_brain.py:355: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestLifecycle::test_fading_then_archived_then_dropped - AssertionError: assert 'fading' == 'archived'\n  \n  - archived\n  + fading\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "B5",
+    "campaign": "B",
+    "name": "evidence half-life 45 -> 45000 days (no decay)",
+    "expectation": "strength/confidence must decay with evidence age",
+    "file": "backend/app/services/brain.py",
+    "find": "HALF_LIFE_DAYS = 45.0  # recent mentions outweigh old ones; the brain forgets",
+    "replace": "HALF_LIFE_DAYS = 45000.0  # recent mentions outweigh old ones; the brain forgets",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_brain.py::TestMemoryAndDecay::test_strength_decays_with_half_life"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.7,
+    "output_tail": ".......................F\n=================================== FAILURES ===================================\n____________ TestMemoryAndDecay.test_strength_decays_with_half_life ____________\n\nself = <tests.test_brain.TestMemoryAndDecay object at 0x10df48b90>\n\n    def test_strength_decays_with_half_life(self):\n        assert brain._decay_strength([T0], T0) == pytest.approx(1 / brain.EVIDENCE_FULL)\n>       assert brain._decay_strength([T0 - timedelta(days=45)], T0) == pytest.approx(\n            1 / brain.EVIDENCE_FULL / 2\n        )\nE       assert 0.12491338662380656 == 0.0625 \u00b1 6.2e-08\nE         \nE         comparison failed\nE         Obtained: 0.12491338662380656\nE         Expected: 0.0625 \u00b1 6.2e-08\n\ntests/test_brain.py:390: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_brain.py::TestMemoryAndDecay::test_strength_decays_with_half_life - assert 0.12491338662380656 == 0.0625 \u00b1 6.2e-08\n  \n  comparison failed\n  Obtained: 0.12491338662380656\n  Expected: 0.0625 \u00b1 6.2e-08\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "C1",
+    "campaign": "C",
+    "name": "zeroize() body removed (keys never scrubbed)",
+    "expectation": "post-destroy/post-run zero assertions must fail",
+    "file": "backend/app/security/enclave.py",
+    "find": "def zeroize(key: bytearray) -> None:\n    for i in range(len(key)):\n        key[i] = 0",
+    "replace": "def zeroize(key: bytearray) -> None:\n    pass",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_enclave.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_enclave.py::TestSecureProcessingContext::test_one_key_buffer_drives_every_decryption_and_is_zeroized"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": "t enclave\n    \n        seen_keys = []\n        real_decrypt = enclave.decrypt\n    \n        def spy(k, blob, aad=None):\n            seen_keys.append(k)\n            return real_decrypt(k, blob, aad)\n    \n        monkeypatch.setattr(\"app.security.enclave.decrypt\", spy)\n        result = SecureProcessingContext(key).run(blobs, lambda plains: len(plains))\n        assert result == 4\n        assert len(seen_keys) == 4\n        assert all(k is seen_keys[0] for k in seen_keys), (\n            \"every item must decrypt with the same working buffer\"\n        )\n        assert isinstance(seen_keys[0], bytearray)\n>       assert all(b == 0 for b in seen_keys[0]), \"working key copy survived the window\"\nE       AssertionError: working key copy survived the window\nE       assert False\nE        +  where False = all(<generator object TestSecureProcessingContext.test_one_key_buffer_drives_every_decryption_and_is_zeroized.<locals>.<genexpr> at 0x10e0bfe00>)\n\ntests/test_enclave.py:196: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_enclave.py::TestSecureProcessingContext::test_one_key_buffer_drives_every_decryption_and_is_zeroized - AssertionError: working key copy survived the window\nassert False\n +  where False = all(<generator object TestSecureProcessingContext.test_one_key_buffer_drives_every_decryption_and_is_zeroized.<locals>.<genexpr> at 0x10e0bfe00>)\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "C2",
+    "campaign": "C",
+    "name": "SecureProcessingContext.run no longer scrubs key copies",
+    "expectation": "working key + context key must be zero after run",
+    "file": "backend/app/security/enclave.py",
+    "find": "        finally:\n            for buf in buffers:\n                buf.zeroize()\n            zeroize(key_material)\n            zeroize(self._key)",
+    "replace": "        finally:\n            for buf in buffers:\n                buf.zeroize()",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_enclave.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_enclave.py::TestSecureProcessingContext::test_one_key_buffer_drives_every_decryption_and_is_zeroized"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": "t enclave\n    \n        seen_keys = []\n        real_decrypt = enclave.decrypt\n    \n        def spy(k, blob, aad=None):\n            seen_keys.append(k)\n            return real_decrypt(k, blob, aad)\n    \n        monkeypatch.setattr(\"app.security.enclave.decrypt\", spy)\n        result = SecureProcessingContext(key).run(blobs, lambda plains: len(plains))\n        assert result == 4\n        assert len(seen_keys) == 4\n        assert all(k is seen_keys[0] for k in seen_keys), (\n            \"every item must decrypt with the same working buffer\"\n        )\n        assert isinstance(seen_keys[0], bytearray)\n>       assert all(b == 0 for b in seen_keys[0]), \"working key copy survived the window\"\nE       AssertionError: working key copy survived the window\nE       assert False\nE        +  where False = all(<generator object TestSecureProcessingContext.test_one_key_buffer_drives_every_decryption_and_is_zeroized.<locals>.<genexpr> at 0x10a5e3b90>)\n\ntests/test_enclave.py:196: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_enclave.py::TestSecureProcessingContext::test_one_key_buffer_drives_every_decryption_and_is_zeroized - AssertionError: working key copy survived the window\nassert False\n +  where False = all(<generator object TestSecureProcessingContext.test_one_key_buffer_drives_every_decryption_and_is_zeroized.<locals>.<genexpr> at 0x10a5e3b90>)\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "C3",
+    "campaign": "C",
+    "name": "keystore.pop does not consume the token (reuse possible)",
+    "expectation": "single-use-by-mechanism test must fail on second pop",
+    "file": "backend/app/security/enclave.py",
+    "find": "            # Only the authorized caller consumes the store-owned buffer.\n            del self._keys[token]\n            return key",
+    "replace": "            # Only the authorized caller consumes the store-owned buffer.\n            return key",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_enclave.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 0.4,
+    "output_tail": "..................                                                       [100%]\n"
+  },
+  {
+    "id": "C4",
+    "campaign": "C",
+    "name": "decrypt ignores AAD (context binding dropped)",
+    "expectation": "wrong-AAD/cross-context tamper tests + vectors must fail",
+    "file": "backend/app/security/crypto.py",
+    "find": "        return AESGCM(key).decrypt(nonce, ciphertext, aad)",
+    "replace": "        return AESGCM(key).decrypt(nonce, ciphertext, None)",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_crypto.py",
+        "tests/test_encrypt_vectors.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_crypto.py::test_roundtrip_with_and_without_aad"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": "_ _ _ _ \n\nkey = b'\\x9c\\xb76#n\\xd8hr\\x93\\xdb&\\xad\\xa3h)\\xd7\\x84}\\xbb\\x96\\xef\\x00\\xe7\\xcb@>\\xa9G\\x16\\x007\\xaf'\nblob = b'y\\x15\\xb0\\x141m\\xd8\\n\\xff\\xb1F\\xdaSd\"L1\\xde\\xd9J\\xaeU\\x048\\x11\\x07\\xb2\\x98'\naad = b'[\"entry\",\"user1\",\"entry-1\"]'\n\n    def decrypt(key: bytes | bytearray, blob: bytes, aad: bytes | None = None) -> bytes:\n        \"\"\"Verify and decrypt an envelope; raises TamperError on any mismatch.\n    \n        ``key`` is any bytes-like: AESGCM accepts bytearray, and the enclave\n        deliberately passes ONE reusable mutable buffer (zeroized after the\n        batch) instead of an immutable per-call copy that would linger until GC.\n        \"\"\"\n        if len(key) != KEY_SIZE:\n            raise CryptoError(f\"key must be {KEY_SIZE} bytes, got {len(key)}\")\n        if len(blob) < MIN_BLOB_SIZE:\n            raise TamperError(f\"blob too short: {len(blob)} bytes\")\n        nonce, ciphertext = blob[:NONCE_SIZE], blob[NONCE_SIZE:]\n        try:\n            return AESGCM(key).decrypt(nonce, ciphertext, None)\n        except InvalidTag as exc:\n>           raise TamperError(\"authentication failed\") from exc\nE           app.security.crypto.TamperError: authentication failed\n\napp/security/crypto.py:85: TamperError\n=========================== short test summary info ============================\nFAILED tests/test_crypto.py::test_roundtrip_with_and_without_aad - app.security.crypto.TamperError: authentication failed\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "C5",
+    "campaign": "C",
+    "name": "build_aad drops the first binding part (user/entry)",
+    "expectation": "AAD canonicalization + API blob-relocation tests must fail",
+    "file": "backend/app/security/crypto.py",
+    "find": "    return json.dumps(list(parts), separators=(\",\", \":\"), ensure_ascii=True).encode(\"utf-8\")",
+    "replace": "    return json.dumps(list(parts)[1:], separators=(\",\", \":\"), ensure_ascii=True).encode(\"utf-8\")",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_crypto.py",
+        "tests/test_contract_pins.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_crypto.py::test_build_aad_canonical_and_unambiguous"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": "..........F\n=================================== FAILURES ===================================\n___________________ test_build_aad_canonical_and_unambiguous ___________________\n\n    def test_build_aad_canonical_and_unambiguous():\n        assert build_aad(\"a\", \"b\") == build_aad(\"a\", \"b\")\n        assert build_aad(\"a\", \"b\") != build_aad(\"ab\", \"\")\n>       assert build_aad(\"a\", \"b\") == b'[\"a\",\"b\"]'\nE       assert b'[\"b\"]' == b'[\"a\",\"b\"]'\nE         \nE         At index 2 diff: b'b' != b'a'\nE         \nE         Full diff:\nE         - (b'[\"a\",\"b\"]')\nE         ?     ----\nE         + (b'[\"b\"]')\n\ntests/test_crypto.py:105: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_crypto.py::test_build_aad_canonical_and_unambiguous - assert b'[\"b\"]' == b'[\"a\",\"b\"]'\n  \n  At index 2 diff: b'b' != b'a'\n  \n  Full diff:\n  - (b'[\"a\",\"b\"]')\n  ?     ----\n  + (b'[\"b\"]')\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "D1",
+    "campaign": "D",
+    "name": "diagnosis words removed from _CLINICAL_TERMS",
+    "expectation": "sanitizer tests must catch 'diagnosed' narratives",
+    "file": "backend/app/services/llm.py",
+    "find": "        \"diagnosis\",\n        \"diagnose\",\n        \"diagnosed\",\n    }\n)",
+    "replace": "    }\n)",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_llm.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 0.5,
+    "output_tail": "............................                                             [100%]\n"
+  },
+  {
+    "id": "D2",
+    "campaign": "D",
+    "name": "narrative digit ban removed (statistics/dosages pass)",
+    "expectation": "minted-number rejection tests must fail",
+    "file": "backend/app/services/llm.py",
+    "find": "    if any(ch.isdigit() for ch in text):\n        return None",
+    "replace": "    if False:\n        return None",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_llm.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 0.5,
+    "output_tail": "............................                                             [100%]\n"
+  },
+  {
+    "id": "D3",
+    "campaign": "D",
+    "name": "narrative may echo crisis language",
+    "expectation": "crisis-echo rejection tests must fail",
+    "file": "backend/app/services/llm.py",
+    "find": "    if crisis.matches_dialog(text) or crisis.matches_suppress(text):\n        return None\n    return text",
+    "replace": "    if False:\n        return None\n    return text",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_llm.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_llm.py::test_narrative_rejects_crisis_language"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": ".........................F\n=================================== FAILURES ===================================\n____________________ test_narrative_rejects_crisis_language ____________________\n\n    def test_narrative_rejects_crisis_language():\n        from app.services.llm import _clean_narrative\n    \n        # The narrative renders under pattern cards: it must never echo what\n        # the suppress tier keeps unquoted, nor add crisis phrasing of its own.\n>       assert _clean_narrative(\"the thought of killing myself recurs here\") is None\nE       AssertionError: assert 'the thought of killing myself recurs here' is None\nE        +  where 'the thought of killing myself recurs here' = <function _clean_narrative at 0x10ba240f0>('the thought of killing myself recurs here')\n\ntests/test_llm.py:609: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_llm.py::test_narrative_rejects_crisis_language - AssertionError: assert 'the thought of killing myself recurs here' is None\n +  where 'the thought of killing myself recurs here' = <function _clean_narrative at 0x10ba240f0>('the thought of killing myself recurs here')\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "D4",
+    "campaign": "D",
+    "name": "surfaced cards ship empty evidence_dates",
+    "expectation": "'Why am I seeing this?' payload binding must be pinned",
+    "file": "backend/app/services/brain.py",
+    "find": "                    \"evidence_dates\": list(record.evidence_dates),",
+    "replace": "                    \"evidence_dates\": [],",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_brain.py",
+        "tests/test_insights_api.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 7.8,
+    "output_tail": "........................................................................ [ 80%]\n.................                                                        [100%]\n"
+  },
+  {
+    "id": "E1",
+    "campaign": "E",
+    "name": "backend suppress tier always returns False",
+    "expectation": "suppression contract tests + question interlock must fail",
+    "file": "backend/app/services/crisis.py",
+    "find": "    variants = _match_variants(text)\n    return any(SUPPRESS_RE.search(v) for v in variants[:2]) or any(\n        SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)\n    )",
+    "replace": "    return False",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_crisis.py",
+        "tests/test_questions.py",
+        "tests/test_llm.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_crisis.py::TestFixtures::test_suppress_only_fixtures"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.5,
+    "output_tail": ".......F\n=================================== FAILURES ===================================\n___________________ TestFixtures.test_suppress_only_fixtures ___________________\n\nself = <tests.test_crisis.TestFixtures object at 0x10a4a9810>\n\n    def test_suppress_only_fixtures(self):\n        for text in _contract()[\"fixtures\"][\"suppress_only_fires\"]:\n>           assert crisis.matches_suppress(text), f\"suppress tier missed {text!r}\"\nE           AssertionError: suppress tier missed 'this traffic is killing me'\nE           assert False\nE            +  where False = <function matches_suppress at 0x10a1cb7f0>('this traffic is killing me')\nE            +    where <function matches_suppress at 0x10a1cb7f0> = crisis.matches_suppress\n\ntests/test_crisis.py:73: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_crisis.py::TestFixtures::test_suppress_only_fixtures - AssertionError: suppress tier missed 'this traffic is killing me'\nassert False\n +  where False = <function matches_suppress at 0x10a1cb7f0>('this traffic is killing me')\n +    where <function matches_suppress at 0x10a1cb7f0> = crisis.matches_suppress\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "E2",
+    "campaign": "E",
+    "name": "backend dialog tier always returns False",
+    "expectation": "dialog-tier detection tests must fail",
+    "file": "backend/app/services/crisis.py",
+    "find": "    variants = _match_variants(text)\n    return any(DIALOG_RE.search(v) for v in variants[:2]) or any(\n        DIALOG_CONCAT_RE.search(v) for v in (variants[2],)\n    )",
+    "replace": "    return False",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_crisis.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_crisis.py::TestFixtures::test_dialog_fixtures_fire"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": ".....F\n=================================== FAILURES ===================================\n____________________ TestFixtures.test_dialog_fixtures_fire ____________________\n\nself = <tests.test_crisis.TestFixtures object at 0x10e21ee90>\n\n    def test_dialog_fixtures_fire(self):\n        for text in _contract()[\"fixtures\"][\"dialog_fires\"]:\n>           assert crisis.matches_dialog(text), f\"dialog tier missed {text!r}\"\nE           AssertionError: dialog tier missed \"I can't go on\"\nE           assert False\nE            +  where False = <function matches_dialog at 0x10df92c40>(\"I can't go on\")\nE            +    where <function matches_dialog at 0x10df92c40> = crisis.matches_dialog\n\ntests/test_crisis.py:65: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_crisis.py::TestFixtures::test_dialog_fixtures_fire - AssertionError: dialog tier missed \"I can't go on\"\nassert False\n +  where False = <function matches_dialog at 0x10df92c40>(\"I can't go on\")\n +    where <function matches_dialog at 0x10df92c40> = crisis.matches_dialog\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "E3",
+    "campaign": "E",
+    "name": "question interlock label tripwire disabled",
+    "expectation": "crisis-adjacent labels must never become questions",
+    "file": "backend/app/services/questions.py",
+    "find": "    if crisis.matches_suppress(pattern.label):\n        return True",
+    "replace": "    if False:\n        return True",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_questions.py",
+        "tests/test_crisis.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 0.7,
+    "output_tail": "..........................................                               [100%]\n"
+  },
+  {
+    "id": "E4",
+    "campaign": "E",
+    "name": "mobile detectCrisisLanguage -> false (false negatives)",
+    "expectation": "on-device dialog-tier corpus tests must fail",
+    "file": "mobile/src/crisisDetect.ts",
+    "find": "  const [primary, orphan, concat] = matchVariants(text);\n  return (\n    DIALOG_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||\n    DIALOG_CONCAT_PATTERNS.some((p) => p.test(concat))\n  );",
+    "replace": "  const [primary, orphan, concat] = matchVariants(text);\n  return false;",
+    "tests": {
+      "cwd": "mobile",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/crisisDetect.test.ts",
+        "tests/crisisDialog.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": "is morning\")).\u2026\n    \u001b[90m   |\u001b[39m                                                                       \u001b[31m^\u001b[39m\n    \u001b[90m152|\u001b[39m     expect(detectCrisisLanguage(\"I feel like dying after that workout\"\u2026\n    \u001b[90m153|\u001b[39m   })\u001b[33m;\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[8/53]\u23af\u001b[22m\u001b[39m\n\n\u001b[41m\u001b[1m FAIL \u001b[22m\u001b[49m tests/crisisDetect.test.ts\u001b[2m > \u001b[22mdual-variant matching + benign masking (2026-09-17)\u001b[2m > \u001b[22mfires on partial-split evasion: orphan single letters glue onto the next word\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected false to be true // Object.is equality\u001b[39m\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[32m- true\u001b[39m\n\u001b[31m+ false\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crisisDetect.test.ts:\u001b[2m170:50\u001b[22m\u001b[39m\n    \u001b[90m168|\u001b[39m   it(\"fires on partial-split evasion: orphan single letters glue onto \u2026\n    \u001b[90m169|\u001b[39m     // The documented \"k ill myself\" residual bypass, now closed on bo\u2026\n    \u001b[90m170|\u001b[39m     \u001b[34mexpect\u001b[39m(\u001b[34mdetectCrisisLanguage\u001b[39m(\u001b[32m\"k ill myself\"\u001b[39m))\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[35mtrue\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m   |\u001b[39m                                                  \u001b[31m^\u001b[39m\n    \u001b[90m171|\u001b[39m     \u001b[34mexpect\u001b[39m(\u001b[34mdetectCrisisLanguage\u001b[39m(\u001b[32m\"o ff myself tonight\"\u001b[39m))\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[35mtrue\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m172|\u001b[39m     \u001b[34mexpect\u001b[39m(\u001b[34mdetectCrisisLanguage\u001b[39m(\u001b[32m\"k i ll myself\"\u001b[39m))\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[35mtrue\u001b[39m)\u001b[33m;\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[9/53]\u23af\u001b[22m\u001b[39m\n\n"
+  },
+  {
+    "id": "E5",
+    "campaign": "E",
+    "name": "mobile matchesCrisisSuppress -> false (quoting returns)",
+    "expectation": "non-quoting card + question suppression tests must fail",
+    "file": "mobile/src/crisisDetect.ts",
+    "find": "  const [primary, orphan, concat] = matchVariants(text);\n  return (\n    SUPPRESS_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||\n    SUPPRESS_CONCAT_PATTERNS.some((p) => p.test(concat))\n  );",
+    "replace": "  const [primary, orphan, concat] = matchVariants(text);\n  return false;",
+    "tests": {
+      "cwd": "mobile",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/crisisPhrases.test.ts",
+        "tests/redteamFixes2026.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": "[39m\n\n\u001b[32m- true\u001b[39m\n\u001b[31m+ false\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crisisPhrases.test.ts:\u001b[2m80:41\u001b[22m\u001b[39m\n    \u001b[90m 78|\u001b[39m\n    \u001b[90m 79|\u001b[39m   it.each(shared.fixtures.suppress_only_fires)(\"suppress tier (not dia\u2026\n    \u001b[90m 80|\u001b[39m     \u001b[34mexpect\u001b[39m(\u001b[34mmatchesCrisisSuppress\u001b[39m(text))\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[35mtrue\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m   |\u001b[39m                                         \u001b[31m^\u001b[39m\n    \u001b[90m 81|\u001b[39m     \u001b[34mexpect\u001b[39m(\u001b[34mdetectCrisisLanguage\u001b[39m(text))\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[35mfalse\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m 82|\u001b[39m   })\u001b[33m;\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/17]\u23af\u001b[22m\u001b[39m\n\n\u001b[41m\u001b[1m FAIL \u001b[22m\u001b[49m tests/crisisPhrases.test.ts\u001b[2m > \u001b[22mtier relationship\u001b[2m > \u001b[22mthe suppress tier is a strict superset of the dialog tier\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected false to be true // Object.is equality\u001b[39m\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[32m- true\u001b[39m\n\u001b[31m+ false\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crisisPhrases.test.ts:\u001b[2m89:75\u001b[22m\u001b[39m\n    \u001b[90m 87|\u001b[39m     \u001b[90m// Every dialog hit is necessarily a suppress hit.\u001b[39m\n    \u001b[90m 88|\u001b[39m     for (const text of [...shared.fixtures.dialog_fires, ...shared.fix\u2026\n    \u001b[90m 89|\u001b[39m       if (detectCrisisLanguage(text)) expect(matchesCrisisSuppress(tex\u2026\n    \u001b[90m   |\u001b[39m                                                                           \u001b[31m^\u001b[39m\n    \u001b[90m 90|\u001b[39m     }\n    \u001b[90m 91|\u001b[39m   })\u001b[33m;\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/17]\u23af\u001b[22m\u001b[39m\n\n"
+  },
+  {
+    "id": "F1",
+    "campaign": "F",
+    "name": "mobile fingerprint hashes base64 text, not the DER key",
+    "expectation": "cross-platform fingerprint pin must fail (substituted-key check dead)",
+    "file": "mobile/src/crypto/sharing.ts",
+    "find": "  const digest = engine.createHash(\"sha256\").update(Buffer.from(therapistPubSpkiB64, \"base64\")).digest();",
+    "replace": "  const digest = engine.createHash(\"sha256\").update(Buffer.from(therapistPubSpkiB64, \"utf8\")).digest();",
+    "tests": {
+      "cwd": "mobile",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/crypto.test.ts",
+        "tests/redteamFixes2026.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.7,
+    "output_tail": " key identically to the portal\u001b[39m\u001b[32m 5\u001b[2mms\u001b[22m\u001b[39m\n     \u001b[32m\u2713\u001b[39m is stable and depends on every key byte\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (2)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m37 passed\u001b[39m\u001b[22m\u001b[90m (38)\u001b[39m\n\u001b[2m   Start at \u001b[22m 20:34:31\n\u001b[2m   Duration \u001b[22m 354ms\u001b[2m (transform 76ms, setup 0ms, import 99ms, tests 276ms, environment 0ms)\u001b[22m\n\n\n\u001b[31m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u001b[39m\u001b[1m\u001b[41m Failed Tests 1 \u001b[49m\u001b[22m\u001b[31m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u001b[39m\n\n\u001b[41m\u001b[1m FAIL \u001b[22m\u001b[49m tests/crypto.test.ts\u001b[2m > \u001b[22mtherapist key fingerprint\u001b[2m > \u001b[22mformats the shared-vector key identically to the portal\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected 'FFB4 5BCF 3369 4A04' to be 'CB54 DE22 C976 DF43' // Object.is equality\u001b[39m\n\nExpected: \u001b[32m\"CB54 DE22 C976 DF43\"\u001b[39m\nReceived: \u001b[31m\"FFB4 5BCF 3369 4A04\"\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crypto.test.ts:\u001b[2m275:53\u001b[22m\u001b[39m\n    \u001b[90m273|\u001b[39m   it(\"formats the shared-vector key identically to the portal\", async \u2026\n    \u001b[90m274|\u001b[39m     const { therapistKeyFingerprint } = await import(\"../src/crypto/sh\u2026\n    \u001b[90m275|\u001b[39m     \u001b[34mexpect\u001b[39m(\u001b[34mtherapistKeyFingerprint\u001b[39m(\u001b[33mFIXED_SPKI_B64\u001b[39m))\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[33mEXPECTED\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m   |\u001b[39m                                                     \u001b[31m^\u001b[39m\n    \u001b[90m276|\u001b[39m   })\u001b[33m;\u001b[39m\n    \u001b[90m277|\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\u001b[22m\u001b[39m\n\n"
+  },
+  {
+    "id": "F2",
+    "campaign": "F",
+    "name": "portal fingerprint hashes base64 text, not the DER key",
+    "expectation": "portal fingerprint pin must fail",
+    "file": "portal/src/crypto.ts",
+    "find": "  const digest = new Uint8Array(await subtle().digest(\"SHA-256\", unb64(spkiB64)));",
+    "replace": "  const digest = new Uint8Array(await subtle().digest(\"SHA-256\", new TextEncoder().encode(spkiB64)));",
+    "tests": {
+      "cwd": "portal",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/crypto.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.7,
+    "output_tail": "0\u001b[2mms\u001b[22m\u001b[39m\n     \u001b[32m\u2713\u001b[39m buildAad matches pinned bytes for { name: 'rtl', parts: [Array], \u2026(1) }\u001b[32m 0\u001b[2mms\u001b[22m\u001b[39m\n   \u001b[31m\u276f\u001b[39m pairing key fingerprint \u001b[2m(1)\u001b[22m\n\u001b[31m     \u001b[31m\u00d7\u001b[31m formats the shared-vector key identically to the mobile app\u001b[39m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m1 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m41 passed\u001b[39m\u001b[22m\u001b[90m (42)\u001b[39m\n\u001b[2m   Start at \u001b[22m 20:34:31\n\u001b[2m   Duration \u001b[22m 392ms\u001b[2m (tests 88%, transform 9%, import 2%, setup 1%)\u001b[22m\n\n\n\u001b[31m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u001b[39m\u001b[1m\u001b[41m Failed Tests 1 \u001b[49m\u001b[22m\u001b[31m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u001b[39m\n\n\u001b[41m\u001b[1m FAIL \u001b[22m\u001b[49m tests/crypto.test.ts\u001b[2m > \u001b[22mpairing key fingerprint\u001b[2m > \u001b[22mformats the shared-vector key identically to the mobile app\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected 'FFB4 5BCF 3369 4A04' to be 'CB54 DE22 C976 DF43' // Object.is equality\u001b[39m\n\nExpected: \u001b[32m\"CB54 DE22 C976 DF43\"\u001b[39m\nReceived: \u001b[31m\"FFB4 5BCF 3369 4A04\"\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crypto.test.ts:\u001b[2m451:50\u001b[22m\u001b[39m\n    \u001b[90m449|\u001b[39m   it(\"formats the shared-vector key identically to the mobile app\", as\u2026\n    \u001b[90m450|\u001b[39m     const { keyFingerprint } = await import(\"../src/crypto\");\n    \u001b[90m451|\u001b[39m     expect(await keyFingerprint(FIXED_SPKI_B64)).toBe(EXPECTED);\n    \u001b[90m   |\u001b[39m                                                  \u001b[31m^\u001b[39m\n    \u001b[90m452|\u001b[39m   });\n    \u001b[90m453|\u001b[39m });\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\u001b[22m\u001b[39m\n\n"
+  },
+  {
+    "id": "F3",
+    "campaign": "F",
+    "name": "journal role gate disabled (therapist token writes entries)",
+    "expectation": "403 role-rejection tests must fail",
+    "file": "backend/app/deps.py",
+    "find": "    if user.role != ROLE_USER:\n        raise ApiError(\n            status_code=403,\n            detail=\"therapist accounts cannot access journal endpoints\",",
+    "replace": "    if False:\n        raise ApiError(\n            status_code=403,\n            detail=\"therapist accounts cannot access journal endpoints\",",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_therapist_api.py",
+        "tests/test_entries_api.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_therapist_api.py::TestRoleSeparation::test_therapist_cannot_use_journal_endpoints"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 1.4,
+    "output_tail": "       \"/api/processing/sessions\",\n                headers=th.headers,\n                json={\"data_key\": base64.b64encode(b\"k\" * 32).decode()},\n            ),\n            client.get(\"/api/account/export\", headers=th.headers),\n            client.post(\"/api/insights/recompute\", headers=th.headers),\n        ]\n        for coro in checks:\n            response = await coro\n>           assert response.status_code == 403, response.text\nE           AssertionError: {\"id\":\"af624ac5d36f4ccfbf8b1e97e8791e73\",\"client_entry_id\":\"e1\",\"blob\":\"eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==\",\"entry_date\":\"2026-09-18\",\"received_at\":\"2026-09-19T03:34:33.297716Z\"}\nE           assert 201 == 403\nE            +  where 201 = <Response [201 Created]>.status_code\n\ntests/test_therapist_api.py:211: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_therapist_api.py::TestRoleSeparation::test_therapist_cannot_use_journal_endpoints - AssertionError: {\"id\":\"af624ac5d36f4ccfbf8b1e97e8791e73\",\"client_entry_id\":\"e1\",\"blob\":\"eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA==\",\"entry_date\":\"2026-09-18\",\"received_at\":\"2026-09-19T03:34:33.297716Z\"}\nassert 201 == 403\n +  where 201 = <Response [201 Created]>.status_code\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n<sys>:0: RuntimeWarning: coroutine 'AsyncClient.post' was never awaited\n<sys>:0: RuntimeWarning: coroutine 'AsyncClient.get' was never awaited\n"
+  },
+  {
+    "id": "F4",
+    "campaign": "F",
+    "name": "therapist role gate disabled (patient token reads portal routes)",
+    "expectation": "mirrored 403 role-rejection tests must fail",
+    "file": "backend/app/deps.py",
+    "find": "    if user.role != ROLE_THERAPIST:\n        raise ApiError(\n            status_code=403,\n            detail=\"not a therapist account\",",
+    "replace": "    if False:\n        raise ApiError(\n            status_code=403,\n            detail=\"not a therapist account\",",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_therapist_api.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_therapist_api.py::TestRoleSeparation::test_patient_cannot_use_therapist_endpoints"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 1.5,
+    "output_tail": "90>\n\n    async def test_patient_cannot_use_therapist_endpoints(self, client):\n        emu = ClientEmulator(\"plainuser\", \"pw\")\n        await emu.register(client)\n        checks = [\n            client.get(\"/api/therapist/patients\", headers=emu.headers),\n            client.post(\"/api/therapist/pairing-codes\", headers=emu.headers),\n            client.get(\"/api/therapist/me\", headers=emu.headers),\n            client.get(\"/api/therapist/patients/xyz/insights\", headers=emu.headers),\n            client.post(\n                \"/api/therapist/patients/xyz/notes\",\n                headers=emu.headers,\n                json={\"client_note_id\": \"n1\", \"blob\": base64.b64encode(b\"x\" * 40).decode()},\n            ),\n        ]\n        for coro in checks:\n            response = await coro\n>           assert response.status_code == 403, response.text\nE           AssertionError: []\nE           assert 200 == 403\nE            +  where 200 = <Response [200 OK]>.status_code\n\ntests/test_therapist_api.py:230: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_therapist_api.py::TestRoleSeparation::test_patient_cannot_use_therapist_endpoints - AssertionError: []\nassert 200 == 403\n +  where 200 = <Response [200 OK]>.status_code\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n<sys>:0: RuntimeWarning: coroutine 'AsyncClient.post' was never awaited\n<sys>:0: RuntimeWarning: coroutine 'AsyncClient.get' was never awaited\n"
+  },
+  {
+    "id": "F5",
+    "campaign": "F",
+    "name": "mobile PBKDF2 iterations 600_000 -> 1_000",
+    "expectation": "KDF contract + cross-platform vector tests must fail",
+    "file": "mobile/src/crypto/kdf.ts",
+    "find": "export const KDF_ITERATIONS = 600_000;",
+    "replace": "export const KDF_ITERATIONS = 1_000;",
+    "tests": {
+      "cwd": "mobile",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/crypto.test.ts",
+        "tests/vectors.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 1.2,
+    "output_tail": "ns must be at least \u001b[39m\u001b[36m${\u001b[39m\u001b[33mMIN_ITERATIONS\u001b[39m\u001b[36m}\u001b[39m\u001b[32m `\u001b[39m \u001b[33m+\u001b[39m\n    \u001b[90m 49|\u001b[39m         `(got ${iterations}; the cross-platform contract is ${KDF_ITER\u2026\n\u001b[90m \u001b[2m\u276f\u001b[22m deriveKeys src/crypto/MindPatternCrypto.ts:\u001b[2m27:21\u001b[22m\u001b[39m\n\u001b[90m \u001b[2m\u276f\u001b[22m keys tests/crypto.test.ts:\u001b[2m213:33\u001b[22m\u001b[39m\n\u001b[90m \u001b[2m\u276f\u001b[22m tests/crypto.test.ts:\u001b[2m228:15\u001b[22m\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[6/7]\u23af\u001b[22m\u001b[39m\n\n\u001b[41m\u001b[1m FAIL \u001b[22m\u001b[49m tests/crypto.test.ts\u001b[2m > \u001b[22mMindPatternCrypto payload helpers\u001b[2m > \u001b[22mrejects insights payloads whose version this client does not understand\n\u001b[31m\u001b[1mError\u001b[22m: iterations must be at least 100000 (got 1000; the cross-platform contract is 1000)\u001b[39m\n\u001b[36m \u001b[2m\u276f\u001b[22m deriveMasterKey src/crypto/kdf.ts:\u001b[2m47:11\u001b[22m\u001b[39m\n    \u001b[90m 45|\u001b[39m   }\n    \u001b[90m 46|\u001b[39m   \u001b[35mif\u001b[39m (iterations \u001b[33m<\u001b[39m \u001b[33mMIN_ITERATIONS\u001b[39m) {\n    \u001b[90m 47|\u001b[39m     \u001b[35mthrow\u001b[39m \u001b[35mnew\u001b[39m \u001b[33mError\u001b[39m(\n    \u001b[90m   |\u001b[39m           \u001b[31m^\u001b[39m\n    \u001b[90m 48|\u001b[39m       \u001b[32m`iterations must be at least \u001b[39m\u001b[36m${\u001b[39m\u001b[33mMIN_ITERATIONS\u001b[39m\u001b[36m}\u001b[39m\u001b[32m `\u001b[39m \u001b[33m+\u001b[39m\n    \u001b[90m 49|\u001b[39m         `(got ${iterations}; the cross-platform contract is ${KDF_ITER\u2026\n\u001b[90m \u001b[2m\u276f\u001b[22m deriveKeys src/crypto/MindPatternCrypto.ts:\u001b[2m27:21\u001b[22m\u001b[39m\n\u001b[90m \u001b[2m\u276f\u001b[22m keys tests/crypto.test.ts:\u001b[2m213:33\u001b[22m\u001b[39m\n\u001b[90m \u001b[2m\u276f\u001b[22m tests/crypto.test.ts:\u001b[2m243:15\u001b[22m\u001b[39m\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[7/7]\u23af\u001b[22m\u001b[39m\n\n"
+  },
+  {
+    "id": "F6",
+    "campaign": "F",
+    "name": "portal PBKDF2 iterations 600_000 -> 1_000",
+    "expectation": "portal KDF contract tests must fail",
+    "file": "portal/src/crypto.ts",
+    "find": "export const KDF_ITERATIONS = 600_000;",
+    "replace": "export const KDF_ITERATIONS = 1_000;",
+    "tests": {
+      "cwd": "portal",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/crypto.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": "\n\nExpected: \u001b[32m\"\u001b[7mJkFKx5BsiL/p38UDxSGyxBZ+1CkkJRaGd8eXH2fvw00\u001b[27m=\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7mEYwQ9oFz5i+7UYKxzevdUb2Vv2lmUdZlEmGvZdo9OjE\u001b[27m=\"\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crypto.test.ts:\u001b[2m106:31\u001b[22m\u001b[39m\n    \u001b[90m104|\u001b[39m       const master = await deriveMasterKey(v.password, unb64(v.salt));\n    \u001b[90m105|\u001b[39m       const keys = await derivePortalKeys(master);\n    \u001b[90m106|\u001b[39m       expect(keys.authKeyB64).toBe(v.auth_key);\n    \u001b[90m   |\u001b[39m                               \u001b[31m^\u001b[39m\n    \u001b[90m107|\u001b[39m     });\n    \u001b[90m108|\u001b[39m   }\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/4]\u23af\u001b[22m\u001b[39m\n\n\u001b[41m\u001b[1m FAIL \u001b[22m\u001b[49m tests/crypto.test.ts\u001b[2m > \u001b[22mkey schedule vectors\u001b[2m > \u001b[22mvector 3: master -> auth key matches the backend\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected 'dLMDvCPIWnhlAjjQbk1u7c1P3RJ41kEQoGMyJ\u2026' to be 'iBp6M3R8yUKgzn6LpP0S+pjV0M7yO0HopKOeS\u2026' // Object.is equality\u001b[39m\n\nExpected: \u001b[32m\"\u001b[7miBp6M3R8yUKgzn6LpP0S+pjV0M7yO0HopKOeSi60cM0\u001b[27m=\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7mdLMDvCPIWnhlAjjQbk1u7c1P3RJ41kEQoGMyJ+pLnFc\u001b[27m=\"\u001b[39m\n\n\u001b[36m \u001b[2m\u276f\u001b[22m tests/crypto.test.ts:\u001b[2m106:31\u001b[22m\u001b[39m\n    \u001b[90m104|\u001b[39m       const master = await deriveMasterKey(v.password, unb64(v.salt));\n    \u001b[90m105|\u001b[39m       const keys = await derivePortalKeys(master);\n    \u001b[90m106|\u001b[39m       expect(keys.authKeyB64).toBe(v.auth_key);\n    \u001b[90m   |\u001b[39m                               \u001b[31m^\u001b[39m\n    \u001b[90m107|\u001b[39m     });\n    \u001b[90m108|\u001b[39m   }\n\n\u001b[31m\u001b[2m\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/4]\u23af\u001b[22m\u001b[39m\n\n"
+  },
+  {
+    "id": "F7",
+    "campaign": "F",
+    "name": "backend KDF iteration floor 100_000 -> 1",
+    "expectation": "downgrade-refusal tests must fail",
+    "file": "backend/app/security/kdf.py",
+    "find": "MIN_ITERATIONS = 100_000",
+    "replace": "MIN_ITERATIONS = 1",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-x",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow",
+        "tests/test_kdf.py"
+      ],
+      "timeout": 900,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_kdf.py::test_iteration_floor_is_enforced"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 0.4,
+    "output_tail": ".....F\n=================================== FAILURES ===================================\n_______________________ test_iteration_floor_is_enforced _______________________\n\n    def test_iteration_floor_is_enforced():\n        \"\"\"2026-09-16 remediation (red-team finding A4): the library refuses to\n        derive below MIN_ITERATIONS so no honest caller can silently downgrade\n        the 600k contract; the boundary itself is exactly MIN_ITERATIONS.\"\"\"\n        with pytest.raises(ValueError, match=\"iterations must be at least\"):\n            kdf.derive_master_key(\"p\", b\"0123456789abcdef\", kdf.MIN_ITERATIONS - 1)\n        # Exactly at the floor is valid (and equals a raw PBKDF2 of the same cost).\n        assert kdf.derive_master_key(\"p\", b\"0123456789abcdef\", kdf.MIN_ITERATIONS) == fast_master(\n            \"p\", b\"0123456789abcdef\", kdf.MIN_ITERATIONS\n        )\n        # The default is still the full production contract.\n        assert kdf.KDF_ITERATIONS == 600_000\n>       assert kdf.MIN_ITERATIONS >= 100_000\nE       assert 1 >= 100000\nE        +  where 1 = kdf.MIN_ITERATIONS\n\ntests/test_kdf.py:67: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_kdf.py::test_iteration_floor_is_enforced - assert 1 >= 100000\n +  where 1 = kdf.MIN_ITERATIONS\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+  },
+  {
+    "id": "F8",
+    "campaign": "F",
+    "name": "keychain write failure falls back to plaintext AsyncStorage",
+    "expectation": "fail-closed custody tests must fail",
+    "file": "mobile/src/secureStore.ts",
+    "find": "    if (!result) throw new Error(\"device secure storage rejected the session key\");",
+    "replace": "    if (!result) { await AsyncStorage.setItem(LEGACY_DEVICE_KEY_STORAGE, keyB64); return; }",
+    "tests": {
+      "cwd": "mobile",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run",
+        "tests/secureStore.test.ts"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 0.4,
+    "output_tail": "\n\u001b[1m\u001b[30m\u001b[46m RUN \u001b[49m\u001b[39m\u001b[22m \u001b[36mv4.1.11 \u001b[39m\u001b[90m/Users/pradeepreddy/Desktop/mental_health_application/mobile\u001b[39m\n\n \u001b[32m\u2713\u001b[39m tests/secureStore.test.ts \u001b[2m(\u001b[22m\u001b[2m12 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 10\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m12 passed\u001b[39m\u001b[22m\u001b[90m (12)\u001b[39m\n\u001b[2m   Start at \u001b[22m 20:34:37\n\u001b[2m   Duration \u001b[22m 97ms\u001b[2m (transform 24ms, setup 0ms, import 35ms, tests 10ms, environment 0ms)\u001b[22m\n\n"
+  }
+]

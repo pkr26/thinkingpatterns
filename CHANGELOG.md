@@ -6,6 +6,41 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-18 — Behavioral mutation campaign over the non-negotiables
+
+36 hand-written semantic mutants across six campaigns (BH/FDR statistics,
+lifecycle, crypto & memory boundaries, clinical guardrails, crisis
+handling, sharing clients); each applied to production code, tested,
+reverted byte-wise. 31/36 killed by the existing suites; the 5 genuine
+survivors are now pinned by regression tests and re-verified killed
+(36/36). Report: `reports/mutation_campaign_2026-09-18.md`; harness:
+`redteam/mutation_campaign_2026-09-18/`.
+
+- **A5** — zeroing the Cohen's d floor (0.5→0.0) survived the entire
+  suite: the only prior pin compared the card's `cohens_d` against the
+  constant itself (true for any constant). New pin: a deterministic
+  tight-theme/noisy-majority corpus with mood_delta ≈ 0.25 but |d| ≈
+  0.42 must earn no card across two qualification days, plus a canary
+  that proves the corpus discriminates, plus a floor-value pin.
+- **D1/D2** — the LLM narrative sanitizer's rules were only tested
+  through overlapping inputs (digits AND medication AND domains).
+  New pins trip exactly one rule each: diagnosis vocabulary
+  ("a doctor would diagnose this…") and bare digits ("87 percent of
+  your Saturdays").
+- **E3** — the question-interlock label tripwire (the layer covering
+  patterns that arrive without the `sensitive` flag: LLM extras,
+  legacy payloads) had no isolated pin; composite safety came from the
+  other two layers. Now pinned as a predicate and end-to-end.
+- **F8** — the fail-closed custody seam where Keychain/Keystore
+  *returns false* (rather than throwing) was never exercised; a mutant
+  falling back to plaintext AsyncStorage survived the whole mobile
+  suite. The keychain test mock gained a `__failWrites` seam and the
+  regression asserts rejection AND no key in AsyncStorage.
+- Design note recorded (not fixed): `_clean_narrative` has no general
+  advice-language denylist ("you should…"); containment is
+  architectural (the inverted LLM path cannot mint claims). If the
+  narrative path ever gains autonomy, that tripwire is missing.
+
 ### 2026-09-17 (c) — Exhaustive full-codebase audit remediation
 
 A file-by-file exhaustive audit of every source file (backend, mobile,

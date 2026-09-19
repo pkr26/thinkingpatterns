@@ -70,6 +70,22 @@ describe("secureStore", () => {
     expect(await secureStore.getItem("k")).toBe("v");
   });
 
+  it("fails closed when Keychain REJECTS the write (returns false), never falling back to AsyncStorage", async () => {
+    // Mutation-campaign pin (2026-09-18, mutant F8): making writeDeviceKey
+    // park the device key in AsyncStorage on Keychain rejection survived
+    // the whole suite — the false-return seam (vs a thrown error) was never
+    // exercised. Custody must fail closed: no throw-less degradation into
+    // the unencrypted plist/SQLite store.
+    (Keychain as unknown as { __failWrites: (v: boolean) => void }).__failWrites(true);
+    try {
+      await expect(secureStore.setItem("k", "v")).rejects.toThrow("device secure storage rejected");
+      expect(await storage.getItem("@mindpattern/device_k")).toBeNull();
+      expect(await storage.getItem("k")).toBeNull();
+    } finally {
+      (Keychain as unknown as { __failWrites: (v: boolean) => void }).__failWrites(false);
+    }
+  });
+
   it("accepts a test-injected secure backend without touching AsyncStorage", async () => {
     const values = new Map<string, string>();
     const backend = {

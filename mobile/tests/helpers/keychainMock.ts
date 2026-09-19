@@ -4,6 +4,7 @@
  * AsyncStorage mock so tests exercise the same custody boundary.
  */
 const credentials = new Map<string, { username: string; password: string }>();
+let failWrites = false;
 
 export const ACCESSIBLE = {
   WHEN_UNLOCKED_THIS_DEVICE_ONLY: "AccessibleWhenUnlockedThisDeviceOnly",
@@ -17,8 +18,9 @@ export async function setGenericPassword(
   username: string,
   password: string,
   options?: { service?: string },
-): Promise<{ service: string }> {
+): Promise<false | { service: string }> {
   const service = options?.service ?? "";
+  if (failWrites) return false; // the real module's failure contract
   credentials.set(service, { username, password });
   return { service };
 }
@@ -27,6 +29,13 @@ export async function resetGenericPassword(options?: { service?: string }): Prom
   return credentials.delete(options?.service ?? "");
 }
 
+/** Force setGenericPassword to report failure, as the native module does
+ * when the keystore rejects the write. Cleared by __reset. */
+export function __failWrites(value: boolean): void {
+  failWrites = value;
+}
+
 export function __reset(): void {
   credentials.clear();
+  failWrites = false;
 }

@@ -1,0 +1,231 @@
+[
+  {
+    "id": "A5",
+    "campaign": "A",
+    "name": "Cohen's d effect gate zeroed (0.5 -> 0.0)",
+    "expectation": "trivial-effect patterns must be refused by regressions",
+    "file": "backend/app/services/brain.py",
+    "find": "MOOD_MIN_EFFECT = 0.5  # Cohen's d",
+    "replace": "MOOD_MIN_EFFECT = 0.0  # Cohen's d",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1800,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 64.3,
+    "output_tail": "........................................................................ [  7%]\n........................................................................ [ 14%]\n........................................................................ [ 21%]\n........................................................................ [ 28%]\n........................................................................ [ 35%]\n........................................................................ [ 42%]\n........................................................................ [ 49%]\n........................................................................ [ 56%]\n..................................................................s..... [ 63%]\n........................................................................ [ 70%]\n........................................................................ [ 77%]\n........................................................................ [ 84%]\n........................................................................ [ 91%]\n........................................................................ [ 98%]\n..............                                                           [100%]\n"
+  },
+  {
+    "id": "C3",
+    "campaign": "C",
+    "name": "keystore.pop does not consume the token (reuse possible)",
+    "expectation": "single-use-by-mechanism test must fail on second pop",
+    "file": "backend/app/security/enclave.py",
+    "find": "            # Only the authorized caller consumes the store-owned buffer.\n            del self._keys[token]\n            return key",
+    "replace": "            # Only the authorized caller consumes the store-owned buffer.\n            return key",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1800,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_audit_fixes.py::test_keystore_pop_is_atomic_single_use"
+      ],
+      [
+        "FAILED",
+        "tests/test_insights_api.py::test_processing_session_is_single_use"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 64.1,
+    "output_tail": "object at 0x10e02c410>\nsettings = Settings(environment='development', database_url='sqlite+aiosqlite://', token_secret='test-secret-not-for-production',..._sharing_enabled=True, therapist_enrollment_token='', cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])\n\n    async def test_processing_session_is_single_use(client, settings):\n        settings.unlock_threshold_days = 1\n        emu = ClientEmulator(\"onceonly\", \"p\")\n        await emu.register(client)\n        await emu.create_entry(client, \"hello\", TODAY)\n    \n        token = await emu.open_processing_session(client)\n        first = await client.post(\n            \"/api/insights/recompute\",\n            headers={**emu.headers, \"X-Processing-Token\": token},\n        )\n        assert first.status_code == 200\n        replay = await client.post(\n            \"/api/insights/recompute\",\n            headers={**emu.headers, \"X-Processing-Token\": token},\n        )\n        # Replaying a consumed session token must not re-run analysis.\n>       assert replay.status_code == 403\nE       assert 400 == 403\nE        +  where 400 = <Response [400 Bad Request]>.status_code\n\ntests/test_insights_api.py:170: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_audit_fixes.py::test_keystore_pop_is_atomic_single_use - assert False\nFAILED tests/test_insights_api.py::test_processing_session_is_single_use - assert 400 == 403\n +  where 400 = <Response [400 Bad Request]>.status_code\n"
+  },
+  {
+    "id": "D1",
+    "campaign": "D",
+    "name": "diagnosis words removed from _CLINICAL_TERMS",
+    "expectation": "sanitizer tests must catch 'diagnosed' narratives",
+    "file": "backend/app/services/llm.py",
+    "find": "        \"diagnosis\",\n        \"diagnose\",\n        \"diagnosed\",\n    }\n)",
+    "replace": "    }\n)",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1800,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 66.5,
+    "output_tail": "........................................................................ [  7%]\n........................................................................ [ 14%]\n........................................................................ [ 21%]\n........................................................................ [ 28%]\n........................................................................ [ 35%]\n........................................................................ [ 42%]\n........................................................................ [ 49%]\n........................................................................ [ 56%]\n..................................................................s..... [ 63%]\n........................................................................ [ 70%]\n........................................................................ [ 77%]\n........................................................................ [ 84%]\n........................................................................ [ 91%]\n........................................................................ [ 98%]\n..............                                                           [100%]\n"
+  },
+  {
+    "id": "D2",
+    "campaign": "D",
+    "name": "narrative digit ban removed (statistics/dosages pass)",
+    "expectation": "minted-number rejection tests must fail",
+    "file": "backend/app/services/llm.py",
+    "find": "    if any(ch.isdigit() for ch in text):\n        return None",
+    "replace": "    if False:\n        return None",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1800,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 67.0,
+    "output_tail": "........................................................................ [  7%]\n........................................................................ [ 14%]\n........................................................................ [ 21%]\n........................................................................ [ 28%]\n........................................................................ [ 35%]\n........................................................................ [ 42%]\n........................................................................ [ 49%]\n........................................................................ [ 56%]\n..................................................................s..... [ 63%]\n........................................................................ [ 70%]\n........................................................................ [ 77%]\n........................................................................ [ 84%]\n........................................................................ [ 91%]\n........................................................................ [ 98%]\n..............                                                           [100%]\n"
+  },
+  {
+    "id": "D4",
+    "campaign": "D",
+    "name": "surfaced cards ship empty evidence_dates",
+    "expectation": "'Why am I seeing this?' payload binding must be pinned",
+    "file": "backend/app/services/brain.py",
+    "find": "                    \"evidence_dates\": list(record.evidence_dates),",
+    "replace": "                    \"evidence_dates\": [],",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1800,
+      "kind": "pytest"
+    },
+    "killed": true,
+    "status": "KILLED",
+    "failing_tests": [
+      [
+        "FAILED",
+        "tests/test_therapist_api.py::TestEvidenceDates::test_patterns_carry_evidence_dates"
+      ],
+      [
+        "FAILED",
+        "tests/test_therapist_api.py::TestEvidenceDates::test_therapist_sees_evidence_dates_after_e2e_decrypt"
+      ]
+    ],
+    "returncode": 1,
+    "seconds": 70.9,
+    "output_tail": "   th = TherapistEmulator(\"drev\", \"pw\")\n        await th.register(client)\n        await _grant(client, patient, th)\n        patients = (await client.get(\"/api/therapist/patients\", headers=th.headers)).json()\n        data_key = th.unwrap_patient_data_key(\n            patient, patients[0][\"ephemeral_pub\"], patients[0][\"wrapped_key\"]\n        )\n        insights = (\n            await client.get(\n                f\"/api/therapist/patients/{patient.user_id}/insights\", headers=th.headers\n            )\n        ).json()\n        plain = json.loads(\n            crypto.decrypt(\n                data_key,\n                base64.b64decode(insights[\"blob\"]),\n                crypto.build_aad(\"insights\", patient.user_id, \"patterns\"),\n            )\n        )\n        with_dates = [p for p in plain[\"stats\"][\"patterns\"] if p[\"detail\"].get(\"evidence_dates\")]\n>       assert with_dates, \"therapist-decrypted patterns must carry evidence dates\"\nE       AssertionError: therapist-decrypted patterns must carry evidence dates\nE       assert []\n\ntests/test_therapist_api.py:1314: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_therapist_api.py::TestEvidenceDates::test_patterns_carry_evidence_dates - assert (True and [])\n +  where True = isinstance([], list)\nFAILED tests/test_therapist_api.py::TestEvidenceDates::test_therapist_sees_evidence_dates_after_e2e_decrypt - AssertionError: therapist-decrypted patterns must carry evidence dates\nassert []\n"
+  },
+  {
+    "id": "E3",
+    "campaign": "E",
+    "name": "question interlock label tripwire disabled",
+    "expectation": "crisis-adjacent labels must never become questions",
+    "file": "backend/app/services/questions.py",
+    "find": "    if crisis.matches_suppress(pattern.label):\n        return True",
+    "replace": "    if False:\n        return True",
+    "tests": {
+      "cwd": "backend",
+      "cmd": [
+        ".venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow"
+      ],
+      "timeout": 1800,
+      "kind": "pytest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 68.2,
+    "output_tail": "........................................................................ [  7%]\n........................................................................ [ 14%]\n........................................................................ [ 21%]\n........................................................................ [ 28%]\n........................................................................ [ 35%]\n........................................................................ [ 42%]\n........................................................................ [ 49%]\n........................................................................ [ 56%]\n..................................................................s..... [ 63%]\n........................................................................ [ 70%]\n........................................................................ [ 77%]\n........................................................................ [ 84%]\n........................................................................ [ 91%]\n........................................................................ [ 98%]\n..............                                                           [100%]\n"
+  },
+  {
+    "id": "F8",
+    "campaign": "F",
+    "name": "keychain write failure falls back to plaintext AsyncStorage",
+    "expectation": "fail-closed custody tests must fail",
+    "file": "mobile/src/secureStore.ts",
+    "find": "    if (!result) throw new Error(\"device secure storage rejected the session key\");",
+    "replace": "    if (!result) { await AsyncStorage.setItem(LEGACY_DEVICE_KEY_STORAGE, keyB64); return; }",
+    "tests": {
+      "cwd": "mobile",
+      "cmd": [
+        "npx",
+        "vitest",
+        "run"
+      ],
+      "timeout": 600,
+      "kind": "vitest"
+    },
+    "killed": false,
+    "status": "SURVIVED",
+    "failing_tests": [],
+    "returncode": 0,
+    "seconds": 2.4,
+    "output_tail": "...)\n\n\u001b[90mstderr\u001b[2m | tests/screens/unlockScreen.test.tsx\u001b[2m > \u001b[22m\u001b[2mUnlockScreen\u001b[2m > \u001b[22m\u001b[2mrenders the android keyboard behavior when the platform differs\n\u001b[22m\u001b[39mThe current testing environment is not configured to support act(...)\n\n\u001b[90mstderr\u001b[2m | tests/screens/unlockScreen.test.tsx\u001b[2m > \u001b[22m\u001b[2mUnlockScreen\u001b[2m > \u001b[22m\u001b[2mrenders the android keyboard behavior when the platform differs\n\u001b[22m\u001b[39mThe current testing environment is not configured to support act(...)\n\n\u001b[90mstderr\u001b[2m | tests/screens/unlockScreen.test.tsx\u001b[2m > \u001b[22m\u001b[2mUnlockScreen\u001b[2m > \u001b[22m\u001b[2mzeroizes keys that failed to unlock and stays locked\n\u001b[22m\u001b[39mreact-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer\nThe current testing environment is not configured to support act(...)\n\n\u001b[90mstderr\u001b[2m | tests/screens/unlockScreen.test.tsx\u001b[2m > \u001b[22m\u001b[2mUnlockScreen\u001b[2m > \u001b[22m\u001b[2mzeroizes keys that failed to unlock and stays locked\n\u001b[22m\u001b[39mThe current testing environment is not configured to support act(...)\n\n\u001b[90mstderr\u001b[2m | tests/screens/unlockScreen.test.tsx\u001b[2m > \u001b[22m\u001b[2mUnlockScreen\u001b[2m > \u001b[22m\u001b[2mzeroizes keys that failed to unlock and stays locked\n\u001b[22m\u001b[39mThe current testing environment is not configured to support act(...)\n\n\u001b[90mstderr\u001b[2m | tests/screens/unlockScreen.test.tsx\u001b[2m > \u001b[22m\u001b[2mUnlockScreen\u001b[2m > \u001b[22m\u001b[2mzeroizes keys that failed to unlock and stays locked\n\u001b[22m\u001b[39mThe current testing environment is not configured to support act(...)\n\n"
+  }
+]

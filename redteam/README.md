@@ -19,6 +19,7 @@ bash redteam/run_all.sh
 | `g_infra.py` | G1–G3 | backup config, supply chain, fail-closed boots, hygiene |
 | `h_privacy.py` | H1–H3 | metadata inference, export, erasure |
 | `../mobile/redteam/f_mobile.test.ts` | E1-TS, A2, A3, A4-TS, A6-TS, F1, F2, F4 | real mobile modules under vitest |
+| `mutation_campaign_2026-09-18/` | — | behavioral mutation campaign: 36 mutants over the non-negotiables (see `../../reports/mutation_campaign_2026-09-18.md`) |
 
 Artefacts: `results/*.json` (verdicts), `aad_corpus.json`, `crisis_corpus.json`
 (promote both into the main suites as regression fixtures). Everything runs
