@@ -70,7 +70,9 @@ async def _mature_recompute_user(client: AsyncClient, app, name: str) -> ClientE
 
 def _decrypt_patterns(user: ClientEmulator, blob_b64: str) -> dict:
     blob = base64.b64decode(blob_b64)
-    plain = crypto.decrypt(user.data_key, blob, crypto.build_aad("insights", user.user_id, "patterns"))
+    plain = crypto.decrypt(
+        user.data_key, blob, crypto.build_aad("insights", user.user_id, "patterns")
+    )
     return json.loads(plain.decode("utf-8"))
 
 

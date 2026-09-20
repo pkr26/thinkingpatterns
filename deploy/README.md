@@ -16,6 +16,24 @@ The public release env asset contains image references only. It deliberately
 does not contain `MINDPATTERN_TOKEN_SECRET`, database credentials, `BACKUP_KEY`,
 or proxy settings. Keep those in an owner-only file outside the checkout.
 
+## Operator tooling (opt-in, outside the release contract)
+
+Two directories add opt-in operator capabilities without weakening the
+digest-pinned contract above — both ship version-tagged images on purpose
+and include a documented digest-pinning step (`docker buildx imagetools
+inspect` → pin `@sha256:…`) for use in production:
+
+- `deploy/monitoring/` — Prometheus + optional Grafana/blackbox stack
+  (profile-gated compose file of its own), alert rules grounded in the
+  API's `/metrics` exposition, and backup-freshness scripts. See
+  `deploy/monitoring/README.md` for boot, token wiring, and severity
+  mapping against `docs/INCIDENT_RUNBOOK.md`.
+- `deploy/backup-offsite/` — hourly `rclone copy` replication of the
+  `pgbackups` volume (ciphertext only) to an S3-compatible remote, as a
+  compose overlay layered onto the main file. See
+  `deploy/backup-offsite/README.md` for the layered enable command and the
+  host-gone recovery path.
+
 ## Deploy a tagged release
 
 The following initial-install sequence is for a Linux host with Docker Compose

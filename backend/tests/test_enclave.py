@@ -28,7 +28,7 @@ class TestInMemoryKeyStore:
     def test_create_get_roundtrip(self):
         store = InMemoryKeyStore()
         key = crypto.generate_key()
-        token = store.create(key, ttl_seconds=60, owner='unbound-test')
+        token = store.create(key, ttl_seconds=60, owner="unbound-test")
         assert store.get(token) == key
 
     def test_unknown_token(self):
@@ -38,7 +38,7 @@ class TestInMemoryKeyStore:
 
     def test_expiry(self):
         store = InMemoryKeyStore()
-        token = store.create(crypto.generate_key(), ttl_seconds=10, now=100.0, owner='unbound-test')
+        token = store.create(crypto.generate_key(), ttl_seconds=10, now=100.0, owner="unbound-test")
         store.get(token, now=105.0)
         with pytest.raises(KeyNotFound):
             store.get(token, now=110.0)  # at/after expiry
@@ -47,7 +47,7 @@ class TestInMemoryKeyStore:
 
     def test_destroy(self):
         store = InMemoryKeyStore()
-        token = store.create(crypto.generate_key(), 60, owner='unbound-test')
+        token = store.create(crypto.generate_key(), 60, owner="unbound-test")
         assert store.destroy(token) is True
         assert store.destroy(token) is False  # idempotent second destroy
         with pytest.raises(KeyNotFound):
@@ -71,9 +71,9 @@ class TestInMemoryKeyStore:
 
     def test_purge_expired(self):
         store = InMemoryKeyStore()
-        store.create(crypto.generate_key(), 10, now=0.0, owner='unbound-test')
-        store.create(crypto.generate_key(), 10, now=0.0, owner='unbound-test')
-        keep = store.create(crypto.generate_key(), 100, now=0.0, owner='unbound-test')
+        store.create(crypto.generate_key(), 10, now=0.0, owner="unbound-test")
+        store.create(crypto.generate_key(), 10, now=0.0, owner="unbound-test")
+        keep = store.create(crypto.generate_key(), 100, now=0.0, owner="unbound-test")
         assert len(store) == 3
         purged = store.purge_expired(now=50.0)
         assert purged == 2
@@ -83,9 +83,9 @@ class TestInMemoryKeyStore:
     def test_rejects_bad_key_and_ttl(self):
         store = InMemoryKeyStore()
         with pytest.raises(ValueError):
-            store.create(b"too-short", 60, owner='unbound-test')
+            store.create(b"too-short", 60, owner="unbound-test")
         with pytest.raises(ValueError):
-            store.create(crypto.generate_key(), 0, owner='unbound-test')
+            store.create(crypto.generate_key(), 0, owner="unbound-test")
 
     def test_tokens_are_unique_and_long(self):
         # Owner binding is mandatory now, so minting 20 sessions for one

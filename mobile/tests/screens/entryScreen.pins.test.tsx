@@ -112,6 +112,11 @@ async function writeEntry(root: Awaited<ReturnType<typeof render>>, text: string
   await typeInto(root, "What's going on today?", text);
 }
 
+/** The check-ins sit behind the collapsed-by-default disclosure. */
+async function openDetails(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  await pressLabel(root, "Add details (optional)");
+}
+
 /** The style of the Text node whose flattened content contains `fragment`. */
 function styleOfText(root: Awaited<ReturnType<typeof render>>, fragment: string): unknown {
   const flat = (children: unknown): string => {
@@ -158,6 +163,7 @@ describe("EntryScreen pins: initial-state and boundary guards", () => {
     const root = await render(<EntryScreen />);
     await flush();
     expect(textOf(root)).toContain("Save entry");
+    await openDetails(root);
     expect(textOf(root)).toContain("How does today feel?");
   });
 });
@@ -301,6 +307,7 @@ describe("EntryScreen pins: node-exact style contracts", () => {
     const { View } = await import("react-native");
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
+    await openDetails(root);
     expectStyle(root, { gap: 8 }); // the check-in block container (sm spacing)
     expect(styleOfText(root, "How does today feel?")).toEqual({ color: "#8a91a3", fontSize: 13 });
     const moodRow = root.root.findAllByType(View).find((n) => n.props.accessibilityLabel === "Mood check-in");

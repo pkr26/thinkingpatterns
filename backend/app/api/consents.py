@@ -443,9 +443,12 @@ async def revoke_consent(
             consent.revoked_at = utcnow()
             # Nothing left to unwrap: the wrapped key and the ephemeral
             # public key are the grant's key material — cleared, not
-            # archived.
+            # archived. The caseload summary rides the same rule.
             consent.wrapped_key = None
             consent.ephemeral_pub = None
+            consent.summary_blob = None
+            consent.summary_eph_pub = None
+            consent.summary_updated_at = None
             session.add(
                 AccessLog(
                     actor_id=fresh_user.id,

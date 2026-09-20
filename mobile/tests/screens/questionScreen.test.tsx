@@ -80,15 +80,32 @@ async function touchableByA11yLabel(root: Awaited<ReturnType<typeof render>>, la
 }
 
 describe("QuestionScreen", () => {
-  it("starts empty with the invitation button", async () => {
+  it("auto-loads today's question on mount — key-free, no tap needed", async () => {
+    // Default mock: baseline phase → the on-device generic pool answers.
+    // The mount effect must show the question WITHOUT any press, and must
+    // not have shipped anything key-bearing to do it.
     const root = await render(<QuestionScreen />);
     await flush();
-    expect(textOf(root)).toContain("Show today's question");
-    expect(textOf(root)).not.toContain("One question a day");
-    // Idle first paint: no spinner, button enabled.
+    expect(textOf(root)).toContain("What took up most space in your mind today?");
+    expect(textOf(root)).toContain("For now, one question a day.");
+    expect(api.openProcessingSession).not.toHaveBeenCalled();
+    // Settled first paint: no spinner, button shows Refresh.
     const { ActivityIndicator } = await import("react-native");
     expect(root.root.findAllByType(ActivityIndicator)).toHaveLength(0);
-    expect(touchableByLabel(root, "Show today's question").props.disabled).toBe(false);
+    expect(touchableByLabel(root, "Refresh").props.disabled).toBe(false);
+  });
+
+  it("auto-load stops at the key-bearing step: no session, no consent dialog on mount", async () => {
+    vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+    vi.mocked(api.questionToday).mockRejectedValue(new ApiError(404, "none"));
+    const root = await render(<QuestionScreen />);
+    await flush();
+    // The mount auto-load reached step 3 and STOPPED: the explicit button
+    // remains the only path that may ship the data key.
+    expect(api.openProcessingSession).not.toHaveBeenCalled();
+    expect(api.recompute).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Show today's question");
   });
 
   it("pins the visual language of the screen (question shown)", async () => {
@@ -98,7 +115,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.questionToday).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What did you notice?") } as never);
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expectStyle(root, { flex: 1, justifyContent: "center" }); // container base
     expectStyle(root, { backgroundColor: "#0f1115", padding: 24, gap: 18 }); // container themed
@@ -117,7 +133,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.insights).mockRejectedValue(new Error("offline"));
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("offline");
     expectStyle(root, { fontSize: 13, textAlign: "center" }); // error base
@@ -128,7 +143,6 @@ describe("QuestionScreen", () => {
     await storage.removeItem(CONSENT_KEY); // even with no acknowledgment on record…
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     // Day-one value: a real reflective question, rendered as a normal card.
     expect(textOf(root)).toContain("What took up most space in your mind today?");
@@ -154,7 +168,6 @@ describe("QuestionScreen", () => {
     // offline day-one user gets the question with the baseline caption.
     vi.mocked(api.insights).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("What took up most space in your mind today?");
     expect(textOf(root)).toContain("For now, one question a day.");
@@ -175,7 +188,6 @@ describe("QuestionScreen", () => {
   it("a SERVER error (500) on the phase check stays an error — no offline fallback", async () => {
     vi.mocked(api.insights).mockRejectedValue(new ApiError(500, "boom"));
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("The server hit a problem — try again in a moment.");
     expect(textOf(root)).not.toContain("What took up most space in your mind today?");
@@ -185,7 +197,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
     genericQuestionForDate.mockReturnValueOnce("First day question").mockReturnValueOnce("Second day question");
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("First day question");
     await pressLabel(root, "Refresh");
@@ -197,7 +208,6 @@ describe("QuestionScreen", () => {
   it("a hostile summary shape degrades the day counter, never the question", async () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: "four", days_remaining: null } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("What took up most space in your mind today?");
     expect(textOf(root)).not.toContain("Day NaN");
@@ -209,7 +219,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
     const nav = { navigate: vi.fn() };
     const root = await render(<QuestionScreen navigation={nav} />);
-    await pressLabel(root, "Show today's question");
     await flush();
     await pressLabel(root, "Write about this");
     await flush();
@@ -224,7 +233,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.questionToday).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
     const nav = { navigate: vi.fn() };
     const root = await render(<QuestionScreen navigation={nav} />);
-    await pressLabel(root, "Show today's question");
     await flush();
     await pressLabel(root, "Write about this");
     await flush();
@@ -238,7 +246,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
     const nav = { navigate: vi.fn() };
     const root = await render(<QuestionScreen navigation={nav} />);
-    await pressLabel(root, "Show today's question");
     await flush();
     await pressLabel(root, "Write about this");
     await flush();
@@ -250,7 +257,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     vi.mocked(api.questionToday).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What did you notice?") } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
 
     expect(textOf(root)).toContain("What did you notice?");
@@ -261,12 +267,18 @@ describe("QuestionScreen", () => {
 
   it("on 404, opens the key-bearing session once and only on consent", async () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+    // 404 twice: the mount auto-load consumes the first (and stops at the
+    // key-bearing step); the explicit press consumes the second before its
+    // recompute path re-reads the stored question.
     vi.mocked(api.questionToday)
+      .mockRejectedValueOnce(new ApiError(404, "not found"))
       .mockRejectedValueOnce(new ApiError(404, "not found"))
       .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
     vi.mocked(api.recompute).mockResolvedValue({ question_stored: true } as never);
 
     const root = await render(<QuestionScreen />);
+    await flush();
+    expect(api.openProcessingSession).not.toHaveBeenCalled(); // the mount never ships the key
     await pressLabel(root, "Show today's question");
     await flush();
 
@@ -281,6 +293,7 @@ describe("QuestionScreen", () => {
     vi.mocked(api.recompute).mockResolvedValue({ question_stored: false } as never);
 
     const root = await render(<QuestionScreen />);
+    await flush();
     await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("No recurring pattern has enough evidence yet — keep writing.");
@@ -292,6 +305,7 @@ describe("QuestionScreen", () => {
     vi.mocked(api.recompute).mockRejectedValue(new ApiError(500, "boom"));
 
     const root = await render(<QuestionScreen />);
+    await flush();
     await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("The server hit a problem — try again in a moment.");
@@ -301,11 +315,13 @@ describe("QuestionScreen", () => {
   it("a local crypto failure AFTER a consented recompute still gets a dialog", async () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     vi.mocked(api.questionToday)
-      .mockRejectedValueOnce(new ApiError(404, "not found"))
-      .mockResolvedValue({ for_date: FOR_DATE, blob: "AAAA" } as never); // TamperError
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // mount auto-load: stops at the key step
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // the press's phase-2 read
+      .mockResolvedValue({ for_date: FOR_DATE, blob: "AAAA" } as never); // TamperError post-recompute
     vi.mocked(api.recompute).mockResolvedValue({ question_stored: true } as never);
 
     const root = await render(<QuestionScreen />);
+    await flush();
     await pressLabel(root, "Show today's question");
     await flush();
     expect(api.openProcessingSession).toHaveBeenCalledTimes(1);
@@ -318,7 +334,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.questionToday).mockRejectedValue(new ApiError(500, "boom"));
 
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("The server hit a problem — try again in a moment.");
     expect(textOf(root)).not.toContain("boom");
@@ -328,7 +343,6 @@ describe("QuestionScreen", () => {
   it("clears a previous error while a new load is in flight", async () => {
     vi.mocked(api.insights).mockRejectedValue(new Error("offline"));
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("offline");
 
@@ -348,7 +362,6 @@ describe("QuestionScreen", () => {
   it("session expiry maps to calm copy without a dialog", async () => {
     vi.mocked(api.insights).mockRejectedValue(new ApiError(401, "invalid token"));
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("Session expired — please unlock again.");
     expect(textOf(root)).not.toContain("invalid token");
@@ -377,7 +390,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.questionToday).mockResolvedValue({ for_date: FOR_DATE, blob: "AAAA" } as never); // TamperError
 
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(Alert.alert).toHaveBeenCalledWith("Could not load question", "blob failed authentication");
     expect(textOf(root)).toContain("blob failed authentication");
@@ -387,7 +399,6 @@ describe("QuestionScreen", () => {
     vi.mocked(api.getUserId).mockResolvedValue(null);
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("account id missing — sign in again");
   });
@@ -395,7 +406,6 @@ describe("QuestionScreen", () => {
   it("non-Error rejections fall back to the calm generic sentence", async () => {
     vi.mocked(api.insights).mockRejectedValue("nope" as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("Something went wrong — try again.");
     expect(Alert.alert).toHaveBeenCalled();
@@ -415,10 +425,8 @@ describe("QuestionScreen", () => {
     const root = await render(<QuestionScreen />);
     const helpers = await import("../helpers/rtr");
     const reactNative = await import("react-native");
-    await helpers.firePress(root, "Show today's question");
-    await flush();
-    // Busy: the visible label is a spinner; the button stays findable (and
-    // disabled) via its accessibilityLabel.
+    // The MOUNT auto-load is already in flight against the pending phase
+    // check — the busy state needs no press to exist.
     const btn = await touchableByA11yLabel(root, "Show today's question");
     expect(btn.props.disabled).toBe(true);
     expect(btn.props.accessibilityState).toEqual({ disabled: true, busy: true });
@@ -437,11 +445,10 @@ describe("QuestionScreen", () => {
     let resolveInsights!: (v: unknown) => void;
     vi.mocked(api.insights).mockImplementation(() => new Promise((resolve) => (resolveInsights = resolve)));
     const root = await render(<QuestionScreen />);
-    const { firePress, act } = await import("../helpers/rtr");
-    await firePress(root, "Show today's question");
-    await flush();
-    // Fire the handler directly (a leaked press past the disabled control):
-    // the busy guard swallows it — no second phase check.
+    const { act } = await import("../helpers/rtr");
+    // The mount auto-load is in flight; fire the press handler directly (a
+    // leaked press past the disabled control): the busy guard swallows it —
+    // no second phase check.
     const btn = await touchableByA11yLabel(root, "Show today's question");
     await act(async () => {
       void (btn.props as { onPress: () => unknown }).onPress?.();
@@ -484,13 +491,17 @@ describe("QuestionScreen key-shipment consent (informed consent fix)", () => {
     insightNoQuestion();
     const root = await render(<QuestionScreen />);
     await flush();
+    // The mount auto-load stopped at the key step with NO dialog of its own.
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(api.openProcessingSession).not.toHaveBeenCalled();
     await pressLabel(root, "Show today's question");
     await flush();
     expect(lastAlert()[0]).toBe("Your key, briefly");
     expect(lastAlert()[1]).toContain("held in memory for up to 5 minutes");
     expect(lastAlert()[1]).toContain("never stored");
-    // Key-free reads ran (they need no consent); the key-bearing session did not.
-    expect(api.insights).toHaveBeenCalledTimes(1);
+    // Key-free reads ran on both loads (mount + press); the key-bearing
+    // session still did not.
+    expect(api.insights).toHaveBeenCalledTimes(2);
     expect(api.openProcessingSession).not.toHaveBeenCalled();
   });
 
@@ -498,7 +509,8 @@ describe("QuestionScreen key-shipment consent (informed consent fix)", () => {
     await storage.removeItem(CONSENT_KEY);
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     vi.mocked(api.questionToday)
-      .mockRejectedValueOnce(new ApiError(404, "not found"))
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // mount auto-load: stops at the key step
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // the press's phase-2 read
       .mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
     vi.mocked(api.recompute).mockResolvedValue({ question_stored: true } as never);
     const root = await render(<QuestionScreen />);
@@ -516,7 +528,7 @@ describe("QuestionScreen key-shipment consent (informed consent fix)", () => {
     await pressLabel(root, "Refresh");
     await flush();
     expect(Alert.alert).not.toHaveBeenCalled();
-    expect(api.questionToday).toHaveBeenCalledTimes(3);
+    expect(api.questionToday).toHaveBeenCalledTimes(4); // auto, press, post-recompute, refresh
     expect(api.openProcessingSession).toHaveBeenCalledTimes(1);
   });
 
@@ -568,13 +580,9 @@ describe("QuestionScreen key-shipment consent (informed consent fix)", () => {
   });
 
   it("the honest caption matches the phase: key shipment only post-threshold", async () => {
-    // Before any load the phase is unknown — the caption states the worst case.
+    // The default mock is baseline phase: the mount auto-load swaps the
+    // caption to the on-device truth immediately…
     const root = await render(<QuestionScreen />);
-    await flush();
-    expect(textOf(root)).toContain("held in memory for up to 5 minutes, never stored.");
-    // Pre-threshold it swaps to the on-device truth…
-    vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("nothing leaves this device for it.");
     expect(textOf(root)).not.toContain("held in memory for up to 5 minutes, never stored.");
@@ -608,7 +616,6 @@ describe("QuestionScreen feedback attribution (pattern_pid)", () => {
       blob: questionBlob("What repeats?", FOR_DATE, "pid-1"),
     } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("What repeats?");
     expect(textOf(root)).toContain("This resonated");
@@ -625,7 +632,6 @@ describe("QuestionScreen feedback attribution (pattern_pid)", () => {
       blob: questionBlob("What did you notice?"),
     } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("What did you notice?");
     expect(textOf(root)).not.toContain("This resonated");
@@ -659,7 +665,6 @@ describe("QuestionScreen feedback attribution (pattern_pid)", () => {
       .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("What repeats?", FOR_DATE, "pid-a") } as never)
       .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("A plain follow-up?") } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("This resonated");
     await pressLabel(root, "Refresh");

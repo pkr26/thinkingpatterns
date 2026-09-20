@@ -9,6 +9,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
+    // Deterministic English for the suite's shipped-copy assertions; the
+    // device locale of the machine running the tests must not leak in.
+    setupFiles: ["tests/helpers/i18nSetup.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**"],

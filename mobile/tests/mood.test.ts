@@ -33,16 +33,23 @@ describe("moodLabel", () => {
   });
 });
 
-describe("localSentiment (the Entry screen's long-standing estimate)", () => {
-  it("scores positive, negative, mixed and neutral text exactly as before", () => {
+describe("localSentiment — now the real graded engine (2026-09-19)", () => {
+  it("scores text exactly as the server's deterministic engine would", () => {
+    // Values pinned to the Python engine's verdicts (the same walk is
+    // vector-pinned in tests/brainVectors.test.ts): strongly positive,
+    // strongly negative, and a genuinely mixed day score by MAGNITUDE now,
+    // not by positive-vs-negative word counts.
     expect(localSentiment("good great happy")).toBe(1);
     expect(localSentiment("bad sad anxious stressed")).toBe(-1);
-    expect(localSentiment("good then bad news")).toBe(0);
-    expect(localSentiment("nothing emotional here")).toBe(0);
+    expect(localSentiment("good then bad news")).toBeCloseTo(0.0, 2);
+    // The graded engine scores "nothing" mildly negative (VADER lineage).
+    expect(localSentiment("nothing emotional here")).toBeCloseTo(-0.111, 2);
   });
 
-  it("is case-insensitive and respects word boundaries", () => {
-    expect(localSentiment("GOOD day")).toBe(1);
-    expect(localSentiment("goodness gracious")).toBe(0);
+  it("is case-insensitive; word identity comes from the lexicon, not substrings", () => {
+    expect(localSentiment("GOOD day")).toBeCloseTo(0.475, 3);
+    // "goodness" and "gracious" are their own graded words — the score is
+    // their valence, never a substring match on "good".
+    expect(localSentiment("goodness gracious")).toBe(1);
   });
 });

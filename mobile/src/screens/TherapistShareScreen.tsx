@@ -22,6 +22,7 @@ import { therapistKeyFingerprint, wrapDataKeyForTherapist } from "../crypto/shar
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { calmFallbackCopy } from "../components/errors";
+import { t as tr } from "../strings";
 
 type PendingAction =
   | { kind: "grant"; code: string; lookup: PairingLookup }
@@ -68,16 +69,13 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       setLookup(found);
     } catch (err) {
       if (isSessionExpiredError(err)) {
-        Alert.alert("Session expired", "Please unlock again.");
+        Alert.alert(tr("common.sessionExpiredTitle"), tr("common.unlockAgainBody"));
       } else if (err instanceof ApiError && err.status === 404) {
-        Alert.alert(
-          "Code not found",
-          "Check the code with your therapist — it expires 15 minutes after they generate it.",
-        );
+        Alert.alert(tr("share.codeNotFoundTitle"), tr("share.codeNotFoundBody"));
       } else {
         // Offline and server errors are NOT "wrong code": blaming the code
         // (or the therapist) for a dead connection erodes trust.
-        Alert.alert("Couldn’t look up the code", calmFallbackCopy(err, "Something went wrong — try again."));
+        Alert.alert(tr("share.lookupFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
     } finally {
       setBusy(false);
@@ -86,39 +84,26 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
 
   const confirmGrant = () => {
     if (!lookup) return;
-    Alert.alert(
-      `Share with ${lookup.display_name}?`,
-      "They will be able to read every journal entry and every pattern computed from them, " +
-        "from their therapist portal. They cannot change or delete anything — only read, and " +
-        "write their own private notes.\n\n" +
-        "You can stop sharing at any time; that ends their access immediately, but it cannot " +
-        "unread what they have already seen. You will be asked for your password.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue to password",
-          style: "destructive",
-          onPress: () => setPending({ kind: "grant", code: code.trim(), lookup }),
-        },
-      ],
-    );
+    Alert.alert(tr("share.grantTitle", { name: lookup.display_name }), tr("share.grantBody"), [
+      { text: tr("common.cancel"), style: "cancel" },
+      {
+        text: tr("settings.continueToPassword"),
+        style: "destructive",
+        onPress: () => setPending({ kind: "grant", code: code.trim(), lookup }),
+      },
+    ]);
   };
 
   const askRevoke = (consent: ListedConsent) => {
     if (busy) return;
-    Alert.alert(
-      `Stop sharing with ${consent.display_name}?`,
-      "Their access ends immediately. They keep anything they have already read. " +
-        "You will be asked for your password.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Stop sharing",
-          style: "destructive",
-          onPress: () => setPending({ kind: "revoke", consentId: consent.id }),
-        },
-      ],
-    );
+    Alert.alert(tr("share.revokeTitle", { name: consent.display_name }), tr("share.revokeBody"), [
+      { text: tr("common.cancel"), style: "cancel" },
+      {
+        text: tr("share.stopSharing"),
+        style: "destructive",
+        onPress: () => setPending({ kind: "revoke", consentId: consent.id }),
+      },
+    ]);
   };
 
   /** Both flows land here: the action only runs after the typed password
@@ -132,18 +117,18 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       const reauth = await verifyPasswordForVault(password);
       if (!reauth.ok) {
         const messages = {
-          locked: "The vault is locked — unlock again first.",
-          "no-account": "No saved account on this device — sign in again.",
-          "wrong-password": "Wrong password.",
-          offline: "Cannot verify your password offline right now — try again when online.",
+          locked: tr("common.reauthLocked"),
+          "no-account": tr("common.reauthNoAccount"),
+          "wrong-password": tr("common.wrongPassword"),
+          offline: tr("common.reauthOffline"),
         } as const;
-        Alert.alert("Could not verify", messages[reauth.reason]);
+        Alert.alert(tr("common.couldNotVerifyTitle"), messages[reauth.reason]);
         retry();
         return;
       }
       if (pending.kind === "grant") {
         const userId = await api.getUserId();
-        if (!userId) throw new Error("no saved account on this device");
+        if (!userId) throw new Error(tr("share.noAccount"));
         // The data key leaves the device exactly once: inside this wrap.
         const wrap = wrapDataKeyForTherapist(
           vault.get().dataKey,
@@ -153,25 +138,25 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         );
         await api.grantConsent(pending.code, wrap.ephemeralPubB64, wrap.wrappedKeyB64, reauth.verifierB64);
         Alert.alert(
-          "Sharing started",
-          `${pending.lookup.display_name} can now read your entries and patterns from their portal.`,
+          tr("share.grantDoneTitle"),
+          tr("share.grantDoneBody", { name: pending.lookup.display_name }),
         );
       } else {
         await api.revokeConsent(pending.consentId, reauth.verifierB64);
-        Alert.alert("Sharing stopped", "Their access has ended.");
+        Alert.alert(tr("share.revokeDoneTitle"), tr("share.revokeDoneBody"));
       }
       refresh();
       done();
     } catch (err) {
       if (isVerificationFailedError(err)) {
-        Alert.alert("That password didn't match", "Check it and try again — nothing was changed.");
+        Alert.alert(tr("common.passwordMismatchTitle"), tr("common.passwordMismatchBody"));
         retry();
         return;
       }
       if (isSessionExpiredError(err)) {
-        Alert.alert("Session expired", "Please unlock again.");
+        Alert.alert(tr("common.sessionExpiredTitle"), tr("common.unlockAgainBody"));
       } else {
-        Alert.alert("Could not complete", calmFallbackCopy(err, "Something went wrong — try again."));
+        Alert.alert(tr("common.couldNotCompleteTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
       done();
     }
@@ -199,29 +184,23 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
 
       {sharingAvailable === false && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
-          <Text style={[styles.cardTitle, { color: t.colors.text }]}>Therapist sharing unavailable</Text>
-          <Text style={themed.footnote}>
-            This server has not enabled verified clinician sharing. No pairing code or journal data will be sent.
-          </Text>
-          <GhostButton label="Back" center={false} onPress={() => navigation.goBack?.()} />
+          <Text style={[styles.cardTitle, { color: t.colors.text }]}>{tr("share.unavailableTitle")}</Text>
+          <Text style={themed.footnote}>{tr("share.unavailableBody")}</Text>
+          <GhostButton label={tr("common.back")} center={false} onPress={() => navigation.goBack?.()} />
         </View>
       )}
 
       {sharingAvailable === null && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
-          <Text style={[styles.cardTitle, { color: t.colors.text }]}>Can’t reach the server</Text>
-          <Text style={themed.footnote}>
-            Sharing availability could not be confirmed — check your connection and try again. No pairing code or journal data is sent until it is.
-          </Text>
-          <GhostButton label="Back" center={false} onPress={() => navigation.goBack?.()} />
+          <Text style={[styles.cardTitle, { color: t.colors.text }]}>{tr("share.unreachableTitle")}</Text>
+          <Text style={themed.footnote}>{tr("share.unreachableBody")}</Text>
+          <GhostButton label={tr("common.back")} center={false} onPress={() => navigation.goBack?.()} />
         </View>
       )}
 
-      {sharingAvailable === true && <Text style={themed.label}>Sharing now</Text>}
+      {sharingAvailable === true && <Text style={themed.label}>{tr("share.sharingNowLabel")}</Text>}
       {sharingAvailable === true && consents.length === 0 && (
-        <Text style={themed.footnote}>
-          You are not sharing with anyone. Your entries stay visible only to you.
-        </Text>
+        <Text style={themed.footnote}>{tr("share.notSharingNote")}</Text>
       )}
       {sharingAvailable === true && consents.map((consent) => (
         <View
@@ -232,13 +211,13 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
             {consent.display_name}{"\n"}
             <Text style={themed.footnote}>
               {consent.status === "active"
-                ? `Sharing since ${dayOf(consent.granted_at)}`
-                : `Stopped ${consent.revoked_at ? dayOf(consent.revoked_at) : ""}`}
+                ? tr("share.sharingSince", { date: dayOf(consent.granted_at) })
+                : tr("share.stoppedOn", { date: consent.revoked_at ? dayOf(consent.revoked_at) : "" })}
             </Text>
           </Text>
           {consent.status === "active" && (
             <GhostButton
-              label="Stop sharing"
+              label={tr("share.stopSharing")}
               center={false}
               disabled={busy}
               onPress={() => askRevoke(consent)}
@@ -249,22 +228,19 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
 
       {sharingAvailable === true && !lookup && (
         <>
-          <Text style={themed.label}>Add your therapist</Text>
-          <Text style={themed.footnote}>
-            Ask your therapist for a pairing code from their portal, then enter it here. Codes
-            expire after 15 minutes.
-          </Text>
+          <Text style={themed.label}>{tr("share.addLabel")}</Text>
+          <Text style={themed.footnote}>{tr("share.addBody")}</Text>
           <TextInput
             style={themed.input}
             value={code}
             onChangeText={setCode}
             autoCapitalize="characters"
-            placeholder="e.g. 7X2KQM4N"
+            placeholder={tr("share.codePlaceholder")}
             placeholderTextColor={t.colors.placeholder}
-            accessibilityLabel="Therapist pairing code"
+            accessibilityLabel={tr("share.codeA11y")}
           />
           <PrimaryButton
-            label={busy ? "Looking up…" : "Find my therapist"}
+            label={busy ? tr("share.lookingUp") : tr("share.findTherapist")}
             onPress={findTherapist}
             disabled={busy || !code.trim()}
           />
@@ -275,21 +251,16 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={[styles.cardTitle, { color: t.colors.text }]}>{lookup.display_name}</Text>
           <Text style={themed.footnote}>
-            {`Key fingerprint: ${therapistKeyFingerprint(lookup.wrap_pub_key)}\n`}
-            Read it back to your therapist and check it matches the one their portal
-            shows — a mismatch means the key was substituted in transit.
+            {tr("share.fingerprintNote", { fingerprint: therapistKeyFingerprint(lookup.wrap_pub_key) })}
           </Text>
-          <Text style={themed.footnote}>
-            Sharing lets them read every entry and pattern (never change anything), and write their
-            own private notes. You can stop at any time; what they already read cannot be unread.
-          </Text>
+          <Text style={themed.footnote}>{tr("share.disclosure")}</Text>
           <PrimaryButton
-            label={`Share with ${lookup.display_name}`}
+            label={tr("share.shareWithName", { name: lookup.display_name })}
             onPress={confirmGrant}
             disabled={busy}
           />
           <GhostButton
-            label="Cancel"
+            label={tr("common.cancel")}
             disabled={busy}
             onPress={() => { setLookup(null); setCode(""); }}
           />
@@ -300,28 +271,28 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
             {pending.kind === "grant"
-              ? `Enter your password to share with ${pending.lookup.display_name}`
-              : "Enter your password to stop sharing"}
+              ? tr("share.reauthGrantTitle", { name: pending.lookup.display_name })
+              : tr("share.reauthRevokeTitle")}
           </Text>
           <TextInput
             style={themed.input}
-            placeholder="password"
+            placeholder={tr("common.passwordPlaceholder")}
             placeholderTextColor={t.colors.placeholder}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
-            accessibilityLabel="Password confirmation"
+            accessibilityLabel={tr("common.passwordConfirmA11y")}
             textContentType="password"
           />
           <PrimaryButton
-            label={busy ? "Verifying…" : "Confirm with password"}
+            label={busy ? tr("common.verifying") : tr("common.confirmWithPassword")}
             onPress={confirmWithPassword}
             disabled={!password}
             danger={pending.kind === "revoke"}
-            accessibilityLabel="Confirm with password"
+            accessibilityLabel={tr("common.confirmWithPassword")}
           />
           <GhostButton
-            label="Cancel"
+            label={tr("common.cancel")}
             disabled={busy}
             onPress={() => { setPending(null); setPassword(""); }}
           />

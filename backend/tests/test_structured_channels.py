@@ -181,7 +181,7 @@ class TestTagChannel:
 
 
 class TestEnergyChannel:
-    def test_energy_rides_along_without_breaking_anything(self):
+    def test_energy_is_analyzed_but_uniform_alternation_claims_nothing(self):
         entries = [
             JournalEntry(
                 "day notes",
@@ -192,8 +192,10 @@ class TestEnergyChannel:
             for ago in range(60, 0, -1)
         ]
         result = _run_twice(entries, T0)
-        # Energy is carried, not yet analyzed (near-tautological with
-        # mood); the run completes and nothing claims to be from it.
+        # Energy IS analyzed now (2026-09-19: inertia over the energy
+        # channel, same machinery as mood) — but a UNIFORMLY alternating
+        # series has the same (near-negative) carryover in both windows:
+        # no rise, no claim. Carried-but-quiet stays quiet.
         assert all(p.detail.get("channel") != "energy" for p in result.surfaced)
 
 

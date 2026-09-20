@@ -43,8 +43,10 @@ class TestEwmaChartPins:
         """mood_shift is a WINDOW_STAT kind: it surfaces only after a second
         qualification day >= 2 calendar days out (the replication gate), so
         every chart pin recomputes twice."""
-        first = [JournalEntry("ordinary day notes", d, sentiment=s)
-                 for d, s in zip(_days(len(sentiments), start), sentiments)]
+        first = [
+            JournalEntry("ordinary day notes", d, sentiment=s)
+            for d, s in zip(_days(len(sentiments), start), sentiments)
+        ]
         res1 = brain.update(brain.fresh_state(), first, start + timedelta(days=len(sentiments)))
         tail_days = _days(2, start + timedelta(days=len(sentiments) + 1))
         second = first + [
@@ -80,8 +82,23 @@ class TestEwmaChartPins:
         exactly one point; the spike is repeated on the replication days so
         the second qualification is not what silences it — the run rule is.
         """
-        baseline = [0.1, -0.1, 0.2, -0.2, 0.05, -0.05, 0.15, -0.15,
-                    0.1, -0.1, 0.2, -0.2, 0.0, 0.1, -0.1] + [0.0] * 8
+        baseline = [
+            0.1,
+            -0.1,
+            0.2,
+            -0.2,
+            0.05,
+            -0.05,
+            0.15,
+            -0.15,
+            0.1,
+            -0.1,
+            0.2,
+            -0.2,
+            0.0,
+            0.1,
+            -0.1,
+        ] + [0.0] * 8
         result = self._update_twice(baseline + [2.5])
         shifts = [p for p in result.surfaced if p.kind == "mood_shift"]
         assert shifts == [], [s.detail for s in shifts]
@@ -95,12 +112,19 @@ class TestEwmaChartPins:
 def _store_with_pattern(last_qualified: str, state_name: str) -> dict:
     store = brain.fresh_state()
     record = StoredPattern(
-        pid="temporal:work", kind="temporal", label="work",
-        first_seen=last_qualified, last_seen=last_qualified,
-        first_qualified=last_qualified, last_qualified=last_qualified,
-        occurrences=12, state=state_name,
-        qualification_days=[last_qualified], evidence_dates=[last_qualified],
-        feedback={}, detail={"day": "Sunday"},
+        pid="temporal:work",
+        kind="temporal",
+        label="work",
+        first_seen=last_qualified,
+        last_seen=last_qualified,
+        first_qualified=last_qualified,
+        last_qualified=last_qualified,
+        occurrences=12,
+        state=state_name,
+        qualification_days=[last_qualified],
+        evidence_dates=[last_qualified],
+        feedback={},
+        detail={"day": "Sunday"},
     )
     store["patterns"][record.pid] = record
     # Round-trip so _merge_lifecycle sees a normalized store, exactly as a
@@ -158,9 +182,7 @@ class TestSensitiveFlagPin:
         surfaced = [p for p in result.surfaced if p.kind in ("rumination", "recurring_phrase")]
         assert surfaced, "corpus must surface the recurring cluster"
         flagged = [p for p in surfaced if p.detail.get("sensitive")]
-        assert flagged, [
-            (p.kind, p.label, p.detail.get("sensitive")) for p in surfaced
-        ]
+        assert flagged, [(p.kind, p.label, p.detail.get("sensitive")) for p in surfaced]
 
     def test_label_branch_of_sensitivity_flag(self):
         """J2 pin (the label branch): a record whose LABEL is suppress-tier
@@ -170,12 +192,17 @@ class TestSensitiveFlagPin:
         the variants[:3] cap; this is the record shape where only the label
         branch sees it."""
         record = StoredPattern(
-            pid="rumination:x", kind="rumination",
+            pid="rumination:x",
+            kind="rumination",
             label="i can't go on anymore",
-            first_seen="2026-08-01", last_seen="2026-08-12",
-            first_qualified="2026-08-12", last_qualified="2026-08-12",
-            occurrences=12, state="emerging",
-            qualification_days=["2026-08-12"], evidence_dates=["2026-08-01"],
+            first_seen="2026-08-01",
+            last_seen="2026-08-12",
+            first_qualified="2026-08-12",
+            last_qualified="2026-08-12",
+            occurrences=12,
+            state="emerging",
+            qualification_days=["2026-08-12"],
+            evidence_dates=["2026-08-01"],
             feedback={},
             # Benign variants only: the variants branch cannot fire here.
             detail={"variants": ["everything feels heavy and slow", "so tired of everything"]},

@@ -10,30 +10,35 @@
  * further from support.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { api } from "../api/client";
 import { useSession } from "../store";
 import { useTheme } from "../theme";
 import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
 import { hasSeenOnboarding, recordOnboardingSeen } from "../onboarding";
+import { setReminderEnabled } from "../reminders";
+import { syncReminderSchedule } from "../reminderSync";
+import { t as tr } from "../strings";
 
 interface Panel {
   title: string;
   body: string;
 }
 
+// Resolved at module load — the app locale is resolved once at startup, so
+// the panels cannot drift between languages mid-session.
 const PANELS: readonly Panel[] = [
   {
-    title: "Write each day",
-    body: "After 30 days of writing, the app shows you patterns too slow to notice on your own — every one with the evidence behind it. Never advice, never a diagnosis.",
+    title: tr("onboarding.panel1Title"),
+    body: tr("onboarding.panel1Body"),
   },
   {
-    title: "Your words stay yours",
-    body: "Your password derives the encryption keys on this device, and everything you write is encrypted before it leaves — the server stores only ciphertext. The one exception: when you start a pattern analysis yourself, your key is used once — held in memory for up to 5 minutes, then destroyed. It is never stored.",
+    title: tr("onboarding.panel2Title"),
+    body: tr("onboarding.panel2Body"),
   },
   {
-    title: "Keep your password safe",
-    body: "There is no password reset — write your password down somewhere safe. If it is lost, no one, including us, can recover your journal.",
+    title: tr("onboarding.panel3Title"),
+    body: tr("onboarding.panel3Body"),
   },
 ];
 
@@ -42,6 +47,9 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
   const { touchActivity } = useSession();
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
+  // The reminder opt-in (2026-09-19): off by default, one tap to say yes,
+  // changeable later in Settings. Calm copy — an invitation, never a debt.
+  const [remind, setRemind] = useState(false);
   // Double-tap guard: two presses inside one frame both pass a state-only
   // check — the ref is synchronous (the Entry screen's savingRef pattern).
   const busyRef = useRef(false);
@@ -82,6 +90,22 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
   const last = index === PANELS.length - 1;
   const panel = PANELS[index]!;
 
+  /** Persist the reminder opt-in per account. The onboarding flow runs
+   *  right after registration, so the account exists — but if the id read
+   *  fails, skip silently: onboarding must never block or nag. */
+  const toggleRemind = (on: boolean) => {
+    touchActivity();
+    setRemind(on);
+    api
+      .getUserId()
+      .then(async (userId) => {
+        if (!userId) return;
+        await setReminderEnabled(userId, on).catch(() => {});
+        await syncReminderSchedule(userId).catch(() => {});
+      })
+      .catch(() => {});
+  };
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: t.colors.bg }}
@@ -92,22 +116,35 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
         onTouchStart={touchActivity}
       >
       <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-        {index + 1} of {PANELS.length}
+        {tr("onboarding.stepOf", { current: index + 1, total: PANELS.length })}
       </Text>
       <Text style={[styles.title, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
         {panel.title}
       </Text>
       <Text style={[styles.body, { color: t.colors.body }]}>{panel.body}</Text>
+      {index === 0 && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, flex: 1, lineHeight: 19 }}>
+            {tr("onboarding.remindQuestion")}
+          </Text>
+          <Switch
+            value={remind}
+            onValueChange={toggleRemind}
+            accessibilityLabel={tr("settings.dailyReminderA11y")}
+            accessibilityState={{ checked: remind }}
+          />
+        </View>
+      )}
       {index === 1 && (
-        <GhostButton label="Read the privacy policy" onPress={() => navigation.navigate("Privacy")} />
+        <GhostButton label={tr("onboarding.readPrivacy")} onPress={() => navigation.navigate("Privacy")} />
       )}
       {last && (
         <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, lineHeight: 19 }}>
-          MindPattern is for people 13 and older — by continuing you confirm that you are.
+          {tr("onboarding.ageNotice")}
         </Text>
       )}
       <PrimaryButton
-        label={last ? "I understand — start writing" : "Continue"}
+        label={last ? tr("onboarding.start") : tr("common.continue")}
         onPress={
           last
             ? () => void finish()
@@ -117,7 +154,11 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
               }
         }
         busy={busy}
-        accessibilityLabel={last ? "I understand — start writing" : `Continue to panel ${index + 2} of ${PANELS.length}`}
+        accessibilityLabel={
+          last
+            ? tr("onboarding.start")
+            : tr("onboarding.continueA11y", { next: index + 2, total: PANELS.length })
+        }
       />
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
       </View>

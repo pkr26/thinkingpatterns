@@ -120,10 +120,12 @@ describe("AppNavigator", () => {
     const root = await render(<AppNavigator />);
     await flush();
 
-    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Privacy", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Measures", "Privacy", "Crisis"]);
     const text = textOf(root);
     expect(text).toContain("Save entry");
-    expect(text).toContain("Show today's question");
+    // The Question screen auto-loads its key-free content on mount: the
+    // baseline card (with its caption) is visible without any tap.
+    expect(text).toContain("For now, one question a day");
     expect(text).toContain("Save server URL");
     expect(text).toContain("Delete my account and data");
     // Screen titles are the product's navigation contract.
@@ -170,7 +172,7 @@ describe("AppNavigator", () => {
     await flush();
 
     expect(screenNames(root)).toEqual([
-      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Privacy", "Crisis",
+      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Measures", "Privacy", "Crisis",
     ]);
     expect(screenOptions(root, "Onboarding")).toEqual({ headerShown: false });
     // The first panel is what a brand-new account actually sees.

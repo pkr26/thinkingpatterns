@@ -234,9 +234,47 @@ class Consent(Base):
     # ("consent-wrap", user_id, therapist_id) so a blob cannot be relocated
     # between consents undetected. NULL while revoked.
     wrapped_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Caseload summary (2026-09-19): at every patient recompute the server
+    # (inside the processing session, where the surfaced patterns already
+    # exist in memory) writes a small per-consent summary — pattern count,
+    # sensitive-card presence, newest first-seen — wrapped to the
+    # THERAPIST's public key with the same ECIES construction as the data
+    # key wrap (context "caseload-summary"). The therapist portal then
+    # triages its caseload with N small decrypts instead of N full insight
+    # blobs, and a sensitive card is discoverable WITHOUT opening every
+    # chart. NULL until the patient's first recompute after the grant; NULL
+    # again while revoked. The summary is metadata for an already-authorized
+    # reader — the server learns nothing new in the clear.
+    summary_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    summary_eph_pub: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    summary_updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # Which sharing-disclosure copy the patient answered (the LLM consent's
     # Art. 7 record, applied to sharing).
     disclosure: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class Measure(Base):
+    """A patient-recorded wellbeing measure (2026-09-19, MBC module): one
+    opaque AES-GCM blob per completed questionnaire — e.g. a PHQ-9 the
+    patient filled in the app. Same opacity contract as entries: the
+    server stores ciphertext it cannot read; the PATIENT's client encrypts
+    under the data key with AAD ("measure", user_id, client_measure_id),
+    and the therapist portal decrypts with the per-consent unwrapped data
+    key. The app never interprets a score — interpretation belongs to the
+    clinician the patient chose to share with."""
+
+    __tablename__ = "measures"
+    __table_args__ = (
+        UniqueConstraint("user_id", "client_measure_id", name="uq_user_client_measure"),
+        Index("ix_measures_user_date", "user_id", "measure_date"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    client_measure_id: Mapped[str] = mapped_column(String(64))
+    blob: Mapped[bytes] = mapped_column(LargeBinary)  # opaque: nonce||ct||tag
+    measure_date: Mapped[date] = mapped_column(Date)  # calendar day completed
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class PairingCode(Base):

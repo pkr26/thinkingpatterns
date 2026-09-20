@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { Switch } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
@@ -174,5 +175,60 @@ describe("OnboardingScreen", () => {
     await act(async () => resolveUserId("user-1"));
     await flush();
     expect(nav.replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("OnboardingScreen reminder opt-in (panel 1)", () => {
+  function reminderSwitch(root: Awaited<ReturnType<typeof render>>) {
+    return root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder");
+  }
+
+  it("offers the opt-in on panel 1 only, calm copy, off by default", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Want a gentle reminder each day? You can change it anytime in Settings.");
+    const sw = reminderSwitch(root);
+    expect(sw).toBeDefined();
+    expect(sw!.props.value).toBe(false);
+    expect(sw!.props.accessibilityState).toEqual({ checked: false });
+    // Later panels carry no reminder row — the ask happens once, calmly.
+    await pressLabel(root, "Continue");
+    await pressLabel(root, "Continue");
+    expect(reminderSwitch(root)).toBeUndefined();
+    expect(textOf(root)).not.toContain("Want a gentle reminder");
+  });
+
+  it("toggling on persists the per-account opt-in", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    const sw = reminderSwitch(root)!;
+    await act(async () => {
+      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    expect(await storage.getItem("@mindpattern/reminders_user-1")).toContain("\"enabled\":true");
+    expect(touchActivity).toHaveBeenCalled();
+    // Toggling back off is equally one tap.
+    const back = reminderSwitch(root)!;
+    await act(async () => {
+      (back.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
+    });
+    await flush();
+    expect(await storage.getItem("@mindpattern/reminders_user-1")).toContain("\"enabled\":false");
+  });
+
+  it("a missing account id skips silently — onboarding never blocks or nags", async () => {
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    const sw = reminderSwitch(root)!;
+    await act(async () => {
+      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    expect(await storage.getItem("@mindpattern/reminders_user-1")).toBeNull();
+    // The row still toggles visually; completion is unaffected.
+    await pressLabel(root, "Continue");
+    expect(textOf(root)).toContain("2 of 3");
   });
 });

@@ -140,4 +140,3 @@ def test_distinct_deployments_do_not_conflict(isolated_lock_dir):
     assert p1 != p2
     release_single_process_lock(t1, d1)
     release_single_process_lock(t2, d2)
-

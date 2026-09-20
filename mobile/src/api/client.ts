@@ -646,6 +646,14 @@ export const api = {
 
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string) =>
     request("POST", `${API_PREFIX}/entries`, { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
+  /** MBC measures (2026-09-19): opaque encrypted questionnaire records. */
+  createMeasure: (clientMeasureId: string, blobB64: string, measureDate: string) =>
+    request(
+      "POST",
+      `${API_PREFIX}/measures`,
+      { client_measure_id: clientMeasureId, blob: blobB64, measure_date: measureDate },
+    ),
+  listMeasures: () => request("GET", `${API_PREFIX}/measures`),
   /** Offline-queue upload. Identical to createEntry but pinned to the origin
    *  the queue is scoped to: the request refuses to ship (OriginPinnedError,
    *  nothing sent) if the selected server moved, so queued ciphertext can

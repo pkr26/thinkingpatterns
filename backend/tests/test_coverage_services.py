@@ -167,7 +167,10 @@ def test_parse_feedback_filters_invalid_events_and_returns_stable_api_errors():
             {"pid": "x" * 129, "resonated": False},
         ]
     }
-    assert insights._parse_feedback(json.dumps(payload).encode("utf-8")) == [("accepted", True)]
+    events = insights._parse_feedback(json.dumps(payload).encode("utf-8"))
+    assert events.taps == [("accepted", True)]
+    assert events.muted == []
+    assert events.unmuted == []
 
 
 def test_chosen_pattern_pid_filters_suppressed_and_duplicate_questions(monkeypatch):

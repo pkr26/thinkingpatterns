@@ -33,6 +33,7 @@ vi.mock("../src/api", async (importOriginal) => {
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
+      patientMeasures: vi.fn(async () => []),
     },
   };
 });
@@ -55,6 +56,8 @@ vi.mock("../src/crypto", async (importOriginal) => {
     sealPrivateKeyForUpload: vi.fn(async () => "SEALED=="),
     unlockWrapPrivateKey: vi.fn(async () => ({ algorithm: { name: "ECDH" } })),
     unwrapPatientDataKey: vi.fn(async () => new Uint8Array(32)),
+    decryptCaseloadSummary: vi.fn(async () => null),
+    decryptMeasure: vi.fn(async () => null),
     decryptInsights: vi.fn(async () => ({
       stats: {
         patterns: [
@@ -898,5 +901,95 @@ describe("PatientView 2026-09-17 wave", () => {
     await flush();
     const svg = root.root.findAllByType("svg");
     expect(svg.length).toBeGreaterThan(0);
+  });
+});
+
+describe("PatientsView caseload summaries (2026-09-19)", () => {
+  it("decrypts server summaries and shows the sensitive banner without opening charts", async () => {
+    mockedApi.patients.mockResolvedValueOnce([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==", summary_updated_at: "2026-09-19T00:00:00Z" },
+      { ...patient, user_id: "user-2", username: "patientb", summary_blob: "SB2==", summary_eph_pub: "SE2==" },
+    ]);
+    const { decryptCaseloadSummary } = mockedCrypto;
+    vi.mocked(decryptCaseloadSummary)
+      .mockResolvedValueOnce({ patterns: 4, sensitive: true, newest: "2026-09-18", forDate: "2026-09-19" })
+      .mockResolvedValueOnce({ patterns: 0, sensitive: false, newest: null, forDate: "2026-09-19" });
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    // The banner: one patient flagged sensitive, wording never quoted.
+    expect(textOf(root)).toContain("1 of your patients has a sensitive card");
+    expect(textOf(root)).toContain("never echoed here");
+    // The per-patient count comes from the O(1) summary, not a chart fetch.
+    expect(textOf(root)).toContain("4 patterns");
+    expect(mockedApi.patientInsights).not.toHaveBeenCalled();
+  });
+
+  it("no banner and no counts when no summaries decrypt", async () => {
+    mockedApi.patients.mockResolvedValueOnce([{ ...patient }]);
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    expect(textOf(root)).not.toContain("sensitive card");
+    expect(textOf(root)).not.toContain(" · "); // no per-patient count line at all
+    expect(mockedCrypto.decryptCaseloadSummary).not.toHaveBeenCalled();
+  });
+
+  it("a failed summary decrypt degrades to no summary (the scan stays the fallback)", async () => {
+    mockedApi.patients.mockResolvedValueOnce([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+    ]);
+    vi.mocked(mockedCrypto.decryptCaseloadSummary).mockResolvedValueOnce(null);
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    expect(textOf(root)).toContain("patienta");
+    expect(textOf(root)).not.toContain("sensitive card");
+    expect(textOf(root)).not.toContain(" · ");
+  });
+});
+
+describe("PatientView recorded measures (MBC, 2026-09-19)", () => {
+  it("renders decrypted measure scores with the interpretation-belongs-to-you copy", async () => {
+    mockedApi.patientInsights.mockResolvedValueOnce({
+      phase: "insight",
+      active_days: 45,
+      streak: 3,
+      days_remaining: 0,
+      blob: "BLOB==",
+    } as never);
+    mockedApi.patientMeasures.mockResolvedValueOnce([
+      { id: "1", client_measure_id: "m-1", blob: "B1==", measure_date: "2026-09-04", received_at: "2026-09-04T00:00:00Z" },
+      { id: "2", client_measure_id: "m-2", blob: "B2==", measure_date: "2026-09-11", received_at: "2026-09-11T00:00:00Z" },
+    ] as never);
+    vi.mocked(mockedCrypto.decryptMeasure)
+      .mockResolvedValueOnce({ measure: "phq9", score: 14, completedAt: "2026-09-04", measureDate: "2026-09-04" })
+      .mockResolvedValueOnce({ measure: "phq9", score: 9, completedAt: "2026-09-11", measureDate: "2026-09-11" });
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    expect(rtr.textOf(root)).toContain("Recorded measures (2)");
+    expect(rtr.textOf(root)).toContain("2026-09-04: 14  ·  2026-09-11: 9");
+    expect(rtr.textOf(root)).toContain("interpretation is yours");
+  });
+
+  it("no measures means no card", async () => {
+    mockedApi.patientInsights.mockResolvedValueOnce({
+      phase: "insight",
+      active_days: 45,
+      streak: 3,
+      days_remaining: 0,
+      blob: "BLOB==",
+    } as never);
+    mockedApi.patientMeasures.mockResolvedValueOnce([] as never);
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    expect(rtr.textOf(root)).not.toContain("Recorded measures");
   });
 });

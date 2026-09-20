@@ -146,6 +146,7 @@ export async function decrypt(key: Bytes, blob: Bytes, aad?: Bytes): Promise<Byt
 export const THERAPIST_KEY_CONTEXT = "therapist-key";
 export const NOTE_CONTEXT = "note";
 export const WRAP_CONTEXT = "consent-wrap";
+export const SUMMARY_CONTEXT = "caseload-summary";
 
 /** Decrypt this therapist's stored P-256 private key (PKCS8 DER) with the
  * password-derived wrap KEK. AAD binds the key to the therapist's username,
@@ -223,6 +224,126 @@ export async function unwrapPatientDataKey(
     // ephDer/thDer/salt are public inputs, while shared/kek are secret; wipe
     // all module-owned buffers to keep the simple lifecycle auditable. The
     // returned patient data key remains the caller's responsibility.
+    zeroize(ephDer, thDer, wrapped, salt, shared, kek);
+  }
+}
+
+// --- measures (MBC, 2026-09-19) --------------------------------------------------
+
+export interface MeasureReading {
+  measure: string;
+  score: number;
+  completedAt: string | null;
+  measureDate: string;
+}
+
+/** Decrypt one patient-recorded measure blob. The payload is the patient's
+ *  client contract: {"v":1,"measure":"phq9","score":N,"completed_at":ISO}.
+ *  Sanitized like every decrypted payload — wrong shapes degrade to null,
+ *  never render. The portal DISPLAYS scores; it never interprets them. */
+export async function decryptMeasure(
+  dataKey: Bytes,
+  userId: string,
+  measure: { client_measure_id: string; blob: string; measure_date: string },
+): Promise<MeasureReading | null> {
+  const { buildAad } = await import("./aad");
+  let encrypted: Bytes | null = null;
+  let plain: Bytes | null = null;
+  try {
+    encrypted = unb64(measure.blob);
+    plain = await decrypt(
+      dataKey,
+      encrypted,
+      buildAad("measure", userId, measure.client_measure_id),
+    );
+    const payload = decodeJson(plain) as Record<string, unknown>;
+    const score = payload.score;
+    if (typeof score !== "number" || !Number.isFinite(score)) return null;
+    return {
+      measure: typeof payload.measure === "string" ? payload.measure.slice(0, 24) : "measure",
+      score: Math.max(0, Math.min(100, Math.round(score))),
+      completedAt:
+        typeof payload.completed_at === "string" ? payload.completed_at.slice(0, 10) : null,
+      measureDate: measure.measure_date.slice(0, 10),
+    };
+  } catch {
+    return null;
+  } finally {
+    zeroize(encrypted, plain);
+  }
+}
+
+// --- caseload summaries --------------------------------------------------------
+
+export interface CaseloadSummary {
+  patterns: number;
+  sensitive: boolean;
+  newest: string | null;
+  forDate: string | null;
+}
+
+/** The portal-side open of a per-consent caseload summary — the exact
+ * construction unwrapPatientDataKey uses (ECDH against the summary's
+ * ephemeral key, HKDF salted by both SPKI DERs, AES-GCM), with the AAD
+ * context "caseload-summary" separating the role from the data-key wrap.
+ * The server writes these at each patient recompute; triaging decrypts N
+ * small blobs instead of N full insight blobs. Output is sanitized like
+ * every decrypted payload: wrong shapes degrade to null, never render. */
+export async function decryptCaseloadSummary(
+  therapistPrivateKey: CryptoKey,
+  therapistPubSpkiB64: string,
+  ephemeralPubSpkiB64: string,
+  summaryBlobB64: string,
+  userId: string,
+  therapistId: string,
+): Promise<CaseloadSummary | null> {
+  const { buildAad } = await import("./aad");
+  let ephDer: Bytes | null = null;
+  let thDer: Bytes | null = null;
+  let wrapped: Bytes | null = null;
+  let salt: Bytes | null = null;
+  let shared: Bytes | null = null;
+  let kek: Bytes | null = null;
+  try {
+    ephDer = unb64(ephemeralPubSpkiB64);
+    thDer = unb64(therapistPubSpkiB64);
+    wrapped = unb64(summaryBlobB64);
+    const ephPub = await subtle().importKey(
+      "spki",
+      ephDer,
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      [],
+    );
+    const sharedBits = await subtle().deriveBits(
+      { name: "ECDH", public: ephPub },
+      therapistPrivateKey,
+      256,
+    );
+    shared = new Uint8Array(sharedBits);
+    salt = new Uint8Array(new ArrayBuffer(ephDer.length + thDer.length));
+    salt.set(ephDer, 0);
+    salt.set(thDer, ephDer.length);
+    kek = await hkdf(shared, salt, WRAP_INFO, KEY_SIZE);
+    const plain = await decrypt(
+      kek,
+      wrapped,
+      buildAad(SUMMARY_CONTEXT, userId, therapistId),
+    );
+    const parsed = JSON.parse(new TextDecoder().decode(plain)) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const raw = parsed as Record<string, unknown>;
+    const patterns =
+      typeof raw.patterns === "number" && Number.isFinite(raw.patterns)
+        ? Math.max(0, Math.floor(raw.patterns))
+        : 0;
+    const newest = typeof raw.newest === "string" ? raw.newest.slice(0, 10) : null;
+    const forDate = typeof raw.for_date === "string" ? raw.for_date.slice(0, 10) : null;
+    return { patterns, sensitive: raw.sensitive === true, newest, forDate };
+  } catch {
+    // Tamper/relocation/wrong key: no summary, rendered as "—".
+    return null;
+  } finally {
     zeroize(ephDer, thDer, wrapped, salt, shared, kek);
   }
 }

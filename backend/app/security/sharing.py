@@ -125,7 +125,33 @@ def wrap_data_key(
     a fixed ephemeral key; production callers (none on the server) generate
     one per grant. Mirrors mobile/src/crypto/sharing.ts and the portal.
     """
-    if len(data_key) != crypto.KEY_SIZE:
+    return _ecies_wrap(
+        data_key,
+        therapist_pub_b64,
+        user_id,
+        therapist_id,
+        WRAP_CONTEXT,
+        require_key_size=True,
+        ephemeral_private=ephemeral_private,
+    )
+
+
+def _ecies_wrap(
+    plaintext: bytes,
+    therapist_pub_b64: str,
+    user_id: str,
+    therapist_id: str,
+    context: str,
+    *,
+    require_key_size: bool = False,
+    ephemeral_private: ec.EllipticCurvePrivateKey | None = None,
+) -> tuple[str, str]:
+    """The ECIES construction shared by every server→therapist wrap: an
+    ephemeral P-256 key per wrap, ECDH against the therapist's public key,
+    HKDF salted by BOTH public keys, AES-256-GCM with the AAD pinning the
+    (context, user, therapist) triple — the context separates the roles so
+    a key wrap can never be replayed as a summary wrap or vice versa."""
+    if require_key_size and len(plaintext) != crypto.KEY_SIZE:
         raise SharingError(f"data_key must be {crypto.KEY_SIZE} bytes")
     therapist_der = validate_public_key_b64(therapist_pub_b64)
     therapist_pub = _load_public(therapist_der)
@@ -135,8 +161,8 @@ def wrap_data_key(
         encoding=Encoding.DER, format=PublicFormat.SubjectPublicKeyInfo
     )
     kek = _kek(shared, eph_der, therapist_der)
-    aad = crypto.build_aad(WRAP_CONTEXT, user_id, therapist_id)
-    wrapped = crypto.encrypt(kek, data_key, aad)
+    aad = crypto.build_aad(context, user_id, therapist_id)
+    wrapped = crypto.encrypt(kek, plaintext, aad)
     return base64.b64encode(eph_der).decode("ascii"), base64.b64encode(wrapped).decode("ascii")
 
 
@@ -151,6 +177,27 @@ def unwrap_data_key(
     """Reference implementation of the portal-side unwrap. The portal knows
     its own public DER (or it is re-derived from the private key); the KEK
     salt needs it, so it is recomputed when not supplied."""
+    return _ecies_unwrap(
+        therapist_private,
+        ephemeral_pub_b64,
+        wrapped,
+        user_id,
+        therapist_id,
+        WRAP_CONTEXT,
+        therapist_pub_der=therapist_pub_der,
+    )
+
+
+def _ecies_unwrap(
+    therapist_private: ec.EllipticCurvePrivateKey,
+    ephemeral_pub_b64: str,
+    wrapped: bytes,
+    user_id: str,
+    therapist_id: str,
+    context: str,
+    *,
+    therapist_pub_der: bytes | None = None,
+) -> bytes:
     eph_der = validate_public_key_b64(ephemeral_pub_b64)
     eph_pub = _load_public(eph_der)
     shared = therapist_private.exchange(ec.ECDH(), eph_pub)
@@ -159,8 +206,44 @@ def unwrap_data_key(
             encoding=Encoding.DER, format=PublicFormat.SubjectPublicKeyInfo
         )
     kek = _kek(shared, eph_der, therapist_pub_der)
-    aad = crypto.build_aad(WRAP_CONTEXT, user_id, therapist_id)
+    aad = crypto.build_aad(context, user_id, therapist_id)
     return crypto.decrypt(kek, wrapped, aad)
+
+
+# --- caseload summaries ----------------------------------------------------------
+
+SUMMARY_CONTEXT = "caseload-summary"
+SUMMARY_MAX_BYTES = 512
+
+
+def wrap_summary_payload(
+    summary: bytes,
+    therapist_pub_b64: str,
+    user_id: str,
+    therapist_id: str,
+) -> tuple[str, str]:
+    """Wrap a small per-consent caseload summary to the therapist's public
+    key (the recompute path's server-side counterpart of the patient-side
+    data-key wrap — same construction, different AAD context, arbitrary
+    bounded payload). The plaintext exists only inside the processing
+    session, exactly like the patterns it summarizes."""
+    if len(summary) > SUMMARY_MAX_BYTES:
+        raise SharingError("summary payload too large")
+    return _ecies_wrap(summary, therapist_pub_b64, user_id, therapist_id, SUMMARY_CONTEXT)
+
+
+def unwrap_summary_payload(
+    therapist_private: ec.EllipticCurvePrivateKey,
+    ephemeral_pub_b64: str,
+    wrapped: bytes,
+    user_id: str,
+    therapist_id: str,
+) -> bytes:
+    """The portal-side counterpart (reference implementation; the portal
+    implements the same WebCrypto derivation)."""
+    return _ecies_unwrap(
+        therapist_private, ephemeral_pub_b64, wrapped, user_id, therapist_id, SUMMARY_CONTEXT
+    )
 
 
 def load_private_key_pkcs8(der: bytes) -> ec.EllipticCurvePrivateKey:

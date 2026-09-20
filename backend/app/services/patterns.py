@@ -284,6 +284,24 @@ class Pattern:
             )
         if self.kind == "inertia":
             return "Your mood has been carrying over from day to day more than usual for you."
+        if self.kind == "energy_inertia":
+            return "Your energy has been carrying over from day to day more than usual for you."
+        if self.kind == "pa_inertia":
+            return "Your positive feelings have been carrying over from day to day more than usual for you."
+        if self.kind == "na_inertia":
+            return "Your negative feelings have been carrying over from day to day more than usual for you."
+        if self.kind == "energy_mood_coupling":
+            return "Your energy and your mood have been moving together more closely than usual for you."
+        if self.kind == "sense_making":
+            return (
+                "Your writing has leaned more on sense-making words — like "
+                "'because' and 'realize' — than it used to."
+            )
+        if self.kind == "activity_diversity":
+            direction = self.detail.get("direction", "widened")
+            if direction == "narrowed":
+                return "The variety in your tagged activities has narrowed compared with your own usual."
+            return "The variety in your tagged activities has widened compared with your own usual."
         if self.kind == "instability":
             return "Your daily mood has swung more widely than usual for you these past weeks."
         if self.kind == "rumination":

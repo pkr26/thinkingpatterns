@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 const { vault } = await import("../src/vault");
-const { recordFeedbackTap, buildFeedbackBlob, clearFeedback } = await import("../src/questionFeedback");
+const { recordFeedbackTap, recordPatternMute, buildFeedbackBlob, clearFeedback } = await import("../src/questionFeedback");
 const envelope = await import("../src/crypto/envelope");
 
 const DATA_KEY = Buffer.alloc(32, 5);
@@ -49,5 +49,46 @@ describe("questionFeedback", () => {
     await recordFeedbackTap(DATA_KEY, USER, "temporal:work", true);
     const other = Buffer.alloc(32, 9);
     expect(await buildFeedbackBlob(other, USER)).toBeNull();
+  });
+});
+
+describe("pattern mutes riding the feedback channel (2026-09-19)", () => {
+  it("partitions mutes and unmutes into their own blob lists", async () => {
+    await recordFeedbackTap(DATA_KEY, USER, "temporal:work", true);
+    await recordPatternMute(DATA_KEY, USER, "topic:guitar", true);
+    await recordPatternMute(DATA_KEY, USER, "topic:taxes", true);
+    await recordPatternMute(DATA_KEY, USER, "topic:guitar", false);
+    const blob = await buildFeedbackBlob(DATA_KEY, USER);
+    expect(blob).toBeTruthy();
+    const plain = envelope.decrypt(
+      DATA_KEY,
+      Buffer.from(blob!, "base64"),
+      envelope.buildAad("feedback", USER),
+    );
+    const parsed = JSON.parse(plain.toString("utf8"));
+    expect(parsed.feedback).toEqual([{ pid: "temporal:work", resonated: true }]);
+    // Last write wins per pid: guitar was muted then unmuted.
+    expect(parsed.muted).toEqual(["topic:taxes"]);
+    expect(parsed.unmuted).toEqual(["topic:guitar"]);
+  });
+
+  it("a mute-only queue still ships a blob", async () => {
+    await recordPatternMute(DATA_KEY, USER, "rumination:abc123", true);
+    const blob = await buildFeedbackBlob(DATA_KEY, USER);
+    expect(blob).toBeTruthy();
+    const plain = envelope.decrypt(
+      DATA_KEY,
+      Buffer.from(blob!, "base64"),
+      envelope.buildAad("feedback", USER),
+    );
+    const parsed = JSON.parse(plain.toString("utf8"));
+    expect(parsed.feedback).toEqual([]);
+    expect(parsed.muted).toEqual(["rumination:abc123"]);
+  });
+
+  it("clearFeedback empties mute events with the taps", async () => {
+    await recordPatternMute(DATA_KEY, USER, "topic:guitar", true);
+    await clearFeedback(USER);
+    expect(await buildFeedbackBlob(DATA_KEY, USER)).toBeNull();
   });
 });

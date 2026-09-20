@@ -6,25 +6,27 @@
  * it never reaches a dialog: the STATUS decides the sentence. Local Errors
  * thrown by our own code carry copy we wrote and may pass through; unknown
  * non-Error failures degrade to a calm generic line. Every sentence here
- * follows the app voice — honest, non-prescriptive, no blame.
+ * follows the app voice — honest, non-prescriptive, no blame. Catalog
+ * lookups (2026-09-19) keep both languages calm.
  */
 import { ApiError } from "../api/client";
+import { t } from "../strings";
 
 /** Human copy for a failed request, keyed on status — never on detail. */
 export function requestFailureCopy(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 0) return "Couldn't reach the server — check your connection.";
-    if (err.status === 401) return "Session expired — please unlock again.";
-    if (err.status === 403) return "The server refused that request.";
-    if (err.status === 404) return "That isn't on the server (anymore).";
-    if (err.status === 409) return "That conflicts with something the server already has.";
-    if (err.status === 413) return "That's more data than the server can accept.";
-    if (err.status === 429) return "Too many attempts — wait a moment, then try again.";
-    if (err.status >= 500) return "The server hit a problem — try again in a moment.";
-    return "The server didn't accept that request.";
+    if (err.status === 0) return t("errors.offline");
+    if (err.status === 401) return t("errors.sessionExpired");
+    if (err.status === 403) return t("errors.forbidden");
+    if (err.status === 404) return t("errors.notFound");
+    if (err.status === 409) return t("errors.conflict");
+    if (err.status === 413) return t("errors.tooLarge");
+    if (err.status === 429) return t("errors.rateLimited");
+    if (err.status >= 500) return t("errors.serverError");
+    return t("errors.rejected");
   }
   if (err instanceof Error) return err.message; // our own copy, not server text
-  return "Something went wrong — try again.";
+  return t("errors.generic");
 }
 
 /** For failures where even our local Error text would mislead (or where the

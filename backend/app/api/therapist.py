@@ -40,8 +40,19 @@ from ..locks import (
     sharing_patient_lock_key,
     sharing_therapist_lock_key,
 )
-from ..models import AccessLog, Consent, Entry, PairingCode, TherapistNote, User, new_id, utcnow
+from ..models import (
+    AccessLog,
+    Consent,
+    Entry,
+    Measure,
+    PairingCode,
+    TherapistNote,
+    User,
+    new_id,
+    utcnow,
+)
 from ..schemas import (
+    MeasureOut,
     InsightsResponse,
     NoteCreateRequest,
     NoteOut,
@@ -505,6 +516,15 @@ async def list_patients(
                             if active and consent.wrapped_key is not None
                             else None
                         ),
+                        # Same rule for the caseload summary: encrypted to
+                        # this therapist, gone the moment the grant does.
+                        summary_blob=(
+                            base64.b64encode(bytes(consent.summary_blob)).decode("ascii")
+                            if active and consent.summary_blob is not None
+                            else None
+                        ),
+                        summary_eph_pub=consent.summary_eph_pub if active else None,
+                        summary_updated_at=consent.summary_updated_at if active else None,
                     )
                 )
                 await session.commit()
@@ -559,6 +579,64 @@ async def read_patient_insights(
             )
             await session.commit()  # the audit row
     return response
+
+
+@router.get(
+    "/patients/{user_id}/measures",
+    response_model=list[MeasureOut],
+    dependencies=[
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-measures", "read_rate_limit", "read_rate_window")),
+    ],
+)
+async def read_patient_measures(
+    user_id: str,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+):
+    """The patient's recorded wellbeing measures (MBC, 2026-09-19): opaque
+    blobs under the SAME active-consent rule as entries — the portal
+    decrypts with the per-consent unwrapped data key and interprets;
+    this server never learns a score. Read is audit-logged like every
+    other patient-data access."""
+    if len(user_id) > 32:
+        raise ApiError(status_code=404, detail="patient not found", code="not_found")
+    out: list[MeasureOut] = []
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
+            await _active_consent(session, user, user_id)
+            rows = (
+                (
+                    await session.execute(
+                        select(Measure)
+                        .where(Measure.user_id == user_id)
+                        .order_by(Measure.measure_date.desc(), Measure.received_at.desc())
+                        .limit(200)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                out.append(
+                    MeasureOut(
+                        id=row.id,
+                        client_measure_id=row.client_measure_id,
+                        blob=base64.b64encode(bytes(row.blob)).decode("ascii"),
+                        measure_date=row.measure_date,
+                        received_at=row.received_at,
+                    )
+                )
+            session.add(
+                AccessLog(
+                    actor_id=user.id,
+                    actor_role=user.role,
+                    user_id=user_id,
+                    action="read_measures",
+                )
+            )
+            await session.commit()  # the audit row
+    return out
 
 
 @router.get(

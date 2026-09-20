@@ -31,7 +31,7 @@ function crisisTextUrl(): string {
  *  to telling the user the number/address itself. */
 function openExternal(url: string, fallback: string): void {
   Linking.openURL(url).catch(() => {
-    Alert.alert("Couldn't open it from here", fallback);
+    Alert.alert(tr("crisis.openFailedTitle"), fallback);
   });
 }
 
@@ -72,13 +72,13 @@ function ActionButton({
       ]}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${label} — ${detail}`}
+      accessibilityLabel={tr("crisis.actionA11y", { label, detail })}
     >
       <View style={{ flex: 1 }}>
         <Text style={[styles.actionLabel, { color: theme.colors.text }]}>{label}</Text>
         <Text style={[styles.actionDetail, { color: theme.colors.muted, fontSize: 13 }]}>{detail}</Text>
       </View>
-      <Text style={[styles.actionGo, { color: theme.colors.accent }]}>Go</Text>
+      <Text style={[styles.actionGo, { color: theme.colors.accent }]}>{tr("crisis.go")}</Text>
     </TouchableOpacity>
   );
 }
@@ -103,21 +103,19 @@ export function CrisisScreen({ region }: { region?: string }): React.JSX.Element
       <ActionButton
         label={tr("crisis.text741741")}
         detail={tr("crisis.text741741.detail")}
-        onPress={() => openExternal(crisisTextUrl(), "You can still text HOME to 741741 from your messages app.")}
+        onPress={() => openExternal(crisisTextUrl(), tr("crisis.text741741.fallback"))}
         theme={t}
       />
       <ActionButton
-        label="Chat online at 988lifeline.org"
-        detail="The same lifeline, in your browser — no phone call needed"
-        onPress={() =>
-          openExternal("https://988lifeline.org/chat", "You can still visit 988lifeline.org/chat in a browser.")
-        }
+        label={tr("crisis.chat")}
+        detail={tr("crisis.chat.detail")}
+        onPress={() => openExternal("https://988lifeline.org/chat", tr("crisis.chat.fallback"))}
         theme={t}
       />
       <ActionButton
-        label={usFirst ? "Call 911" : "Call 911 (US)"}
-        detail="If you are in immediate danger or have already hurt yourself"
-        onPress={() => openExternal("tel:911", "You can still dial 911 from your phone.")}
+        label={usFirst ? tr("crisis.emergency.us") : tr("crisis.emergency")}
+        detail={tr("crisis.emergency.detail")}
+        onPress={() => openExternal("tel:911", tr("crisis.emergency.fallback"))}
         theme={t}
       />
     </>
@@ -127,11 +125,11 @@ export function CrisisScreen({ region }: { region?: string }): React.JSX.Element
     <TouchableOpacity
       style={[styles.link, { minHeight: t.minTouch, justifyContent: "center" }]}
       hitSlop={t.touchSlop}
-      onPress={() => openExternal("https://findahelpline.com", "You can still visit findahelpline.com in a browser.")}
+      onPress={() => openExternal("https://findahelpline.com", tr("crisis.findhelpline.fallback"))}
       accessibilityRole="link"
-      accessibilityLabel="Open findahelpline.com — crisis lines worldwide"
+      accessibilityLabel={tr("crisis.findhelpline.detail")}
     >
-      <Text style={[styles.linkText, { color: t.colors.accent }]}>Open findahelpline.com</Text>
+      <Text style={[styles.linkText, { color: t.colors.accent }]}>{tr("crisis.findhelpline")}</Text>
     </TouchableOpacity>
   );
 
@@ -140,42 +138,27 @@ export function CrisisScreen({ region }: { region?: string }): React.JSX.Element
       style={[styles.container, { backgroundColor: t.colors.bg }]}
       contentContainerStyle={{ padding: t.spacing.xl, gap: 14 }}
     >
-      <Text style={[styles.headline, { color: t.colors.text }]}>If you are thinking about harming yourself</Text>
-      <Text style={[styles.body, { color: t.colors.body }]}>
-        Please reach out right now. These services are free, confidential, and staffed by trained
-        people — 24 hours a day.
-      </Text>
-      <Text style={[styles.body, { color: t.colors.body }]}>
-        What to expect when you call or text: a trained counselor answers, and you can say as much
-        or as little as you want — there is no script and no wrong way to start.
-      </Text>
+      <Text style={[styles.headline, { color: t.colors.text }]}>{tr("crisis.title")}</Text>
+      <Text style={[styles.body, { color: t.colors.body }]}>{tr("crisis.subtitle")}</Text>
+      <Text style={[styles.body, { color: t.colors.body }]}>{tr("crisis.whatToExpect")}</Text>
 
       {usFirst ? (
         <>
           {usServices}
-          <Text style={[styles.body, { color: t.colors.body }]}>
-            These are US services. Outside the US, find your local line at findahelpline.com.
-          </Text>
+          <Text style={[styles.body, { color: t.colors.body }]}>{tr("crisis.localeNote")}</Text>
           {helpline}
         </>
       ) : (
         <>
-          <Text style={[styles.body, { color: t.colors.body }]}>
-            Your region doesn't look like the US — find your local line first:
-          </Text>
+          <Text style={[styles.body, { color: t.colors.body }]}>{tr("crisis.regionNote")}</Text>
           {helpline}
-          <Text style={[styles.body, { color: t.colors.body }]}>
-            In the US, these are the national services (988 and 741741 are US-only):
-          </Text>
+          <Text style={[styles.body, { color: t.colors.body }]}>{tr("crisis.usServicesNote")}</Text>
           {usServices}
         </>
       )}
 
       <View style={[styles.divider, { backgroundColor: t.colors.border }]} />
-      <Text style={[styles.note, { color: t.colors.muted }]}>
-        MindPattern is a journal that shows you your own patterns. It is not therapy, not a medical
-        device, and not an emergency service. Talking to a professional is never a wrong move.
-      </Text>
+      <Text style={[styles.note, { color: t.colors.muted }]}>{tr("crisis.disclaimer")}</Text>
     </ScrollView>
   );
 }

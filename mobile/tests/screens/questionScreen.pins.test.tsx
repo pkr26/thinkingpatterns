@@ -107,6 +107,10 @@ function parentViewStyle(root: Awaited<ReturnType<typeof render>>, fragment: str
 
 describe("QuestionScreen pins: card presence guards", () => {
   it("no baseline card before any load (guard needs phase AND generic AND no question)", async () => {
+    // A server-side phase failure leaves the phase unknown and the generic
+    // unset — with the mount auto-load this is the only "no card" state a
+    // user can still see, and the render guard must hold in it.
+    vi.mocked(api.insights).mockRejectedValue(new ApiError(500, "boom"));
     const root = await render(<QuestionScreen />);
     await flush();
     expect(textOf(root)).not.toContain("For now, one question a day");
@@ -114,14 +118,13 @@ describe("QuestionScreen pins: card presence guards", () => {
   });
 
   it("a stale generic never re-renders after the phase moves to insight", async () => {
-    // Load 1: baseline — the generic pool fills the card.
+    // Load 1 (mount auto-load): baseline — the generic pool fills the card.
     vi.mocked(api.insights).mockResolvedValueOnce({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
-    // Load 2: insight phase, no stored question, no pattern strong enough.
+    // Load 2 (explicit): insight phase, no stored question, no pattern strong enough.
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     vi.mocked(api.questionToday).mockRejectedValue(new ApiError(404, "not found"));
     vi.mocked(api.recompute).mockResolvedValue({ question_stored: false } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain(GENERIC);
     await pressLabel(root, "Refresh");
@@ -134,9 +137,15 @@ describe("QuestionScreen pins: card presence guards", () => {
 
   it("the notice clears when a later load succeeds", async () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
-    vi.mocked(api.questionToday).mockRejectedValueOnce(new ApiError(404, "not found")).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
+    // 404 twice: the mount auto-load and the first explicit press; the
+    // second press then reads the stored question and clears the notice.
+    vi.mocked(api.questionToday)
+      .mockRejectedValueOnce(new ApiError(404, "not found"))
+      .mockRejectedValueOnce(new ApiError(404, "not found"))
+      .mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
     vi.mocked(api.recompute).mockResolvedValueOnce({ question_stored: false } as never);
     const root = await render(<QuestionScreen />);
+    await flush();
     await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("No recurring pattern has enough evidence yet");
@@ -151,7 +160,6 @@ describe("QuestionScreen pins: card presence guards", () => {
       .mockResolvedValueOnce({ phase: "baseline", active_days: 4, days_remaining: 26 } as never)
       .mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain("Day 4 of 30");
     await pressLabel(root, "Refresh");
@@ -165,7 +173,6 @@ describe("QuestionScreen pins: card presence guards", () => {
   it("a null days_remaining degrades to the default threshold — never 'Day 4 of 4'", async () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: null } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(textOf(root)).toContain(GENERIC);
     expect(textOf(root)).not.toContain("Day 4 of");
@@ -177,12 +184,18 @@ describe("QuestionScreen pins: busy during the consent-Continue recompute", () =
   it("Continue starts a busy recompute: screen spinner AND button spinner", async () => {
     await storage.removeItem(CONSENT_KEY);
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
-    vi.mocked(api.questionToday).mockRejectedValueOnce(new ApiError(404, "not found")).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
+    // 404 twice: the mount auto-load stops at the key step; the explicit
+    // press reaches the consent explainer and the recompute.
+    vi.mocked(api.questionToday)
+      .mockRejectedValueOnce(new ApiError(404, "not found"))
+      .mockRejectedValueOnce(new ApiError(404, "not found"))
+      .mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
     let resolveRecompute!: (v: unknown) => void;
     vi.mocked(api.recompute).mockImplementation(() => new Promise((resolve) => (resolveRecompute = resolve)));
     const { ActivityIndicator } = await import("react-native");
 
     const root = await render(<QuestionScreen />);
+    await flush();
     await pressLabel(root, "Show today's question");
     await flush();
     expect(lastAlert()[0]).toBe("Your key, briefly");
@@ -205,6 +218,9 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
     vi.mocked(api.questionToday).mockRejectedValue(new ApiError(404, "not found"));
     vi.mocked(api.recompute).mockResolvedValue({ question_stored: false } as never);
     const root = await render(<QuestionScreen />);
+    await flush();
+    // The mount auto-load stops at the key step; the explicit press runs the
+    // recompute whose "no pattern yet" notice is the pin's subject.
     await pressLabel(root, "Show today's question");
     await flush();
     expect(parentViewStyle(root, "No recurring pattern")).toEqual([
@@ -217,7 +233,6 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
   it("the baseline card: view, title, question, fine print, day counter, ghost button", async () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(parentViewStyle(root, "For now, one question a day")).toEqual([
       { padding: 22, gap: 12 },
@@ -244,7 +259,6 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     vi.mocked(api.questionToday).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
     const root = await render(<QuestionScreen />);
-    await pressLabel(root, "Show today's question");
     await flush();
     expect(parentViewStyle(root, "What repeats?")).toEqual([
       { padding: 22, gap: 12 },
@@ -267,9 +281,11 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
   });
 
   it("the caption carries its base + themed style array", async () => {
+    // Default mock = baseline: the mount auto-load swaps the caption to the
+    // on-device variant; its style array is the pin (same in both phases).
     const root = await render(<QuestionScreen />);
     await flush();
-    expect(styleArrayOfText(root, "held in memory for up to 5 minutes")).toEqual([
+    expect(styleArrayOfText(root, "nothing leaves this device for it")).toEqual([
       { textAlign: "center", marginTop: 8, lineHeight: 16 },
       { color: "#8a91a3", fontSize: 12 },
     ]);
@@ -295,7 +311,6 @@ describe("QuestionScreen pins: dialog and bridge contracts", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
     const nav = { navigate: vi.fn() };
     const root = await render(<QuestionScreen navigation={nav} />);
-    await pressLabel(root, "Show today's question");
     await flush();
     await pressLabel(root, "Write about this");
     await flush();

@@ -20,6 +20,14 @@ vi.mock("../src/offlineQueue", () => ({
   flushQueueOnReconnect: vi.fn(async () => {}),
 }));
 
+// The reminder reconciliation is likewise observed at the wiring boundary
+// (its logic is covered in tests/reminderSync.test.ts): the store must
+// reconcile ONCE per mount for the stored account, and never for none.
+const syncReminderSchedule = vi.fn(async () => false);
+vi.mock("../src/reminderSync", () => ({
+  syncReminderSchedule: (...args: unknown[]) => syncReminderSchedule(...(args as [string])),
+}));
+
 const { api, setUnauthorizedHandler } = await import("../src/api/client");
 const { abortInFlightFlush, flushQueueOnReconnect } = await import("../src/offlineQueue");
 const { resetApi } = await import("./helpers/apiMock");
@@ -44,6 +52,7 @@ beforeEach(() => {
   vi.mocked(AppState.addEventListener).mockClear();
   vi.mocked(abortInFlightFlush).mockClear();
   vi.mocked(flushQueueOnReconnect).mockClear();
+  syncReminderSchedule.mockClear();
   vault.lock();
   // Sign-out/origin-switch tests deliberately suppress stale editor cleanup.
   // A fresh authenticated test session re-enables normal draft stashing.
@@ -69,6 +78,30 @@ describe("SessionProvider", () => {
     );
     await flush();
     expect(textOf(second)).toBe("loggedOut|false|0|30");
+  });
+
+  it("reconciles the local reminder schedule once per mount for the stored account — never without one", async () => {
+    // App start with a stored account: the native schedule converges to
+    // the stored preference (opt-in only; reminders.ts defaults off).
+    await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    expect(syncReminderSchedule).toHaveBeenCalledTimes(1);
+    expect(syncReminderSchedule).toHaveBeenCalledWith("user-1");
+
+    // No account on the device: nothing to reconcile, no notification work.
+    syncReminderSchedule.mockClear();
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    expect(syncReminderSchedule).not.toHaveBeenCalled();
   });
 
   it("renders the loading gate until isLoggedIn resolves", async () => {

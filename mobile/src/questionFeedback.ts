@@ -8,6 +8,12 @@
  * server never sees plaintext pids and never learns what was answered
  * except inside the secure processing context. The brain's question
  * ranking reads the taps; after a successful recompute the queue clears.
+ *
+ * Pattern mutes (2026-09-19) ride the exact same channel: "stop showing me
+ * this" / unmute events queue locally, travel encrypted with the next
+ * recompute, and land in the brain's per-pattern muted set. Until that
+ * recompute runs, a mute is optimistic client state only — the pattern
+ * reappears if the queue is lost, which is the honest failure direction.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, encrypt, decrypt } from "./crypto/envelope";
@@ -21,7 +27,19 @@ export interface FeedbackTap {
   resonated: boolean;
 }
 
-async function readPending(dataKey: Buffer, userId: string): Promise<FeedbackTap[]> {
+/** A pattern mute/unmute request queued for the next recompute. */
+export interface MuteEvent {
+  pid: string;
+  mute: boolean;
+}
+
+export type FeedbackEvent = FeedbackTap | MuteEvent;
+
+function isTap(event: FeedbackEvent): event is FeedbackTap {
+  return typeof (event as FeedbackTap).resonated === "boolean";
+}
+
+async function readPending(dataKey: Buffer, userId: string): Promise<FeedbackEvent[]> {
   const raw = await AsyncStorage.getItem(key(userId));
   if (!raw) return [];
   try {
@@ -29,23 +47,35 @@ async function readPending(dataKey: Buffer, userId: string): Promise<FeedbackTap
     const parsed = JSON.parse(plain.toString("utf8")) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (t): t is FeedbackTap =>
-        typeof t === "object" && t !== null &&
-        typeof (t as FeedbackTap).pid === "string" && typeof (t as FeedbackTap).resonated === "boolean",
+      (e): e is FeedbackEvent =>
+        typeof e === "object" && e !== null && typeof (e as FeedbackEvent).pid === "string" &&
+        (typeof (e as FeedbackTap).resonated === "boolean" ||
+          typeof (e as MuteEvent).mute === "boolean"),
     );
   } catch {
     return []; // wrong key / corruption: disposable
   }
 }
 
-/** Record one tap (fire-and-forget friendly). */
+/** Record one tap or mute event (fire-and-forget friendly). */
 export async function recordFeedbackTap(
   dataKey: Buffer, userId: string, pid: string, resonated: boolean,
 ): Promise<void> {
+  await appendEvent(dataKey, userId, { pid, resonated });
+}
+
+/** Queue a pattern mute (or unmute) for the next recompute. */
+export async function recordPatternMute(
+  dataKey: Buffer, userId: string, pid: string, mute: boolean,
+): Promise<void> {
+  await appendEvent(dataKey, userId, { pid, mute });
+}
+
+async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent): Promise<void> {
   const keyCopy = Buffer.from(dataKey);
   try {
     const pending = await readPending(keyCopy, userId);
-    pending.push({ pid, resonated });
+    pending.push(event);
     const blob = encrypt(
       keyCopy,
       Buffer.from(JSON.stringify(pending.slice(-MAX_PENDING)), "utf8"),
@@ -58,7 +88,9 @@ export async function recordFeedbackTap(
 }
 
 /** The opaque blob for the recompute body, or null when nothing is pending.
- *  Encrypts under the DATA key with the server's feedback AAD. */
+ *  Encrypts under the DATA key with the server's feedback AAD. The shipped
+ *  shape partitions taps from mutes: {"feedback": [...], "muted": [pids],
+ *  "unmuted": [pids]} — the server applies each list separately. */
 export async function buildFeedbackBlob(
   dataKey: Buffer, userId: string,
 ): Promise<string | null> {
@@ -66,9 +98,24 @@ export async function buildFeedbackBlob(
   try {
     const pending = await readPending(keyCopy, userId);
     if (pending.length === 0) return null;
+    const taps = pending.filter(isTap) as FeedbackTap[];
+    // Last write wins per pid: an unmute queued after a mute (or the
+    // reverse) is the user's final word, and the server applies lists in
+    // muted-then-unmuted order anyway.
+    const mutes = new Map<string, boolean>();
+    for (const event of pending) {
+      if (!isTap(event)) mutes.set(event.pid, event.mute);
+    }
     const blob = encrypt(
       keyCopy,
-      Buffer.from(JSON.stringify({ feedback: pending }), "utf8"),
+      Buffer.from(
+        JSON.stringify({
+          feedback: taps,
+          muted: [...mutes.entries()].filter(([, m]) => m).map(([pid]) => pid),
+          unmuted: [...mutes.entries()].filter(([, m]) => !m).map(([pid]) => pid),
+        }),
+        "utf8",
+      ),
       buildAad("feedback", userId),
     );
     return blob.toString("base64");

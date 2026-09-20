@@ -1,0 +1,180 @@
+# Prometheus rules for the MindPattern API.
+#
+# OPERATOR TOOLING — same status as deploy/monitoring/prometheus.yml: opt-in,
+# outside the digest-pinned release contract (see deploy/monitoring/README.md).
+#
+# Every expression below uses ONLY metric names backend/app/metrics.py
+# actually renders (this is machine-checked by deploy/monitoring/verify.sh):
+#
+#   mindpattern_requests_total{status="2xx"|"3xx"|"4xx"|"5xx"}      counter
+#   mindpattern_recompute_seconds_bucket{le="0.25"|"0.5"|"1.0"|"2.0"|"5.0"|"15.0"|"60.0"|"+Inf"}
+#   mindpattern_recompute_seconds_count / mindpattern_recompute_seconds_sum
+#   mindpattern_llm_calls_total{outcome="success"|"failure"}        counter
+#   mindpattern_keystore_sessions                                   gauge
+#
+# plus Prometheus' own `up` (and `probe_success` if the blackbox job is
+# enabled). Two facts about the hand-rolled exposition, which the queries
+# account for:
+#   * a status family series appears only after its first response is
+#     observed — an absent {status="5xx"} numerator makes the ratio
+#     expression empty (correctly "no alert"), never zero-division noise;
+#   * le labels render as "0.25" … "5.0" … "+Inf" (Python str(float));
+#     histogram_quantile parses them as floats, so this is legal PromQL.
+#
+# SEVERITY MAPPING (docs/INCIDENT_RUNBOOK.md matrix; details in README.md):
+#   S2  service unusable — API down, 5xx storm, readyz failing
+#   S3  degraded — slow recomputes, LLM failure ratio
+#   The keystore alert starts at S2 and ESCALATES to S1 per the runbook's
+#   plaintext-exposure checklist, which names this exact metric.
+
+groups:
+  - name: mindpattern-api
+    rules:
+      # S2 — runbook "S2: API down". up==0 means the /metrics scrape fails:
+      # either the API process is down, or (check FIRST) the token/network
+      # wiring broke — a wrong MINDPATTERN_METRICS_TOKEN looks identical.
+      - alert: MindPatternAPIDown
+        expr: |
+          up{job="mindpattern-api"} == 0
+        for: 2m
+        labels:
+          severity: S2
+        annotations:
+          summary: "API metrics target down (scrape failing for 2m)"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S2: API down (first confirm the token is not the cause; a 401 on /metrics is an S3, a dead process is an S2)"
+
+      # S2 — runbook S2 lists "recomputes 500ing". 5m rate of the 5xx family
+      # against ALL families, >5% sustained 10m, with a minimal-traffic
+      # floor (>4 requests per 5m) so a near-idle instance does not page on
+      # one stray failure.
+      - alert: MindPatternHigh5xxRatio
+        expr: |
+          (
+            sum(rate(mindpattern_requests_total{status="5xx"}[5m]))
+              /
+            clamp_min(sum(rate(mindpattern_requests_total[5m])), 1e-9)
+          ) > 0.05
+            and
+          sum(increase(mindpattern_requests_total[5m])) > 4
+        for: 10m
+        labels:
+          severity: S2
+        annotations:
+          summary: "More than 5% of API responses are 5xx for 10m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S2 (container logs for tracebacks; a 5xx storm from recomputes is the listed S2 example)"
+
+      # S3 — runbook S2/S3 boundary: "mindpattern_recompute_seconds p95
+      # climbing past ~5s means the analyze slots are saturated". The
+      # threshold 5s matches an actual bucket edge (le="5.0"). With zero
+      # recomputes in the window all bucket rates are zero and the quantile
+      # is NaN — no alert, correctly.
+      - alert: MindPatternRecomputeP95Slow
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(mindpattern_recompute_seconds_bucket[10m]))
+          ) > 5
+        for: 10m
+        labels:
+          severity: S3
+        annotations:
+          summary: "Recompute p95 above 5s for 10m — analyze slots saturating"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S3 (shed load via MINDPATTERN_PROCESSING_RATE_LIMIT; do NOT scale to a second instance)"
+
+      # S2, escalate to S1 — the runbook's plaintext-exposure checklist step
+      # names this exact gauge. Sessions are TTL-bounded (<=5 min) and
+      # purged on every mint/get/pop, per-account cap 4, analyze limiter 4
+      # concurrent. A gauge above 16 = 4x the analyze slots, held for 15m =
+      # three full TTL windows, means data keys are being minted and NOT
+      # consumed — the plaintext-retention precondition, not yet proof of
+      # exposure.
+      - alert: MindPatternKeystoreSessionsStuck
+        expr: |
+          mindpattern_keystore_sessions > 16
+        for: 15m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Processing sessions not being consumed (>16 for 15m)"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S1 checklist step 2 (this metric, sustained high); escalate to S1 only if the checklist confirms exposure"
+
+      # S3 — LLM egress is consent-gated enrichment; core journaling works
+      # without it. Ratio over 15m with an absolute floor of >2 calls in the
+      # window so one failed call on a quiet instance does not page. The
+      # failure counter series only exists after the first failure; no
+      # failures -> empty expression -> no alert.
+      - alert: MindPatternLLMFailureRatioHigh
+        expr: |
+          (
+            sum(rate(mindpattern_llm_calls_total{outcome="failure"}[15m]))
+              /
+            clamp_min(sum(rate(mindpattern_llm_calls_total[15m])), 1e-9)
+          ) > 0.25
+            and
+          sum(increase(mindpattern_llm_calls_total[15m])) > 2
+        for: 15m
+        labels:
+          severity: S3
+        annotations:
+          summary: "More than 25% of LLM calls failing for 15m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S3 (provider degraded); the S1 LLM path is about exposure, not failure ratio"
+
+  # --------------------------------------------------------------------
+  # OPTIONAL: blackbox /readyz probe. Uncomment ONLY if you enabled the
+  # `blackbox` profile and the mindpattern-blackbox scrape job — without
+  # the exporter running this would reference a series that never exists
+  # (harmless, but dishonest on the targets page).
+  # --------------------------------------------------------------------
+  # - name: mindpattern-blackbox
+  #   rules:
+  #     # S2 — /readyz failing means DB unreachable at the required schema
+  #     # head; the app is fail-closed and serves nothing. Distinct from
+  #     # MindPatternAPIDown: the API process may be perfectly alive.
+  #     - alert: MindPatternReadyzProbeFailing
+  #       expr: |
+  #         probe_success{job="mindpattern-blackbox"} == 0
+  #       for: 5m
+  #       labels:
+  #         severity: S2
+  #       annotations:
+  #         summary: "Blackbox probe of /readyz failing for 5m (DB path broken)"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — S2: API down, step 1 (/readyz 503 -> database)"
+
+  # --------------------------------------------------------------------
+  # OPTIONAL: backup freshness via node_exporter's textfile collector.
+  # The compose backup service exports NO Prometheus metrics — the honest
+  # mechanism is a push-style heartbeat: deploy/monitoring/
+  # backup-heartbeat.sh (usually invoked by check-backup-freshness.sh from
+  # cron) writes mindpattern_backup_last_success_timestamp_seconds into the
+  # textfile directory with the mtime of the newest encrypted dump.
+  # Uncomment BOTH rules only if node_exporter scrapes that directory AND
+  # the heartbeat cron is wired (README, "Backup freshness"). The
+  # cron-only alternative needs none of this — see check-backup-freshness.sh.
+  # --------------------------------------------------------------------
+  # - name: mindpattern-backup-textfile
+  #   rules:
+  #     # S2 — recovery capability degraded. Daily dumps + slack: 26h means
+  #     # the newest dump missed at least one full cycle. Keep this threshold
+  #     # equal to BACKUP_MAX_AGE_HOURS in check-backup-freshness.sh.
+  #     - alert: MindPatternBackupHeartbeatStale
+  #       expr: |
+  #         time() - mindpattern_backup_last_success_timestamp_seconds > 26 * 60 * 60
+  #       for: 15m
+  #       labels:
+  #         severity: S2
+  #       annotations:
+  #         summary: "Newest encrypted backup is older than 26h"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — Backups / Off-site replication (treat a stale backup as an amplifier for any live incident)"
+  #
+  #     # S2 — the heartbeat series is absent entirely: the cron wiring or
+  #     # the textfile scrape broke (a broken freshness check must not fail
+  #     # silent, which is exactly what absence detection is for).
+  #     - alert: MindPatternBackupHeartbeatAbsent
+  #       expr: |
+  #         absent(mindpattern_backup_last_success_timestamp_seconds)
+  #       for: 30m
+  #       labels:
+  #         severity: S2
+  #       annotations:
+  #         summary: "Backup heartbeat metric never appeared (wiring broken)"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — Backups; deploy/monitoring/README.md, Backup freshness"

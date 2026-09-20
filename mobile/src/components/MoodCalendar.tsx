@@ -11,9 +11,16 @@
 import React, { useMemo, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../theme";
+import { t as tr, dateLocaleTag } from "../strings";
 import { CalendarDay, monthGrid, monthLabel, stepMonth } from "../historyFind";
 
-const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"] as const;
+/** Monday-first weekday initials per locale (en: M T W T F S S; es: L M X
+ *  J V S D) via Intl narrow weekdays from a stable Monday anchor — no
+ *  per-language tables to keep in sync. */
+function weekdayInitials(): string[] {
+  const fmt = new Intl.DateTimeFormat(dateLocaleTag(), { weekday: "narrow", timeZone: "UTC" });
+  return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(Date.UTC(2024, 0, 1 + i))));
+}
 
 export function MoodCalendar({
   dayMoods,
@@ -44,13 +51,13 @@ export function MoodCalendar({
     <View
       style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}
       accessibilityRole="summary"
-      accessibilityLabel={`Calendar, ${monthLabel(view.year, view.month)}. Dots mark journaled days.`}
+      accessibilityLabel={tr("calendar.a11y", { month: monthLabel(view.year, view.month) })}
     >
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => setView(stepMonth(view.year, view.month, -1))}
           accessibilityRole="button"
-          accessibilityLabel="Previous month"
+          accessibilityLabel={tr("calendar.prevMonth")}
           hitSlop={t.touchSlop}
           style={styles.arrow}
         >
@@ -62,7 +69,7 @@ export function MoodCalendar({
         <TouchableOpacity
           onPress={() => setView(stepMonth(view.year, view.month, 1))}
           accessibilityRole="button"
-          accessibilityLabel="Next month"
+          accessibilityLabel={tr("calendar.nextMonth")}
           hitSlop={t.touchSlop}
           style={styles.arrow}
         >
@@ -70,7 +77,7 @@ export function MoodCalendar({
         </TouchableOpacity>
       </View>
       <View style={styles.grid}>
-        {WEEKDAY_LABELS.map((label, i) => (
+        {weekdayInitials().map((label, i) => (
           <Text key={`${label}-${i}`} style={{ color: t.colors.muted, fontSize: 10, textAlign: "center", width: CELL_WIDTH }}>
             {label}
           </Text>
@@ -98,8 +105,10 @@ export function MoodCalendar({
               accessibilityRole="button"
               accessibilityLabel={
                 journaled
-                  ? `${cell.iso}, journaled${selected ? ", selected" : ""}`
-                  : `${cell.iso}, no entry`
+                  ? selected
+                    ? tr("calendar.dayJournaledSelected", { date: cell.iso })
+                    : tr("calendar.dayJournaled", { date: cell.iso })
+                  : tr("calendar.dayNoEntry", { date: cell.iso })
               }
               accessibilityState={selected ? { selected: true } : undefined}
             >

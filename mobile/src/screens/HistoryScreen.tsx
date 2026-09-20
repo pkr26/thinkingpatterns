@@ -45,6 +45,7 @@ import { useTheme } from "../theme";
 import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
 import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
 import { requestFailureCopy } from "../components/errors";
+import { t as tr, dateLocaleTag } from "../strings";
 
 /** History reveals in calm batches instead of one endless scroll. */
 const PAGE_SIZE = 50;
@@ -59,8 +60,6 @@ const SNIPPET_CHARS = 140;
 const MAX_ENTRY_CHARS = 100_000;
 const SHOW_COUNT_ABOVE = 90_000;
 const STATUS_MS = 2_600;
-const SNAPSHOT_RELOAD_STATUS =
-  "Your journal changed while older entries were loading. Reloading the latest history from the start.";
 
 interface HistoryEntry {
   clientEntryId: string;
@@ -69,6 +68,10 @@ interface HistoryEntry {
   text: string;
   /** The day's explicit check-in pick, when one was made (else null). */
   sentiment: number | null;
+  /** The v2 structured channels, preserved through an edit (else default). */
+  energy: number | null;
+  sleep: number | null;
+  tags: string[];
 }
 
 type Mode =
@@ -76,13 +79,13 @@ type Mode =
   | { kind: "detail"; entry: HistoryEntry }
   | { kind: "edit"; entry: HistoryEntry };
 
-/** "2026-09-03" → "Thursday, September 3, 2026". The locale is pinned so
- *  every device renders the same shape; a garbage date falls back to the
- *  raw string instead of crashing the row. */
+/** "2026-09-03" → "Thursday, September 3, 2026" (es: "jueves, 3 de
+ *  septiembre de 2026") per the app locale; a garbage date falls back to
+ *  the raw string instead of crashing the row. */
 export function formatEntryDate(iso: string): string {
   const parsed = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  return parsed.toLocaleDateString(dateLocaleTag(), { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 }
 
 function snippetOf(text: string): string {
@@ -97,6 +100,34 @@ function sanitizeSentiment(value: unknown): number | null {
   // Stryker disable next-line LogicalOperator,ConditionalExpression: value arrives JSON-parsed from the entry blob; Number.isFinite is false for every non-number, so || vs && and dropping the typeof arm differ only for NaN/Infinity numbers, which JSON cannot encode
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.max(-1, Math.min(1, value));
+}
+
+/** The v2 structured channels get the same type-check-and-clamp treatment:
+ *  they ride back through encryptEntry on every edit, so a malformed value
+ *  must degrade to "absent", never to a payload the server would reject. */
+function sanitizeEnergy(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(-1, Math.min(1, value));
+}
+
+function sanitizeSleep(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.round(value) >= 1 && Math.round(value) <= 5 ? Math.round(value) : null;
+}
+
+/** Mirrors the server's tag cleaning (insights.py): strip, lowercase,
+ * truncate to 24, drop empties and duplicates, cap at 8 — everything that
+ * survives can round-trip through a re-encrypt without rejection. */
+function sanitizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const cleaned: string[] = [];
+  for (const tag of value) {
+    if (typeof tag !== "string") continue;
+    const clean = tag.trim().toLowerCase().slice(0, 24);
+    if (clean && !cleaned.includes(clean)) cleaned.push(clean);
+    if (cleaned.length >= 8) break;
+  }
+  return cleaned;
 }
 
 export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.Element {
@@ -189,7 +220,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     try {
       const userId = await api.getUserId();
       if (loadEpoch !== historyLoadEpochRef.current) return;
-      if (!userId) throw new Error("account id missing — sign in again");
+      if (!userId) throw new Error(tr("common.accountMissing"));
       const page = await api.listEntriesPage({
         limit: SERVER_PAGE_SIZE,
         offset: 0,
@@ -208,6 +239,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             receivedAt: typeof row.received_at === "string" ? row.received_at : "",
             text: typeof payload.text === "string" ? payload.text : "",
             sentiment: sanitizeSentiment(payload.sentiment),
+            energy: sanitizeEnergy(payload.energy),
+            sleep: sanitizeSleep(payload.sleep),
+            tags: sanitizeTags(payload.tags),
           });
         } catch {
           // Tampered or wrong-key blob: skipped (never rendered raw), and
@@ -253,7 +287,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         historyLimitRef.current = false;
         setHistoryLimitReached(false);
       } else if (err instanceof ApiError && err.status === 409) {
-        setError("Your journal changed while it was loading. Try again to reload the latest history.");
+        setError(tr("history.revisionConflict"));
       } else {
         setError(requestFailureCopy(err));
       }
@@ -345,7 +379,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     try {
       const userId = await api.getUserId();
       if (loadEpoch !== historyLoadEpochRef.current) return;
-      if (!userId) throw new Error("account id missing — sign in again");
+      if (!userId) throw new Error(tr("common.accountMissing"));
       const offset = nextOffset;
       const page = await api.listEntriesPage({
         limit: Math.min(SERVER_PAGE_SIZE, remainingRows),
@@ -362,7 +396,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         // The page client normally catches this first. Retain a UI-level
         // guard so a future alternate client/mock cannot append a page from a
         // different snapshot (including a mixed legacy/modern deployment).
-        showStatus(SNAPSHOT_RELOAD_STATUS, "neutral");
+        showStatus(tr("history.snapshotReload"), "neutral");
         void load(true);
         return;
       }
@@ -378,6 +412,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             receivedAt: typeof row.received_at === "string" ? row.received_at : "",
             text: typeof payload.text === "string" ? payload.text : "",
             sentiment: sanitizeSentiment(payload.sentiment),
+            energy: sanitizeEnergy(payload.energy),
+            sleep: sanitizeSleep(payload.sleep),
+            tags: sanitizeTags(payload.tags),
           });
         } catch {
           failed += 1;
@@ -406,10 +443,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     } catch (err) {
       if (loadEpoch !== historyLoadEpochRef.current) return;
       if (err instanceof ApiError && err.status === 409) {
-        showStatus(SNAPSHOT_RELOAD_STATUS, "neutral");
+        showStatus(tr("history.snapshotReload"), "neutral");
         void load(true);
       } else {
-        Alert.alert("Could not load older entries", requestFailureCopy(err));
+        Alert.alert(tr("history.loadOlderFailedTitle"), requestFailureCopy(err));
       }
     } finally {
       loadingMoreRef.current = false;
@@ -432,7 +469,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state fails the edit/detail checks and falls through to the identical list return
       setMode({ kind: "list" });
       // Stryker disable next-line StringLiteral: InlineStatus only branches on tone === "ok"; tone "" colors exactly like "neutral"
-      showStatus("Entry deleted", "neutral");
+      showStatus(tr("history.entryDeleted"), "neutral");
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         // Already gone server-side: the end state the user asked for.
@@ -440,14 +477,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
         setMode({ kind: "list" });
         // Stryker disable next-line StringLiteral: InlineStatus only branches on tone === "ok"; tone "" colors exactly like "neutral"
-        showStatus("Entry deleted", "neutral");
+        showStatus(tr("history.entryDeleted"), "neutral");
       } else if (err instanceof ApiError && err.status === 0) {
-        Alert.alert(
-          "Needs a connection",
-          "Deleting removes the entry from the server, so it can't run offline. Connect and try again — nothing was changed.",
-        );
+        Alert.alert(tr("history.needsConnectionTitle"), tr("history.deleteOfflineBody"));
       } else {
-        Alert.alert("Could not delete", requestFailureCopy(err));
+        Alert.alert(tr("history.couldNotDeleteTitle"), requestFailureCopy(err));
       }
     } finally {
       busyRef.current = false;
@@ -458,22 +492,22 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   /** Calm double confirmation: scope first ("every device"), permanence
    *  second. Neither dialog rushes or shames. */
   const confirmDelete = (entry: HistoryEntry) => {
-    Alert.alert(
-      "Delete this entry?",
-      "This removes the entry from your journal on every device. This can't be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () =>
-            Alert.alert("Final confirmation", "Deleting is permanent — there is no copy anywhere to restore from.", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Delete permanently", style: "destructive", onPress: () => void runDelete(entry) },
-            ]),
-        },
-      ],
-    );
+    Alert.alert(tr("history.deleteConfirmTitle"), tr("history.deleteConfirmBody"), [
+      { text: tr("common.cancel"), style: "cancel" },
+      {
+        text: tr("common.delete"),
+        style: "destructive",
+        onPress: () =>
+          Alert.alert(tr("common.finalConfirmation"), tr("history.finalConfirmBody"), [
+            { text: tr("common.cancel"), style: "cancel" },
+            {
+              text: tr("common.deletePermanently"),
+              style: "destructive",
+              onPress: () => void runDelete(entry),
+            },
+          ]),
+      },
+    ]);
   };
 
   const startEdit = (entry: HistoryEntry) => {
@@ -485,7 +519,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     const trimmed = draft.trim();
     if (!trimmed || busyRef.current) return;
     if (trimmed.length > MAX_ENTRY_CHARS) {
-      Alert.alert("Entry too long", `Entries are limited to ${MAX_ENTRY_CHARS.toLocaleString()} characters.`);
+      Alert.alert(
+        tr("history.tooLongTitle"),
+        tr("history.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }),
+      );
       return;
     }
     // Nothing actually changed: back to the entry, no server round-trip.
@@ -498,22 +535,33 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     try {
       const userId = await api.getUserId();
       if (!userId) {
-        Alert.alert("Session damaged", "Account id missing — please sign in again. Your text is still on screen.");
+        Alert.alert(tr("common.sessionDamagedTitle"), tr("history.sessionDamagedBody"));
         return;
       }
       // The same id is deliberately retained: it is part of the ciphertext
-      // AAD, and the backend replaces this one record atomically.
-      const { blobB64 } = encryptEntry(vault.get(), userId, entry.clientEntryId, trimmed, entry.entryDate, entry.sentiment);
+      // AAD, and the backend replaces this one record atomically. The v2
+      // structured channels (energy/sleep/tags) ride along unchanged — an
+      // edit fixes WORDS, it must not silently erase the day's check-ins
+      // (the pre-2026-09-19 bug this line closes).
+      const { blobB64 } = encryptEntry(
+        vault.get(),
+        userId,
+        entry.clientEntryId,
+        trimmed,
+        entry.entryDate,
+        entry.sentiment,
+        { energy: entry.energy, sleep: entry.sleep, tags: entry.tags },
+      );
       try {
         await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate);
       } catch (err) {
         if (err instanceof ApiError && err.status === 0) {
-          Alert.alert(
-            "Needs a connection",
-            "Updating needs a connection. Your original entry and this text are both still safe; try again when connected.",
-          );
+          Alert.alert(tr("history.needsConnectionTitle"), tr("history.updateOfflineBody"));
         } else {
-          Alert.alert("Could not update", `${requestFailureCopy(err)} Your original entry is unchanged and this text is still on screen.`);
+          Alert.alert(
+            tr("history.couldNotUpdateTitle"),
+            tr("history.updateFailedBody", { reason: requestFailureCopy(err) }),
+          );
         }
         return;
       }
@@ -524,9 +572,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       const updated: HistoryEntry = { ...entry, text: trimmed };
       setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
       setMode({ kind: "detail", entry: updated });
-      showStatus("Updated ✓", "ok");
+      showStatus(tr("history.updated"), "ok");
     } catch (err) {
-      Alert.alert("Could not update", requestFailureCopy(err));
+      Alert.alert(tr("history.couldNotUpdateTitle"), requestFailureCopy(err));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -541,7 +589,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       <View
         style={[styles.badge, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.md }]}
         accessibilityRole="text"
-        accessibilityLabel={`Mood: ${label}`}
+        accessibilityLabel={tr("history.moodBadgeA11y", { label })}
       >
         <Text style={{ color: t.colors.accent, fontSize: t.type.meta.fontSize }}>{label}</Text>
       </View>
@@ -579,7 +627,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
               touchActivity();
               setDraft(next);
             }}
-            accessibilityLabel="Edit entry"
+            accessibilityLabel={tr("history.editA11y")}
             // Privacy: keep journal text out of keyboard suggestion caches.
             autoCorrect={false}
             spellCheck={false}
@@ -588,16 +636,19 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           />
           {draft.length > SHOW_COUNT_ABOVE && (
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "right" }}>
-              {draft.length.toLocaleString()} / {MAX_ENTRY_CHARS.toLocaleString()}
+              {tr("history.charCount", {
+                current: draft.length.toLocaleString(dateLocaleTag()),
+                max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()),
+              })}
             </Text>
           )}
           <PrimaryButton
-            label="Save changes"
+            label={tr("history.saveChanges")}
             onPress={() => void saveEdit(entry)}
             disabled={!draft.trim()}
             busy={busy}
           />
-          <GhostButton label="Cancel" onPress={() => setMode({ kind: "detail", entry })} disabled={busy} />
+          <GhostButton label={tr("common.cancel")} onPress={() => setMode({ kind: "detail", entry })} disabled={busy} />
           <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -619,12 +670,12 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           {badge(entry)}
         </View>
         <Text style={{ color: t.colors.text, fontSize: t.type.bodyLarge.fontSize, lineHeight: 24 }}>{entry.text}</Text>
-        <PrimaryButton label="Edit this entry" onPress={() => startEdit(entry)} disabled={busy} />
-        <PrimaryButton label="Delete this entry" onPress={() => confirmDelete(entry)} busy={busy} danger />
+        <PrimaryButton label={tr("history.editThisEntry")} onPress={() => startEdit(entry)} disabled={busy} />
+        <PrimaryButton label={tr("history.deleteThisEntry")} onPress={() => confirmDelete(entry)} busy={busy} danger />
         <GhostButton
           // Stryker disable next-line ObjectLiteral, StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
           onPress={() => setMode({ kind: "list" })}
-          label="Back to history"
+          label={tr("history.backToHistory")}
           disabled={busy}
         />
         <InlineStatus message={status} tone={statusTone} />
@@ -663,21 +714,29 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           <Text style={{ color: t.colors.error, fontSize: t.type.bodySmall.fontSize }} accessibilityRole="alert">
             {error}
           </Text>
-          <GhostButton label="Try again" onPress={() => void load()} accessibilityLabel="Try loading your history again" />
+          <GhostButton
+            label={tr("common.tryAgain")}
+            onPress={() => void load()}
+            accessibilityLabel={tr("history.tryAgainA11y")}
+          />
         </View>
       )}
       {!loading && offline && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
-            Your journal history loads when you're online; today's writing always works offline.
+            {tr("history.offlineBody")}
           </Text>
-          <GhostButton label="Try again" onPress={() => void load()} accessibilityLabel="Try loading your history again" />
+          <GhostButton
+            label={tr("common.tryAgain")}
+            onPress={() => void load()}
+            accessibilityLabel={tr("history.tryAgainA11y")}
+          />
         </View>
       )}
       {!loading && !offline && !error && entries.length === 0 && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
-            No entries yet. What you write each day will gather here — decrypted only on this device.
+            {tr("history.emptyBody")}
           </Text>
         </View>
       )}
@@ -692,7 +751,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
               padding: 12,
               fontSize: t.type.body.fontSize,
             }}
-            placeholder="Search your entries"
+            placeholder={tr("history.searchPlaceholder")}
             placeholderTextColor={t.colors.placeholder}
             value={query}
             onChangeText={(next) => {
@@ -700,7 +759,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
               setQuery(next);
               setShown(PAGE_SIZE);
             }}
-            accessibilityLabel="Search your entries"
+            accessibilityLabel={tr("history.searchPlaceholder")}
             autoCorrect={false}
             spellCheck={false}
             autoCapitalize="none"
@@ -718,10 +777,12 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           />
           {(query.trim() !== "" || dayFilter !== null) && (
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-              {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"} match
-              {dayFilter !== null ? ` · ${dayFilter}` : ""}
-              {query.trim() !== "" ? " · search" : ""}
-              {hasMore ? " · loaded history only" : ""}
+              {visibleEntries.length === 1
+                ? tr("history.matchOne", { count: visibleEntries.length })
+                : tr("history.matchMany", { count: visibleEntries.length })}
+              {dayFilter !== null ? tr("history.filterDay", { date: dayFilter }) : ""}
+              {query.trim() !== "" ? tr("history.filterSearch") : ""}
+              {hasMore ? tr("history.filterLoaded") : ""}
             </Text>
           )}
         </>
@@ -732,7 +793,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, minHeight: t.minTouch }]}
           onPress={() => setMode({ kind: "detail", entry })}
           accessibilityRole="button"
-          accessibilityLabel={`Entry from ${formatEntryDate(entry.entryDate)}`}
+          accessibilityLabel={tr("history.entryA11y", { date: formatEntryDate(entry.entryDate) })}
         >
           <View style={styles.rowHeader}>
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>{entry.entryDate}</Text>
@@ -745,7 +806,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       ))}
       {visibleEntries.length > shown && (
         <GhostButton
-          label={`Show older entries (${visibleEntries.length - shown} more)`}
+          label={tr("history.showOlder", { count: visibleEntries.length - shown })}
           onPress={() => {
             touchActivity();
             setShown(shown + PAGE_SIZE);
@@ -754,26 +815,27 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       )}
       {visibleEntries.length <= shown && hasMore && !historyLimitReached && query.trim() === "" && dayFilter === null && (
         <GhostButton
-          label={loadingMore ? "Loading older entries…" : "Load older entries"}
+          label={loadingMore ? tr("history.loadingOlder") : tr("history.loadOlder")}
           onPress={() => void loadOlder()}
           disabled={loadingMore}
-          accessibilityLabel="Load older encrypted journal entries"
+          accessibilityLabel={tr("history.loadOlderA11y")}
         />
       )}
       {historyLimitReached && hasMore && (
         <Text accessibilityRole="alert" style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
-          This history view has reached its safe download limit ({MAX_HISTORY_ROWS} entries or {MAX_HISTORY_SERVER_PAGES} pages).
-          More encrypted history remains on the server.
+          {tr("history.limitReached", { rows: MAX_HISTORY_ROWS, pages: MAX_HISTORY_SERVER_PAGES })}
         </Text>
       )}
       {!loading && !offline && !error && entries.length > 0 && visibleEntries.length === 0 && (
         <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize, textAlign: "center" }}>
-          Nothing matches {query.trim() !== "" ? "that search" : "that day"}.
+          {query.trim() !== "" ? tr("history.noMatchSearch") : tr("history.noMatchDay")}
         </Text>
       )}
       {unreadable > 0 && (
         <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
-          {unreadable} {unreadable === 1 ? "entry" : "entries"} couldn't be read on this device.
+          {unreadable === 1
+            ? tr("history.unreadableOne", { count: unreadable })
+            : tr("history.unreadableMany", { count: unreadable })}
         </Text>
       )}
       <InlineStatus message={status} tone={statusTone} />

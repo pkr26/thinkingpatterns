@@ -163,7 +163,7 @@ def test_processing_tokens_are_43_char_urlsafe():
 
     store = InMemoryKeyStore()
     key = crypto.generate_key()
-    t = store.create(key, 60, owner='unbound-test')
+    t = store.create(key, 60, owner="unbound-test")
     assert len(t) == 43  # token_urlsafe(32) -> 43 chars; shorter means weaker entropy
     assert all(c.isalnum() or c in "-_" for c in t)
 
@@ -178,12 +178,12 @@ def test_enclave_error_messages():
 
     store = InMemoryKeyStore()
     with pytest.raises(ValueError, match=r"^key must be 32 bytes"):
-        store.create(b"short", 60, owner='unbound-test')
+        store.create(b"short", 60, owner="unbound-test")
     with pytest.raises(ValueError, match=r"^ttl must be positive"):
-        store.create(crypto.generate_key(), 0, owner='unbound-test')
+        store.create(crypto.generate_key(), 0, owner="unbound-test")
     with pytest.raises(KeyNotFound, match=r"^unknown processing session"):
         store.get("missing")
-    token = store.create(crypto.generate_key(), 10, now=0.0, owner='unbound-test')
+    token = store.create(crypto.generate_key(), 10, now=0.0, owner="unbound-test")
     with pytest.raises(KeyNotFound, match=r"^processing session expired"):
         store.get(token, now=100.0)
 
@@ -334,7 +334,7 @@ def test_ttl_of_one_second_is_valid():
     from app.security.enclave import InMemoryKeyStore
 
     store = InMemoryKeyStore()
-    store.create(crypto.generate_key(), 1, owner='unbound-test')
+    store.create(crypto.generate_key(), 1, owner="unbound-test")
     assert len(store) == 1
 
 
@@ -362,7 +362,7 @@ def test_purge_at_exact_expiry_boundary():
     from app.security.enclave import InMemoryKeyStore
 
     store = InMemoryKeyStore()
-    store.create(crypto.generate_key(), 10, now=0.0, owner='unbound-test')
+    store.create(crypto.generate_key(), 10, now=0.0, owner="unbound-test")
     assert store.purge_expired(now=10.0) == 1  # expiry instant counts as expired
 
 

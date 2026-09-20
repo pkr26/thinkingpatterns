@@ -133,6 +133,36 @@ TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
         "Lately one day's mood leans on the next more than it used to. When did that rhythm start?",
         "Some weeks drag their mood from day to day. What tends to break the pattern for you?",
     ),
+    "energy_inertia": (
+        "Your energy has been carrying over from day to day more than usual — what does a drained stretch look like from the inside?",
+        "Lately one day's energy leans on the next more than it used to. When did that start?",
+        "Some weeks drag their energy from day to day. What tends to lift yours?",
+    ),
+    "pa_inertia": (
+        "Your positive feelings have been carrying over from day to day more than usual — what does a good stretch feel like from the inside?",
+        "Lately one good day seems to lean on the next. When did that rhythm start?",
+        "Some weeks carry their brightness from day to day. What feeds yours?",
+    ),
+    "na_inertia": (
+        "Your negative feelings have been carrying over from day to day more than usual — what does a hard stretch feel like from the inside?",
+        "Lately one hard day seems to lean on the next. When did that start?",
+        "Some weeks drag their weight from day to day. What tends to interrupt it for you?",
+    ),
+    "energy_mood_coupling": (
+        "Your energy and mood have been tracking each other more closely than usual — what do those days look like together?",
+        "Lately when your energy shifts, your mood tends to move with it. What sits in the middle of that for you?",
+        "Your energy and mood have been moving in step lately. When do you first notice them linking up?",
+    ),
+    "sense_making": (
+        "Your writing has joined events to reasons more than it used to — what were you working out?",
+        "You've leaned on words like 'because' and 'realize' more lately. What clicked into place?",
+        "Your entries have moved from describing toward understanding. What changed to make that possible?",
+    ),
+    "activity_diversity": (
+        "The variety of things you tag has {direction} compared with your usual — what has that been like?",
+        "Compared with your own usual weeks, your activity variety has {direction} — what fills the difference for you?",
+        "Your activity variety has {direction} these past weeks — what does a usual week hold for you now?",
+    ),
     "instability": (
         "Your daily mood has swung more than usual these past weeks — what do the peaks and dips have in common?",
         "The distance between your good days and hard days has grown lately. What sits at either end?",
@@ -206,6 +236,15 @@ def pattern_is_sensitive(pattern: Pattern) -> bool:
     return False
 
 
+def pattern_is_muted(pattern: Pattern) -> bool:
+    """True when the patient muted this pattern (2026-09-19): the card
+    surfaces in the client's collapsed "muted" section, and question
+    generation skips it entirely — a muted topic must not come back as a
+    reflective question. Module-level so the insights API re-derives the
+    SAME pool when routing feedback taps back to pattern ids."""
+    return bool(pattern.detail.get("muted")) is True
+
+
 def feedback_rank(p: Pattern) -> tuple[int, int, int, str]:
     """Feedback-aware ordering (2026-09-17): patterns the user said "this
     resonated" about float up, "not me" sinks — the question learns from
@@ -228,6 +267,8 @@ def build_pool(patterns: Sequence[Pattern]) -> list[str]:
     """
     pool: list[str] = []
     for pattern in sorted(patterns, key=feedback_rank)[:MAX_PATTERN_QUESTIONS]:
+        if pattern_is_muted(pattern):
+            continue
         if pattern_is_sensitive(pattern):
             continue
         pool.extend(render_pattern_questions(pattern))

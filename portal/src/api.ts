@@ -313,6 +313,12 @@ export interface Patient {
   revoked_at: string | null;
   ephemeral_pub: string | null;
   wrapped_key: string | null;
+  /** Caseload summary (2026-09-19): ECIES-wrapped to this therapist at the
+   *  patient's last recompute; null until that first recompute and after a
+   *  revoke. Decrypted locally with decryptCaseloadSummary. */
+  summary_blob?: string | null;
+  summary_eph_pub?: string | null;
+  summary_updated_at?: string | null;
 }
 
 export interface InsightsSummary {
@@ -335,6 +341,14 @@ export interface PortalEntry {
  * raw ciphertext.  Never expose a caller-controlled larger page request. */
 export const THERAPIST_ENTRY_PAGE_SIZE = 25;
 export const THERAPIST_ENTRY_PAGE_BYTES = 2 * 1024 * 1024;
+
+export interface PortalMeasure {
+  id: string;
+  client_measure_id: string;
+  blob: string;
+  measure_date: string;
+  received_at: string;
+}
 
 export interface PatientEntriesPage {
   entries: PortalEntry[];
@@ -453,6 +467,11 @@ export const api = {
   patients: () => request<Patient[]>("GET", "/therapist/patients"),
   patientInsights: (userId: string) =>
     request<InsightsSummary>("GET", `/therapist/patients/${encodeURIComponent(userId)}/insights`),
+  patientMeasures: (userId: string) =>
+    request<PortalMeasure[]>(
+      "GET",
+      `/therapist/patients/${encodeURIComponent(userId)}/measures`,
+    ),
   patientEntries: async (
     userId: string,
     params: { since?: string; until?: string; offset?: number; expectedRevision?: string } = {},

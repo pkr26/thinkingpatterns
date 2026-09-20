@@ -2,32 +2,32 @@
   {
     "id": "E1.ts-dialog-bypass",
     "status": "FINDING",
-    "summary": "3/35 crisis samples miss the on-device dialog tier (the pre-encryption safety net): k ill myself,i don't see any future for me,everyone would be happier if i was gone"
+    "summary": "2/35 crisis samples miss the on-device dialog tier (the pre-encryption safety net): i don't see any future for me,everyone would be happier if i was gone"
   },
   {
     "id": "E1.ts-suppress-bypass",
-    "status": "FINDING",
-    "summary": "1/35 crisis samples also miss the client-side suppress re-check used by InsightsScreen before rendering quotes"
+    "status": "BLOCKED",
+    "summary": "0/35 crisis samples also miss the client-side suppress re-check used by InsightsScreen before rendering quotes"
   },
   {
     "id": "E1.ts-false-positives",
-    "status": "FINDING",
-    "summary": "benign texts firing the crisis dialog: that movie was suicide squad and i liked it"
+    "status": "BLOCKED",
+    "summary": "benign controls correctly silent"
   },
   {
     "id": "E1.ts-python-parity",
-    "status": "BLOCKED",
-    "summary": "client and server engines agree on every corpus sample (shared regex contract holds)"
+    "status": "FINDING",
+    "summary": "2 samples behave differently between engines"
   },
   {
     "id": "A2.offline-oracle",
     "status": "FINDING",
-    "summary": "offline dictionary attack on a stolen device recovered the password in 4 guesses (76 ms/guess at 600000 iters on ONE cpu core; no server round-trip, no throttle beyond PBKDF2 + a 500ms UI delay that an attacker's script does not honor); verifyUnlockProof('absent') also tells the attacker whether the oracle is enabled for an account"
+    "summary": "offline dictionary attack on a stolen device recovered the password in 4 guesses (50 ms/guess at 600000 iters on ONE cpu core; no server round-trip, no throttle beyond PBKDF2 + a 500ms UI delay that an attacker's script does not honor); verifyUnlockProof('absent') also tells the attacker whether the oracle is enabled for an account"
   },
   {
     "id": "A3.device-key-colocation",
-    "status": "FINDING",
-    "summary": "simulated backup (AsyncStorage contents) contains BOTH the device key ('@mindpattern/device_k') and the token ciphertext; a 10-line offline script decrypts the session token — Keychain/Keystore custody is the documented pending TODO (secureStore.ts header)"
+    "status": "BLOCKED",
+    "summary": "could not recover token from store dump"
   },
   {
     "id": "A4.ts-kdf-no-floor",
@@ -48,5 +48,10 @@
     "id": "F2.detail-sanitizer",
     "status": "BLOCKED",
     "summary": "scheme-less domains, phone digit runs and bidi/zero-width tricks are now stripped (2026-09-16 fix); spelled-out contacts (\"five five five\") remain a documented low-risk residual — they cannot resolve to a dialable destination"
+  },
+  {
+    "id": "F2.http-key-shipment",
+    "status": "FINDING",
+    "summary": "the data key was still POSTed over cleartext http"
   }
 ]

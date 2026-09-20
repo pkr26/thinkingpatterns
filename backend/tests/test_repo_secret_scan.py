@@ -95,7 +95,7 @@ def test_scan_detects_the_original_leak_shape():
         json.dumps({"ep": 1, "exp": 1999999999, "iat": 1999999990, "uid": "x" * 32}).encode()
     ).rstrip(b"=")
     header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=")
-    leaked = b'{"evidence": "201 {\'token\': \'%s.%s.%s\'}"}' % (header, claims, b"S" * 43)
+    leaked = b"{\"evidence\": \"201 {'token': '%s.%s.%s'}\"}" % (header, claims, b"S" * 43)
     assert _scan_bytes(leaked) == ["JWT-shaped token with exp/iat claims"]
 
     # And the shapes that must NOT fire: dotted version strings and

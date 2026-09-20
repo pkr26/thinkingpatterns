@@ -1,0 +1,110 @@
+# OPERATOR TOOLING — deliberately OUTSIDE the digest-pinned production
+# contract (deploy/README.md). The production docker-compose.yml runs only
+# immutable @sha256 release images; this file intentionally ships VERSION
+# TAGS because operator tooling must not weaken that contract. Before
+# production use, resolve and pin each digest — see README.md here,
+# "Digest pinning" (docker buildx imagetools inspect / docker manifest
+# inspect, then image: repo:tag@sha256:...).
+#
+# Nothing here starts with a plain `up`: prometheus + grafana are gated
+# behind the `monitoring` profile, the blackbox probe behind `blackbox`
+# (same pattern as the `backups` profile in the production file).
+#
+#   docker compose -f deploy/monitoring/docker-compose.yml \
+#     --profile monitoring up -d
+
+services:
+  prometheus:
+    # PIN A DIGEST before production use (see README.md here). v3.x line.
+    image: prom/prometheus:v3.4.1
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Aggregate counters are cheap; 30d comfortably spans the incident
+      # postmortem window (runbook: 5 business days) plus trend context.
+      - --storage.tsdb.retention.time=30d
+    environment:
+      # Consumed by prometheus.yml's ${MINDPATTERN_METRICS_TOKEN} expansion
+      # at config load; Prometheus refuses to start when unset (fail closed,
+      # matching the api's own behavior without the token).
+      MINDPATTERN_METRICS_TOKEN: ${MINDPATTERN_METRICS_TOKEN:?export MINDPATTERN_METRICS_TOKEN (the same value the api service uses) before starting the monitoring stack}
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks: [mindpattern, internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    mem_limit: 768M
+    # The Prometheus UI is intentionally NOT published. To look at it, use
+    # an SSH tunnel to the host and a temporary loopback publish, e.g.
+    #   ports: ["127.0.0.1:9090:9090"]
+    # (loopback only — same rule as the api service in the production file).
+
+  grafana:
+    # PIN A DIGEST before production use (see README.md here).
+    image: grafana/grafana:12.0.0
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # Fail closed like the rest of the stack: Grafana defaults to
+      # admin/admin, which must never reach a listening socket.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD (openssl rand -base64 24) in the owner-only secrets file}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      # Datasource only. No dashboards are shipped: add them in the UI, or
+      # provide a dashboards provider under
+      # deploy/monitoring/grafana/provisioning/dashboards/ and mount it the
+      # same way (README.md, "Grafana").
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      # Loopback only, like the api service: reach it via SSH tunnel or your
+      # own TLS-terminating proxy. Never expose Grafana to a network as-is.
+      - "127.0.0.1:3000:3000"
+    networks: [internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    mem_limit: 512M
+
+  blackbox:
+    # OPTIONAL uptime probe of /readyz. Enable together with the
+    # mindpattern-blackbox scrape job in prometheus.yml:
+    #   --profile monitoring --profile blackbox up -d
+    # PIN A DIGEST before production use (see README.md here).
+    image: prom/blackbox-exporter:v0.25.0
+    profiles: ["blackbox"]
+    networks: [mindpattern]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+    mem_limit: 96M
+
+networks:
+  # The production stack's default compose network, joined as external so
+  # prometheus/blackbox can reach the api by service DNS (api:8000) — the
+  # same mechanism the backup service uses for `pg_dump -h db`.
+  # For the deploy/README.md flow (APP_DIR=/srv/mindpattern) the project is
+  # `mindpattern`, so the network is mindpattern_default; a checkout-run
+  # dev stack uses mental_health_application_default. Confirm with
+  # `docker network ls` and export MINDPATTERN_COMPOSE_NETWORK if yours
+  # differs (e.g. a custom `compose -p <project>`).
+  mindpattern:
+    name: ${MINDPATTERN_COMPOSE_NETWORK:-mindpattern_default}
+    external: true
+  # Grafana must not sit on the production network; it only talks to
+  # prometheus over this one.
+  internal: {}
+
+volumes:
+  prometheus_data: {}
+  grafana_data: {}

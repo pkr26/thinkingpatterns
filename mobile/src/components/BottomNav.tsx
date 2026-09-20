@@ -17,6 +17,7 @@
 import React from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../theme";
+import { t as tr } from "../strings";
 
 export type NavDestination = "Entry" | "History" | "Insights" | "Question" | "Settings";
 
@@ -26,13 +27,16 @@ export interface BottomNavItem {
   help?: boolean;
 }
 
+// Labels resolve ONCE at module load: the locale itself is resolved once at
+// startup (there is no in-app language switch this wave), so per-render
+// lookups would only invite drift between this table and the rendered bar.
 export const BOTTOM_NAV_ITEMS: readonly BottomNavItem[] = [
-  { key: "Entry", label: "Today" },
-  { key: "History", label: "History" },
-  { key: "Insights", label: "Patterns" },
-  { key: "Question", label: "Question" },
-  { key: "Settings", label: "Settings" },
-  { key: "Crisis", label: "Get help", help: true },
+  { key: "Entry", label: tr("nav.today") },
+  { key: "History", label: tr("nav.history") },
+  { key: "Insights", label: tr("nav.patterns") },
+  { key: "Question", label: tr("nav.question") },
+  { key: "Settings", label: tr("nav.settings") },
+  { key: "Crisis", label: tr("nav.getHelp"), help: true },
 ] as const;
 
 export function BottomNav({
@@ -47,7 +51,7 @@ export function BottomNav({
     <View
       style={[styles.bar, { backgroundColor: t.colors.bg, borderTopColor: t.colors.border }]}
       accessibilityRole="tablist"
-      accessibilityLabel="Main navigation"
+      accessibilityLabel={tr("nav.a11y")}
     >
       {BOTTOM_NAV_ITEMS.map((item) => {
         const active = item.key === current;
@@ -66,7 +70,7 @@ export function BottomNav({
             onPress={() => navigation?.navigate(item.key)}
             accessibilityRole="tab"
             accessibilityState={active ? { selected: true } : undefined}
-            accessibilityLabel={help ? "Get help — crisis resources" : item.label}
+            accessibilityLabel={help ? tr("nav.getHelpA11y") : item.label}
           >
             <Text
               maxFontSizeMultiplier={1.3}

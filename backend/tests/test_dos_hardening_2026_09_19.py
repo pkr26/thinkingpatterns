@@ -86,9 +86,7 @@ def test_person_candidates_ranking_prefers_most_mentioned():
         # Every entry mentions ``frequent``; entry i also mentions a
         # rotating subset of the others so each clears 8 mentions.
         texts.append("Saw " + frequent + " plus " + " ".join(others[i % 30] for _ in range(1)))
-    window = [
-        _entry(texts[i], date.today() - timedelta(days=40 + i)) for i in range(len(texts))
-    ]
+    window = [_entry(texts[i], date.today() - timedelta(days=40 + i)) for i in range(len(texts))]
     # Each ``other`` appears in ~1 entry — below the bar — so only the
     # frequent name qualifies and the cap is not the thing under test
     # here; the point is the ranking key feeds off real counts.
@@ -104,7 +102,10 @@ def test_person_candidates_small_corpora_unchanged():
 
 def test_select_tag_themes_capped_and_deterministic():
     counts = {f"tag{_letters(i)}": 10 for i in range(100)}
-    days = {f"tag{_letters(i)}": {date.today() - timedelta(days=k) for k in range(10)} for i in range(100)}
+    days = {
+        f"tag{_letters(i)}": {date.today() - timedelta(days=k) for k in range(10)}
+        for i in range(100)
+    }
     kept = _select_tag_themes(counts, days)
     assert len(kept) == TAG_MAX_THEMES
     assert kept == _select_tag_themes(counts, days)
@@ -144,9 +145,7 @@ def _attack_corpus_names(names_n: int, entries: int) -> list[JournalEntry]:
     text = "Met " + " and ".join(names) + " today"
     start = date.today() - timedelta(days=40)
     step = max(1, 40 // entries)
-    return [
-        _entry(text, start + timedelta(days=i * step % 40)) for i in range(entries)
-    ]
+    return [_entry(text, start + timedelta(days=i * step % 40)) for i in range(entries)]
 
 
 def test_person_cardinality_perf_bounded():

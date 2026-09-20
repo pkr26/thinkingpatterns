@@ -1,0 +1,131 @@
+# OFF-SITE BACKUP REPLICATION — opt-in overlay, deliberately OUTSIDE the
+# digest-pinned production contract (deploy/README.md).
+#
+# Why a separate overlay instead of a service in the production file: the
+# production docker-compose.yml must keep rendering ONLY @sha256 release
+# images; a mutable rclone tag in that file would weaken the contract (a
+# loud TODO placeholder is not a digest). Operators opt in by layering this
+# file onto the main one — see deploy/backup-offsite/README.md for the
+# exact commands.
+#
+# WHAT THIS DOES: hourly `rclone copy` of the pgbackups named volume (the
+# same volume the existing `backup` service writes) to an S3-compatible
+# remote. `copy`, never `sync`: replication can never delete from the
+# remote — local retention pruning therefore does NOT propagate, and the
+# remote lifecycle/retention policy is the operator's explicit choice.
+#
+# WHAT SHIPS: CIPHERTEXT ONLY. Every file in pgbackups is client-side
+# encrypted by the backup service (AES-256-CBC/PBKDF2 under BACKUP_KEY,
+# with an HMAC sidecar — both the .dump.enc and the .dump.enc.hmac are
+# copied so a restore can verify integrity before decrypting). This service
+# never sees BACKUP_KEY. Consequence stated plainly: the off-site copy
+# makes BACKUP_KEY custody matter MORE — if the host and the key are lost
+# together, the journal corpus is gone. See docs/INCIDENT_RUNBOOK.md,
+# "BACKUP_KEY second-location custody".
+#
+# OPTIONAL — starts only when explicitly requested (own profile, so the
+# existing `--profile backups` behavior is unchanged):
+#   docker compose -f docker-compose.yml -f deploy/backup-offsite/docker-compose.yml \
+#     --profile backups --profile backups-offsite up -d backup backup-offsite
+#
+# The rclone image tag below is a mutable VERSION TAG (operator tooling);
+# resolve and pin its digest before production use:
+#   docker buildx imagetools inspect rclone/rclone:v1.69.1
+#   image: rclone/rclone:v1.69.1@sha256:<64-hex>
+services:
+  backup-offsite:
+    profiles: ["backups-offsite"]
+    image: rclone/rclone:v1.69.1
+    environment:
+      # rclone remote:destination spec, e.g. s3-offsite:mindpattern/backups
+      # (the remote must exist in BACKUP_OFFSITE_RCLONE_CONFIG).
+      BACKUP_OFFSITE_REMOTE: ${BACKUP_OFFSITE_REMOTE:?set BACKUP_OFFSITE_REMOTE (rclone remote:destination, e.g. s3-offsite:mindpattern/backups) in the owner-only secrets file}
+      # The FULL rclone config INI (remote name + credentials), inline.
+      # Keep it in the owner-only secrets file — never in the release env
+      # asset or the checkout. Multi-line value: wrap it in double quotes.
+      # It is written to /config/rclone.conf (mode 0600) at container start
+      # and never logged.
+      BACKUP_OFFSITE_RCLONE_CONFIG: ${BACKUP_OFFSITE_RCLONE_CONFIG:?set BACKUP_OFFSITE_RCLONE_CONFIG (full rclone config INI, double-quoted multi-line value) in the owner-only secrets file}
+      # Replication interval in seconds (default hourly; minimum 60).
+      BACKUP_OFFSITE_INTERVAL_SECONDS: ${BACKUP_OFFSITE_INTERVAL_SECONDS:-3600}
+      # One-shot recovery mode (docs/INCIDENT_RUNBOOK.md, Off-site
+      # replication): BACKUP_OFFSITE_MODE=fetch + BACKUP_FETCH_DIR=/restore
+      # copies REMOTE -> dir and exits instead of looping.
+      BACKUP_OFFSITE_MODE: ${BACKUP_OFFSITE_MODE:-loop}
+      BACKUP_FETCH_DIR: ${BACKUP_FETCH_DIR:-/restore}
+      # Points both the entrypoint and the healthcheck at the config file
+      # the entrypoint writes.
+      RCLONE_CONFIG: /config/rclone.conf
+    volumes:
+      # Same named volume the `backup` service writes, mounted READ-ONLY:
+      # replication must never be able to alter or delete local dumps, and
+      # a leaked rclone config cannot rewrite backup history.
+      - pgbackups:/backups:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    mem_limit: 256M
+    healthcheck:
+      # Observability only (Docker does not act on unhealthy by itself):
+      # proves config + credentials + remote reachability.
+      test: ["CMD-SHELL", "rclone lsf --max-depth 1 \"$$BACKUP_OFFSITE_REMOTE\" >/dev/null || exit 1"]
+      interval: 10m
+      timeout: 2m
+      retries: 3
+      start_period: 1m
+    # Same plain-POSIX-loop pattern as the backup service; `$$` escapes keep
+    # compose from interpolating the loop's own variables. The copy runs
+    # BEFORE the first sleep so `up -d` proves the remote path immediately.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -eu
+        umask 077
+        case "$$BACKUP_OFFSITE_REMOTE" in
+          *:*) ;;
+          *)
+            echo "BACKUP_OFFSITE_REMOTE must look like remote:destination (got '$$BACKUP_OFFSITE_REMOTE')" >&2
+            exit 1
+            ;;
+        esac
+        case "$$BACKUP_OFFSITE_RCLONE_CONFIG" in
+          '')
+            echo "BACKUP_OFFSITE_RCLONE_CONFIG is empty" >&2
+            exit 1
+            ;;
+        esac
+        interval=$${BACKUP_OFFSITE_INTERVAL_SECONDS:-3600}
+        case "$$interval" in
+          ''|*[!0-9]*) echo "BACKUP_OFFSITE_INTERVAL_SECONDS must be a positive whole number" >&2; exit 1 ;;
+        esac
+        [ "$$interval" -ge 60 ] || {
+          echo "BACKUP_OFFSITE_INTERVAL_SECONDS must be at least 60" >&2
+          exit 1
+        }
+        mkdir -p /config
+        printf '%s\n' "$$BACKUP_OFFSITE_RCLONE_CONFIG" > /config/rclone.conf
+        if [ "$$BACKUP_OFFSITE_MODE" = "fetch" ]; then
+          # One-shot recovery: pull the remote down for a host-gone restore.
+          mkdir -p "$$BACKUP_FETCH_DIR"
+          echo "backup-offsite: fetching $$BACKUP_OFFSITE_REMOTE into $$BACKUP_FETCH_DIR"
+          exec rclone copy "$$BACKUP_OFFSITE_REMOTE" "$$BACKUP_FETCH_DIR" --progress
+        fi
+        while :; do
+          if rclone copy /backups "$$BACKUP_OFFSITE_REMOTE" \
+              --transfers 4 --retries 3 --log-level INFO; then
+            echo "backup-offsite: replication pass complete at $$(date -u +%Y-%m-%dT%H:%M:%SZ) (copy semantics — remote files are never deleted)"
+          else
+            echo "backup-offsite: rclone copy failed at $$(date -u +%Y-%m-%dT%H:%M:%SZ); retrying in $$interval s" >&2
+          fi
+          sleep "$$interval"
+        done
+
+volumes:
+  # Declared by the MAIN docker-compose.yml; re-declared here so this
+  # overlay layers cleanly with -f. Always run it layered with the main
+  # file: on its own it would create an empty project volume and copy
+  # nothing (see README.md).
+  pgbackups:

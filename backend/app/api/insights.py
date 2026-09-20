@@ -41,17 +41,18 @@ import math
 import time
 from dataclasses import replace
 from datetime import date as date_type, timedelta
+from typing import NamedTuple
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Header, Request, Body
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
-from ..models import Entry, Insight, User, new_id, utcnow
+from ..models import Consent, Entry, Insight, User, new_id, utcnow
 from ..schemas import (
     InsightsResponse,
     ProcessingSessionRequest,
@@ -59,7 +60,7 @@ from ..schemas import (
     QuestionResponse,
     RecomputeResponse,
 )
-from ..security import crypto
+from ..security import crypto, sharing
 from ..security.crypto import TamperError
 from ..security.enclave import KeyNotFound, KeyStoreFull, SecureProcessingContext, zeroize
 from ..services import brain, llm, questions, threshold
@@ -127,7 +128,9 @@ async def _replace_insight(
         await session.execute(
             delete(Insight).where(Insight.user_id == user_id, Insight.kind == kind)
         )
-        session.add(Insight(user_id=user_id, kind=kind, for_date=None, blob=blob, state_seq=state_seq))
+        session.add(
+            Insight(user_id=user_id, kind=kind, for_date=None, blob=blob, state_seq=state_seq)
+        )
         return
     now = utcnow()
     stmt = (
@@ -373,15 +376,15 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
     from ..services import questions as question_engine
 
     # Mirror build_pool EXACTLY: top-5 by feedback rank FIRST, sensitive
-    # patterns skipped AFTER the slice. Filtering before the slice admits
-    # different patterns into the pool and misattributes taps to the wrong
-    # pattern whenever a sensitive pattern ranks in the top 5.
+    # and muted patterns skipped AFTER the slice. Filtering before the
+    # slice admits different patterns into the pool and misattributes taps
+    # to the wrong pattern whenever a skipped pattern ranks in the top 5.
     pool_patterns = [
         p
         for p in sorted(patterns, key=question_engine.feedback_rank)[
             : question_engine.MAX_PATTERN_QUESTIONS
         ]
-        if not question_engine.pattern_is_sensitive(p)
+        if not question_engine.pattern_is_sensitive(p) and not question_engine.pattern_is_muted(p)
     ]
     rendered: list[str] = []
     owners: list[str | None] = []
@@ -406,8 +409,19 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
     return chosen_owner if isinstance(chosen_owner, str) else None
 
 
-def _parse_feedback(raw: bytes) -> list[tuple[str, bool]]:
-    """Decoded question-feedback taps: [{"pid": str, "resonated": bool}].
+class FeedbackEvents(NamedTuple):
+    """Decoded client feedback riding a recompute (all optional, all
+    validated): question taps, pattern mutes, pattern unmutes."""
+
+    taps: list[tuple[str, bool]]
+    muted: list[str]
+    unmuted: list[str]
+
+
+def _parse_feedback(raw: bytes) -> FeedbackEvents:
+    """Decoded question-feedback taps and pattern mutes:
+    {"feedback": [{"pid": str, "resonated": bool}],
+     "muted": [pid, ...], "unmuted": [pid, ...]}.
     Hostile-shape rules like every payload: malformed input is a 400
     (entry_payload_malformed), never a silent skip or a crash."""
     try:
@@ -425,15 +439,22 @@ def _parse_feedback(raw: bytes) -> list[tuple[str, bool]]:
             detail="feedback blob is malformed",
             code="entry_payload_malformed",
         )
-    out: list[tuple[str, bool]] = []
+    taps: list[tuple[str, bool]] = []
     for item in events[:100]:
         if not isinstance(item, dict):
             continue
         pid = item.get("pid")
         resonated = item.get("resonated")
         if isinstance(pid, str) and 1 <= len(pid) <= 128 and isinstance(resonated, bool):
-            out.append((pid, resonated))
-    return out
+            taps.append((pid, resonated))
+
+    def _pid_list(key: str) -> list[str]:
+        raw_list = payload.get(key) if isinstance(payload, dict) else None
+        if not isinstance(raw_list, list):
+            return []
+        return [pid for pid in raw_list[:100] if isinstance(pid, str) and 1 <= len(pid) <= 128]
+
+    return FeedbackEvents(taps=taps, muted=_pid_list("muted"), unmuted=_pid_list("unmuted"))
 
 
 async def _load_rows(
@@ -683,12 +704,14 @@ async def recompute(
                     state_plain = bytes(plains[-tail]) if with_state and tail else None
                     fb_plain = bytes(plains[-1]) if with_feedback else None
                     entries = _parse_entries(entry_plains, analysis_dates)
-                    feedback_events = _parse_feedback(fb_plain) if fb_plain is not None else []
+                    events = _parse_feedback(fb_plain) if fb_plain is not None else None
                     result = brain.update(
                         brain.load_state(state_plain),
                         entries,
                         today,
-                        feedback=feedback_events or None,
+                        feedback=events.taps if events else None,
+                        muted=events.muted if events else None,
+                        unmuted=events.unmuted if events else None,
                     )
                     merged = list(result.surfaced)
                     if enricher is not None:
@@ -729,9 +752,7 @@ async def recompute(
                 # decrypt; the in-run decrypt then cannot fail and the
                 # ladder below remains as a backstop, not the gate.
                 try:
-                    feedback_plain = crypto.decrypt(
-                        data_key, feedback_item[1], feedback_item[0]
-                    )
+                    feedback_plain = crypto.decrypt(data_key, feedback_item[1], feedback_item[0])
                 except TamperError:
                     raise ApiError(
                         status_code=400,
@@ -865,6 +886,53 @@ async def recompute(
                     crypto.build_aad("question", user.id, today.isoformat()),
                 )
 
+            # Caseload summaries (2026-09-19): while the surfaced patterns'
+            # metadata exists in plaintext inside this processing scope,
+            # wrap a small per-consent summary to each ACTIVE therapist's
+            # public key (same ECIES construction as the data-key wrap,
+            # context "caseload-summary") and persist it in the write
+            # transaction below. The portal then triages with N small
+            # decrypts instead of N full insight blobs, and a sensitive
+            # card is discoverable without opening every chart. A malformed
+            # or missing therapist key only skips that consent — it must
+            # never fail the patient's recompute.
+            summary_wraps: list[tuple[str, str, bytes]] = []
+            summary_json = json.dumps(
+                {
+                    "v": 1,
+                    "patterns": len(merged),
+                    "sensitive": any(bool(p.detail.get("sensitive")) for p in merged),
+                    "newest": max(
+                        (
+                            p.detail.get("last_seen")
+                            for p in merged
+                            if isinstance(p.detail.get("last_seen"), str)
+                        ),
+                        default=None,
+                    ),
+                    "for_date": today.isoformat(),
+                },
+                separators=(",", ":"),
+            ).encode("utf-8")
+            async with sessionmaker() as session:
+                consent_rows = (
+                    await session.execute(
+                        select(Consent.id, Consent.therapist_id, User.wrap_pub_key)
+                        .join(User, Consent.therapist_id == User.id)
+                        .where(Consent.user_id == user.id, Consent.status == "active")
+                    )
+                ).all()
+            for consent_id, therapist_id, wrap_pub in consent_rows:
+                if not isinstance(wrap_pub, str) or not wrap_pub:
+                    continue
+                try:
+                    eph_b64, wrapped_b64 = sharing.wrap_summary_payload(
+                        summary_json, wrap_pub, user.id, therapist_id
+                    )
+                except sharing.SharingError:
+                    continue
+                summary_wraps.append((consent_id, eph_b64, base64.b64decode(wrapped_b64)))
+
             # WRITE phase: a second short transaction, opened only after the
             # analysis and encryption are done. Nothing here decrypts.
             async with sessionmaker() as session:
@@ -890,6 +958,19 @@ async def recompute(
                             Insight.for_date < today - timedelta(days=QUESTION_RETENTION_DAYS),
                         )
                     )
+                    # The status guard keeps a revoke that raced between the
+                    # summary read above and this write from resurrecting a
+                    # cleared row.
+                    for consent_id, eph_b64, wrapped_bytes in summary_wraps:
+                        await session.execute(
+                            update(Consent)
+                            .where(Consent.id == consent_id, Consent.status == "active")
+                            .values(
+                                summary_blob=wrapped_bytes,
+                                summary_eph_pub=eph_b64,
+                                summary_updated_at=utcnow(),
+                            )
+                        )
                     await session.commit()
                 except IntegrityError as exc:
                     if _is_fk_violation(exc):

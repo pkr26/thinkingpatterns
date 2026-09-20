@@ -412,7 +412,7 @@ async def test_llm_consent_requires_verifier(client, settings):
 def test_keystore_destroy_zeroizes_internal_bytes():
     store = InMemoryKeyStore()
     key = base64.b64decode("A" * 43 + "=")  # deterministic 32 bytes
-    token = store.create(key, 60, owner='unbound-test')
+    token = store.create(key, 60, owner="unbound-test")
     internal = store._keys[token][0]  # noqa: SLF001 — white-box pin
     store.destroy(token)
     assert all(b == 0 for b in internal), "destroy must scrub the stored key bytes"

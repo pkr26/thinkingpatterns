@@ -21,11 +21,19 @@
  * version of the same honesty sits under the button in the insight phase.
  * Errors are surfaced, never swallowed.
  *
+ * AUTO-LOAD (2026-09-19): the screen loads on mount — but only the
+ * key-free steps (phase check, stored question, baseline generic). When
+ * the load would reach the key-bearing step 3 it STOPS and leaves the
+ * "Show today's question" button: shipping the data key stays an explicit
+ * act of the user's finger (the red-team contract — no screen ships it
+ * automatically), so the mount effect never fires the consent explainer
+ * or a processing session either.
+ *
  * "Write about this" bridges question → journal: the text is stashed as
  * the draft (account-bound, memory-only) and EntryScreen's focus listener
  * restores it even while the editor stays mounted underneath.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, ApiError } from "../api/client";
 import { decryptQuestion } from "../crypto/MindPatternCrypto";
@@ -38,6 +46,7 @@ import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { hasKeyShipConsent, recordKeyShipConsent } from "../components/keyConsent";
 import { requestFailureCopy } from "../components/errors";
+import { t as tr } from "../strings";
 
 /** Calm copy for a failed load: calm request copy for ApiErrors, our own
  *  sentence for local Errors, one generic line for anything else. */
@@ -45,7 +54,7 @@ function failureCopy(err: unknown): string {
   // Stryker disable next-line ConditionalExpression: requestFailureCopy implements the identical three-way mapping (ApiError→status copy, Error→message, else generic) — delegating every error to it is behavior-preserving
   if (err instanceof ApiError) return requestFailureCopy(err);
   if (err instanceof Error) return err.message;
-  return "Something went wrong — try again.";
+  return tr("errors.generic");
 }
 
 export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.Element {
@@ -64,7 +73,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
 
   const decryptToday = async () => {
     const userId = await api.getUserId();
-    if (!userId) throw new Error("account id missing — sign in again");
+    if (!userId) throw new Error(tr("common.accountMissing"));
     const direct = await api.questionToday();
     // The blob's AAD is bound to the server's calendar date — always
     // decrypt with the for_date the server reported, never a locally
@@ -85,12 +94,10 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       const userId = await api.getUserId();
       if (userId) {
         await recordFeedbackTap(vault.get().dataKey, userId, pid, resonated);
-        setNotice(resonated
-          ? "Noted — questions like this will come up more often."
-          : "Noted — this one will step back.");
+        setNotice(resonated ? tr("question.noticedMore") : tr("question.noticedLess"));
       }
     } catch {
-      setNotice("Your answer stays on this device; it could not be saved just now.");
+      setNotice(tr("question.feedbackSaveFailed"));
       setFeedbackGiven(false);
     }
   };
@@ -100,7 +107,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     setError(message);
     if (!(err instanceof ApiError)) {
       // Local crypto failures are unexpected enough to be worth a dialog.
-      Alert.alert("Could not load question", message);
+      Alert.alert(tr("question.loadFailedTitle"), message);
     }
   };
 
@@ -134,7 +141,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       }
       if (feedbackBlob && userId) await clearFeedback(userId).catch(() => {});
       if (!result.question_stored) {
-        setNotice("No recurring pattern has enough evidence yet — keep writing.");
+        setNotice(tr("question.noEvidenceYet"));
         return;
       }
       const payload = await decryptToday();
@@ -148,7 +155,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     }
   };
 
-  const load = async () => {
+  const load = async (allowKeyShip: boolean) => {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -209,30 +216,29 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       // keys — a session/vault desync must never ship one account's key
       // into another's session — and the first time per account the user
       // is told plainly what happens BEFORE anything is sent.
+      // The mount auto-load stops HERE (allowKeyShip=false): the button
+      // below is the explicit act that may continue.
+      if (!allowKeyShip) return;
       const sessionUserId = await api.getUserId();
       if (!sessionUserId || vault.ownerUserId() !== sessionUserId) {
-        throw new Error("session and unlocked keys do not match — sign in again");
+        throw new Error(tr("question.sessionMismatch"));
       }
       // A failed consent READ errs toward showing the explainer again (the
       // user may never have been told), never toward skipping it silently.
       // Stryker disable next-line ArrowFunction: !undefined ≡ !false — a failed consent read shows the explainer either way
       if (!(await hasKeyShipConsent(sessionUserId).catch(() => false))) {
-        Alert.alert(
-          "Your key, briefly",
-          "To compute your patterns, your encryption key is sent to the server once — held in memory for up to 5 minutes, then destroyed. It is never stored, and it is only ever sent when you ask from this screen.",
-          [
-            { text: "Not now", style: "cancel" },
-            {
-              text: "Continue",
-              onPress: () => {
-                // Losing this write just shows the explainer again — never
-                // block the load on it.
-                void recordKeyShipConsent(sessionUserId).catch(() => {});
-                void computeQuestion();
-              },
+        Alert.alert(tr("question.keyShipTitle"), tr("question.keyShipBody"), [
+          { text: tr("common.notNow"), style: "cancel" },
+          {
+            text: tr("common.continue"),
+            onPress: () => {
+              // Losing this write just shows the explainer again — never
+              // block the load on it.
+              void recordKeyShipConsent(sessionUserId).catch(() => {});
+              void computeQuestion();
             },
-          ],
-        );
+          },
+        ]);
         return;
       }
       await computeQuestion();
@@ -243,10 +249,19 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     }
   };
 
+  // Key-free auto-load on mount: the baseline generic or an already-stored
+  // question becomes visible without a tap. The key-bearing step 3 never
+  // runs from here (see load's allowKeyShip guard) — mounting a screen
+  // must not ship the data key or fire the consent dialog at the user.
+  useEffect(() => {
+    void load(false);
+    // Stryker disable next-line ArrayDeclaration: the mount effect must run exactly once — load closes over stable setters and a boolean flag, so a literal dep array and [] are behaviorally identical
+  }, []);
+
   const onShowQuestion = () => {
     // A second tap while a load is in flight is a no-op.
     if (busy) return;
-    void load();
+    void load(true);
   };
 
   /** The question → journal bridge: the question becomes the start of
@@ -255,7 +270,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     // Stryker disable next-line ArrowFunction: null and undefined are both falsy in the !userId branch directly below
     const userId = await api.getUserId().catch(() => null);
     if (!userId) {
-      Alert.alert("Session damaged", "Account id missing — please sign in again.");
+      Alert.alert(tr("common.sessionDamagedTitle"), tr("question.accountMissingPlain"));
       return;
     }
     stashDraft(userId, text);
@@ -286,66 +301,63 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       )}
       {phase === "baseline" && generic && !question && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.xl }]}>
-          <Text style={[styles.cardTitle, { color: t.colors.accent }]}>Today</Text>
+          <Text style={[styles.cardTitle, { color: t.colors.accent }]}>{tr("question.today")}</Text>
           <Text style={[styles.question, { color: t.colors.text }]}>{generic}</Text>
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, lineHeight: 17 }}>
-            For now, one question a day. After {dayProgress?.total ?? 30} days of writing, your
-            questions start coming from YOUR patterns.
+            {tr("question.baselineCaption", { days: dayProgress?.total ?? 30 })}
           </Text>
           {dayProgress && (
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-              Day {dayProgress.active} of {dayProgress.total}
+              {tr("question.dayOf", { active: dayProgress.active, total: dayProgress.total })}
             </Text>
           )}
 <GhostButton
-            label="Write about this"
+            label={tr("question.writeAbout")}
             center={false}
             onPress={() => void writeAbout(generic)}
-            accessibilityLabel="Write about this question"
+            accessibilityLabel={tr("question.writeAboutA11y")}
           />
         </View>
       )}
       {question && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.xl }]}>
-          <Text style={[styles.cardTitle, { color: t.colors.accent }]}>Today</Text>
+          <Text style={[styles.cardTitle, { color: t.colors.accent }]}>{tr("question.today")}</Text>
           <Text style={[styles.question, { color: t.colors.text }]}>{question}</Text>
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-            One question a day. No advice — just something to sit with.
+            {tr("question.oneADay")}
           </Text>
                     {patternPid !== null && !feedbackGiven && (
             <View style={{ flexDirection: "row", gap: 8, justifyContent: "center" }}>
               <GhostButton
-                label="This resonated"
+                label={tr("question.resonated")}
                 center={false}
                 onPress={() => void recordTap(true)}
-                accessibilityLabel="This question resonated with me"
+                accessibilityLabel={tr("question.resonatedA11y")}
               />
               <GhostButton
-                label="Not me"
+                label={tr("question.notMe")}
                 center={false}
                 onPress={() => void recordTap(false)}
-                accessibilityLabel="This question does not land for me"
+                accessibilityLabel={tr("question.notMeA11y")}
               />
             </View>
           )}
 <GhostButton
-            label="Write about this"
+            label={tr("question.writeAbout")}
             center={false}
             onPress={() => void writeAbout(question)}
-            accessibilityLabel="Write about this question"
+            accessibilityLabel={tr("question.writeAboutA11y")}
           />
         </View>
       )}
       <View>
         <PrimaryButton
-          label={question ?? generic ? "Refresh" : "Show today's question"}
+          label={question ?? generic ? tr("question.refresh") : tr("question.showToday")}
           onPress={onShowQuestion}
           busy={busy}
         />
         <Text style={[styles.caption, { color: t.colors.muted, fontSize: t.type.meta.fontSize }]}>
-          {phase === "baseline"
-            ? "Today's question comes from a small built-in set — nothing leaves this device for it."
-            : "Computing your question can send your encryption key to the server once — held in memory for up to 5 minutes, never stored."}
+          {phase === "baseline" ? tr("question.captionBaseline") : tr("question.captionInsight")}
         </Text>
       </View>
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />

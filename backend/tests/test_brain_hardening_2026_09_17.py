@@ -380,12 +380,14 @@ class TestAuditRemediation2026_09_17:
     def _run(self, corpus: list[JournalEntry]) -> brain.BrainUpdate:
         return _run_twice(corpus, T0)
 
-    def test_negation_dense_spanish_is_gated(self):
-        # "no"/"me"/"a" are English tokens too: counting 1-2-letter tokens
-        # let this Spanish register pass at ~25% "known" and mint
-        # English-lexicon rumination cards. The gate scores >=3-letter
-        # tokens, so the same text now steps aside (phrases may surface;
-        # rumination/mood/topic must not).
+    def test_unsupported_languages_are_gated_but_spanish_is_analyzed(self):
+        # 2026-09-19: Spanish became a SUPPORTED language (its own graded
+        # lexicon), so the historical "Spanish is gated" pin inverted: the
+        # same negation-dense Spanish corpus now legitimately surfaces
+        # SPANISH rumination — the honest reading of a genuinely recurring
+        # negative thought in the user's language. The gate's real intent
+        # (unsupported languages must not mint claims from noise) is
+        # preserved with a German corpus: same shape, still suppressed.
         spanish = [
             JournalEntry(
                 "No me siento bien hoy. No quiero ir al trabajo y no me "
@@ -395,6 +397,18 @@ class TestAuditRemediation2026_09_17:
             for ago in range(70, 0, -1)
         ]
         result = self._run(spanish)
+        assert any(p.kind == "rumination" for p in result.surfaced), (
+            "supported Spanish must analyze, not gate"
+        )
+        german = [
+            JournalEntry(
+                "Ich fühle mich heute nicht gut. Ich möchte nicht zur "
+                "Arbeit gehen und die Gedanken lassen mich nicht in Ruhe.",
+                T0 - timedelta(days=ago),
+            )
+            for ago in range(70, 0, -1)
+        ]
+        result_de = self._run(german)
         assert all(
             p.kind
             not in (
@@ -405,8 +419,9 @@ class TestAuditRemediation2026_09_17:
                 "instability",
                 "inertia",
             )
-            for p in result.surfaced
-        ), [p.kind for p in result.surfaced]
+            for p in result_de.surfaced
+        ), [p.kind for p in result_de.surfaced]
+        assert result_de.stats.get("language") == "other"
 
     def test_sentence_initial_words_are_not_person_candidates(self):
         # Telegram-style fragments: every fragment starts capitalized, but

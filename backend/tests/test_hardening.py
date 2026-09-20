@@ -164,9 +164,11 @@ def test_keystore_binds_owner():
 
 def test_keystore_purges_expired_on_create():
     store = InMemoryKeyStore()
-    store.create(crypto.generate_key(), ttl_seconds=10, now=0.0, owner='unbound-test')
-    store.create(crypto.generate_key(), ttl_seconds=500, now=0.0, owner='unbound-test')
-    store.create(crypto.generate_key(), ttl_seconds=500, now=100.0, owner='unbound-test')  # triggers purge
+    store.create(crypto.generate_key(), ttl_seconds=10, now=0.0, owner="unbound-test")
+    store.create(crypto.generate_key(), ttl_seconds=500, now=0.0, owner="unbound-test")
+    store.create(
+        crypto.generate_key(), ttl_seconds=500, now=100.0, owner="unbound-test"
+    )  # triggers purge
     assert len(store) == 2
 
 

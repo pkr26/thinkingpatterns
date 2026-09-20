@@ -1372,3 +1372,536 @@ def test_api_parse_entries_clamps_oversized_sentiment():
     )
     (entry,) = _parse_entries([bytearray(payload.encode())], [date(2026, 9, 1)])
     assert entry.sentiment == 1.0
+
+
+# --- per-pattern mute + the energy channel (2026-09-19) ---------------------------
+
+
+def _inertia_corpus(channel_values):
+    """70 days whose RECENT window carries multi-day mood/energy blocks and
+    whose earlier window alternates — rising carryover on whichever channel
+    the values are placed on."""
+    entries = []
+    for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+        if i >= 42:
+            value = 0.4 if (i // 4) % 2 == 0 else -0.4
+        else:
+            value = 0.3 if i % 2 == 0 else -0.3
+        entries.append(channel_values(value, d))
+    return entries
+
+
+def _surface_inertia(entries, muted=None, unmuted=None, kinds=("inertia", "energy_inertia")):
+    """Run update() over consecutive days until an inertia claim surfaces
+    (the replication gate needs two qualification days; the window slides,
+    so the recent-window correlation wobbles across the gate)."""
+    state = brain.load_state(None)
+    for k in range(5):
+        result = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            entries,
+            T0 + timedelta(days=k),
+            muted=muted,
+            unmuted=unmuted,
+        )
+        state = result.new_state
+        if any(p.kind in kinds for p in result.surfaced):
+            return state, result
+    raise AssertionError("inertia never surfaced")
+
+
+class TestEnergyInertia:
+    def test_rising_energy_carryover_surfaces_with_channel_marker(self):
+        entries = _inertia_corpus(
+            lambda value, d: JournalEntry("ordinary day notes", d, energy=value)
+        )
+        state, result = _surface_inertia(entries)
+        energy_claims = [p for p in result.surfaced if p.kind == "energy_inertia"]
+        assert energy_claims, "rising energy carryover must surface"
+        claim = energy_claims[0]
+        assert claim.detail.get("channel") == "energy"
+        assert claim.detail.get("pattern_pid") == "inertia:energy"
+        assert isinstance(claim.detail.get("p_value"), float)
+        # The copy is the energy axis, never the mood axis.
+        assert "energy" in claim.describe()
+
+    def test_energy_claims_absent_without_energy_data(self):
+        entries = _inertia_corpus(
+            lambda value, d: JournalEntry("ordinary day notes", d, sentiment=value)
+        )
+        state, result = _surface_inertia(entries)
+        assert [p for p in result.surfaced if p.kind == "energy_inertia"] == []
+        assert [p for p in result.surfaced if p.kind == "inertia"], "mood inertia still fires"
+
+    def test_energy_and_mood_surface_with_distinct_pids(self):
+        # Identical values on both channels: both claims exist in the store
+        # under their own pids (they may qualify on different sliding days).
+        entries = _inertia_corpus(
+            lambda v, d: JournalEntry("ordinary day notes", d, sentiment=v, energy=v)
+        )
+        state = brain.load_state(None)
+        surfaced_kinds: set[str] = set()
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+            surfaced_kinds |= {p.kind for p in result.surfaced}
+        assert "inertia" in surfaced_kinds
+        assert "energy_inertia" in surfaced_kinds
+        assert "inertia:mood" in state["patterns"]
+        assert "inertia:energy" in state["patterns"]
+
+
+class TestPatternMute:
+    def test_mute_flags_the_card_and_orders_it_after_live_cards(self):
+        entries = _inertia_corpus(lambda v, d: JournalEntry("ordinary day notes", d, sentiment=v))
+        state, result = _surface_inertia(entries)
+        pid = "inertia:mood"
+        assert any(p.detail.get("pattern_pid") == pid for p in result.surfaced)
+
+        muted_result = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            entries,
+            T0 + timedelta(days=5),
+            muted=[pid],
+        )
+        muted_cards = [p for p in muted_result.surfaced if p.detail.get("pattern_pid") == pid]
+        assert muted_cards and muted_cards[0].detail.get("muted") is True
+        # Muted cards surface AFTER every live card — they never displace.
+        live_indexes = [i for i, p in enumerate(muted_result.surfaced) if not p.detail.get("muted")]
+        for i, p in enumerate(muted_result.surfaced):
+            if p.detail.get("muted"):
+                assert live_indexes == [] or i > max(live_indexes)
+        # A muted pattern never counts as "new".
+        assert all(
+            not p.detail.get("is_new") for p in muted_result.surfaced if p.detail.get("muted")
+        )
+
+    def test_unmute_restores_the_live_card(self):
+        entries = _inertia_corpus(lambda v, d: JournalEntry("ordinary day notes", d, sentiment=v))
+        state, _ = _surface_inertia(entries)
+        muted = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            entries,
+            T0 + timedelta(days=5),
+            muted=["inertia:mood"],
+        )
+        restored = brain.update(
+            brain.load_state(brain.dump_state(muted.new_state)),
+            entries,
+            T0 + timedelta(days=6),
+            unmuted=["inertia:mood"],
+        )
+        cards = [p for p in restored.surfaced if p.detail.get("pattern_pid") == "inertia:mood"]
+        assert cards and "muted" not in cards[0].detail
+
+    def test_mute_survives_the_state_roundtrip(self):
+        entries = _inertia_corpus(lambda v, d: JournalEntry("ordinary day notes", d, sentiment=v))
+        state, _ = _surface_inertia(entries)
+        muted = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            entries,
+            T0 + timedelta(days=5),
+            muted=["inertia:mood"],
+        )
+        # dump→load is also update()'s copy-on-entry path: a mute forgotten
+        # here would vanish on the very next recompute.
+        reloaded = brain.load_state(brain.dump_state(muted.new_state))
+        assert reloaded["muted"] == {"inertia:mood": True}
+
+    def test_unknown_pid_mute_is_ignored(self):
+        entries = _inertia_corpus(lambda v, d: JournalEntry("ordinary day notes", d, sentiment=v))
+        state, _ = _surface_inertia(entries)
+        result = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            entries,
+            T0 + timedelta(days=5),
+            muted=["totally:unknown"],
+        )
+        assert result.new_state.get("muted") in (None, {})
+
+    def test_questions_never_quote_a_muted_pattern(self):
+        from app.services import questions
+
+        entries = _inertia_corpus(lambda v, d: JournalEntry("ordinary day notes", d, sentiment=v))
+        state, _ = _surface_inertia(entries)
+        muted_result = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            entries,
+            T0 + timedelta(days=5),
+            muted=["inertia:mood"],
+        )
+        pool = questions.build_pool(muted_result.surfaced)
+        assert pool, "generic questions still fill the pool"
+        assert all("carrying over from day to day" not in q for q in pool), (
+            "a muted pattern's templates must never become the day's question"
+        )
+
+
+# --- PA/NA split + energy-mood coupling (2026-09-19 wave 2) ----------------------
+
+
+class TestSentimentComponents:
+    def test_components_sum_by_sign_and_match_the_compound_direction(self):
+        tokens = "felt happy and calm but tired".split()
+        pa, na = brain.sentiment_components(tokens)
+        assert pa > 0 and na > 0  # both streams present in mixed text
+        compound = brain.sentiment_score(tokens)
+        assert (compound > 0 and pa > na) or (compound < 0 and na > pa) or compound == 0
+
+    def test_pure_positive_and_pure_negative(self):
+        pa, na = brain.sentiment_components("wonderful great day".split())
+        assert pa > 0 and na == 0
+        pa, na = brain.sentiment_components("terrible awful day".split())
+        assert pa == 0 and na > 0
+
+    def test_neutral_text_has_no_components(self):
+        assert brain.sentiment_components("ordinary day notes".split()) == (0.0, 0.0)
+
+    def test_walk_refactor_left_the_compound_byte_identical(self):
+        # The accumulation was extracted into _valence_walk; the compound
+        # must not have moved. Spot-check shapes the old engine pinned.
+        cases = [
+            "i am happy today",
+            "i am not happy today",
+            "felt happy and calm but tired",
+            "extremely bad no good very anxious",
+            "quiet day, some work in the afternoon",
+        ]
+        for text in cases:
+            tokens = text.split()
+            walk = brain._valence_walk(tokens)
+            expected = max(-1.0, min(1.0, sum(walk) / brain.SENTIMENT_SCALE)) if walk else 0.0
+            assert brain.sentiment_score(tokens) == pytest.approx(expected)
+
+
+class TestPanaInertia:
+    def _pana_corpus(self, pos: str, neg: str):
+        """Blocks in the recent window vs alternation earlier, expressed
+        through TEXT (sentiment words) so the PA/NA split has real input."""
+        entries = []
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            if i >= 42:
+                text = pos if (i // 4) % 2 == 0 else neg
+            else:
+                text = pos if i % 2 == 0 else neg
+            entries.append(JournalEntry(text, d))
+        return entries
+
+    def test_rising_negative_affect_carryover_surfaces(self):
+        entries = self._pana_corpus("a calm and grateful day", "an anxious tired day")
+        state = brain.load_state(None)
+        na_surfaced = False
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+            if any(p.kind == "na_inertia" for p in result.surfaced):
+                na_surfaced = True
+                break
+        assert na_surfaced, "rising negative-affect carryover must surface"
+
+    def test_pa_and_na_pids_are_distinct_from_the_compound(self):
+        entries = self._pana_corpus("a calm and grateful day", "an anxious tired day")
+        state = brain.load_state(None)
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+        assert "inertia:pa" in state["patterns"] or "inertia:na" in state["patterns"]
+
+    def test_no_sentiment_words_no_pana_claims(self):
+        entries = [
+            JournalEntry("ordinary day notes", d, sentiment=None)
+            for d in consecutive(T0 - timedelta(days=69), 70)
+        ]
+        state = brain.load_state(None)
+        for k in range(3):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+        assert "inertia:pa" not in state["patterns"]
+        assert "inertia:na" not in state["patterns"]
+
+    def test_mood_tag_overrides_do_not_feed_pana(self):
+        # The explicit check-in is one valence judgment; the PA/NA streams
+        # stay text-only even when every entry carries an override.
+        entries = [
+            JournalEntry("ordinary day notes", d, sentiment=0.4 if (i // 4) % 2 == 0 else -0.4)
+            for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70))
+        ]
+        state = brain.load_state(None)
+        for k in range(3):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+        assert "inertia:pa" not in state["patterns"]
+        assert "inertia:na" not in state["patterns"]
+
+
+class TestEnergyMoodCoupling:
+    def _coupled_corpus(self):
+        """Energy and mood residuals move together in the recent window
+        (blocks) and independently earlier (mood alternates while energy
+        holds steady — near-zero cross-correlation)."""
+        entries = []
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            if i >= 42:
+                mood = 0.4 if (i // 4) % 2 == 0 else -0.4
+                energy = mood  # concordant recent window
+            else:
+                mood = 0.3 if i % 2 == 0 else -0.3
+                energy = 0.05  # steady: no cross-correlation
+            entries.append(JournalEntry("ordinary day notes", d, sentiment=mood, energy=energy))
+        return entries
+
+    def test_rising_coupling_surfaces_with_cross_channel_marker(self):
+        entries = self._coupled_corpus()
+        state = brain.load_state(None)
+        coupled = None
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+            coupled = next((p for p in result.surfaced if p.kind == "energy_mood_coupling"), None)
+            if coupled:
+                break
+        assert coupled is not None, "rising energy-mood coupling must surface"
+        assert coupled.detail.get("channel") == "energy_mood"
+        assert coupled.detail.get("pattern_pid") == "coupling:energy_mood"
+        assert isinstance(coupled.detail.get("p_value"), float)
+        assert "energy and your mood" in coupled.describe()
+
+    def test_uncoupled_channels_stay_quiet(self):
+        # Energy blocks and mood blocks with OFFSET periods: correlation
+        # near zero in BOTH windows — nothing to claim.
+        entries = []
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            mood = 0.4 if (i // 4) % 2 == 0 else -0.4
+            energy = 0.4 if ((i + 2) // 4) % 2 == 0 else -0.4
+            entries.append(JournalEntry("ordinary day notes", d, sentiment=mood, energy=energy))
+        state = brain.load_state(None)
+        for k in range(4):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+        assert "coupling:energy_mood" not in state["patterns"]
+
+    def test_missing_energy_channel_no_coupling_claim(self):
+        entries = [
+            JournalEntry("ordinary day notes", d, sentiment=0.3 if i % 2 == 0 else -0.3)
+            for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70))
+        ]
+        state = brain.load_state(None)
+        for k in range(3):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+        assert "coupling:energy_mood" not in state["patterns"]
+
+
+# --- sense-making + activity diversity (2026-09-19 wave 3) -----------------------
+
+
+class TestSenseMaking:
+    def _corpus(self, recent_sense: bool):
+        """Dense causal/insight phrasing in the recent window (or not),
+        plain narrative earlier — density measured per 100 tokens."""
+        plain = "we went to the market and i saw a friend there and walked home"
+        sensey = (
+            "i realize the reason i felt tense was the meeting, because i "
+            "understand now that the deadline caused it and i notice why"
+        )
+        entries = []
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            use_sense = recent_sense and i >= 42
+            entries.append(JournalEntry(sensey if use_sense else plain, d))
+        return entries
+
+    def _surface(self, entries):
+        state = brain.load_state(None)
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+            found = next((p for p in result.surfaced if p.kind == "sense_making"), None)
+            if found:
+                return state, result, found
+        return state, result, None
+
+    def test_rising_sense_making_density_surfaces(self):
+        state, result, found = self._surface(self._corpus(recent_sense=True))
+        assert found is not None, "rising sense-making density must surface"
+        assert found.detail.get("direction") == "higher"
+        assert found.detail.get("density_recent", 0) > found.detail.get("density_earlier", 99)
+        assert "sense-making words" in found.describe()
+
+    def test_flat_density_stays_quiet(self):
+        state, result, found = self._surface(self._corpus(recent_sense=False))
+        assert found is None, "no change in density means no claim"
+
+    def test_short_entries_are_not_measured(self):
+        assert brain._sense_density(["tiny", "note"]) is None
+        assert brain._sense_density(["because"] * 10) == 100.0
+
+
+class TestActivityDiversity:
+    def _corpus(self, narrow_recent: bool):
+        """Earlier weeks: 4-5 distinct tags spread. Recent weeks: either 1
+        tag only (narrowing) or the same spread (no claim)."""
+        spread_tags = ("work", "family", "exercise", "friends", "outdoors")
+        entries = []
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            if i >= 42:
+                tags = ("work",) if narrow_recent else spread_tags[:4]
+            else:
+                tags = spread_tags
+            entries.append(JournalEntry("ordinary day notes", d, tags=tags))
+        return entries
+
+    def _surface(self, entries):
+        state = brain.load_state(None)
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+            found = next((p for p in result.surfaced if p.kind == "activity_diversity"), None)
+            if found:
+                return state, result, found
+        return state, result, None
+
+    def test_narrowing_variety_surfaces_with_direction(self):
+        state, result, found = self._surface(self._corpus(narrow_recent=True))
+        assert found is not None, "narrowing activity variety must surface"
+        assert found.detail.get("direction") == "narrowed"
+        assert found.detail.get("entropy_recent", 9) < found.detail.get("entropy_earlier", 0)
+        assert "narrowed" in found.describe()
+
+    def test_steady_variety_stays_quiet(self):
+        state, result, found = self._surface(self._corpus(narrow_recent=False))
+        assert found is None, "no change in variety means no claim"
+
+    def test_single_tag_history_never_measures(self):
+        entries = [
+            JournalEntry("ordinary day notes", d, tags=("work",))
+            for d in consecutive(T0 - timedelta(days=69), 70)
+        ]
+        assert (
+            brain._detect_activity_diversity({"work": {e.entry_date for e in entries}}, T0) is None
+        )
+
+    def test_weekly_entropy_is_deterministic_bits(self):
+        mondays = sundays(T0 - timedelta(days=90), 1)
+        # any Monday works for a unit check of the entropy math itself
+        d0 = T0 - timedelta(days=T0.weekday()) - timedelta(days=60)
+        d0 = d0 - timedelta(days=d0.weekday())  # align to Monday
+        days = [d0 + timedelta(days=k) for k in range(14)]
+        tag_days = {
+            "a": set(days),
+            "b": set(days[:7]),
+        }
+        entropies = brain._weekly_tag_entropies(tag_days)
+        assert len(entropies) == 2
+        # week 1: a+b evenly -> 1 bit; week 2: only a -> 0 bits
+        assert entropies[0][1] == pytest.approx(1.0)
+        assert entropies[1][1] == pytest.approx(0.0)
+        del mondays
+
+
+# --- Spanish: the first supported non-English language (2026-09-19 final wave) ---
+
+
+class TestSpanishEngine:
+    def test_detection_separates_english_spanish_and_other(self):
+        import re as _re
+
+        def detect(text: str) -> str:
+            tokens = _re.findall(r"[a-z']+", text.lower())
+            scored = [t for t in tokens if len(t) >= 3]
+            if len(scored) < brain.LANGUAGE_MIN_TOKENS:
+                return "en"
+            en = sum(1 for t in scored if t in brain._KNOWN_TOKENS) / len(scored)
+            es = sum(1 for t in scored if t in brain._KNOWN_TOKENS_ES) / len(scored)
+            if es >= brain.LANGUAGE_HIT_FLOOR and es > en:
+                return "es"
+            if en >= brain.LANGUAGE_HIT_FLOOR:
+                return "en"
+            return "other"
+
+        # Each sample repeats to clear LANGUAGE_MIN_TOKENS (50 scored
+        # tokens) — below it the gate honestly defaults to English.
+        spanish = (
+            "Hoy me siento bastante cansado porque el trabajo fue duro, "
+            "pero la cena con mi familia me dejó tranquilo y agradecido. "
+        ) * 4
+        english = (
+            "Today I feel rather tired because work was hard, but dinner "
+            "with my family left me calm and grateful. "
+        ) * 4
+        german = (
+            "Heute fühle ich mich ziemlich müde, weil die Arbeit hart "
+            "war, aber das Abendessen mit meiner Familie hat mich ruhig "
+            "und dankbar gemacht. "
+        ) * 4
+        assert detect(spanish) == "es"
+        assert detect(english) == "en"
+        assert detect(german) == "other"
+
+    def test_stats_report_the_detected_language(self):
+        entries = [
+            JournalEntry(
+                "me siento tranquilo y agradecido, un dia tranquilo con calma",
+                T0 - timedelta(days=ago),
+            )
+            for ago in range(70, 0, -1)
+        ]
+        result = brain.update(brain.load_state(None), entries, T0)
+        assert result.stats.get("language") == "es"
+
+    def test_spanish_negation_pero_and_intensifiers(self):
+        # Negation flips with damping; "pero" re-weights toward the final
+        # clause; "muy" intensifies. Spot values from the graded lexicon.
+        assert brain.sentiment_score("no estoy bien".split()) < 0
+        assert brain.sentiment_score("estoy cansado pero feliz".split()) > 0
+        plain = brain.sentiment_score("feliz hoy".split())
+        boosted = brain.sentiment_score("muy feliz hoy".split())
+        assert boosted > plain
+        assert brain.sentiment_score("me siento triste y cansado".split()) < 0
+
+    def test_spanish_corpus_surfaces_patterns(self):
+        """Blocks vs alternation in SPANISH text — the same rising-carryover
+        corpus shape that surfaces for English must surface for Spanish
+        (previously the language gate suppressed everything)."""
+        calma = "me siento tranquilo y agradecido, un dia con calma y paz"
+        ansioso = "me siento ansioso y cansado, mucha preocupacion por todo"
+        entries = []
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            if i >= 42:
+                text = calma if (i // 4) % 2 == 0 else ansioso
+            else:
+                text = calma if i % 2 == 0 else ansioso
+            entries.append(JournalEntry(text, d))
+        state = brain.load_state(None)
+        surfaced_any = False
+        for k in range(6):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+            )
+            state = result.new_state
+            if any(
+                p.kind in ("inertia", "na_inertia", "pa_inertia", "instability")
+                for p in result.surfaced
+            ):
+                surfaced_any = True
+                break
+        assert surfaced_any, "a Spanish corpus must surface dynamics claims"

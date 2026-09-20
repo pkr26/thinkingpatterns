@@ -85,7 +85,7 @@ export const INSIGHTS_PAYLOAD_VERSION = 2;
 
 export interface InsightsPayload {
   v: number;
-  stats?: { patterns?: unknown };
+  stats?: { patterns?: unknown; language?: unknown };
   /** Analysis generation (2026-09-19): must equal the GET /insights echo
    *  of the same name and never decrease across sessions — the
    *  rollback-replay detection contract (see stateSeqGuard.ts). Absent on

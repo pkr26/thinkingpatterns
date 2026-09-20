@@ -18,6 +18,7 @@ import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { clearCrisisDialogStamp } from "./crisisDialog";
+import { syncReminderSchedule } from "./reminderSync";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
@@ -147,6 +148,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // Stryker disable next-line ConditionalExpression: React 18 made setState on an unmounted component a silent no-op, so skipping the cancelled guard is unobservable
       if (!cancelled) setAuthStatus(logged ? "loggedIn" : "loggedOut");
     });
+    // Local-reminder reconciliation (2026-09-19), once per session start:
+    // align the native schedule with the stored per-account preference —
+    // disabled/absent cancels any stale schedule, enabled reschedules.
+    // Nothing is ever CREATED without the opt-in (reminders.ts default is
+    // off), and the whole path is quiet: a missing notification module or
+    // a storage fault answers false and changes nothing on screen.
+    api
+      .getUserId()
+      .then((userId) => {
+        if (userId) void syncReminderSchedule(userId);
+      })
+      .catch(() => {});
     api
       .meta()
       .then((m) => {

@@ -26,7 +26,22 @@ import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacit
 import { api, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
-import { reminderCapability, biometricCapability } from "../nativeFeatures";
+import { cancelDailyReminder, reminderCapability } from "../nativeFeatures";
+import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPrefs } from "../reminders";
+import { syncReminderSchedule } from "../reminderSync";
+import {
+  clearMoodMirrorPref,
+  ensureStateOfMindWriteAccess,
+  getMoodMirrorPref,
+  healthKitCapability,
+  setMoodMirrorPref,
+} from "../healthkit";
+import {
+  biometricsSupported,
+  disableBiometricUnlock,
+  enableBiometricUnlock,
+  hasBiometricUnlock,
+} from "../biometricUnlock";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
@@ -41,13 +56,24 @@ import { clearKeyShipConsent } from "../components/keyConsent";
 import { clearOnboardingSeen } from "../onboarding";
 import { clearCrisisDialogStamp } from "../crisisDialog";
 import { clearFeedback } from "../questionFeedback";
+import { clearThresholdNotice } from "../thresholdNotice";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy, calmFallbackCopy } from "../components/errors";
+import { t as tr } from "../strings";
 
 /** Keep in sync with package.json; shown in About (the server reports its
  *  own version via /api/meta). */
 const APP_VERSION = "1.0.0";
+
+/** The offered reminder times — an evening default, never a morning alarm.
+ *  A custom stored time appears as its own extra chip. Labels resolve at
+ *  module load (the app locale is resolved once at startup). */
+const REMINDER_PRESETS: readonly { label: string; hour: number; minute: number }[] = [
+  { label: tr("settings.reminderMorning"), hour: 9, minute: 0 },
+  { label: tr("settings.reminderMidday"), hour: 12, minute: 0 },
+  { label: tr("settings.reminderEvening"), hour: 20, minute: 0 },
+];
 
 type PendingAction = { kind: "llm"; enabled: boolean } | { kind: "delete" } | null;
 
@@ -93,20 +119,33 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       if (!userId) return;
       rejectedEntryCount(userId).then(setRejectedCount).catch(() => {});
       quarantinedQueueExists(userId).then(setQuarantined).catch(() => {});
+      // The reminder preference (non-sensitive, per account) and the
+      // biometric-wrap existence (quiet Keychain read, never prompts).
+      getReminderPrefs(userId)
+        .then((prefs) => {
+          setReminderOn(prefs.enabled);
+          setReminderTimeState({ hour: prefs.hour, minute: prefs.minute });
+        })
+        .catch(() => {});
+      // The Health mirror opt-in (non-sensitive, per account) — the
+      // preference reads back even while the Health module is absent.
+      getMoodMirrorPref(userId).then(setMirrorHealthOn).catch(() => {});
+      hasBiometricUnlock(userId).then(setBioEnabled).catch(() => {});
     }).catch(() => {});
     hasLegacyQueueRecovery().then(setLegacyQueueRecovery).catch(() => {});
+    biometricsSupported().then(setBioSupported).catch(() => {});
   }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
      []);
 
   const saveUrl = async () => {
     const parsed = parseServerUrl(url);
     if (!parsed) {
-      Alert.alert("Invalid URL", "Enter a full URL like https://your-server:8000");
+      Alert.alert(tr("settings.invalidUrlTitle"), tr("settings.invalidUrlBody"));
       return;
     }
     const error = await setBaseUrl(parsed.url);
-    if (error) Alert.alert("Could not save server", error);
-    else Alert.alert("Saved", "Server URL updated. Changing server origins signs this device out to protect your session.");
+    if (error) Alert.alert(tr("settings.couldNotSaveServerTitle"), error);
+    else Alert.alert(tr("settings.serverSavedTitle"), tr("settings.serverSavedBody"));
   };
 
   /** One tap: move rejected entries back into the live queue and flush.
@@ -117,7 +156,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     try {
       const userId = await api.getUserId();
       if (!userId) {
-        Alert.alert("Sign in required", "Sign in again before retrying saved entries.");
+        Alert.alert(tr("settings.signInRequiredTitle"), tr("settings.signInRequiredBody"));
         return;
       }
       const moved = await requeueRejected(userId);
@@ -125,13 +164,20 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       const left = await rejectedEntryCount(userId);
       setRejectedCount(left);
       Alert.alert(
-        "Recovered entries",
+        tr("settings.recoveredTitle"),
         moved > 0
-          ? `${moved} ${moved === 1 ? "entry" : "entries"} moved back into the sync queue — ${left === 0 ? "they upload on the next sync." : `${left} still waiting.`}`
-          : "Nothing could be moved yet — the entries stay safely stored on this device.",
+          ? tr("settings.recoveredMoved", {
+              count: moved,
+              unit: tr(moved === 1 ? "history.entryWord" : "history.entryWordPlural"),
+              rest:
+                left === 0
+                  ? tr("settings.recoveredUploadNext")
+                  : tr("settings.recoveredStillWaiting", { count: left }),
+            })
+          : tr("settings.recoveredNone"),
       );
     } catch {
-      Alert.alert("Could not retry", "The saved entries are still safe on this device.");
+      Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody"));
     } finally {
       setBusy(false);
     }
@@ -151,12 +197,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       const reauth = await verifyPasswordForVault(password);
       if (!reauth.ok) {
         const messages = {
-          locked: "The vault is locked — unlock again first.",
-          "no-account": "No saved account on this device — sign in again.",
-          "wrong-password": "Wrong password.",
-          offline: "Cannot verify your password offline right now — try again when online.",
+          locked: tr("common.reauthLocked"),
+          "no-account": tr("common.reauthNoAccount"),
+          "wrong-password": tr("common.wrongPassword"),
+          offline: tr("common.reauthOffline"),
         } as const;
-        Alert.alert("Could not verify", messages[reauth.reason]);
+        Alert.alert(tr("common.couldNotVerifyTitle"), messages[reauth.reason]);
         retry();
         return;
       }
@@ -171,16 +217,16 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       if (isVerificationFailedError(err)) {
         // 403: the verifier itself was rejected — the typed password no
         // longer matches. NOT a session death: stay on the card for a retry.
-        Alert.alert("That password didn't match", "Check it and try again — nothing was changed.");
+        Alert.alert(tr("common.passwordMismatchTitle"), tr("common.passwordMismatchBody"));
         retry();
         return;
       }
       if (isSessionExpiredError(err)) {
         // 401: the client hook has already locked the vault; the stack is
         // about to swap to Unlock. Say why.
-        Alert.alert("Session expired", "Please unlock again.");
+        Alert.alert(tr("common.sessionExpiredTitle"), tr("common.unlockAgainBody"));
       } else {
-        Alert.alert("Could not complete", calmFallbackCopy(err, "Something went wrong — try again."));
+        Alert.alert(tr("common.couldNotCompleteTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
       done();
     }
@@ -209,25 +255,27 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           await clearOnboardingSeen(userId); // so does the onboarding acknowledgment
           await clearCrisisDialogStamp(userId); // and the dialog-throttle stamp
           await clearFeedback(userId); // and the pending question-feedback taps
+          await clearThresholdNotice(userId); // and the one-time threshold card stamp
+          await clearReminderPrefs(userId); // and the reminder opt-in
+          await clearMoodMirrorPref(userId); // and the Health mirror opt-in
+          await disableBiometricUnlock(userId); // and the biometric data-key wrap
+          await cancelDailyReminder().catch(() => {}); // a deleted account must not be nudged
         }
         if (username) await api.clearCachedSalt(username);
       } catch {
         // Reported in the success dialog below.
       }
       await signOut(); // revokes tokens, clears the session
-      Alert.alert(
-        "Deleted",
-        "Your account and data were deleted from the server. If anything failed to clear on this device, reinstalling the app removes the remnants.",
-      );
+      Alert.alert(tr("settings.deletedTitle"), tr("settings.deletedBody"));
     } catch (err) {
       // The server still holds the account — keep the local session intact
       // so the user can retry instead of believing it worked.
       if (isVerificationFailedError(err)) {
-        Alert.alert("Delete failed", "The server didn't accept that password. Nothing was deleted — check it and try again.");
+        Alert.alert(tr("settings.deleteFailedTitle"), tr("settings.deleteFailedVerifier"));
       } else if (isSessionExpiredError(err)) {
-        Alert.alert("Delete failed", "Session expired — please unlock again. Nothing was deleted.");
+        Alert.alert(tr("settings.deleteFailedTitle"), tr("settings.deleteFailedSession"));
       } else {
-        Alert.alert("Delete failed", calmFallbackCopy(err, "Something went wrong — try again."));
+        Alert.alert(tr("settings.deleteFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
     }
   };
@@ -238,31 +286,119 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    * expose plaintext in a share intent. Re-enable only with a reviewed
    * native streaming-to-file implementation. */
   const explainExportUnavailable = () => {
-    Alert.alert(
-      "Export unavailable in this build",
-      "To protect large journals, this app needs its verified secure file-export component before it can create an export. Your entries remain safely on the server and this device.",
-    );
+    Alert.alert(tr("settings.exportTitle"), tr("settings.exportBody"));
+  };
+
+  /** Reminder opt-in: persist first (the preference is readable whatever
+   *  this build can schedule), then reconcile the native schedule. */
+  const toggleReminders = async (on: boolean) => {
+    touchActivity();
+    const userId = await api.getUserId().catch(() => null);
+    if (!userId) return; // no account: nothing to bind the preference to
+    try {
+      await setReminderEnabled(userId, on);
+    } catch {
+      Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody"));
+      return;
+    }
+    setReminderOn(on);
+    const scheduled = await syncReminderSchedule(userId).catch(() => false);
+    if (on && !scheduled && reminders.available) {
+      // The module is linked but the OS said no — honest, and fixable by
+      // the user in system settings. (An unlinked module is already
+      // explained by the muted reason line under the switch.)
+      Alert.alert(tr("settings.reminderNotScheduledTitle"), tr("settings.reminderNotScheduledBody"));
+    }
+  };
+
+  /** Choose the reminder time; the preference saves even while the native
+   *  side is unavailable, and syncs whenever it can. */
+  const chooseReminderTime = async (hour: number, minute: number) => {
+    touchActivity();
+    const userId = await api.getUserId().catch(() => null);
+    if (!userId) return;
+    await setReminderTime(userId, hour, minute).catch(() => {});
+    setReminderTimeState({ hour, minute });
+    void syncReminderSchedule(userId).catch(() => {});
+  };
+
+  /** Health mirror opt-in (2026-09-19): persist first (the preference is
+   *  readable whatever this build can write), then — on enabling, with the
+   *  module linked — ask for Health WRITE access HERE, where the user just
+   *  flipped the switch, so the OS prompt never surprises them at a future
+   *  check-in and a denial is reported instead of silently skipping. */
+  const toggleHealthMirror = async (on: boolean) => {
+    touchActivity();
+    const userId = await api.getUserId().catch(() => null);
+    if (!userId) return; // no account: nothing to bind the preference to
+    try {
+      await setMoodMirrorPref(userId, on);
+    } catch {
+      Alert.alert(tr("settings.healthMirrorSaveFailedTitle"), tr("settings.healthMirrorSaveFailedBody"));
+      return;
+    }
+    setMirrorHealthOn(on);
+    if (on && health.available) {
+      const granted = await ensureStateOfMindWriteAccess().catch(() => false);
+      if (!granted) {
+        // The preference stays saved (the user's choice is real); the
+        // honest note says what to fix — mirroring just won't land yet.
+        Alert.alert(tr("settings.healthMirrorDeniedTitle"), tr("settings.healthMirrorDeniedBody"));
+      }
+    }
+  };
+
+  /** Biometric unlock: enabling is an explicit, explained act — the Alert
+   *  states the trade before anything is stored. */
+  const toggleBiometrics = async (on: boolean) => {
+    touchActivity();
+    const userId = await api.getUserId().catch(() => null);
+    if (!userId) return;
+    if (!on) {
+      try {
+        await disableBiometricUnlock(userId);
+        setBioEnabled(false);
+      } catch {
+        Alert.alert(tr("settings.bioOffFailedTitle"), tr("settings.bioOffFailedBody"));
+      }
+      return;
+    }
+    Alert.alert(tr("settings.bioTitle"), tr("settings.bioBody"), [
+      { text: tr("common.cancel"), style: "cancel" },
+      { text: tr("settings.bioEnable"), onPress: () => void enableBiometricWrap(userId) },
+    ]);
+  };
+
+  const enableBiometricWrap = async (userId: string) => {
+    try {
+      // Settings only renders while the vault is unlocked — but the read
+      // lives inside the same guard so a locked vault degrades honestly.
+      const { dataKey } = vault.get();
+      await enableBiometricUnlock(userId, dataKey);
+      setBioEnabled(true);
+    } catch {
+      Alert.alert(tr("settings.bioOnFailedTitle"), tr("settings.bioOnFailedBody"));
+    }
   };
 
   const deleteEverything = () => {
-    Alert.alert(
-      "Delete everything?",
-      "All entries, patterns and your account will be permanently deleted from the server. " +
-        "Your local encrypted queue is also wiped. This cannot be undone. You will be asked for your password.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue",
-          style: "destructive",
-          onPress: () =>
-            Alert.alert("Final confirmation", "Deleting is irreversible. You will be asked for your password next.", [
-              { text: "Cancel", style: "cancel" },
-              // The password prompt below IS the real confirmation.
-              { text: "Continue to password", style: "destructive", onPress: () => setPending({ kind: "delete" }) },
-            ]),
-        },
-      ],
-    );
+    Alert.alert(tr("settings.deleteAllTitle"), tr("settings.deleteAllBody"), [
+      { text: tr("common.cancel"), style: "cancel" },
+      {
+        text: tr("common.continue"),
+        style: "destructive",
+        onPress: () =>
+          Alert.alert(tr("common.finalConfirmation"), tr("settings.deleteAllFinalBody"), [
+            { text: tr("common.cancel"), style: "cancel" },
+            // The password prompt below IS the real confirmation.
+            {
+              text: tr("settings.continueToPassword"),
+              style: "destructive",
+              onPress: () => setPending({ kind: "delete" }),
+            },
+          ]),
+      },
+    ]);
   };
 
   // Appearance state (2026-09-17). The radio starts at the provider's own
@@ -273,9 +409,41 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
   const [haptics, setHaptics] = useState(true);
   const [reminders] = useState(reminderCapability());
-  const [biometrics] = useState(biometricCapability());
+  // The HealthKit State of Mind seam capability — probed once, sync, the
+  // reminderCapability idiom. The mirror ROW is always visible (the
+  // preference is real); the switch is enabled only when available.
+  const [health] = useState(healthKitCapability());
+  // Local reminder preference (reminders.ts) — readable even when the
+  // native notification module is absent in this build; the Switch is
+  // disabled then, never hidden-with-a-guess.
+  const [reminderOn, setReminderOn] = useState(false);
+  const [reminderTime, setReminderTimeState] = useState({ hour: 20, minute: 0 });
+  // The Health mirror preference (healthkit.ts) — same honesty rules.
+  const [mirrorHealthOn, setMirrorHealthOn] = useState(false);
+  // Biometric unlock wrap state — the section only appears when this
+  // device actually has biometrics (biometricUnlock.ts quiet probe).
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioEnabled, setBioEnabled] = useState(false);
   React.useEffect(() => {
     void loadHapticsSetting().then(setHaptics);
+  }, []);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await (await import("@react-native-async-storage/async-storage")).default.getItem(
+          themeStorageKey(),
+        );
+        if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
+          setThemeModeState(stored);
+        }
+      } catch {
+        /* non-sensitive preference; default stands */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
   React.useEffect(() => {
     let cancelled = false;
@@ -320,47 +488,40 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       {rejectedCount > 0 && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={themed.rowText}>
-            {rejectedCount} {rejectedCount === 1 ? "entry" : "entries"} couldn't sync and{" "}
-            {rejectedCount === 1 ? "was" : "were"} kept safely on this device.
+            {rejectedCount === 1
+              ? tr("settings.rejectedOne", { count: rejectedCount })
+              : tr("settings.rejectedMany", { count: rejectedCount })}
           </Text>
           <GhostButton
-            label="Try syncing them again"
+            label={tr("settings.retrySync")}
             center={false}
             onPress={recoverRejected}
             disabled={busy}
-            accessibilityLabel="Try syncing the recovered entries again"
+            accessibilityLabel={tr("settings.retrySyncA11y")}
           />
         </View>
       )}
       {quarantined && (
-        <Text style={themed.footnote}>
-          A damaged piece of the offline queue was set aside instead of deleted. New entries sync
-          normally.
-        </Text>
+        <Text style={themed.footnote}>{tr("settings.quarantinedNote")}</Text>
       )}
       {legacyQueueRecovery && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderColor: t.colors.border, borderWidth: 1, borderRadius: t.radius.lg }]} accessibilityRole="alert">
-          <Text style={{ color: t.colors.text, fontSize: t.type.title.fontSize, fontWeight: "700" }}>Older offline entries need recovery</Text>
-          <Text style={themed.footnote}>
-            This update protected unsent encrypted entries from being sent to the wrong server. They remain on this device but cannot be safely assigned automatically; contact support before clearing app data.
-          </Text>
+          <Text style={{ color: t.colors.text, fontSize: t.type.title.fontSize, fontWeight: "700" }}>{tr("settings.legacyTitle")}</Text>
+          <Text style={themed.footnote}>{tr("settings.legacyBody")}</Text>
         </View>
       )}
 
       {llmAvailable && (
         <>
-          <Text style={themed.label}>Third-party AI analysis</Text>
+          <Text style={themed.label}>{tr("settings.llmLabel")}</Text>
           <View style={[styles.row, { backgroundColor: t.colors.card, borderRadius: t.radius.md }]}>
-            <Text style={themed.rowText}>
-              Allow sending your (decrypted) entries to an external AI service for pattern analysis.
-              Off by default; needs your password to change.
-            </Text>
+            <Text style={themed.rowText}>{tr("settings.llmBody")}</Text>
             <Switch
               value={llmEnabled}
               disabled={busy}
               onValueChange={(enabled) => setPending({ kind: "llm", enabled })}
               trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
-              accessibilityLabel="Allow third-party AI analysis"
+              accessibilityLabel={tr("settings.llmA11y")}
               accessibilityState={{ checked: llmEnabled, disabled: busy }}
             />
           </View>
@@ -370,38 +531,38 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
             {pending.kind === "delete"
-              ? "Enter your password to delete everything"
-              : `Enter your password to ${pending.enabled ? "enable" : "disable"} third-party AI analysis`}
+              ? tr("settings.reauthDeleteTitle")
+              : tr("settings.reauthLlmTitle", {
+                  action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
+                })}
           </Text>
           <TextInput
             style={themed.input}
-            placeholder="password"
+            placeholder={tr("common.passwordPlaceholder")}
             placeholderTextColor={t.colors.placeholder}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
-            accessibilityLabel="Password confirmation"
+            accessibilityLabel={tr("common.passwordConfirmA11y")}
             textContentType="password"
           />
           <PrimaryButton
-            label={busy ? "Verifying…" : "Confirm with password"}
+            label={busy ? tr("common.verifying") : tr("common.confirmWithPassword")}
             onPress={confirmWithPassword}
             disabled={!password}
             danger={pending.kind === "delete"}
-            accessibilityLabel="Confirm with password"
+            accessibilityLabel={tr("common.confirmWithPassword")}
           />
           <GhostButton
-            label="Cancel"
+            label={tr("common.cancel")}
             disabled={busy}
             onPress={() => { setPending(null); setPassword(""); }}
           />
         </View>
       )}
 
-      {/* Appearance & feel (2026-09-17): theme override, haptics, and the
-          native-feature seams (reminders/biometrics light up when their
-          native modules are linked — see src/nativeFeatures.ts). */}
-      <Text style={themed.label}>APPEARANCE</Text>
+      {/* Appearance & feel (2026-09-17): theme override + haptics. */}
+      <Text style={themed.label}>{tr("settings.appearanceLabel")}</Text>
       <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           {(["system", "dark", "light"] as ThemeMode[]).map((mode) => (
@@ -422,16 +583,16 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
               }}
               accessibilityRole="radio"
               accessibilityState={{ selected: themeMode === mode }}
-              accessibilityLabel={`Theme: ${mode}`}
+              accessibilityLabel={tr("settings.themeA11y", { mode })}
             >
               <Text style={{ color: themeMode === mode ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
-                {mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light"}
+                {tr(mode === "system" ? "settings.themeSystem" : mode === "dark" ? "settings.themeDark" : "settings.themeLight")}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
-          <Text style={themed.rowText}>Quiet haptics on taps and saves</Text>
+          <Text style={themed.rowText}>{tr("settings.hapticsLabel")}</Text>
           <Switch
             value={haptics}
             onValueChange={(on) => {
@@ -439,77 +600,178 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
               setHaptics(on);
               void setHapticsEnabled(on);
             }}
-            accessibilityLabel="Haptics"
+            accessibilityLabel={tr("settings.hapticsA11y")}
           />
         </View>
+      </View>
+
+      {/* Local journaling reminders (2026-09-19): the preference is always
+          real; the native schedule follows what this build can do. */}
+      <Text style={themed.label}>{tr("settings.reminderLabel")}</Text>
+      <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
+        <Text style={themed.footnote}>{tr("settings.reminderNote")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
+          <Text style={themed.rowText}>{tr("settings.remindMeLabel")}</Text>
+          <Switch
+            value={reminderOn}
+            disabled={!reminders.available}
+            onValueChange={(on) => void toggleReminders(on)}
+            trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
+            accessibilityLabel={tr("settings.dailyReminderA11y")}
+            accessibilityState={{ checked: reminderOn, disabled: !reminders.available }}
+          />
+        </View>
+        {reminderOn && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }} accessibilityLabel={tr("settings.reminderTimeA11y")}>
+            {[
+              ...REMINDER_PRESETS,
+              // A stored custom time (never one of the presets) shows as
+              // its own chip so the current choice is always visible.
+              ...((REMINDER_PRESETS.some((p) => p.hour === reminderTime.hour && p.minute === reminderTime.minute)
+                ? []
+                : [
+                    {
+                      label: `${reminderTime.hour}:${String(reminderTime.minute).padStart(2, "0")}`,
+                      hour: reminderTime.hour,
+                      minute: reminderTime.minute,
+                    },
+                  ]) as { label: string; hour: number; minute: number }[]),
+            ].map((preset) => {
+              const selected =
+                preset.hour === reminderTime.hour && preset.minute === reminderTime.minute;
+              return (
+                <TouchableOpacity
+                  key={preset.label}
+                  style={[
+                    styles.timeChip,
+                    {
+                      backgroundColor: selected ? t.colors.primary : t.colors.cardDeep,
+                      borderRadius: t.radius.md,
+                      minHeight: 40,
+                    },
+                  ]}
+                  onPress={() => void chooseReminderTime(preset.hour, preset.minute)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={tr("settings.reminderTimeOptionA11y", { label: preset.label })}
+                >
+                  <Text style={{ color: selected ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
+                    {preset.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
         {!reminders.available && (
           <Text style={themed.footnote}>
-            Daily reminders will appear here once the notification module is linked in the app build.
-          </Text>
-        )}
-        {!biometrics.available && (
-          <Text style={themed.footnote}>
-            Face/fingerprint unlock will appear here once the biometric module is linked in the app build.
+            {tr("settings.reminderUnavailableNote", { reason: reminders.reason ?? "" })}
           </Text>
         )}
       </View>
 
+      {/* HealthKit State of Mind mirror (2026-09-19): WRITE-ONLY — the
+          honest disclosure rides with the row; the preference is always
+          real, the switch only works where the module is linked. */}
+      <Text style={themed.label}>{tr("settings.healthMirrorLabel")}</Text>
+      <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
+          <Text style={themed.rowText}>{tr("settings.healthMirrorRow")}</Text>
+          <Switch
+            value={mirrorHealthOn}
+            disabled={!health.available}
+            onValueChange={(on) => void toggleHealthMirror(on)}
+            trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
+            accessibilityLabel={tr("settings.healthMirrorA11y")}
+            accessibilityState={{ checked: mirrorHealthOn, disabled: !health.available }}
+          />
+        </View>
+        <Text style={themed.footnote}>{tr("settings.healthMirrorNote")}</Text>
+        {!health.available && (
+          <Text style={themed.footnote}>
+            {tr("settings.healthMirrorUnavailableNote", { reason: health.reason ?? "" })}
+          </Text>
+        )}
+      </View>
+
+      {/* Biometric unlock (2026-09-19): shown only where it can work. */}
+      {bioSupported && (
+        <>
+          <Text style={themed.label}>{tr("settings.biometricLabel")}</Text>
+          <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Text style={themed.rowText}>{tr("settings.biometricRow")}</Text>
+              <Switch
+                value={bioEnabled}
+                onValueChange={(on) => void toggleBiometrics(on)}
+                trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
+                accessibilityLabel={tr("settings.biometricA11y")}
+                accessibilityState={{ checked: bioEnabled, disabled: false }}
+              />
+            </View>
+            <Text style={themed.footnote}>{tr("settings.biometricNote")}</Text>
+          </View>
+        </>
+      )}
+
       {sharingAvailable === true ? (
         <GhostButton
-          label="Share with my therapist"
+          label={tr("settings.shareWithTherapist")}
           center={false}
           onPress={() => navigation.navigate("TherapistShare")}
-          accessibilityLabel="Share your entries and patterns with a therapist"
+          accessibilityLabel={tr("settings.shareWithTherapistA11y")}
         />
       ) : sharingAvailable === false ? (
-        <Text style={themed.footnote}>
-          Therapist sharing is not available on this server. It stays disabled until verified clinician enrollment is configured.
-        </Text>
+        <Text style={themed.footnote}>{tr("settings.sharingOffNote")}</Text>
       ) : (
-        <Text style={themed.footnote}>
-          Can’t reach the server to confirm therapist-sharing availability — check your connection and reopen Settings. Nothing is shared in the meantime.
-        </Text>
+        <Text style={themed.footnote}>{tr("settings.sharingUnknownNote")}</Text>
       )}
       <GhostButton
-        label="Why export is unavailable"
+        label={tr("settings.measures")}
+        center={false}
+        onPress={() => navigation.navigate("Measures")}
+        accessibilityLabel={tr("settings.measuresA11y")}
+      />
+      <GhostButton
+        label={tr("settings.whyExport")}
         center={false}
         onPress={explainExportUnavailable}
-        accessibilityLabel="Why export is unavailable in this build"
+        accessibilityLabel={tr("settings.whyExportA11y")}
       />
-      <PrimaryButton label="Delete my account and data" onPress={deleteEverything} disabled={busy} danger />
+      <PrimaryButton label={tr("settings.deleteAccount")} onPress={deleteEverything} disabled={busy} danger />
       <GhostButton
-        label="Sign out"
+        label={tr("settings.signOut")}
         onPress={async () => { vault.lock(); await signOut(); navigation.popToTop(); }}
       />
 
-      <Text style={themed.label}>About</Text>
+      <Text style={themed.label}>{tr("settings.aboutLabel")}</Text>
       <Text style={themed.footnote}>
-        MindPattern {APP_VERSION}
-        {serverVersion ? ` · server ${serverVersion}` : ""}. Everything you write is encrypted on
-        this device before it leaves. The one exception — pattern analysis — runs in a single-use
-        session you start yourself. No advice, no diagnosis, ever.
+        {tr("settings.aboutBody", {
+          version: APP_VERSION,
+          server: serverVersion ? tr("settings.serverVersionTag", { version: serverVersion }) : "",
+        })}
       </Text>
       <GhostButton
-        label="Privacy policy"
+        label={tr("settings.privacyPolicy")}
         center={false}
         onPress={() => navigation.navigate("Privacy")}
-        accessibilityLabel="Read the privacy policy"
+        accessibilityLabel={tr("settings.privacyPolicyA11y")}
       />
 
-      <Text style={themed.label}>Advanced</Text>
-      <Text style={themed.footnote}>Only change this if you run your own server.</Text>
+      <Text style={themed.label}>{tr("settings.advancedLabel")}</Text>
+      <Text style={themed.footnote}>{tr("settings.advancedNote")}</Text>
       <TextInput
         style={themed.input}
         value={url}
         onChangeText={setUrl}
         autoCapitalize="none"
-        placeholder="https://your-server:8000"
+        placeholder={tr("settings.serverUrlPlaceholder")}
         placeholderTextColor={t.colors.placeholder}
-        accessibilityLabel="Server URL"
+        accessibilityLabel={tr("settings.serverUrlA11y")}
         textContentType="URL"
         autoComplete="off"
       />
-      <PrimaryButton label="Save server URL" onPress={saveUrl} disabled={busy} />
+      <PrimaryButton label={tr("settings.saveServerUrl")} onPress={saveUrl} disabled={busy} />
     </ScrollView>
   );
 }
@@ -518,6 +780,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   card: { padding: 16, gap: 8 },
   moodOptionLike: { flex: 1, alignItems: "center", justifyContent: "center" },
+  timeChip: { paddingHorizontal: 12, paddingVertical: 8, alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 },
   reauthCard: { padding: 16, gap: 12 },
   reauthTitle: { fontSize: 15, fontWeight: "600", lineHeight: 20 },

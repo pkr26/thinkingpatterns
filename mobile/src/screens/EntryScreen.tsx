@@ -3,12 +3,17 @@
  * sync. Entries are encrypted before they leave the phone; the save flow
  * queues locally when offline and retries on next launch.
  *
- * Mood check-in: a one-tap row above Save ("How does today feel?") — an
+ * Mood check-in: a one-tap row behind an "Add details (optional)"
+ * disclosure above Save ("How does today feel?" and friends) — an
  * explicit pick wins over the quick text estimate, rides in the encrypted
  * payload's sentiment field, and lands in the device-local mood log.
  * Never picking is fine: the text estimate fills the log as before and the
  * payload sentiment stays null for the server's engine. The row never
- * blocks saving.
+ * blocks saving. The disclosure is COLLAPSED by default (2026-09-19): a
+ * daily writer scrolled past ten optional rows on every write. Nothing
+ * set is silently hidden — with anything picked while collapsed, a
+ * "Details added: …" summary line names the set channels and expands on
+ * tap; the picks themselves ride in the save exactly as before.
  *
  * Drafts survive EVERYTHING: backgrounding locks the vault and unmounts
  * this screen, but the unmount cleanup stashes any non-empty text
@@ -46,10 +51,12 @@ import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
 import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
+import { mirrorMoodCheckIn } from "../healthkit";
 import { ACTIVITY_TAGS, ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, localSentiment } from "../mood";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { lightHaptic } from "../haptics";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
+import { recordThresholdNotice, thresholdNoticeShown } from "../thresholdNotice";
 import { newClientEntryId } from "../entryId";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton } from "../components/buttons";
@@ -57,6 +64,7 @@ import { InlineStatus, InlineStatusTone, NoticeChip } from "../components/Inline
 import { MainShell } from "../components/BottomNav";
 import { PROMPT_CHIPS, promptChipsFor } from "../promptChips";
 import { requestFailureCopy } from "../components/errors";
+import { t as tr, dateLocaleTag } from "../strings";
 
 /** Keeps the encrypted payload comfortably under the server's ~1 MiB cap. */
 const MAX_ENTRY_CHARS = 100_000;
@@ -86,9 +94,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   /** Optional sleep-quality rating 1..5 and activity tags (payload v2). */
   const [sleepQuality, setSleepQuality] = useState<number | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  /** The check-in disclosure: collapsed by default (2026-09-19) — the four
+   *  optional sections are opt-in screen real estate, never a toll every
+   *  write pays. Expansion is view state only; picks survive collapse. */
+  const [detailsOpen, setDetailsOpen] = useState(false);
   /** Current writing streak from the device-local mood log; hidden at 0
    *  (no guilt — a streak you don't have is not a debt). */
   const [streak, setStreak] = useState(0);
+  /** The one-time threshold-crossing card (2026-09-19): the day the
+   *  30-day ask completes finally announces itself. */
+  const [patternsReady, setPatternsReady] = useState(false);
   /** Rotating gentle starters for blank-page days (never required). */
   const [chips] = useState<string[]>(() => promptChipsFor(new Date()));
   // Refs mirror what the unmount cleanup and the double-tap guard need —
@@ -193,11 +208,35 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
      []);
 
+  // The threshold moment: when the server-reported active days first reach
+  // the unlock threshold (and this account has never been told), show the
+  // one-time card. unlockDays <= 0 (hostile/absurd metadata) never fires —
+  // there was no wait to complete. The stamp is recorded when the card is
+  // shown, so it can never nag; a storage read failure errs toward showing.
+  useEffect(() => {
+    if (unlockDays <= 0 || activeDays < unlockDays) return;
+    let cancelled = false;
+    void (async () => {
+      const userId = userIdRef.current ?? (await api.getUserId().catch(() => null));
+      if (!userId || cancelled) return;
+      if (await thresholdNoticeShown(userId).catch(() => false)) return;
+      if (cancelled) return;
+      setPatternsReady(true);
+      await recordThresholdNotice(userId).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDays, unlockDays]);
+
   const save = async () => {
     const trimmed = text.trim();
     if (!trimmed) return;
     if (trimmed.length > MAX_ENTRY_CHARS) {
-      Alert.alert("Entry too long", `Entries are limited to ${MAX_ENTRY_CHARS.toLocaleString()} characters.`);
+      Alert.alert(
+        tr("entry.tooLongTitle"),
+        tr("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }),
+      );
       return;
     }
     // Double-tap guard: two presses inside one frame both pass a state-only
@@ -211,12 +250,17 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       const userId = await api.getUserId();
       if (!userId) {
         // AAD-binding an entry to "" would make it permanently undecryptable.
-        Alert.alert("Session damaged", "Account id missing — please sign in again. Your entry is still on screen.");
+        Alert.alert(tr("common.sessionDamagedTitle"), tr("entry.sessionDamagedBody"));
         return;
       }
       // LOCAL calendar day: the UTC day is wrong for non-UTC users in the
       // evening (it feeds entry ids, dates and the mood log).
       const today = localDateISO();
+      // The explicit check-in pick, captured before the success path clears
+      // it — only an explicit pick is ever mirrored OUT to the Health app
+      // (the text-derived estimate stays device-local; a derived score is
+      // not the user's own act and does not belong in Health).
+      const moodPick = selectedMood;
       const clientEntryId = newClientEntryId(today);
       // sentiment: the explicit check-in pick rides in the encrypted
       // payload when the user made one. Without a pick it stays null — the
@@ -245,14 +289,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // (synced or queued) before this dialog appears. Safe-messaging
       // tone — acknowledge, point at humans, no diagnosis.
       const showCrisisAlert = () =>
-        Alert.alert(
-          "Support is available",
-          "Some of what you wrote sounds like a really heavy moment. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
-          [
-            { text: "View support resources", onPress: () => navigation.navigate("Crisis") },
-            { text: "Not now", style: "cancel" },
-          ],
-        );
+        Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
+          { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
+          { text: tr("common.notNow"), style: "cancel" },
+        ]);
       // Throttled to at most once per calendar day per account
       // (src/crisisDialog.ts): a dialog on EVERY crisis-flagged save trains
       // dismissal. The stamp records BEFORE the dialog so sequential saves
@@ -274,14 +314,14 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           // stashed for the re-unlock remount — it is NOT lost.
           stashDraft(userId, trimmed);
           vault.lock();
-          Alert.alert("Session expired", "Please unlock again — your entry will still be here.");
+          Alert.alert(tr("common.sessionExpiredTitle"), tr("entry.sessionExpiredBody"));
           return;
         }
         if (err instanceof ApiError && err.status === 422) {
           // The server permanently rejects this blob; queueing it would
           // poison the offline queue with an entry that can never sync. No
           // server detail text in the dialog — just the honest outcome.
-          Alert.alert("Entry not accepted", "The server couldn't store this entry as-is. Your entry is still on screen.");
+          Alert.alert(tr("entry.notAcceptedTitle"), tr("entry.notAcceptedBody"));
           return;
         }
         // Offline, 5xx or throttled: queue the SAME encrypted entry —
@@ -294,9 +334,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             // The entry text is still on screen — a crisis-flagged entry
             // that could not be queued must STILL point at support.
             Alert.alert(
-              "Offline storage full",
-              "Your oldest unsynced entries are protected — connect and sync before writing more. This entry is still on screen.",
-              [{ text: "OK", onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } }],
+              tr("entry.queueFullTitle"),
+              tr("entry.queueFullBody"),
+              [{ text: tr("common.ok"), onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } }],
             );
             return;
           }
@@ -307,9 +347,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             // nowhere must STILL point at support (throttled like every
             // other path): the crisis is on screen even if the save isn't.
             Alert.alert(
-              "Not saved",
-              "The offline queue was cleared while saving (were you signed out?). Your entry is still on screen.",
-              [{ text: "OK", onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } }],
+              tr("entry.queueAbandonedTitle"),
+              tr("entry.queueAbandonedBody"),
+              [{ text: tr("common.ok"), onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } }],
             );
             return;
           }
@@ -331,10 +371,20 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       //  "ok" literal on the showStatus line below stays live.)
       // Stryker disable next-line StringLiteral: InlineStatus colors every non-"ok" tone with the same muted color — "neutral" and "" render identically
       const offlineTone: InlineStatusTone = "neutral";
-      showStatus(queuedOffline ? "Saved — will sync when online" : "Saved ✓", queuedOffline ? offlineTone : "ok");
+      showStatus(queuedOffline ? tr("entry.savedOffline") : tr("entry.saved"), queuedOffline ? offlineTone : "ok");
+      // HealthKit State of Mind mirror (2026-09-19): fire-and-forget, only
+      // AFTER the entry is safely saved (synced or queued), only for an
+      // explicit check-in pick, only while the vault is unlocked, and only
+      // when the per-account mirrorMoodToHealth pref is on (checked inside
+      // mirrorMoodCheckIn). It can never block or fail the entry save:
+      // every path in the seam returns false instead of throwing, and the
+      // catch is the explicit guarantee of that here.
+      if (moodPick !== null && vault.isUnlocked()) {
+        void mirrorMoodCheckIn(userId, moodPick, today).catch(() => {});
+      }
       if (crisisLanguage) await maybeShowCrisisAlert();
     } catch (err) {
-      Alert.alert("Could not save", requestFailureCopy(err));
+      Alert.alert(tr("entry.couldNotSaveTitle"), requestFailureCopy(err));
     } finally {
       savingRef.current = false;
       setBusy(false);
@@ -344,6 +394,14 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   // unlockDays comes from server metadata (clamped in the store, but a
   // hostile value of 0 must never produce NaN/Infinity styling here).
   const progress = unlockDays > 0 ? Math.min(1, activeDays / unlockDays) : 1;
+
+  // Which check-in channels hold a pick, in display order — the collapsed
+  // summary names them so nothing is ever silently set behind the fold.
+  const detailChannels: string[] = [];
+  if (selectedMood !== null) detailChannels.push(tr("entry.channelMood"));
+  if (selectedEnergy !== null) detailChannels.push(tr("entry.channelEnergy"));
+  if (sleepQuality !== null) detailChannels.push(tr("entry.channelSleep"));
+  if (selectedTags.length > 0) detailChannels.push(tr("entry.channelTags"));
 
   return (
     <MainShell current="Entry" navigation={navigation} keyboard keyboardBehavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -355,12 +413,14 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       >
         <View style={{ gap: 6 }}>
           <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-            {activeDays >= unlockDays ? "Patterns unlocked" : `${activeDays}/${unlockDays} days to your patterns`}
+            {activeDays >= unlockDays
+              ? tr("entry.patternsUnlocked")
+              : tr("entry.daysToPatterns", { active: activeDays, total: unlockDays })}
           </Text>
           <View
             style={[styles.progressTrack, { backgroundColor: t.colors.card, borderRadius: t.radius.sm }]}
             accessibilityRole="progressbar"
-            accessibilityLabel={`Progress toward your patterns: ${Math.min(activeDays, unlockDays)} of ${unlockDays} days`}
+            accessibilityLabel={tr("entry.progressA11y", { done: Math.min(activeDays, unlockDays), total: unlockDays })}
             accessibilityValue={{ min: 0, max: unlockDays, now: Math.min(activeDays, unlockDays) }}
           >
             <View
@@ -372,12 +432,38 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           </View>
           {streak > 0 && (
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-              Writing streak: {streak} {streak === 1 ? "day" : "days"}
+              {streak === 1 ? tr("common.streakOne", { count: streak }) : tr("common.streakMany", { count: streak })}
             </Text>
           )}
         </View>
-        {wroteToday && <NoticeChip text="Already wrote today" accessibilityLabel="Already wrote today" />}
-        {draftRestored && <NoticeChip text="Draft restored" />}
+        {wroteToday && (
+          <NoticeChip text={tr("entry.wroteToday")} accessibilityLabel={tr("entry.wroteToday")} />
+        )}
+        {draftRestored && <NoticeChip text={tr("entry.draftRestored")} />}
+        {patternsReady && (
+          // The payoff for thirty days of discipline — calm, honest about
+          // sparseness (patterns still have to EARN their way in), and one
+          // hop to the Patterns screen. Shown once per account, ever.
+          <View style={[styles.readyCard, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
+            <Text style={{ color: t.colors.text, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
+              {tr("entry.readyBody", { days: unlockDays })}
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <GhostButton
+                label={tr("entry.seePatterns")}
+                center={false}
+                onPress={() => navigation.navigate("Insights")}
+                accessibilityLabel={tr("entry.seePatternsA11y")}
+              />
+              <GhostButton
+                label={tr("common.notNow")}
+                center={false}
+                onPress={() => setPatternsReady(false)}
+                accessibilityLabel={tr("entry.dismissReadyA11y")}
+              />
+            </View>
+          </View>
+        )}
         {text.trim() === "" && chips.length > 0 && (
           // Blank-page help: three gentle starters, deterministic per day.
           // Tapping one only seeds the editor — nothing is auto-written.
@@ -391,7 +477,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   setText(`${chip} `);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel={`Start with: ${chip}`}
+                accessibilityLabel={tr("entry.startWith", { chip })}
               >
                 <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize }}>{chip}</Text>
               </TouchableOpacity>
@@ -410,7 +496,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             },
           ]}
           multiline
-          placeholder="What's going on today?"
+          placeholder={tr("entry.placeholder")}
           placeholderTextColor={t.colors.placeholder}
           value={text}
           editable={!busy} // text typed mid-save must not be wiped by the clear
@@ -419,7 +505,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             if (draftRestored) setDraftRestored(false);
             setText(next);
           }}
-          accessibilityLabel="Journal entry"
+          accessibilityLabel={tr("entry.journalA11y")}
           // Privacy: keep journal text out of keyboard suggestion caches.
           autoCorrect={false}
           spellCheck={false}
@@ -428,17 +514,59 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         />
         {text.length > SHOW_COUNT_ABOVE && (
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "right" }}>
-            {text.length.toLocaleString()} / {MAX_ENTRY_CHARS.toLocaleString()}
+            {tr("entry.charCount", {
+              current: text.length.toLocaleString(dateLocaleTag()),
+              max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()),
+            })}
           </Text>
         )}
+        {/* Keyboard-dismiss stays with the editor it dismisses. */}
+        {text.length > 0 && (
+          <GhostButton label={tr("entry.hideKeyboard")} onPress={() => Keyboard.dismiss()} center={false} />
+        )}
+        {/* The optional check-ins behind one disclosure (collapsed by
+            default). Save sits directly under it — writing is the daily
+            act; the details are an occasional one. */}
+        <TouchableOpacity
+          style={[styles.disclosure, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.md, minHeight: t.minTouch }]}
+          onPress={() => {
+            touchActivity();
+            setDetailsOpen(!detailsOpen);
+          }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: detailsOpen }}
+          accessibilityLabel={detailsOpen ? tr("entry.hideDetails") : tr("entry.showDetails")}
+        >
+          <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, fontWeight: "600" }}>
+            {detailsOpen ? tr("entry.hideDetails") : tr("entry.showDetails")}
+          </Text>
+        </TouchableOpacity>
+        {!detailsOpen && detailChannels.length > 0 && (
+          // The quiet guarantee that collapse never hides a live pick: the
+          // summary names exactly the set channels and itself expands.
+          <TouchableOpacity
+            onPress={() => {
+              touchActivity();
+              setDetailsOpen(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={tr("entry.detailsAddedA11y", { channels: detailChannels.join(", ") })}
+          >
+            <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+              {tr("entry.detailsAdded", { channels: detailChannels.join(", ") })}
+            </Text>
+          </TouchableOpacity>
+        )}
+        {detailsOpen && (
+          <>
         {/* The explicit check-in: one tap, radio semantics, never required.
             Tapping the selected option again clears it (back to the text
             estimate) — changing your mind costs nothing. */}
         <View style={{ gap: t.spacing.sm }}>
           <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-            How does today feel? Optional — one tap is enough.
+            {tr("entry.moodQuestion")}
           </Text>
-          <View style={styles.moodRow} accessibilityLabel="Mood check-in">
+          <View style={styles.moodRow} accessibilityLabel={tr("entry.moodCheckInA11y")}>
             {MOOD_OPTIONS.map((option) => {
               const selected = selectedMood === option.value;
               return (
@@ -459,7 +587,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={`Mood: ${option.label}`}
+                  accessibilityLabel={tr("entry.moodOptionA11y", { label: option.label })}
                 >
                   <Text
                     maxFontSizeMultiplier={1.3}
@@ -477,9 +605,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         </View>
         <View style={{ gap: t.spacing.sm }}>
           <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-            And your energy? Optional.
+            {tr("entry.energyQuestion")}
           </Text>
-          <View style={styles.moodRow} accessibilityLabel="Energy check-in">
+          <View style={styles.moodRow} accessibilityLabel={tr("entry.energyCheckInA11y")}>
             {ENERGY_OPTIONS.map((option) => {
               const selected = selectedEnergy === option.value;
               return (
@@ -499,7 +627,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={`Energy: ${option.label}`}
+                  accessibilityLabel={tr("entry.energyOptionA11y", { label: option.label })}
                 >
                   <Text
                     style={{
@@ -516,9 +644,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         </View>
         <View style={{ gap: t.spacing.sm }}>
           <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-            How did you sleep? Optional.
+            {tr("entry.sleepQuestion")}
           </Text>
-          <View style={styles.moodRow} accessibilityLabel="Sleep quality">
+          <View style={styles.moodRow} accessibilityLabel={tr("entry.sleepA11y")}>
             {SLEEP_OPTIONS.map((option) => {
               const selected = sleepQuality === option.value;
               return (
@@ -539,7 +667,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={`Sleep: ${option.label}`}
+                  accessibilityLabel={tr("entry.sleepOptionA11y", { label: option.label })}
                 >
                   <Text
                     maxFontSizeMultiplier={1.3}
@@ -557,9 +685,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         </View>
         <View style={{ gap: t.spacing.sm }}>
           <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-            What shaped today? Optional — tap any.
+            {tr("entry.tagsQuestion")}
           </Text>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }} accessibilityLabel="Day tags">
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }} accessibilityLabel={tr("entry.tagsA11y")}>
             {ACTIVITY_TAGS.map((tag) => {
               const selected = selectedTags.includes(tag);
               return (
@@ -572,7 +700,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: selected }}
-                  accessibilityLabel={`Tag: ${tag}`}
+                  accessibilityLabel={tr("entry.tagA11y", { tag })}
                 >
                   <Text
                     maxFontSizeMultiplier={1.3}
@@ -585,10 +713,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             })}
           </View>
         </View>
-        {text.length > 0 && (
-          <GhostButton label="Hide keyboard" onPress={() => Keyboard.dismiss()} center={false} />
+          </>
         )}
-        <PrimaryButton label="Save entry" onPress={save} disabled={!text.trim()} busy={busy} />
+        <PrimaryButton label={tr("entry.save")} onPress={save} disabled={!text.trim()} busy={busy} />
         <InlineStatus message={status} tone={statusTone} />
       </ScrollView>
     </MainShell>
@@ -605,5 +732,7 @@ const styles = StyleSheet.create({
   input: { minHeight: 140, textAlignVertical: "top" },
   moodRow: { flexDirection: "row", gap: 8 },
   moodOption: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
+  disclosure: { alignItems: "center", justifyContent: "center" },
   chip: { paddingHorizontal: 12, paddingVertical: 8 },
+  readyCard: { padding: 18, gap: 12 },
 });

@@ -21,7 +21,7 @@ observation shows you its evidence.**
 | `backend/tests/` | Unit + API integration + crypto vectors + production-hardening, adversarial red-team, and remediation-regression suites |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
-| `mobile/` | React Native (iOS/Android) client: encrypted journal with atomic entry edits, history search + mood calendar, one-tap mood check-in, reflective questions, evidence-view pattern cards, crisis resources, therapist sharing, and scoped offline sync. Export is deliberately disabled pending a reviewed native streaming-to-file implementation. |
+| `mobile/` | React Native (iOS/Android) client: encrypted journal with atomic entry edits, history search + mood calendar, one-tap mood check-in behind an optional details disclosure, reflective questions (auto-loaded, key-shipment still explicit), evidence-view pattern cards with per-pattern mute, one-time threshold-crossing notice, opt-in local daily reminders, optional biometric unlock (data key wrapped under Keychain biometry-current-set; password always remains), the on-device brain's graded sentiment engine (vector-pinned to the server's), optional PHQ-9 wellbeing measures shared with the therapist through the same consent, English/Spanish localization (device locale), crisis resources, therapist sharing, and scoped offline sync. Export is deliberately disabled pending a reviewed native streaming-to-file implementation. |
 | `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes (editable, searchable, templates), the "since your last review" delta anchored to an explicit Mark-reviewed action, printable session summaries, caseload triage scan, mood sparklines, 401-expiry + idle auto-lock — read-only by construction |
 | `shared/vectors.json` | Cross-platform crypto vectors (backend ⇄ mobile ⇄ portal), including non-ASCII AAD cases and the therapist wrap (ECDH→HKDF→AES-GCM) constructions |
 | `shared/crisis_phrases.json` | Cross-platform crisis-language contract (client dialog tier + server suppression tier), consumed by both platforms |
@@ -42,6 +42,11 @@ population averages. Full citations in `RESEARCH.md`.
 | `mood_correlation` | "entries read lower on days 'work' appears" | **within-person residuals** (your mood minus your own rolling baseline — the intensive-longitudinal standard) + Welch's t on autocorrelation-deflated effective sample sizes + Cohen's d gate | Bolger & Laurenceau 2013; Fisher (idiographic models) |
 | `link` | "the day after 'sleep' comes up, entries read lower" | lag-1 day-after association on residuals, same gates; the label reports the **modal exposed gap** (`lag_days` + gap1/gap2 counts) and says "the day after" only when gap 1 is the mode | sleep→next-day mood: Bourke et al. 2026 meta-analysis (118 studies); stress spillover: Bolger et al. 1989 |
 | `inertia` | "mood carries over day to day more than usual" | lag-1 autocorrelation, recent vs your earlier norm (Fisher-z difference test) | Kuppens et al. 2010; Houben et al. 2015 meta-analysis |
+| `energy_inertia` | "your energy carries over day to day more than usual" | the same inertia machinery over the optional energy picks (payload v2 channel) | affect-dynamics methods as `inertia`; mood–energy dissociation is circumplex-standard |
+| `pa_inertia` / `na_inertia` | "your positive / negative feelings carry over more than usual" | the same machinery over the graded lexicon's POSITIVE and NEGATIVE streams summed by sign (`sentiment_components`), text-scored entries only | differential dynamics of PA vs NA: Emmons & Diener 1985; Abitante et al. 2024 |
+| `energy_mood_coupling` | "your energy and your mood move together more than usual" | Pearson correlation of energy and mood within-person residuals, recent vs your own earlier norm (Fisher-z); surfaced only as a rise | mood–energy concordance as a within-person affect-dynamics signal |
+| `sense_making` | "your writing has leaned more on sense-making words" | causal+insight word density per day (LIWC-style dictionary), recent vs your earlier norm (Welch's t + density gates) | rising causal/insight word use tracks benefit in expressive writing: Pennebaker & Francis 1996; Campbell & Pennebaker 2003; Hevey 2014 |
+| `activity_diversity` | "the variety in your tagged activities has narrowed/widened" | weekly Shannon entropy over activity tags, recent weeks vs your earlier weeks (Welch's t + change gate); both directions surface | variety of pleasant activities tracks symptoms: Ong et al. 2023 |
 | `instability` | "bigger daily swings than usual" | spread of within-person residuals, recent vs earlier | affective instability literature |
 | `mood_shift` | "entries read lower than your baseline lately" | EWMA control chart (λ=0.18, ±2.7σ, personal baseline) | Snippe et al. 2023; Smit, Schat & Ceulemans 2023 (methods) |
 | `rumination` | "the worry 'X' keeps returning" | near-duplicate **negative** phrase clusters + negation-heavy phrasing + absolutist-word density | Ehring & Watkins 2008 (RNT); Al-Mosaiwi & Johnstone 2018 (absolutist words) |
@@ -78,6 +83,43 @@ reorders future questions.
 Sentiment is a **graded lexicon engine** (curated-over-VADER: 7,200+ graded words +
 emoji valence, the curation rules winning word-for-word: graded valences,
 intensifiers, damped negation, "but" re-weighting — Hutto & Gilbert 2014),
+**The on-device brain has begun (2026-09-19).** The deterministic core now
+runs in the mobile app too: the graded sentiment engine (the full merged
+lexicon — 7,267 words + emoji valences — with negation, intensifier and
+"but" rules and morphological candidates) is ported to TypeScript
+(`mobile/src/brain/`) and pinned to the Python engine by cross-platform
+vectors (`shared/brain_vectors.json`: 32 sentiment cases including the
+negation/morphology regression inputs, plus the statistics core — erfc,
+Pearson, Fisher-z difference p). The device-local mood estimate, History
+badges and fallback mood-log values now use the REAL engine instead of
+the old 20-word ratio hack. The lexicon artifact is generated
+(`backend/scripts/dump_brain_lexicon.py` → `shared/brain_lexicon.json` +
+a TS module copy) and byte-pinned on both sides. This is the foundation
+for closing the processing-session exception: the port continues (day
+series, inertia family, themes, phrases, lifecycle), and the contract it
+establishes is that whatever runs locally is the same deterministic
+math, never an approximation.
+
+**Spanish is the second analysis language (2026-09-19).** The engine's
+first non-English lexicon ships: ~480 graded Spanish sentiment words on
+the same -4..+4 scale (plus Spanish negators, intensifiers, "pero"
+contrast words, absolutist and sense-making sets, and a function-word
+detection set). The old English-only language GATE became language
+DETECTION: English and Spanish each score a share of the window's tokens
+against their own detection sets (built from language-specific sources,
+so merged lexicon words cannot inflate the wrong side); the higher share
+wins if it clears the floor, anything else is `"other"` and the
+historical suppressions apply (topics, text sentiment, rumination
+classification step aside; client mood tags and phrase repetition still
+count). Consequences: Spanish journals get the FULL analysis — mood
+series, PA/NA, rumination, sense-making, topics — in Spanish, with the
+Spanish copy surfaced by the same machinery; English wins every lexicon
+collision by merge order; `stats.language` carries the detection so the
+app renders an honest "not yet supported" card for other languages
+instead of an unexplained quiet analysis. The mobile i18n and the
+Spanish lexicon are deliberately separate systems (UI language vs
+journal language — either can be either).
+
 deterministic and self-contained. The lexicon is curated: context-dependent
 words ("kind", "fed", "present") were removed after measurement, and
 "hardly"/"barely" are negation-only (VADER's treatment — never downtoners).
@@ -154,17 +196,38 @@ anything:
    power the drill-down: the portal fetches exactly those days, decrypts
    the entries, and highlights label occurrences with per-entry mood.
    Sensitive (crisis-adjacent) cards render non-quoting, as in the app.
-4. **Notes** are the therapist's own record: encrypted under the
+   **Caseload summaries (2026-09-19)**: at each patient recompute the
+   server — inside the processing session, where the surfaced patterns
+   already exist in memory — writes a small per-consent summary
+   (pattern count, sensitive-card presence, newest first-seen) wrapped
+   to the therapist's public key with the same ECIES construction as
+   the data-key wrap (AAD context `"caseload-summary"`, bound to the
+   patient/therapist pair). The portal decrypts N small blobs instead
+   of N full insight payloads when triaging, and a sensitive card's
+   PRESENCE surfaces on the caseload screen (a calm, non-quoting
+   banner) without opening every chart. Summaries are null until the
+   patient's first post-grant recompute and are cleared on revoke.
+**Wellbeing measures (MBC, 2026-09-19)**: the patient can complete a
+   standard questionnaire (PHQ-9) in the app; the score is stored as an
+   opaque encrypted blob (AAD context `"measure"`) under the same
+   per-account quota and date discipline as entries, and the therapist
+   portal reads it through the SAME active consent — decrypting with the
+   per-consent unwrapped data key. The app never interprets a score (no
+   severity bands, no advice — the charter holds); the portal displays
+   the trend and says plainly that interpretation belongs to the
+   clinician. Item 9 (self-harm) endorsement gently points at the offline
+   crisis resources after the response is safely saved.
+5. **Notes** are the therapist's own record: encrypted under the
    therapist's password-derived key in the browser, attachable to a
    patient or a pattern, surviving a revoke and dying with either
    account. Patients cannot read them.
-5. **Revoke** (password-gated) clears the wrapped key — future access
+6. **Revoke** (password-gated) clears the wrapped key — future access
    ends immediately. What was already read cannot be unread; the grant
    disclosure says so plainly. Re-granting reactivates the same consent
    row (note continuity for the therapist). Every grant/revoke and every
    patient-data read/write is audit-logged; the access log outlives
    account deletion.
-6. **Compliance flag**: sharing journal data with clinicians moves an
+7. **Compliance flag**: sharing journal data with clinicians moves an
    operator into health-data territory (HIPAA BAA in the US or
    equivalent). The architecture (explicit consent records with
    disclosure versions, revocation, access audit) is built for it; the
@@ -217,6 +280,12 @@ anything:
 The mobile client keeps derived keys memory-only: after an app restart the session token is still valid but the key vault is locked behind an unlock screen, and navigation is tri-state (no login-flash race). The session token itself is AES-256-GCM-encrypted under a random per-install device key held only by iOS Keychain/Android Keystore through `react-native-keychain`; there is no AsyncStorage key fallback. If that native secure-storage seam is unavailable, sign-in fails closed. The offline sync queue is scoped to both API origin and account; server error text is sanitized before reaching dialogs, and the app switcher sees only a blank shield. Sync is deliberately **push-only**: v1 is a single-device-writer design — entries push up, and the History screen pulls this account's entries back (same-device restore, new device). There is no multi-device conflict model.
 
 ## API surface & error contract
+
+New in this wave: `POST/GET /api/v1/measures` (the patient's opaque
+encrypted questionnaire records — same date/quota/idempotency discipline
+as entries, AAD context `"measure"`) and the consent-gated
+`GET /api/v1/therapist/patients/{id}/measures` (audit-logged like every
+patient-data read).
 
 All routes mount under **`/api/v1`** (canonical); the same routers are also served under **`/api`** as a deprecated legacy alias for existing clients. `GET /api/v1/meta` returns `{unlock_days, llm_available, api_version, version}` — `api_version` is how a client discovers the canonical base. Alongside `GET /healthz` (liveness only, no DB touch), **`GET /readyz`** runs `SELECT 1` against the database and answers 503 when it fails — that is the probe to gate deploys on. `DELETE /api/v1/account` takes the verifier in the **`X-Account-Verifier`** header (a JSON body is still accepted as a deprecated fallback — DELETE bodies are unreliable across clients and proxies).
 

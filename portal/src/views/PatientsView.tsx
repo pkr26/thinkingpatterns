@@ -5,8 +5,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type Patient } from "../api";
-import { decryptInsights, keyFingerprint, unwrapPatientDataKey } from "../crypto";
-import type { Bytes } from "../crypto";
+import { decryptCaseloadSummary, decryptInsights, keyFingerprint, unwrapPatientDataKey } from "../crypto";
+import type { Bytes, CaseloadSummary } from "../crypto";
 import { localStore } from "../platform";
 import { Button, Card, ErrorBanner, Note, theme } from "../ui";
 import type { PortalSession } from "./PatientView";
@@ -54,6 +54,38 @@ export function PatientsView(props: {
     api.patients().then(setPatients).catch((err) => setError(err instanceof Error ? err.message : "could not load patients"));
   }, []);
   useEffect(refresh, [refresh]);
+
+  // Caseload summaries (2026-09-19): the server writes a small ECIS-wrapped
+  // summary per active consent at each patient recompute. Decrypting them
+  // here makes triage O(1) per patient (no full insight fetches) and — the
+  // safety point — surfaces a sensitive card's PRESENCE without opening
+  // every chart. Failures degrade to "no summary": the row renders "—"
+  // and the manual scan below remains the fallback.
+  const [summaries, setSummaries] = useState<Record<string, CaseloadSummary | null>>({});
+  useEffect(() => {
+    if (!props.session || patients.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, CaseloadSummary | null> = {};
+      for (const patient of patients) {
+        if (patient.status !== "active" || !patient.summary_blob || !patient.summary_eph_pub) {
+          continue;
+        }
+        next[patient.user_id] = await decryptCaseloadSummary(
+          props.session!.privateKey,
+          props.session!.publicKeyB64,
+          patient.summary_eph_pub,
+          patient.summary_blob,
+          patient.user_id,
+          props.session!.userId,
+        );
+      }
+      if (!cancelled) setSummaries(next);
+    })();
+    return () => { cancelled = true; };
+  }, [props.session, patients]);
+
+  const sensitiveCount = Object.values(summaries).filter((s) => s?.sensitive === true).length;
 
   const newCode = async () => {
     if (busy) return;
@@ -162,6 +194,16 @@ export function PatientsView(props: {
 
       <ErrorBanner message={error} />
 
+      {sensitiveCount > 0 && (
+        <div data-testid="sensitive-banner" style={{ marginBottom: 14 }}>
+          <Note tone="warn">
+            {sensitiveCount} of your patients {sensitiveCount === 1 ? "has a sensitive card" : "have sensitive cards"} in
+            their current patterns. Opening {sensitiveCount === 1 ? "that chart" : "those charts"} puts the
+            non-quoting card first — the wording itself is never echoed here.
+          </Note>
+        </div>
+      )}
+
       <h2 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>ACTIVE</h2>
       {active.length > 1 && (
         <div style={{ marginBottom: 10 }}>
@@ -174,6 +216,7 @@ export function PatientsView(props: {
       {active.length === 0 && <Note>No patients are sharing with you yet.</Note>}
       {active.map((patient) => {
         const row = scan?.[patient.user_id];
+        const summary = summaries[patient.user_id];
         return (
         <Card key={patient.user_id}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -181,11 +224,12 @@ export function PatientsView(props: {
               <strong style={{ color: theme.text, fontSize: 15 }}>{patient.username}</strong>
               <Note>
                 sharing since {dayOf(patient.granted_at)}
-                {row && row.patterns >= 0 && ` · ${row.patterns} pattern${row.patterns === 1 ? "" : "s"}`}
+                {summary && ` · ${summary.patterns} pattern${summary.patterns === 1 ? "" : "s"}`}
+                {!summary && row && row.patterns >= 0 && ` · ${row.patterns} pattern${row.patterns === 1 ? "" : "s"}`}
                 {row && row.newSinceReviewed > 0 && ` · ${row.newSinceReviewed} new`}
                 {row && row.lastReviewed && ` · reviewed ${row.lastReviewed}`}
               </Note>
-              {row?.sensitive && (
+              {(row?.sensitive || summary?.sensitive) && (
                 <Note tone="warn">a sensitive card is present — review ordering puts it first</Note>
               )}
             </div>

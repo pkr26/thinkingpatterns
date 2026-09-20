@@ -3,7 +3,13 @@
  *
  * Pure functions: the search box and the mood calendar filter the
  * DECRYPTED, on-device list — no query ever leaves the phone.
+ *
+ * monthLabel formats through Intl with the app locale's tag (2026-09-19
+ * i18n wave) — the old pinned English MONTH_NAMES table is gone; a
+ * garbage month still degrades to the raw number-shaped output rather
+ * than throwing.
  */
+import { dateLocaleTag } from "./strings";
 
 export interface SearchableEntry {
   clientEntryId: string;
@@ -44,13 +50,13 @@ export function monthGrid(year: number, month1to12: number): CalendarDay[] {
   return cells;
 }
 
-export const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-] as const;
-
+/** "September 2026" / "septiembre 2026" per the app locale (en → en-US
+ *  capitalized month, es → es-ES lowercase, both via Intl — no tables). */
 export function monthLabel(year: number, month1to12: number): string {
-  return `${MONTH_NAMES[month1to12 - 1]} ${year}`;
+  const name = new Intl.DateTimeFormat(dateLocaleTag(), { month: "long", timeZone: "UTC" }).format(
+    new Date(Date.UTC(year, month1to12 - 1, 1)),
+  );
+  return `${name} ${year}`;
 }
 
 /** Previous/next month stepping (wraps the year). */

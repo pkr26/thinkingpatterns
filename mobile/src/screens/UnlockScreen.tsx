@@ -15,8 +15,18 @@
  * HONEST COPY (audit fix): the old subtitle claimed "Your keys never leave
  * this device" — false, since a processing session ships the data key once
  * (single-use, memory-only). The subtitle now tells the truth calmly.
+ *
+ * BIOMETRIC UNLOCK (2026-09-19): when this device has biometrics AND the
+ * account previously stored a biometric wrap (src/biometricUnlock.ts), a
+ * primary "Unlock with biometrics" button appears ABOVE the password
+ * field. It restores LOCAL DECRYPTION only — a 401 from the server still
+ * requires the password, which is why the dummies below are honest: the
+ * vault zeroizes the master key the moment it takes ownership, and the
+ * auth key exists solely to log in with the password. The password path is
+ * never demoted, never hidden, and stays the default; every biometric
+ * failure lands as one calm inline line, not a lockout.
  */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -34,9 +44,11 @@ import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { storeUnlockProof, verifyUnlockProof } from "../unlockProof";
+import { biometricsSupported, hasBiometricUnlock, unwrapBiometricDataKey } from "../biometricUnlock";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy } from "../components/errors";
+import { t as tr } from "../strings";
 
 /** Throttles offline password guessing: each failed offline proof check
  *  pauses before the dialog appears (PBKDF2 already costs ~100ms+ per
@@ -48,6 +60,62 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
   const { signOut, refreshActiveDays } = useSession();
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Offered only when this device has biometrics AND the account has a
+   *  stored wrap — the check itself never prompts (biometricUnlock.ts). */
+  const [showBiometric, setShowBiometric] = useState(false);
+  /** Calm inline failure line; never a dialog, never a lockout. */
+  const [biometricError, setBiometricError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      // Quiet probe: unsupported device, no stored wrap, or no session
+      // account all leave the screen exactly as it was — password only.
+      try {
+        if (!(await biometricsSupported())) return;
+        const userId = await api.getUserId();
+        if (!userId || cancelled) return;
+        if (await hasBiometricUnlock(userId)) {
+          if (!cancelled) setShowBiometric(true);
+        }
+      } catch {
+        /* the password path needs nothing from this probe */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
+  }, []);
+
+  const unlockWithBiometrics = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const userId = await api.getUserId();
+      if (!userId) throw new Error("no saved account on this device");
+      const dataKey = await unwrapBiometricDataKey(userId);
+      if (dataKey === null) throw new Error("biometric unlock declined");
+      // WHY the dummy master/auth keys are honest here: vault.unlock
+      // zeroizes the master key immediately (it exists only to derive the
+      // other two), and the auth key is only ever SENT at password login —
+      // biometric unlock restores local decryption, not server
+      // re-authentication. A 401 later still asks for the password.
+      vault.unlock(
+        { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32), dataKey },
+        userId,
+      );
+      setPassword(""); // the field was empty anyway; keep the invariant
+      setBiometricError(false);
+      await refreshActiveDays();
+    } catch {
+      // Cancel, lockout, missing wrap, read failure — one calm line. The
+      // password path below is untouched and still the guaranteed way in.
+      setBiometricError(true);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const unlock = async () => {
     if (!password || busy) return;
@@ -55,7 +123,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     let derived: Keys | null = null;
     try {
       const username = await api.getUsername();
-      if (!username) throw new Error("no saved account on this device — please sign in");
+      if (!username) throw new Error(tr("unlock.noAccount"));
       let saltB64: string;
       let offline = false;
       try {
@@ -95,22 +163,21 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         // OFFLINE PATH — must be VERIFIED, never assumed. The sealed
         // marker only opens under the correct data key.
         const userId = await api.getUserId();
-        if (!userId) throw new Error("no saved account on this device — please sign in");
+        if (!userId) throw new Error(tr("unlock.noAccount"));
         const proof = await verifyUnlockProof(keys.dataKey, userId);
         if (proof === "absent") {
-          throw new Error(
-            "offline unlock is not enabled on this device yet — sign in once while online to enable it",
-          );
+          throw new Error(tr("unlock.offlineNotEnabled"));
         }
         if (proof === "wrong") {
           await new Promise((resolve) => setTimeout(resolve, FAILED_PROOF_DELAY_MS));
           // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
-          throw new ApiError(401, "Wrong password.");
+          throw new ApiError(401, tr("common.wrongPassword"));
         }
       }
       vault.unlock(derived, (await api.getUserId()) ?? undefined); // vault takes ownership and zeroizes the master key
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
+      setBiometricError(false); // the promised password path worked — retract the biometric nudge
       await refreshActiveDays();
     } catch (err) {
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
@@ -119,9 +186,9 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       // ApiErrors map to calm copy; our own local Error text passes through.
       const message =
         err instanceof ApiError && err.status === 401
-          ? "Wrong password."
+          ? tr("common.wrongPassword")
           : requestFailureCopy(err);
-      Alert.alert("Unlock failed", message);
+      Alert.alert(tr("unlock.failedTitle"), message);
     } finally {
       setBusy(false);
     }
@@ -137,13 +204,27 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         keyboardShouldPersistTaps="handled"
       >
       <Text style={[styles.title, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
-        Locked
+        {tr("unlock.title")}
       </Text>
       <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
-        Your journal is encrypted with keys only you hold. Re-enter your password to unlock this
-        device. When you ask for your patterns, the key visits the server once — held in memory,
-        then destroyed. Nothing else ever leaves.
+        {tr("unlock.body")}
       </Text>
+      {showBiometric && (
+        <PrimaryButton
+          label={tr("unlock.biometric")}
+          onPress={() => void unlockWithBiometrics()}
+          disabled={busy}
+          accessibilityLabel={tr("unlock.biometric")}
+        />
+      )}
+      {biometricError && (
+        <Text
+          style={{ color: t.colors.muted, fontSize: 13, textAlign: "center", lineHeight: 18 }}
+          accessibilityRole="alert"
+        >
+          {tr("unlock.biometricFailed")}
+        </Text>
+      )}
       <TextInput
         style={{
           backgroundColor: t.colors.card,
@@ -152,18 +233,18 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
           padding: 14,
           fontSize: 16,
         }}
-        placeholder="password"
+        placeholder={tr("common.passwordPlaceholder")}
         placeholderTextColor={t.colors.placeholder}
         secureTextEntry
         value={password}
         onChangeText={setPassword}
         onSubmitEditing={unlock}
-        accessibilityLabel="Password"
+        accessibilityLabel={tr("common.passwordA11y")}
         textContentType="password"
         autoComplete="current-password"
       />
-      <PrimaryButton label="Unlock" onPress={unlock} disabled={!password} busy={busy} />
-      <GhostButton label="Sign out instead" onPress={() => void signOut()} />
+      <PrimaryButton label={tr("unlock.button")} onPress={unlock} disabled={!password} busy={busy} />
+      <GhostButton label={tr("unlock.signOutInstead")} onPress={() => void signOut()} />
       {/* Crisis help needs no unlock and no network — the locked state is
           exactly when it must be one tap away. */}
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />

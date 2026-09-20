@@ -9,11 +9,12 @@ alternating mounts.
 
 from fastapi import APIRouter
 
-from . import account, auth, consents, entries, insights, meta, therapist
+from . import account, auth, consents, entries, insights, measures, meta, therapist
 
 _module_routers = (
     auth.router,
     entries.router,
+    measures.router,
     insights.router,
     account.router,
     consents.router,

@@ -301,6 +301,30 @@ class PatientOut(BaseModel):
     # Absent while revoked — there is nothing left to unwrap.
     ephemeral_pub: str | None = None
     wrapped_key: str | None = None
+    # Caseload summary (2026-09-19): the ECIES-wrapped per-consent summary
+    # written at the patient's last post-grant recompute. Absent while
+    # revoked and until that first recompute — the portal renders "—".
+    summary_blob: str | None = None
+    summary_eph_pub: str | None = None
+    summary_updated_at: datetime | None = None
+
+
+class MeasureCreate(BaseModel):
+    """One recorded questionnaire completion: an opaque blob (the client
+    encrypts the score payload under the data key, AAD ("measure", user,
+    client_measure_id)) plus the client's calendar day of completion."""
+
+    client_measure_id: str = Field(pattern=CLIENT_ID_PATTERN)
+    blob: str = Field(min_length=1, max_length=8192)  # b64 envelope; scores are tiny
+    measure_date: date
+
+
+class MeasureOut(BaseModel):
+    id: str
+    client_measure_id: str
+    blob: str
+    measure_date: date
+    received_at: datetime
 
 
 class NoteCreateRequest(BaseModel):

@@ -1,0 +1,66 @@
+# Prometheus scrape configuration for the MindPattern API.
+#
+# OPERATOR TOOLING — this file and the images in docker-compose.yml next to
+# it are deliberately OUTSIDE the digest-pinned production contract in
+# deploy/README.md. The production docker-compose.yml only runs
+# @sha256-pinned release images; this stack is opt-in, version-tagged, and
+# must have its digests resolved and pinned before production use (see
+# deploy/monitoring/README.md, "Digest pinning").
+#
+# TARGET WIRING
+#   `api:8000` is the compose-internal service DNS name — the same network
+#   the existing backup service uses when it runs `pg_dump -h db`. This
+#   requires the monitoring containers to join the production compose
+#   network (see the `mindpattern` external network in the monitoring
+#   docker-compose.yml; its name defaults to mindpattern_default).
+#   Do NOT switch to host.docker.internal: the api publishes 8000 on
+#   127.0.0.1 ONLY (loopback), so a container reaching the host's bridge
+#   address would be refused.
+#
+# TOKEN
+#   ${MINDPATTERN_METRICS_TOKEN} is expanded by Prometheus itself at config
+#   load. If the variable is unset, Prometheus refuses to start — the same
+#   fail-closed posture as the backup service's BACKUP_KEY. The token must
+#   be the SAME value the api service was given (README, "Enabling /metrics"
+#   — production /metrics 404s until the api has MINDPATTERN_METRICS_TOKEN).
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: mindpattern-api
+    # GET http://api:8000/metrics with `Authorization: Bearer <token>`.
+    # The endpoint is the only source of the mindpattern_* series; see
+    # backend/app/metrics.py for exactly what is (and is deliberately not)
+    # exported: aggregate counters only, never usernames, paths, or
+    # per-user latencies.
+    metrics_path: /metrics
+    scheme: http
+    bearer_token: ${MINDPATTERN_METRICS_TOKEN}
+    static_configs:
+      - targets: ["api:8000"]
+
+  # OPTIONAL synthetic probe (enable together with `--profile blackbox` in
+  # the monitoring docker-compose.yml, then uncomment this job AND the
+  # MindPatternReadyzProbeFailing alert in alerts.yml). Unlike the scrape
+  # above — which proves the API process serves /metrics — this proves
+  # /readyz returns 200, i.e. DB connectivity at the exact schema head.
+  #
+  # - job_name: mindpattern-blackbox
+  #   metrics_path: /probe
+  #   params:
+  #     module: [http_2xx]
+  #   static_configs:
+  #     - targets:
+  #         - http://api:8000/readyz
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: __param_target
+  #     - source_labels: [__param_target]
+  #       target_label: instance
+  #     - target_label: __address__
+  #       replacement: blackbox:9115

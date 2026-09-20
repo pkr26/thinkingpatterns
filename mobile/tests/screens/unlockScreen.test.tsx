@@ -19,6 +19,18 @@ vi.mock("../../src/unlockProof", () => ({
   unlockProofExists: vi.fn(async () => false),
 }));
 
+// Biometric unlock (2026-09-19): defaults to "unsupported device" so every
+// pre-existing test sees the plain password gate.
+const biometricsSupported = vi.fn(async () => false);
+const hasBiometricUnlock = vi.fn(async () => false);
+const unwrapBiometricDataKey = vi.fn(async (): Promise<Buffer | null> => null);
+vi.mock("../../src/biometricUnlock", () => ({
+  biometricsSupported: () => biometricsSupported(),
+  hasBiometricUnlock: (userId: string) => hasBiometricUnlock(userId),
+  unwrapBiometricDataKey: (userId: string) => unwrapBiometricDataKey(userId),
+  disableBiometricUnlock: vi.fn(async () => {}),
+}));
+
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
   return {
@@ -65,6 +77,12 @@ let lastDerived: { masterKey: Buffer; authKey: Buffer; dataKey: Buffer } | null 
 beforeEach(() => {
   resetApi(api as never);
   lastDerived = null;
+  biometricsSupported.mockReset();
+  biometricsSupported.mockImplementation(async () => false);
+  hasBiometricUnlock.mockReset();
+  hasBiometricUnlock.mockImplementation(async () => false);
+  unwrapBiometricDataKey.mockReset();
+  unwrapBiometricDataKey.mockImplementation(async () => null);
   vi.mocked(deriveKeysAsync).mockReset();
   vi.mocked(deriveKeysAsync).mockImplementation(async () => {
     lastDerived = {
@@ -416,5 +434,117 @@ describe("UnlockScreen", () => {
     expect(lastDerived!.masterKey.equals(Buffer.alloc(32))).toBe(true);
     expect(lastDerived!.authKey.equals(Buffer.alloc(32))).toBe(true);
     expect(lastDerived!.dataKey.equals(Buffer.alloc(32))).toBe(true);
+  });
+});
+
+describe("UnlockScreen biometric unlock (offered only when a wrap exists)", () => {
+  it("no biometric button on an unsupported device — the password gate is unchanged", async () => {
+    const root = await render(<UnlockScreen />);
+    await flush();
+    expect(textOf(root)).not.toContain("Unlock with biometrics");
+    expect(textOf(root)).not.toContain("Biometric unlock didn't work");
+  });
+
+  it("no button when the device is supported but no wrap was ever stored", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    hasBiometricUnlock.mockImplementation(async () => false);
+    const root = await render(<UnlockScreen />);
+    await flush();
+    expect(textOf(root)).not.toContain("Unlock with biometrics");
+    expect(hasBiometricUnlock).toHaveBeenCalledWith("user-1");
+  });
+
+  it("no button when the quiet probe finds no session account", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    const root = await render(<UnlockScreen />);
+    await flush();
+    expect(textOf(root)).not.toContain("Unlock with biometrics");
+    expect(hasBiometricUnlock).not.toHaveBeenCalled();
+  });
+
+  it("a wrap on a supported device shows the button above the password field", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    hasBiometricUnlock.mockImplementation(async () => true);
+    const root = await render(<UnlockScreen />);
+    await flush();
+    const { TextInput: RNInput } = await import("react-native");
+    const passwordField = root.root.findAllByType(RNInput)[0];
+    expect(passwordField).toBeDefined();
+    // Document order: the biometric button renders BEFORE the password field.
+    const order = root.root.findAll(() => true);
+    const bioIdx = order.findIndex(
+      (n) => n.props.accessibilityLabel === "Unlock with biometrics" && n.props.accessibilityRole === "button",
+    );
+    const passIdx = order.findIndex((n) => n === passwordField);
+    expect(bioIdx).toBeGreaterThanOrEqual(0);
+    expect(bioIdx).toBeLessThan(passIdx);
+    // The quiet probe never prompted: hasBiometricUnlock ran without an
+    // accessControl read (asserted at the module level in
+    // tests/biometricUnlock.test.ts).
+    expect(hasBiometricUnlock).toHaveBeenCalledTimes(1);
+  });
+
+  it("success: unwraps and unlocks the vault WITHOUT a login round-trip", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    hasBiometricUnlock.mockImplementation(async () => true);
+    unwrapBiometricDataKey.mockImplementation(async () => Buffer.alloc(32, 9));
+    const root = await render(<UnlockScreen />);
+    await flush();
+    await pressLabel(root, "Unlock with biometrics");
+    await flush();
+    expect(unwrapBiometricDataKey).toHaveBeenCalledWith("user-1");
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.ownerUserId()).toBe("user-1");
+    expect(refreshActiveDays).toHaveBeenCalledTimes(1);
+    // Biometric unlock restores LOCAL decryption — no server login, no
+    // token refresh, no proof rewrite (those belong to the password path).
+    expect(api.login).not.toHaveBeenCalled();
+    expect(api.setSession).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(textOf(root)).not.toContain("Biometric unlock didn't work");
+  });
+
+  it("failure: one calm inline line, no dialog, and the password still unlocks", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    hasBiometricUnlock.mockImplementation(async () => true);
+    unwrapBiometricDataKey.mockImplementation(async () => null); // cancelled
+    const root = await render(<UnlockScreen />);
+    await flush();
+    await pressLabel(root, "Unlock with biometrics");
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(textOf(root)).toContain("Biometric unlock didn't work — your password always works below.");
+    expect(Alert.alert).not.toHaveBeenCalled();
+    // The password path is fully intact right after the failure. Submit
+    // from the keyboard: the literal label "Unlock" is now a substring of
+    // "Unlock with biometrics", so this exercises the password flow
+    // unambiguously.
+    await typeInto(root, "password", "correct horse");
+    await submitInput(root, "password");
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    expect(api.login).toHaveBeenCalledTimes(1);
+    expect(textOf(root)).not.toContain("Biometric unlock didn't work");
+  });
+
+  it("ignores a second biometric press while one is in flight (busy guard)", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    hasBiometricUnlock.mockImplementation(async () => true);
+    let resolveUnwrap!: (v: Buffer | null) => void;
+    unwrapBiometricDataKey.mockImplementation(
+      () => new Promise((resolve) => (resolveUnwrap = resolve as (v: Buffer | null) => void)),
+    );
+    const root = await render(<UnlockScreen />);
+    await flush();
+    const { firePress } = await import("../helpers/rtr");
+    await firePress(root, "Unlock with biometrics");
+    await firePress(root, "Unlock with biometrics"); // swallowed: busy
+    expect(unwrapBiometricDataKey).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveUnwrap(Buffer.alloc(32, 9));
+    });
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
   });
 });

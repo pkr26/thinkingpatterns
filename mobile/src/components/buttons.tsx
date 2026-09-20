@@ -7,6 +7,7 @@
 import React from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from "react-native";
 import { useTheme } from "../theme";
+import { t } from "../strings";
 
 interface PressableProps {
   onPress: () => void;
@@ -69,7 +70,7 @@ export function GhostButton({ label, onPress, disabled, accessibilityLabel, cent
 
 /** Crisis help is NOT ordinary navigation: it gets its own surface color
  *  and heavier label so a distressed user can find it without reading. */
-export function CrisisHelpButton({ onPress, label = "Need help now? Crisis resources" }: PressableProps & { label?: string }) {
+export function CrisisHelpButton({ onPress, label = t("buttons.needHelp") }: PressableProps & { label?: string }) {
   const t = useTheme();
   return (
     <TouchableOpacity

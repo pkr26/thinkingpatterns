@@ -165,3 +165,43 @@ def test_chosen_pattern_pid_mirrors_build_pool_ordering():
             f"day {day}: pid {pid!r} comes from outside the top-5 slice — "
             "the sensitive-skip must happen AFTER the slice, like build_pool"
         )
+
+
+async def test_feedback_blob_with_mute_lists_is_accepted(client):
+    """Pattern mutes (2026-09-19) ride the same encrypted blob: the muted/
+    unmuted pid lists parse, apply to the brain state, and an unknown pid
+    is simply ignored (patterns retire)."""
+    emu = ClientEmulator("fb-mute", "deep-password")
+    await emu.register(client)
+    await _mature_account(client, emu)
+    await emu.recompute(client)  # establish the encrypted brain state
+
+    token = await emu.open_processing_session(client)
+    response = await client.post(
+        "/api/insights/recompute",
+        headers={**emu.headers, "X-Processing-Token": token},
+        json={
+            "feedback_blob": _feedback_blob(
+                emu,
+                {"feedback": [], "muted": ["temporal:work", "bogus:pid"], "unmuted": []},
+            )
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["phase"] == "insight"
+
+
+def test_parse_feedback_partitions_taps_and_mutes():
+    from app.api.insights import _parse_feedback
+
+    raw = json.dumps(
+        {
+            "feedback": [{"pid": "a:1", "resonated": True}, {"pid": "x", "resonated": "yes"}],
+            "muted": ["a:1", 7, ""],
+            "unmuted": ["b:2", "way-too-long-" + "x" * 200],
+        }
+    ).encode("utf-8")
+    events = _parse_feedback(raw)
+    assert events.taps == [("a:1", True)]  # the malformed tap is dropped
+    assert events.muted == ["a:1"]  # non-strings and empties dropped
+    assert events.unmuted == ["b:2"]  # the over-length pid is dropped

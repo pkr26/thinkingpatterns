@@ -1333,3 +1333,94 @@ class TestEvidenceDates:
             )
         )
         assert payload["text"]
+
+
+# --- caseload summaries (2026-09-19) ----------------------------------------------
+
+
+async def test_recompute_wraps_a_summary_the_therapist_can_decrypt(client):
+    """The recompute writes a small ECIES-wrapped summary per active
+    consent; the therapist's own private key (the portal's unwrap path)
+    opens it to the surfaced-pattern metadata."""
+    import json as _json
+
+    from app.security import sharing as sharing_crypto
+
+    patient = ClientEmulator("sum-patient", "deep-password")
+    await patient.register(client)
+    await _seed(client, patient)
+    th = TherapistEmulator("sum-dr", "pw-therapist", "Dr. Summary")
+    await th.register(client)
+    await _grant(client, patient, th)
+
+    # No summary until the first post-grant recompute.
+    before = (await client.get("/api/therapist/patients", headers=th.headers)).json()
+    assert before[0]["summary_blob"] is None
+    assert before[0]["summary_eph_pub"] is None
+
+    await patient.recompute(client)
+
+    after = (await client.get("/api/therapist/patients", headers=th.headers)).json()
+    row = after[0]
+    assert row["summary_blob"] is not None
+    assert row["summary_eph_pub"] is not None
+    assert row["summary_updated_at"] is not None
+    plain = sharing_crypto.unwrap_summary_payload(
+        th.unlock_private_key(),
+        row["summary_eph_pub"],
+        base64.b64decode(row["summary_blob"]),
+        row["user_id"],
+        th.user_id,
+    )
+    summary = _json.loads(plain.decode("utf-8"))
+    assert summary["v"] == 1
+    assert isinstance(summary["patterns"], int) and summary["patterns"] > 0
+    assert summary["sensitive"] is False  # the seeded corpus has no crisis content
+    assert isinstance(summary["newest"], str)
+
+
+async def test_summary_blob_rejects_relocation_between_consents(client):
+    """AAD binds (caseload-summary, user, therapist): a summary wrapped for
+    one pair must fail authentication when unwrapped as another's."""
+    import json as _json
+
+    from app.security import sharing as sharing_crypto
+
+    patient = ClientEmulator("sum-bind", "deep-password")
+    await patient.register(client)
+    await _seed(client, patient)
+    th = TherapistEmulator("sum-bind-dr", "pw-therapist", "Dr. Bind")
+    await th.register(client)
+    await _grant(client, patient, th)
+    await patient.recompute(client)
+
+    row = (await client.get("/api/therapist/patients", headers=th.headers)).json()[0]
+    other_id = "not-the-therapist"
+    with pytest.raises(Exception):
+        sharing_crypto.unwrap_summary_payload(
+            th.unlock_private_key(),
+            row["summary_eph_pub"],
+            base64.b64decode(row["summary_blob"]),
+            row["user_id"],
+            other_id,
+        )
+
+
+async def test_revoke_clears_the_summary(client):
+    patient = ClientEmulator("sum-revoke", "deep-password")
+    await patient.register(client)
+    await _seed(client, patient)
+    th = TherapistEmulator("sum-revoke-dr", "pw-therapist", "Dr. Revoke")
+    await th.register(client)
+    granted = await _grant(client, patient, th)
+    await patient.recompute(client)
+    assert (await client.get("/api/therapist/patients", headers=th.headers)).json()[0][
+        "summary_blob"
+    ] is not None
+
+    await patient.revoke_consent(client, granted["body"]["id"])
+    row = (await client.get("/api/therapist/patients", headers=th.headers)).json()[0]
+    assert row["status"] == "revoked"
+    assert row["summary_blob"] is None
+    assert row["summary_eph_pub"] is None
+    assert row["summary_updated_at"] is None

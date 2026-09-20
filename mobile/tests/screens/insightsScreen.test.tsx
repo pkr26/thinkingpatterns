@@ -773,30 +773,32 @@ describe("InsightsScreen evidence view", () => {
       });
       await flush();
     };
-    // One "Why am I seeing this?" per card, plus the persistent crisis-help
-    // button rendered after the cards.
-    expect(root.root.findAllByType(TouchableOpacity)).toHaveLength(7);
+    // One "Why am I seeing this?" + one mute affordance per card, plus the
+    // persistent crisis-help button rendered after the cards.
+    expect(root.root.findAllByType(TouchableOpacity)).toHaveLength(13);
+    // The mute affordance is present on every ordinary card (2026-09-19).
+    expect(text).toContain("Not about me anymore — mute");
 
     // The mood_shift card trending up renders the "+" direction.
     await expand(0);
     expect(textOf(root)).toContain("+0.30 against your baseline of 0.20");
 
     // The link card without sample counts shows "?" placeholders.
-    await expand(2);
+    await expand(4);
     expect(textOf(root)).toContain("~1 day later — seen on ? such days vs ? others");
 
     // Expanding the bare card shows the "?" fallbacks for missing fields.
-    await expand(3);
+    await expand(6);
     expect(textOf(root)).toContain("Evidence window");
     expect(textOf(root)).toContain("? → ?");
 
     // The temporal card without a base_rate reports a 0% baseline.
-    await expand(4);
+    await expand(8);
     expect(textOf(root)).toContain("50% of these mentions fell on Sundays — your baseline for Sundays is 0%");
 
     // The rain card: mood difference in the "higher" direction, and the
     // share/span rows without their optional counts.
-    await expand(5);
+    await expand(10);
     const rainText = textOf(root);
     expect(rainText).toContain("entries read higher by 0.30 than your own norm");
     expect(rainText).toContain("20% (? entries, 4 mentions)");
@@ -1101,5 +1103,108 @@ describe("effectSizeWords", () => {
     expect(effectSizeWords(-0.3)).toBe("a small difference");
     expect(effectSizeWords(0.65)).toBe("a medium-sized difference");
     expect(effectSizeWords(-1.2)).toBe("a large difference");
+  });
+});
+
+describe("InsightsScreen per-pattern mute (2026-09-19)", () => {
+  const seeded = (patterns: unknown[]) => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 45,
+      days_remaining: 0,
+      blob: insightsBlob({ stats: { patterns } }),
+    } as never);
+  };
+
+  it("muting hides the card optimistically and queues the encrypted event", async () => {
+    const { pressLabel } = await import("../helpers/rtr");
+    const storage = (await import("../helpers/storageMock")).default;
+    seeded([
+      pattern({ kind: "topic", label: "guitar", detail: { pattern_pid: "topic:guitar" } }),
+      pattern({ kind: "temporal", label: "work", detail: { day: "Sunday", day_fraction: 0.57, pattern_pid: "temporal:work" } }),
+    ]);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).toContain("guitar");
+    // The FIRST mute affordance belongs to the first card (guitar).
+    await pressLabel(root, "Not about me anymore — mute");
+    await flush();
+    // Optimistic: the card is gone from the visible list…
+    expect(textOf(root)).not.toContain("guitar");
+    expect(textOf(root)).toContain("work");
+    // …the muted section appeared with the honest caption…
+    expect(textOf(root)).toContain("Show muted (1)");
+    expect(textOf(root)).toContain("Muted patterns stay out of your questions.");
+    expect(textOf(root)).toContain("Muted — hidden here now");
+    // …and the encrypted event is queued for the next recompute.
+    const raw = await storage.getItem("@mindpattern/question_feedback.user-1");
+    expect(raw).toBeTruthy();
+  });
+
+  it("unmute restores the card and queues the reverse event", async () => {
+    const { pressLabel } = await import("../helpers/rtr");
+    const storage = (await import("../helpers/storageMock")).default;
+    const envelope = await import("../../src/crypto/envelope");
+    seeded([
+      pattern({ kind: "topic", label: "guitar", detail: { pattern_pid: "topic:guitar" } }),
+    ]);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    await pressLabel(root, "Not about me anymore — mute");
+    await flush();
+    await pressLabel(root, "Show muted (1)");
+    await flush();
+    // The collapsed row shows kind and label, with the Unmute action.
+    expect(textOf(root)).toContain("THEME · guitar");
+    await pressLabel(root, "Unmute");
+    await flush();
+    expect(textOf(root)).toContain("guitar");
+    expect(textOf(root)).not.toContain("Show muted");
+    // The queue's last word on this pid is the unmute.
+    const raw = await storage.getItem("@mindpattern/question_feedback.user-1");
+    expect(raw).toBeTruthy();
+    const plain = envelope.decrypt(
+      dataKey,
+      Buffer.from(raw!, "base64"),
+      envelope.buildAad("feedback-local", "user-1"),
+    );
+    const events = JSON.parse(plain.toString("utf8")) as Array<{ pid: string; mute?: boolean }>;
+    const guitarEvents = events.filter((e) => e.pid === "topic:guitar");
+    expect(guitarEvents[guitarEvents.length - 1]?.mute).toBe(false);
+  });
+
+  it("a server-muted pattern renders only in the muted section (never displaces visible cards)", async () => {
+    seeded([
+      pattern({ kind: "topic", label: "taxes", detail: { pattern_pid: "topic:taxes", muted: true } }),
+      pattern({ kind: "temporal", label: "work", detail: { pattern_pid: "temporal:work" } }),
+    ]);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).not.toContain("taxes");
+    expect(textOf(root)).toContain("work");
+    expect(textOf(root)).toContain("Show muted (1)");
+  });
+
+  it("sensitive cards never offer the mute affordance", async () => {
+    seeded([
+      pattern({ kind: "rumination", label: "cutting myself", detail: { sensitive: true, pattern_pid: "rumination:xyz" } }),
+    ]);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).toContain("A difficult thought has been returning");
+    expect(textOf(root)).not.toContain("Not about me anymore — mute");
+    expect(textOf(root)).not.toContain("Show muted");
+  });
+
+  it("all patterns muted shows the honest empty state, not a false 'nothing solid'", async () => {
+    const { pressLabel } = await import("../helpers/rtr");
+    seeded([
+      pattern({ kind: "topic", label: "guitar", detail: { pattern_pid: "topic:guitar" } }),
+    ]);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    await pressLabel(root, "Not about me anymore — mute");
+    await flush();
+    expect(textOf(root)).toContain("Every current pattern is muted — unmute one below, or keep writing.");
   });
 });

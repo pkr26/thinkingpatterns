@@ -9,6 +9,8 @@
  * judgmental language: Heavy and Light are states of the day, not verdicts
  * about the person.
  */
+import { sentimentScore } from "./brain/sentiment";
+
 export interface MoodOption {
   value: number;
   label: string;
@@ -63,17 +65,14 @@ export function moodLabel(value: number): string {
   return best.label;
 }
 
-/** Quick client-side mood estimate: drives the local (device-only) trend
- *  view before patterns unlock. Never sent as plaintext metadata and, in
- *  the entry payload, only a deliberate check-in pick rides along — the
- *  server's graded engine re-scores the text at analysis time. */
+/** The device-local mood estimate (2026-09-19): the REAL graded engine —
+ *  the on-device brain's port of the server's deterministic sentiment
+ *  walk (mobile/src/brain/sentiment.ts), vector-pinned to the Python
+ *  engine via shared/brain_vectors.json. The old 20-word ratio hack is
+ *  retired: the local trend, History badges and fallback mood-log values
+ *  now score exactly as the server would. Never sent as plaintext
+ *  metadata; in the entry payload only a deliberate check-in pick rides
+ *  along. */
 export function localSentiment(text: string): number {
-  const positive = (text.toLowerCase().match(/\b(good|great|happy|calm|grateful|relaxed|excited|proud|hopeful)\b/g) ?? []).length;
-  const negative = (text.toLowerCase().match(/\b(bad|sad|anxious|anxiety|stressed|angry|worried|tired|lonely|overwhelmed)\b/g) ?? []).length;
-  // When positive == negative the ratio below already evaluates to 0, so
-  // `-` and `+` agree on every reachable input.
-  // Stryker disable ArithmeticOperator
-  if (positive + negative === 0) return 0;
-  // Stryker restore ArithmeticOperator
-  return Number(((positive - negative) / (positive + negative)).toFixed(2));
+  return sentimentScore(text);
 }

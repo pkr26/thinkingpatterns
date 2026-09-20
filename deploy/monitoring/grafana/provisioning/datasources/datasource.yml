@@ -1,0 +1,13 @@
+# Grafana datasource provisioning (mounted read-only by the monitoring
+# docker-compose.yml). No dashboards are provisioned — see
+# deploy/monitoring/README.md, "Grafana", for where to add them.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Service DNS on the monitoring stack's internal network.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

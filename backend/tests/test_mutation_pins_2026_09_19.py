@@ -143,8 +143,9 @@ async def test_same_day_recompute_rewrites_the_question_blob(client):
     first = (await client.get("/api/questions/today", headers=emu.headers)).json()["blob"]
     assert first
 
-    await emu.create_entry(client, "a late evening note about sleep", TODAY,
-                           client_entry_id="pins-p6-extra")
+    await emu.create_entry(
+        client, "a late evening note about sleep", TODAY, client_entry_id="pins-p6-extra"
+    )
     await emu.recompute(client)
     second = (await client.get("/api/questions/today", headers=emu.headers)).json()["blob"]
 
@@ -228,8 +229,9 @@ async def test_grant_rejects_when_the_therapist_caseload_is_full(client, app):
         )
         await session.commit()
 
-    result = await patient.grant_consent(client, code, therapist.wrap_pub_key,
-                                         therapist.user_id or "")
+    result = await patient.grant_consent(
+        client, code, therapist.wrap_pub_key, therapist.user_id or ""
+    )
     assert result["status"] == 413
     assert result["body"]["code"] == "payload_too_large"
 
@@ -289,8 +291,9 @@ async def test_concurrent_pair_grant_answers_conflict_not_500(client, app, monke
 
     monkeypatch.setattr(app.state, "sessionmaker", factory)
 
-    result = await patient.grant_consent(client, code, therapist.wrap_pub_key,
-                                         therapist.user_id or "")
+    result = await patient.grant_consent(
+        client, code, therapist.wrap_pub_key, therapist.user_id or ""
+    )
     assert result["status"] == 409
     assert result["body"]["code"] == "conflict"
 
@@ -339,7 +342,9 @@ async def test_pairing_code_creation_only_retries_unique_violations():
 
     with pytest.raises(IntegrityError):
         await therapist_api.create_pairing_code(
-            request=request, user=user, session=FakeSession()  # type: ignore[arg-type]
+            request=request,
+            user=user,
+            session=FakeSession(),  # type: ignore[arg-type]
         )
 
     # Positive control: a UNIQUE violation is retried (bounded), surfacing
@@ -356,7 +361,9 @@ async def test_pairing_code_creation_only_retries_unique_violations():
 
     with pytest.raises(ApiError) as info:
         await therapist_api.create_pairing_code(
-            request=request, user=user, session=RetryingSession()  # type: ignore[arg-type]
+            request=request,
+            user=user,
+            session=RetryingSession(),  # type: ignore[arg-type]
         )
     assert info.value.status_code == 503
 
@@ -432,8 +439,9 @@ async def _regressed_account(client, app, username: str) -> ClientEmulator:
     for day in daterange(32, TODAY):
         entry_id = f"{username}-{day.isoformat()}"
         ids_by_day[day] = entry_id
-        await emu.create_entry(client, "a day with work and some sleep", day,
-                               client_entry_id=entry_id)
+        await emu.create_entry(
+            client, "a day with work and some sleep", day, client_entry_id=entry_id
+        )
     await emu.recompute(client)
     blob = (await client.get("/api/insights", headers=emu.headers)).json()["blob"]
     assert blob is not None  # insight phase: the blob is legitimately served

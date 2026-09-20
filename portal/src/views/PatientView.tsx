@@ -25,6 +25,8 @@ import {
   decryptInsights,
   decryptNote,
   encryptNote,
+  decryptMeasure,
+  type MeasureReading,
   unwrapPatientDataKey,
   type PatternPayload,
 } from "../crypto";
@@ -210,6 +212,10 @@ export function PatientView(props: {
   const [busy, setBusy] = useState(false);
   const [newCount, setNewCount] = useState(0);
   const [lastReviewed, setLastReviewed] = useState<string | null>(null);
+  /** Patient-recorded wellbeing measures (MBC, 2026-09-19), decrypted
+   *  with the consent-unwrapped data key. Display only — interpretation
+   *  belongs to the clinician, and the copy says so. */
+  const [measures, setMeasures] = useState<MeasureReading[] | null>(null);
   const [stats, setStats] = useState<{ avg_sentiment?: number; total_entries?: number; active_days?: number; first_date?: string; last_date?: string } | null>(null);
   /** Notes search filter (client-side: notes are already decrypted here). */
   const [noteQuery, setNoteQuery] = useState("");
@@ -232,6 +238,40 @@ export function PatientView(props: {
     setEntries(null);
     setNoteQuery("");
     setEditing(null);
+    setMeasures(null);
+
+    // Measures (MBC): loaded independently of insights so a baseline-phase
+    // patient's recorded questionnaires still surface. Failures render as
+    // "no measures" rather than blocking the chart.
+    const measuresLoad = (async (): Promise<void> => {
+      try {
+        if (!patient.ephemeral_pub || !patient.wrapped_key) return;
+        const rows = await api.patientMeasures(patient.user_id);
+        if (operation !== loadGeneration.current || rows.length === 0) return;
+        const dataKey = await unwrapPatientDataKey(
+          session.privateKey,
+          patient.ephemeral_pub,
+          patient.wrapped_key,
+          patient.user_id,
+          session.userId,
+          session.publicKeyB64,
+        );
+        const readings: MeasureReading[] = [];
+        try {
+          for (const row of rows.slice(0, 60)) {
+            const reading = await decryptMeasure(dataKey, patient.user_id, row);
+            if (reading) readings.push(reading);
+          }
+        } finally {
+          dataKey.fill(0);
+        }
+        // Oldest first for the trend row.
+        readings.sort((a, b) => a.measureDate.localeCompare(b.measureDate));
+        if (operation === loadGeneration.current) setMeasures(readings);
+      } catch {
+        // Unreadable measures never block the chart.
+      }
+    })();
 
     // Notes are intentionally available during the patient's baseline
     // phase, and after a sharing revoke where the server permits the
@@ -337,6 +377,7 @@ export function PatientView(props: {
       }
     } finally {
       await notesLoad;
+      await measuresLoad;
     }
   }, [patient, session]);
 
@@ -548,6 +589,18 @@ export function PatientView(props: {
       <ErrorBanner message={error} />
 
       {phaseNote && <Card title="Baseline phase"><NoteText>{phaseNote}</NoteText></Card>}
+
+      {measures && measures.length > 0 && (
+        <Card title={`Recorded measures (${measures.length})`}>
+          <NoteText>
+            {measures.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+          </NoteText>
+          <NoteText>
+            Patient-recorded questionnaire scores, shared with you by consent.
+            MindPattern displays them; interpretation is yours.
+          </NoteText>
+        </Card>
+      )}
 
       {stats && patterns !== null && patterns.length > 0 && (
         <Card title="Account summary">

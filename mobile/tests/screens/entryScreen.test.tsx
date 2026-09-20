@@ -36,6 +36,14 @@ vi.mock("../../src/moodLog", async (importOriginal) => {
   return { ...actual, recordMood, recentMoods, localStreak, localDateISO: vi.fn(() => "2026-09-04") };
 });
 
+// The HealthKit State of Mind mirror (2026-09-19): fire-and-forget after a
+// successful save — mocked here so the wiring (when it fires, with what)
+// is observable without the native seam.
+const mirrorMoodCheckIn = vi.fn(async () => false);
+vi.mock("../../src/healthkit", () => ({
+  mirrorMoodCheckIn: (...args: unknown[]) => mirrorMoodCheckIn(...(args as [string, number, string])),
+}));
+
 // C2: saving/syncing an entry must NEVER auto-ship the data key — the
 // mini-brain refresh is an explicit, user-initiated act only. EntryScreen no
 // longer imports brainSync at all, so nothing here can trigger a recompute.
@@ -84,6 +92,8 @@ beforeEach(() => {
   vi.mocked(recentMoods).mockImplementation(async () => []);
   vi.mocked(localStreak).mockReset();
   vi.mocked(localStreak).mockImplementation(async () => 0);
+  mirrorMoodCheckIn.mockReset();
+  mirrorMoodCheckIn.mockResolvedValue(false);
   Alert.alert.mockClear();
   nav.navigate.mockClear();
   touchActivity.mockClear();
@@ -103,6 +113,12 @@ beforeEach(() => {
 
 async function writeEntry(root: Awaited<ReturnType<typeof render>>, text: string): Promise<void> {
   await typeInto(root, "What's going on today?", text);
+}
+
+/** The check-ins live behind the "Add details (optional)" disclosure
+ *  (collapsed by default) — open it before touching mood/energy/sleep/tags. */
+async function openDetails(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  await pressLabel(root, "Add details (optional)");
 }
 
 describe("EntryScreen progress display", () => {
@@ -161,6 +177,52 @@ describe("EntryScreen progress display", () => {
       .flat()
       .find((s: unknown) => typeof s === "object" && s !== null && "width" in (s as object));
     expect(fill).toMatchObject({ width: "40%" });
+  });
+
+  describe("threshold moment (one-time patterns-ready card, 2026-09-19)", () => {
+    it("shows the card once on the crossing day — then never again for this account", async () => {
+      sessionState = { activeDays: 30, unlockDays: 30, touchActivity };
+      const first = await render(<EntryScreen navigation={nav} />);
+      await flush();
+      expect(textOf(first)).toContain("your patterns are ready for a first look");
+      expect(textOf(first)).toContain("30 days of writing");
+      await pressLabel(first, "See your patterns");
+      expect(nav.navigate).toHaveBeenCalledWith("Insights");
+      await act(async () => first.unmount());
+
+      // A fresh mount, same account: the recorded stamp suppresses it forever.
+      const second = await render(<EntryScreen navigation={nav} />);
+      await flush();
+      expect(textOf(second)).not.toContain("your patterns are ready");
+      await act(async () => second.unmount());
+    });
+
+    it("below the threshold the card never appears", async () => {
+      sessionState = { activeDays: 29, unlockDays: 30, touchActivity };
+      const root = await render(<EntryScreen navigation={nav} />);
+      await flush();
+      expect(textOf(root)).not.toContain("your patterns are ready");
+      await act(async () => root.unmount());
+    });
+
+    it("'Not now' hides the card for the rest of the session", async () => {
+      sessionState = { activeDays: 30, unlockDays: 30, touchActivity };
+      const root = await render(<EntryScreen navigation={nav} />);
+      await flush();
+      expect(textOf(root)).toContain("your patterns are ready");
+      await pressLabel(root, "Not now");
+      expect(textOf(root)).not.toContain("your patterns are ready");
+      expect(nav.navigate).not.toHaveBeenCalled();
+      await act(async () => root.unmount());
+    });
+
+    it("a hostile unlockDays of 0 never fires the moment (there was no wait)", async () => {
+      sessionState = { activeDays: 5, unlockDays: 0, touchActivity };
+      const root = await render(<EntryScreen navigation={nav} />);
+      await flush();
+      expect(textOf(root)).not.toContain("your patterns are ready");
+      await act(async () => root.unmount());
+    });
   });
 
   it("accepts an entry of exactly the 100k cap", async () => {
@@ -264,7 +326,9 @@ describe("EntryScreen save pipeline", () => {
       ["good great happy", 1],
       ["bad sad anxious stressed", -1],
       ["good then bad news", 0],
-      ["nothing emotional here", 0],
+      // The graded engine (src/brain/sentiment.ts, 2026-09-19) gives this
+      // neutral text a small negative — pinned in tests/mood.test.ts.
+      ["nothing emotional here", -0.111],
     ];
     for (const [text, sentiment] of cases) {
       vi.mocked(encryptEntry).mockClear();
@@ -1005,10 +1069,104 @@ describe("EntryScreen 'Already wrote today' (device-local hint)", () => {
   });
 });
 
+describe("EntryScreen check-in disclosure (Add details)", () => {
+  it("is collapsed by default: no check-in rows, the toggle present, Save reachable", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Add details (optional)");
+    expect(textOf(root)).not.toContain("How does today feel?");
+    expect(textOf(root)).not.toContain("And your energy?");
+    expect(textOf(root)).not.toContain("How did you sleep?");
+    expect(textOf(root)).not.toContain("What shaped today?");
+    expect(root.root.findAll((n) => n.props.accessibilityRole === "radio")).toHaveLength(0);
+    expect(root.root.findAll((n) => n.props.accessibilityLabel === "Day tags")).toHaveLength(0);
+    // Nothing is set, so there is no summary line either.
+    expect(textOf(root)).not.toContain("Details added:");
+    // Save does not require expanding anything.
+    expect(touchableByLabel(root, "Save entry")).toBeDefined();
+  });
+
+  it("expands the four sections and the toggle flips to 'Hide details'", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    expect(textOf(root)).toContain("How does today feel?");
+    expect(textOf(root)).toContain("And your energy?");
+    expect(textOf(root)).toContain("How did you sleep?");
+    expect(textOf(root)).toContain("What shaped today?");
+    expect(root.root.findAll((n) => n.props.accessibilityRole === "radio")).toHaveLength(13);
+    const toggle = root.root.findAll((n) => n.props.accessibilityLabel === "Hide details")[0];
+    expect(toggle.props.accessibilityState).toEqual({ expanded: true });
+    await pressLabel(root, "Hide details");
+    expect(textOf(root)).not.toContain("How does today feel?");
+    expect(root.root.findAll((n) => n.props.accessibilityRole === "radio")).toHaveLength(0);
+    expect(textOf(root)).toContain("Add details (optional)");
+  });
+
+  it("the collapsed summary names exactly the set channels, in display order", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    await pressLabel(root, "Good"); // mood
+    await pressLabel(root, "Rested"); // sleep
+    await pressLabel(root, "work"); // tags
+    await pressLabel(root, "Hide details");
+    expect(textOf(root)).toContain("Details added: mood, sleep, tags");
+    expect(textOf(root)).not.toContain("Details added: mood, energy");
+    // The summary control is a real button with an honest label.
+    const summary = root.root.findAll((n) =>
+      n.props.accessibilityLabel === "Details added: mood, sleep, tags. Tap to show details.",
+    )[0];
+    expect(summary.props.accessibilityRole).toBe("button");
+  });
+
+  it("energy alone reads as exactly 'Details added: energy'", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    await pressLabel(root, "Steady");
+    await pressLabel(root, "Hide details");
+    expect(textOf(root)).toContain("Details added: energy");
+  });
+
+  it("tapping the summary line expands the details", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    await pressLabel(root, "Low");
+    await pressLabel(root, "Hide details");
+    expect(textOf(root)).toContain("Details added: mood");
+    await pressLabel(root, "Details added: mood");
+    expect(textOf(root)).toContain("How does today feel?");
+    // The pick survived the collapse/expand round-trip.
+    const low = root.root
+      .findAll((n) => n.props.accessibilityLabel === "Mood: Low")
+      .find((n) => n.props.accessibilityRole === "radio");
+    expect(low?.props.accessibilityState).toEqual({ selected: true });
+  });
+
+  it("a pick made and hidden behind the fold still rides in the save", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    await pressLabel(root, "Heavy");
+    await pressLabel(root, "Hide details");
+    expect(textOf(root)).toContain("Details added: mood"); // nothing silently set
+    await writeEntry(root, "a heavy day, briefly noted");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBe(-1);
+    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    // The save clears the check-in — and with it the summary line.
+    expect(textOf(root)).not.toContain("Details added:");
+  });
+});
+
 describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
   it("renders all five options as a radio group with labels and selected state", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
+    await openDetails(root);
     const radios = root.root.findAll((n) => n.props.accessibilityRole === "radio");
     expect(radios.map((r) => r.props.accessibilityLabel)).toEqual([
       "Mood: Heavy",
@@ -1043,6 +1201,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
   it("an explicit pick wins: it rides in the payload AND lands in the mood log", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
+    await openDetails(root);
     await writeEntry(root, "a long heavy day");
     await pressLabel(root, "Heavy");
     await pressLabel(root, "Save entry");
@@ -1073,6 +1232,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
   it("tapping the pick again clears it — saving falls back to the estimate", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
+    await openDetails(root);
     await pressLabel(root, "Light");
     await pressLabel(root, "Light"); // second tap undoes the pick
     expect(
@@ -1089,6 +1249,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
   it("a successful save clears the pick — the check-in is per entry", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
+    await openDetails(root);
     await pressLabel(root, "Low");
     await writeEntry(root, "a hard morning");
     await pressLabel(root, "Save entry");
@@ -1104,6 +1265,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
     vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "validation_error"));
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
+    await openDetails(root);
     await pressLabel(root, "Low");
     await writeEntry(root, "still here");
     await pressLabel(root, "Save entry");
@@ -1112,6 +1274,85 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
       .findAll((n) => n.props.accessibilityRole === "radio")
       .find((r) => r.props.accessibilityLabel === "Mood: Low");
     expect(low?.props.accessibilityState).toEqual({ selected: true });
+  });
+});
+
+describe("EntryScreen HealthKit mirror (fire-and-forget, after the save)", () => {
+  const PREF = "@mindpattern/mirror_mood_to_health_user-1";
+
+  /** Render, pick an explicit mood and save — the mirror's firing conditions. */
+  async function pickAndSave(mood: string, text: string): Promise<void> {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    await pressLabel(root, mood);
+    await writeEntry(root, text);
+    await pressLabel(root, "Save entry");
+    await flush();
+  }
+
+  it("an explicit pick with the pref ON mirrors to Health AFTER the save lands", async () => {
+    await storage.setItem(PREF, JSON.stringify({ enabled: true }));
+    await pickAndSave("Light", "a light day");
+    expect(mirrorMoodCheckIn).toHaveBeenCalledTimes(1);
+    expect(mirrorMoodCheckIn).toHaveBeenCalledWith("user-1", 1, "2026-09-04");
+    // The mirror never disturbs the save itself.
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("the pref gate lives in the seam — the screen delegates EVERY explicit pick", async () => {
+    // The wiring hands the pick to mirrorMoodCheckIn unconditionally; the
+    // mirrorMoodToHealth pref (default OFF) is checked inside the seam
+    // (pinned in tests/healthkit.test.ts). Anything else would fork the
+    // decision across two layers.
+    await pickAndSave("Heavy", "a heavy day");
+    expect(mirrorMoodCheckIn).toHaveBeenCalledTimes(1);
+    expect(mirrorMoodCheckIn).toHaveBeenCalledWith("user-1", -1, "2026-09-04");
+  });
+
+  it("a vault that locked mid-save skips the mirror silently (belt-and-braces guard)", async () => {
+    // E.g. the unauthorized hook racing this save: the save itself still
+    // completes, but a locked vault must never hand a mood to Health.
+    vi.mocked(api.createEntry).mockImplementation(async () => {
+      vault.lock();
+      return {};
+    });
+    await pickAndSave("Light", "saved while the lock raced in");
+    expect(mirrorMoodCheckIn).not.toHaveBeenCalled();
+  });
+
+  it("no explicit pick: the text-derived estimate is never mirrored to Health", async () => {
+    await storage.setItem(PREF, JSON.stringify({ enabled: true }));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "good great happy"); // estimate 1, but not a pick
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(mirrorMoodCheckIn).not.toHaveBeenCalled();
+  });
+
+  it("a FAILED save never mirrors (queue full: the entry went nowhere)", async () => {
+    await storage.setItem(PREF, JSON.stringify({ enabled: true }));
+    vi.mocked(api.createEntry).mockRejectedValue(new Error("offline"));
+    vi.mocked(enqueue).mockImplementation(async () => {
+      throw new QFErr();
+    });
+    await pickAndSave("Light", "offline with a full queue");
+    expect(mirrorMoodCheckIn).not.toHaveBeenCalled();
+  });
+
+  it("a mirror rejection is swallowed: the save still reads as saved, no alert", async () => {
+    await storage.setItem(PREF, JSON.stringify({ enabled: true }));
+    mirrorMoodCheckIn.mockRejectedValue(new Error("seam exploded"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    await pressLabel(root, "Okay");
+    await writeEntry(root, "an ordinary day");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(textOf(root)).toContain("Saved ✓");
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });
 

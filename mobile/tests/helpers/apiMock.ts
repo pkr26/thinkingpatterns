@@ -48,6 +48,9 @@ export function makeApiMock() {
     listEntriesPage: vi.fn(async () => ({ entries: await listEntries(), nextOffset: null, revision: null })),
     listEntries,
     deleteEntry: vi.fn(async () => ({})),
+    // MBC measures (2026-09-19)
+    createMeasure: vi.fn(async () => ({})),
+    listMeasures: vi.fn(async () => []),
     insights: vi.fn(async () => ({ phase: "baseline", active_days: 0, days_remaining: 30 })),
     questionToday: vi.fn(async () => ({ for_date: "2026-09-03", blob: "" })),
     openProcessingSession: vi.fn(async () => ({ session_token: "st" })),

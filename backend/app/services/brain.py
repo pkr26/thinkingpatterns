@@ -222,6 +222,12 @@ QUALIFICATION_DAYS_CAP = 60
 MAX_STORED_PATTERNS = 200
 MAX_SURFACED = 20
 NEW_PATTERN_WINDOW_DAYS = 7
+# Per-pattern mutes (2026-09-19): muted patterns surface with
+# detail.muted=true (after the unmuted top-N, so they never displace live
+# cards) and never feed question generation. The store cap bounds the
+# payload; the surfaced cap bounds the client's muted section.
+MUTED_STORED_CAP = 100
+MUTED_SURFACED_CAP = 10
 
 ACTIVE_STATES = ("candidate", "emerging", "confirmed")
 SURFACED_STATES = ("emerging", "confirmed", "fading")
@@ -442,6 +448,20 @@ THEME_WORDS: dict[str, str] = {
 # value curated HERE wins word-for-word (the curation rules documented
 # above stay authoritative), and the emoji map scores alongside WORD_RE.
 from .sentiment_lexicon import EMOJI_VALENCES, VADER_BASE  # noqa: E402
+
+# 2026-09-19: the first non-English lexicon. Spanish assets merge with
+# ENGLISH WINS on collision (see SENTIMENT_LEXICON below): shared short
+# words union in the grammatical sets, graded entries never silently
+# override an English reading.
+from .sentiment_lexicon_es import (  # noqa: E402
+    ABSOLUTIST_WORDS_ES,
+    BUT_WORDS_ES,
+    INTENSIFIERS_ES,
+    LANGUAGE_FUNCTION_WORDS_ES,
+    NEGATORS_ES,
+    SENSE_WORDS_ES,
+    VADER_BASE_ES,
+)
 
 CURATED_SENTIMENT: dict[str, float] = {
     # positive — mild
@@ -698,7 +718,11 @@ CURATED_SENTIMENT: dict[str, float] = {
 }
 
 # The active graded lexicon: VADER breadth + curated authority.
-SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
+# The ENGLISH-only lexicon: the language-DETECTION set is built from it
+# (not the merged lookup), so Spanish prose cannot inflate English hits.
+SENTIMENT_LEXICON_EN: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
+# The runtime lookup: English wins every collision by merge order.
+SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}
 
 # Intensifiers/downtoners (VADER booster conventions, multiplicative).
 # "hardly"/"barely" are NOT downtoners: VADER treats them as negations
@@ -729,7 +753,10 @@ INTENSIFIERS: dict[str, float] = {
     "little": 0.9,
 }
 NEGATION_SCALAR = -0.74  # VADER's damped flip: "not good" < "bad"
-BUT_WORDS = frozenset({"but", "however", "although", "though", "yet"})
+BUT_WORDS_EN = frozenset({"but", "however", "although", "though", "yet"})
+BUT_WORDS = BUT_WORDS_EN | BUT_WORDS_ES
+INTENSIFIERS = {**INTENSIFIERS_ES, **INTENSIFIERS}
+
 SENTIMENT_SCALE = 4.0  # max lexicon magnitude maps onto [-1, 1]
 
 NEGATORS = frozenset(
@@ -762,6 +789,8 @@ NEGATORS = frozenset(
         "rarely",
     }
 )
+NEGATORS_EN = NEGATORS
+NEGATORS = NEGATORS_EN | NEGATORS_ES
 
 # Absolutist language (Al-Mosaiwi & Johnstone 2018): elevated in
 # anxiety/depression and suicidal-ideation text; reported to the user as a
@@ -790,6 +819,8 @@ ABSOLUTIST_WORDS = frozenset(
         "undeniably",
     }
 )
+ABSOLUTIST_WORDS_EN = ABSOLUTIST_WORDS
+ABSOLUTIST_WORDS = ABSOLUTIST_WORDS_EN | ABSOLUTIST_WORDS_ES
 
 # --- emergent topic discovery (beyond the fixed theme lexicon) --------------------
 # The lexicon covers nine universal themes; everything else a user's life
@@ -1350,11 +1381,21 @@ _LANGUAGE_FUNCTION_WORDS: frozenset[str] = frozenset(
 _KNOWN_TOKENS: frozenset[str] = (
     frozenset(TOPIC_STOPWORDS)
     | _LANGUAGE_FUNCTION_WORDS
-    | frozenset(SENTIMENT_LEXICON)
-    | frozenset(NEGATORS)
-    | frozenset(ABSOLUTIST_WORDS)
+    | frozenset(SENTIMENT_LEXICON_EN)
+    | frozenset(NEGATORS_EN)
+    | frozenset(ABSOLUTIST_WORDS_EN)
     | frozenset(IRREGULAR_FORMS)
     | {word for words in THEME_LEXICON.values() for word in words}
+)
+# The Spanish twin (2026-09-19): function words + the ES lexicon's own
+# grammatical sets. Detection compares the two shares — Spanish prose
+# lands ~35-55% here and ~2-8% on the English side, and vice versa.
+_KNOWN_TOKENS_ES: frozenset[str] = (
+    LANGUAGE_FUNCTION_WORDS_ES
+    | frozenset(VADER_BASE_ES)
+    | frozenset(NEGATORS_ES)
+    | frozenset(ABSOLUTIST_WORDS_ES)
+    | frozenset(SENSE_WORDS_ES)
 )
 
 # --- NLP primitives -------------------------------------------------------------
@@ -1421,13 +1462,14 @@ def _word_valence(token: str) -> float:
     return 0.0
 
 
-def sentiment_score(tokens: list[str]) -> float:
-    """Graded lexicon sentiment in [-1, 1] (VADER-style, deterministic).
+def _valence_walk(tokens: list[str]) -> list[float]:
+    """The per-word graded valences of the sentiment walk (deterministic).
 
-    Intensifiers scale the next sentiment word; negation flips it with
-    damping ("not good" is mildly negative, not catastrophic — the
-    VADER x-0.74 scalar); "but" re-weights the sentence so the clause
-    after the contrast carries the meaning.
+    This is the exact accumulation ``sentiment_score`` nets into its
+    compound; extracted so the PA/NA components reader can sum the same
+    numbers by sign. Behavior must stay byte-identical to the pre-2026-09-19
+    inline loop — sentiment outputs are pinned by vectors and regression
+    suites.
     """
     sentiments: list[float] = []
     # "but" re-weighting: find the LAST contrastive; damp before, boost after.
@@ -1461,11 +1503,40 @@ def sentiment_score(tokens: list[str]) -> float:
                 valence *= NEGATION_SCALAR
             valence = max(-4.0, min(4.0, valence)) * seg_weight
             sentiments.append(valence)
+    return sentiments
 
+
+def sentiment_score(tokens: list[str]) -> float:
+    """Graded lexicon sentiment in [-1, 1] (VADER-style, deterministic).
+
+    Intensifiers scale the next sentiment word; negation flips it with
+    damping ("not good" is mildly negative, not catastrophic — the
+    VADER x-0.74 scalar); "but" re-weights the sentence so the clause
+    after the contrast carries the meaning.
+    """
+    sentiments = _valence_walk(tokens)
     if not sentiments:
         return 0.0
     total = sum(sentiments)
     return max(-1.0, min(1.0, total / SENTIMENT_SCALE))
+
+
+def sentiment_components(tokens: list[str]) -> tuple[float, float]:
+    """(positive, negative) affect magnitudes, each in [0, 1].
+
+    Same deterministic walk as sentiment_score, summed by SIGN instead of
+    netted. Positive and negative affect are separable constructs, not two
+    ends of one scale (Emmons & Diener 1985; differential dynamics: Abitante
+    et al. 2024) — the PA/NA inertia detectors need each stream. Computed
+    from TEXT-SCORED entries only: an explicit mood check-in is a single
+    valence judgment and cannot be honestly split.
+    """
+    sentiments = _valence_walk(tokens)
+    if not sentiments:
+        return (0.0, 0.0)
+    positive = sum(v for v in sentiments if v > 0) / SENTIMENT_SCALE
+    negative = -sum(v for v in sentiments if v < 0) / SENTIMENT_SCALE
+    return (max(0.0, min(1.0, positive)), max(0.0, min(1.0, negative)))
 
 
 def absolutist_density(tokens: list[str]) -> float:
@@ -1608,7 +1679,7 @@ class StoredPattern:
 
 
 def fresh_state() -> dict:
-    return {"v": STATE_VERSION, "patterns": {}, "history": []}
+    return {"v": STATE_VERSION, "patterns": {}, "history": [], "muted": {}}
 
 
 def _parse_iso(value: Any) -> str | None:
@@ -1700,7 +1771,16 @@ def load_state(raw: bytes | None) -> dict:
         for h in history
         if isinstance(h, list) and len(h) == 2 and isinstance(h[0], str) and isinstance(h[1], list)
     ][:HISTORY_DAYS]
-    return {"v": STATE_VERSION, "patterns": patterns, "history": clean_history}
+    # Per-pattern mutes (2026-09-19): hostile-shape rules like everywhere —
+    # a corrupt entry is dropped, never a crash. Only well-formed pids with
+    # a truthy flag survive; the cap bounds the store's size.
+    muted_raw = parsed.get("muted")
+    muted: dict[str, bool] = {}
+    if isinstance(muted_raw, dict):
+        for pid, flag in list(muted_raw.items())[:MUTED_STORED_CAP]:
+            if isinstance(pid, str) and 1 <= len(pid) <= 128 and flag is True:
+                muted[pid] = True
+    return {"v": STATE_VERSION, "patterns": patterns, "history": clean_history, "muted": muted}
 
 
 def dump_state(state: dict) -> bytes:
@@ -1709,6 +1789,10 @@ def dump_state(state: dict) -> bytes:
         "v": state["v"],
         "patterns": {pid: rec.to_dict() for pid, rec in state["patterns"].items()},
         "history": state["history"],
+        # Per-pattern mutes (2026-09-19): a patient-side presentation
+        # preference. Must survive the update() copy-on-entry roundtrip
+        # (dump_state → load_state) or every recompute would forget it.
+        "muted": state.get("muted") or {},
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -2061,6 +2145,287 @@ def _detect_links(
     return signals
 
 
+def _inertia_signal(
+    series: list[tuple[date, float]],
+    pid: str,
+    kind: str,
+    label: str,
+    today: date,
+    channel: str | None = None,
+) -> _Signal | None:
+    """Lag-1 autocorrelation of a daily channel, recent vs the user's own
+    earlier norm (Fisher z difference test). Shared by the mood and energy
+    channels (2026-09-19): the payload-v2 energy pick is a client-reported
+    channel like the mood tag, so it rides the identical machinery — same
+    evidence bars, same BH family, same lifecycle. Returns None when either
+    window lacks the minimum consecutive-day pairs."""
+    recent_cutoff = today - timedelta(days=INERTIA_RECENT_DAYS)
+    consecutive: list[tuple[date, float, float]] = []
+    for (d1, s1), (d2, s2) in zip(series, series[1:]):
+        if 1 <= (d2 - d1).days <= 2:
+            consecutive.append((d2, s1, s2))
+    recent = [(s1, s2) for d, s1, s2 in consecutive if d > recent_cutoff]
+    earlier = [(s1, s2) for d, s1, s2 in consecutive if d <= recent_cutoff]
+    if len(recent) < INERTIA_MIN_PAIRS or len(earlier) < INERTIA_MIN_PAIRS:
+        return None
+    r_recent = _pearson([a for a, _ in recent], [b for _, b in recent])
+    r_earlier = _pearson([a for a, _ in earlier], [b for _, b in earlier])
+    if r_recent is None or r_earlier is None:
+        return None
+    # The claim is COMPARATIVE ("carrying over more than usual"), so its
+    # p-value must test the difference of the two windows' correlations
+    # (Fisher z), not the weaker null r_recent = 0 — a user whose carryover
+    # was always high has "inertia" under the old test even with no change
+    # at all. The p enters the same Benjamini-Hochberg family as every
+    # other claim this run, whether or not the effect gates pass.
+    pvalue = statsig.fisher_z_difference_p(r_recent, len(recent), r_earlier, len(earlier))
+    detail: dict[str, Any] = {
+        "carryover_recent": round(r_recent, 3),
+        "carryover_earlier": round(r_earlier, 3),
+        "window_days": INERTIA_RECENT_DAYS,
+        "p_value": round(pvalue, 6),
+    }
+    if channel:
+        detail["channel"] = channel
+    return _Signal(
+        pid=pid,
+        kind=kind,
+        label=label,
+        occurrences=len(recent),
+        pvalue=pvalue,
+        detail=detail,
+        evidence_days=[d for d, _, _ in consecutive if d > recent_cutoff],
+        gate_ok=(r_recent >= INERTIA_RECENT_MIN and r_recent - r_earlier >= INERTIA_DELTA),
+    )
+
+
+def _coupling_signal(
+    a_residuals: dict[date, float],
+    b_residuals: dict[date, float],
+    today: date,
+) -> _Signal | None:
+    """Within-person COUPLING of two daily channels (energy ↔ mood): the
+    Pearson correlation of their within-person residuals, recent vs the
+    user's own earlier norm (Fisher z difference) — the same comparative
+    machinery as inertia, applied across channels instead of across days.
+    Surfaced only as a RISE ("moving together more than usual"), never as
+    an absolute verdict; the evidence bar reuses the inertia constants
+    deliberately (a cross-channel claim deserves at least as much proof).
+    Returns None when either window lacks the minimum shared days."""
+    recent_cutoff = today - timedelta(days=INERTIA_RECENT_DAYS)
+    shared = sorted(set(a_residuals) & set(b_residuals))
+    recent_days = [d for d in shared if d > recent_cutoff]
+    earlier_days = [d for d in shared if d <= recent_cutoff]
+    if len(recent_days) < INERTIA_MIN_PAIRS or len(earlier_days) < INERTIA_MIN_PAIRS:
+        return None
+    r_recent = _pearson(
+        [a_residuals[d] for d in recent_days], [b_residuals[d] for d in recent_days]
+    )
+    r_earlier = _pearson(
+        [a_residuals[d] for d in earlier_days], [b_residuals[d] for d in earlier_days]
+    )
+    if r_recent is None or r_earlier is None:
+        return None
+    pvalue = statsig.fisher_z_difference_p(r_recent, len(recent_days), r_earlier, len(earlier_days))
+    return _Signal(
+        pid="coupling:energy_mood",
+        kind="energy_mood_coupling",
+        label="energy and mood",
+        occurrences=len(recent_days),
+        pvalue=pvalue,
+        detail={
+            "coupling_recent": round(r_recent, 3),
+            "coupling_earlier": round(r_earlier, 3),
+            "window_days": INERTIA_RECENT_DAYS,
+            "p_value": round(pvalue, 6),
+            "channel": "energy_mood",
+        },
+        evidence_days=recent_days,
+        gate_ok=(r_recent >= INERTIA_RECENT_MIN and r_recent - r_earlier >= INERTIA_DELTA),
+    )
+
+
+# --- sense-making trajectory + activity diversity (2026-09-19 wave 3) ------------
+
+# LIWC-style causal+insight dictionary (deterministic, hand-curated to
+# unambiguous forms — no stemming adventures). The evidence anchor: people
+# whose writing INCREASES its use of causal ("because", "reason") and
+# insight ("realize", "understand") words across sessions show the
+# greatest health improvements — language moving from describing toward
+# making sense (Pennebaker & Francis 1996; Campbell & Pennebaker 2003;
+# Hevey 2014). Surfaced only as a within-person RISE, never a verdict.
+SENSE_WORDS: frozenset[str] = frozenset(
+    {
+        # causal conjunction/nouns
+        "because",
+        "since",
+        "reason",
+        "reasons",
+        "why",
+        "cause",
+        "causes",
+        "caused",
+        "effect",
+        "effects",
+        "therefore",
+        "thus",
+        "hence",
+        "consequently",
+        "result",
+        "results",
+        "resulted",
+        "leads",
+        "led",
+        # insight/cognitive-processing verbs
+        "realize",
+        "realized",
+        "realise",
+        "realised",
+        "understand",
+        "understood",
+        "consider",
+        "considered",
+        "recognize",
+        "recognized",
+        "recognise",
+        "recognised",
+        "learn",
+        "learned",
+        "learnt",
+        "notice",
+        "noticed",
+        "insight",
+        "perspective",
+        "meaning",
+        "explain",
+        "explained",
+        "figure",
+        "figured",
+        "reflect",
+        "reflected",
+    }
+    | SENSE_WORDS_ES
+)
+SENSEMAKING_RECENT_DAYS = 28
+SENSEMAKING_MIN_DAYS = 8  # density observations per window to trust a t-test
+SENSEMAKING_RECENT_FLOOR = 0.8  # per-100-token density before any claim
+SENSEMAKING_DELTA = 0.5  # ... and risen by this much vs the earlier window
+SENSEMAKING_VARIANCE_FLOOR = 0.35  # measurement-noise floor for sparse text days
+
+
+def _sense_density(tokens: list[str]) -> float | None:
+    """Causal+insight words per 100 tokens. None when the entry is too
+    short to measure honestly (fewer than 10 tokens)."""
+    if len(tokens) < 10:
+        return None
+    hits = sum(1 for t in tokens if t in SENSE_WORDS)
+    return 100.0 * hits / len(tokens)
+
+
+def _detect_sense_making(day_densities: list[tuple[date, float]], today: date) -> _Signal | None:
+    """The sense-making trajectory: per-day causal+insight word density,
+    recent window vs the user's own earlier norm (Welch's t on per-day
+    densities with a measurement-noise variance floor — the same shape as
+    the mood-association tests). A comparative claim, never an absolute
+    one: "leaning more on sense-making words than YOU used to"."""
+    recent_cutoff = today - timedelta(days=SENSEMAKING_RECENT_DAYS)
+    recent = [v for d, v in day_densities if d > recent_cutoff]
+    earlier = [v for d, v in day_densities if d <= recent_cutoff]
+    if len(recent) < SENSEMAKING_MIN_DAYS or len(earlier) < SENSEMAKING_MIN_DAYS:
+        return None
+    _, pvalue = statsig.welch_test(recent, earlier, variance_floor=SENSEMAKING_VARIANCE_FLOOR)
+    mean_recent = sum(recent) / len(recent)
+    mean_earlier = sum(earlier) / len(earlier)
+    return _Signal(
+        pid="sensemaking:causal_insight",
+        kind="sense_making",
+        label="sense-making words",
+        occurrences=len(recent),
+        pvalue=pvalue,
+        detail={
+            "density_recent": round(mean_recent, 2),
+            "density_earlier": round(mean_earlier, 2),
+            "window_days": SENSEMAKING_RECENT_DAYS,
+            "p_value": round(pvalue, 6),
+            "direction": "higher",
+            "channel": "text",
+        },
+        evidence_days=[d for d, _ in day_densities if d > recent_cutoff],
+        gate_ok=(
+            mean_recent >= SENSEMAKING_RECENT_FLOOR
+            and mean_recent - mean_earlier >= SENSEMAKING_DELTA
+        ),
+    )
+
+
+# Activity variety: Shannon entropy (bits) over the week's activity-tag
+# frequencies. Greater VARIETY of pleasant activities tracks fewer
+# depressive symptoms (Ong et al. 2023) — surfaced as BOTH directions
+# ("narrowed" / "widened"), each an honest observation about the person's
+# own tagging, never a symptom claim. Needs real variety to exist: a
+# person who ever used fewer than two distinct tags has no variety to
+# lose or gain, and no claim is made for them.
+DIVERSITY_RECENT_WEEKS = 4
+DIVERSITY_MIN_WEEKS = 3  # weekly entropy observations per window
+DIVERSITY_DELTA = 0.35  # bits of entropy change vs the earlier window
+DIVERSITY_VARIANCE_FLOOR = 0.25
+
+
+def _weekly_tag_entropies(tag_days: dict[str, set[date]]) -> list[tuple[date, float]]:
+    """(week-start-monday, Shannon entropy in bits) for every week with at
+    least one tag, chronological."""
+    weeks: dict[date, dict[str, int]] = {}
+    for tag, days in tag_days.items():
+        for d in days:
+            week = d - timedelta(days=d.weekday())
+            weeks.setdefault(week, {})
+            weeks[week][tag] = weeks[week].get(tag, 0) + 1
+    out: list[tuple[date, float]] = []
+    for week in sorted(weeks):
+        counts = weeks[week]
+        total = sum(counts.values())
+        entropy = -sum((c / total) * math.log2(c / total) for c in counts.values() if c > 0)
+        out.append((week, entropy))
+    return out
+
+
+def _detect_activity_diversity(tag_days: dict[str, set[date]], today: date) -> _Signal | None:
+    """The activity-diversity trajectory: weekly tag entropy, recent weeks
+    vs the user's own earlier weeks (Welch's t with a noise floor). Both
+    directions surface — narrowing and widening are different, equally
+    honest observations."""
+    distinct_tags = len(tag_days)
+    if distinct_tags < 2:
+        return None  # no variety to measure
+    entropies = _weekly_tag_entropies(tag_days)
+    cutoff = today - timedelta(days=7 * DIVERSITY_RECENT_WEEKS)
+    recent = [v for d, v in entropies if d > cutoff]
+    earlier = [v for d, v in entropies if d <= cutoff]
+    if len(recent) < DIVERSITY_MIN_WEEKS or len(earlier) < DIVERSITY_MIN_WEEKS:
+        return None
+    _, pvalue = statsig.welch_test(recent, earlier, variance_floor=DIVERSITY_VARIANCE_FLOOR)
+    mean_recent = sum(recent) / len(recent)
+    mean_earlier = sum(earlier) / len(earlier)
+    direction = "narrowed" if mean_recent < mean_earlier else "widened"
+    return _Signal(
+        pid="diversity:activity_tags",
+        kind="activity_diversity",
+        label="activity variety",
+        occurrences=len(recent),
+        pvalue=pvalue,
+        detail={
+            "entropy_recent": round(mean_recent, 2),
+            "entropy_earlier": round(mean_earlier, 2),
+            "window_weeks": DIVERSITY_RECENT_WEEKS,
+            "p_value": round(pvalue, 6),
+            "direction": direction,
+            "channel": "activity_tags",
+        },
+        evidence_days=[d for d, _ in entropies if d > cutoff],
+        gate_ok=abs(mean_recent - mean_earlier) >= DIVERSITY_DELTA,
+    )
+
+
 def _detect_mood_dynamics(
     day_sentiments: list[tuple[date, float]],
     day_residuals: dict[date, float],
@@ -2079,43 +2444,9 @@ def _detect_mood_dynamics(
     recent_cutoff = today - timedelta(days=INERTIA_RECENT_DAYS)
 
     # --- inertia: lag-1 autocorrelation of daily mood, recent vs earlier.
-    consecutive: list[tuple[date, float, float]] = []
-    for (d1, s1), (d2, s2) in zip(day_sentiments, day_sentiments[1:]):
-        if 1 <= (d2 - d1).days <= 2:
-            consecutive.append((d2, s1, s2))
-    recent = [(s1, s2) for d, s1, s2 in consecutive if d > recent_cutoff]
-    earlier = [(s1, s2) for d, s1, s2 in consecutive if d <= recent_cutoff]
-    if len(recent) >= INERTIA_MIN_PAIRS and len(earlier) >= INERTIA_MIN_PAIRS:
-        r_recent = _pearson([a for a, _ in recent], [b for _, b in recent])
-        r_earlier = _pearson([a for a, _ in earlier], [b for _, b in earlier])
-        if r_recent is not None and r_earlier is not None:
-            # The claim is COMPARATIVE ("carrying over more than usual"),
-            # so its p-value must test the difference of the two windows'
-            # correlations (Fisher z), not the weaker null r_recent = 0 —
-            # a user whose carryover was always high has "inertia" under
-            # the old test even with no change at all. The p enters the
-            # same Benjamini-Hochberg family as every other claim this
-            # run, whether or not the effect gates pass.
-            pvalue = statsig.fisher_z_difference_p(r_recent, len(recent), r_earlier, len(earlier))
-            signals.append(
-                _Signal(
-                    pid="inertia:mood",
-                    kind="inertia",
-                    label="day-to-day mood",
-                    occurrences=len(recent),
-                    pvalue=pvalue,
-                    detail={
-                        "carryover_recent": round(r_recent, 3),
-                        "carryover_earlier": round(r_earlier, 3),
-                        "window_days": INERTIA_RECENT_DAYS,
-                        "p_value": round(pvalue, 6),
-                    },
-                    evidence_days=[d for d, _, _ in consecutive if d > recent_cutoff],
-                    gate_ok=(
-                        r_recent >= INERTIA_RECENT_MIN and r_recent - r_earlier >= INERTIA_DELTA
-                    ),
-                )
-            )
+    inertia = _inertia_signal(day_sentiments, "inertia:mood", "inertia", "day-to-day mood", today)
+    if inertia is not None:
+        signals.append(inertia)
 
     # --- instability: spread of within-person residuals, recent vs earlier.
     residual_days = sorted(day_residuals)
@@ -2976,6 +3307,8 @@ def update(
     entries: list[JournalEntry],
     today: date,
     feedback: list[tuple[str, bool]] | None = None,
+    muted: list[str] | None = None,
+    unmuted: list[str] | None = None,
 ) -> BrainUpdate:
     """Fold the corpus into the persistent store; surface what earned it.
 
@@ -3069,11 +3402,26 @@ def update(
     # negation-dense Spanish through at ~25% "known" — enough to mint
     # English-lexicon rumination cards on Spanish prose.
     scored = [t for _, tokens, _, _ in per_entry for t in tokens if len(t) >= 3]
+    # Language DETECTION (2026-09-19): English and Spanish each score a
+    # share of the window's tokens against their own detection sets; the
+    # higher share wins if it clears the floor, otherwise the language is
+    # "other" and the historical suppressions apply (topics, text
+    # sentiment, rumination classification step aside; client mood tags
+    # and script-independent phrase repetition still count). Too little
+    # text keeps the historical English default.
+    language = "en"
     if len(scored) >= LANGUAGE_MIN_TOKENS:
-        known_hits = sum(1 for t in scored if t in _KNOWN_TOKENS)
-        language_ok = known_hits >= LANGUAGE_HIT_FLOOR * len(scored)
-    else:
-        language_ok = True  # too little text to judge a language honestly
+        en_hits = sum(1 for t in scored if t in _KNOWN_TOKENS)
+        es_hits = sum(1 for t in scored if t in _KNOWN_TOKENS_ES)
+        en_share = en_hits / len(scored)
+        es_share = es_hits / len(scored)
+        if es_share >= LANGUAGE_HIT_FLOOR and es_share > en_share:
+            language = "es"
+        elif en_share >= LANGUAGE_HIT_FLOOR:
+            language = "en"
+        else:
+            language = "other"
+    language_ok = language != "other"
     mood_entries = (
         per_entry
         if language_ok
@@ -3084,6 +3432,50 @@ def update(
     for entry, _, _, sentiment in mood_entries:
         day_buckets.setdefault(entry.entry_date, []).append(sentiment)
     day_sentiments = sorted((day, sum(v) / len(v)) for day, v in day_buckets.items())
+
+    # Energy channel (2026-09-19): the payload-v2 energy pick is a
+    # client-reported daily channel like the mood tag — it is NOT language
+    # gated (the user's own report, not scored text) and rides the inertia
+    # machinery unchanged: same evidence bars, same BH family, surfaced
+    # only as a within-person CHANGE ("more than usual for you").
+    day_energy_buckets: dict[date, list[float]] = {}
+    for entry in window:
+        if entry.energy is not None and math.isfinite(entry.energy):
+            day_energy_buckets.setdefault(entry.entry_date, []).append(
+                max(-1.0, min(1.0, entry.energy))
+            )
+    day_energies = sorted((day, sum(v) / len(v)) for day, v in day_energy_buckets.items())
+
+    # PA/NA split (2026-09-19): positive and negative affect are separable
+    # streams, not ends of one scale (Emmons & Diener 1985; differential
+    # dynamics — Abitante et al. 2024). Computed from TEXT-SCORED entries
+    # only and only when the language gate passed: an explicit mood
+    # check-in is a single valence judgment that cannot be honestly split,
+    # and a lexicon that doesn't know the language cannot split anything.
+    day_pa_buckets: dict[date, list[float]] = {}
+    day_na_buckets: dict[date, list[float]] = {}
+    if language_ok:
+        for entry, tokens, _, _ in per_entry:
+            if entry.sentiment is not None:
+                continue
+            pa, na = sentiment_components(tokens)
+            day_pa_buckets.setdefault(entry.entry_date, []).append(pa)
+            day_na_buckets.setdefault(entry.entry_date, []).append(na)
+    day_pa = sorted((day, sum(v) / len(v)) for day, v in day_pa_buckets.items())
+    day_na = sorted((day, sum(v) / len(v)) for day, v in day_na_buckets.items())
+
+    # Sense-making densities (2026-09-19): per-day causal+insight word
+    # density over EVERY entry's text (a mood-tag override says nothing
+    # about the text's cognitive organization, so — unlike PA/NA — the
+    # override does not exclude the entry), language-gated like every
+    # lexicon measurement.
+    day_sense_buckets: dict[date, list[float]] = {}
+    if language_ok:
+        for entry, tokens, _, _ in per_entry:
+            density = _sense_density(tokens)
+            if density is not None:
+                day_sense_buckets.setdefault(entry.entry_date, []).append(density)
+    day_sense = sorted((day, sum(v) / len(v)) for day, v in day_sense_buckets.items())
 
     # Day-level writing calendar: one calendar day, one Bernoulli (see
     # _detect_themes) — the BASE RATE counts distinct journaling days per
@@ -3135,6 +3527,60 @@ def update(
         signals.extend(_detect_avoidance(day_themes, set(day_buckets), today))
         signals.extend(_detect_cadence(set(day_buckets), today))
         signals.extend(_detect_mood_dynamics(day_sentiments, day_residuals, today))
+        energy_inertia = _inertia_signal(
+            day_energies,
+            "inertia:energy",
+            "energy_inertia",
+            "day-to-day energy",
+            today,
+            channel="energy",
+        )
+        if energy_inertia is not None:
+            signals.append(energy_inertia)
+        # PA/NA inertia: each affect stream gets its own carryover claim —
+        # "your negative feelings have been carrying over" and "your
+        # positive feelings have been carrying over" are different
+        # observations, and neither is implied by the compound alone.
+        pa_inertia = _inertia_signal(
+            day_pa,
+            "inertia:pa",
+            "pa_inertia",
+            "day-to-day positive feelings",
+            today,
+            channel="positive_affect",
+        )
+        if pa_inertia is not None:
+            signals.append(pa_inertia)
+        na_inertia = _inertia_signal(
+            day_na,
+            "inertia:na",
+            "na_inertia",
+            "day-to-day negative feelings",
+            today,
+            channel="negative_affect",
+        )
+        if na_inertia is not None:
+            signals.append(na_inertia)
+        # Energy ↔ mood coupling: cross-channel concordance on within-person
+        # residuals, recent vs the user's own earlier norm. Needs both
+        # channels present on enough shared days.
+        energy_baselines = _personal_baselines(day_energies)
+        energy_residuals = {
+            day: value - energy_baselines.get(day, value) for day, value in day_energies
+        }
+        coupling = _coupling_signal(energy_residuals, day_residuals, today)
+        if coupling is not None:
+            signals.append(coupling)
+        # Sense-making trajectory and activity variety (2026-09-19): the
+        # two Pennebaker-lineage / behavioral-activation-adjacent kinds.
+        # Both are comparative within-person claims in the same BH family.
+        if language_ok:
+            sense_making = _detect_sense_making(day_sense, today)
+            if sense_making is not None:
+                signals.append(sense_making)
+        diversity = _detect_activity_diversity(tag_distinct_days, today)
+        if diversity is not None:
+            signals.append(diversity)
         if language_ok:
             signals.extend(_detect_topics(per_entry, clusters))
 
@@ -3223,31 +3669,63 @@ def update(
             counts[key] = min(99, counts.get(key, 0) + 1)
             record.feedback = counts
 
+    # Per-pattern mutes (2026-09-19): "stop showing me this" rides the same
+    # encrypted feedback channel as the resonated/not_me taps. A mute is a
+    # presentation preference, not evidence removal: the pattern's lifecycle
+    # keeps evolving underneath, question generation skips it, and the card
+    # surfaces with detail.muted=true so the client can offer the unmute.
+    # Unknown pids are ignored (patterns retire); the store is capped so a
+    # stuck button cannot grow it forever.
+    if muted or unmuted:
+        muted_store = dict(store.get("muted") or {})
+        for pid in (muted or [])[:100]:
+            if isinstance(pid, str) and 1 <= len(pid) <= 128 and pid in store["patterns"]:
+                muted_store[pid] = True
+        for pid in (unmuted or [])[:100]:
+            muted_store.pop(pid, None)
+        while len(muted_store) > MUTED_STORED_CAP:
+            muted_store.pop(next(iter(muted_store)))
+        store["muted"] = muted_store
+
     surfaced_records: list[tuple[StoredPattern, float]] = []
+    muted_records: list[tuple[StoredPattern, float]] = []
     for pid in sorted(store["patterns"]):
         record = store["patterns"][pid]
         if record.state not in SURFACED_STATES:
             continue
         evidence = [date.fromisoformat(d) for d in record.evidence_dates]
-        surfaced_records.append((record, _decay_strength(evidence, today)))
-    surfaced_records.sort(
-        key=lambda item: (
-            STATE_RANK.get(item[0].state, 3),
-            -item[1],
-            -item[0].occurrences,
-            item[0].pid,
+        surfaced_entry = (record, _decay_strength(evidence, today))
+        if pid in (store.get("muted") or {}):
+            muted_records.append(surfaced_entry)
+        else:
+            surfaced_records.append(surfaced_entry)
+    for records in (surfaced_records, muted_records):
+        records.sort(
+            key=lambda item: (
+                STATE_RANK.get(item[0].state, 3),
+                -item[1],
+                -item[0].occurrences,
+                item[0].pid,
+            )
         )
-    )
     surfaced_records = surfaced_records[:MAX_SURFACED]
+    muted_records = muted_records[:MUTED_SURFACED_CAP]
 
     n_window_entries = len(per_entry)
     surfaced: list[Pattern] = []
     patterns_new = 0
     patterns_fading = 0
-    for record, strength in surfaced_records:
-        is_new = bool(
-            record.first_qualified
-            and (today - date.fromisoformat(record.first_qualified)).days <= NEW_PATTERN_WINDOW_DAYS
+    for record, strength in surfaced_records + muted_records:
+        is_muted = record.pid in (store.get("muted") or {})
+        # A muted card is never "new" either: the flag exists to draw the
+        # eye, and the eye is deliberately elsewhere.
+        is_new = (
+            bool(
+                record.first_qualified
+                and (today - date.fromisoformat(record.first_qualified)).days
+                <= NEW_PATTERN_WINDOW_DAYS
+            )
+            and not is_muted
         )
         if is_new:
             patterns_new += 1
@@ -3279,6 +3757,11 @@ def update(
                     # Question-feedback taps (encrypted at rest with the rest
                     # of the state): powers feedback-aware question ranking.
                     "feedback": dict(record.feedback),
+                    # Patient-side mute (2026-09-19): the client collapses
+                    # these cards and the question engine skips them; the
+                    # flag rides the payload so the unmute has something to
+                    # act on. Computed at surfacing time from the muted set.
+                    **({"muted": True} if is_muted else {}),
                     # Crisis interlock: when the wording itself is suppress-tier,
                     # the card is marked so the client renders the NON-QUOTING
                     # variant (and the question engine never touches it —
@@ -3300,6 +3783,10 @@ def update(
     sentiments = [s for _, _, _, s in per_entry]
     stats = {
         "total_entries": len(per_entry),
+        # Honesty signal (2026-09-19): the detected analysis language;
+        # "other" means the engine stepped aside for text-derived claims
+        # (clients render an honest note instead of silence).
+        "language": language,
         "active_days": len(day_buckets),
         "avg_sentiment": round(sum(sentiments) / len(sentiments), 3) if sentiments else 0.0,
         "first_date": _iso(window[0].entry_date) if window else None,

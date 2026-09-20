@@ -48,15 +48,19 @@ const nav = { navigate: vi.fn() };
 
 type Sentiment = number | null | unknown;
 
-/** Encrypt an entry row exactly the way a synced save would have made it. */
+/** Encrypt an entry row exactly the way a synced save would have made it.
+ *  The optional `structured` bag emits a v2 payload (malformed values are
+ *  deliberately passable — the decrypt-side sanitizers are under test). */
 function entryRow(
   clientEntryId: string,
   text: string,
   entryDate: string,
   sentiment: Sentiment = null,
   receivedAt: string | null = `${entryDate}T10:00:00.000Z`,
+  structured?: { energy?: unknown; sleep?: unknown; tags?: unknown },
 ) {
-  const payload = JSON.stringify({ v: 1, text, sentiment, created_at: entryDate });
+  const base = { v: 1 as number, text, sentiment, created_at: entryDate };
+  const payload = JSON.stringify(structured ? { ...base, v: 2, ...structured } : base);
   return {
     id: `srv-${clientEntryId}`,
     client_entry_id: clientEntryId,
@@ -649,6 +653,81 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     await flush();
     const days = await recentMoods(dataKey, "user-1", 30);
     expect(days.find((d) => d.date === "2026-09-03")?.value).toBe(1);
+  });
+
+  it("an edit preserves the v2 structured channels — energy, sleep and tags ride the replacement (2026-09-19 data-loss fix)", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-ccc", "structured day", "2026-09-03", null, null, {
+        energy: -1,
+        sleep: 2,
+        tags: ["work", "family"],
+      }),
+    ] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "structured day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("structured day, revised");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    const [updatedId, blob] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    // The typo fix must not have erased the day's check-ins.
+    expect(payload.v).toBe(2);
+    expect(payload.text).toBe("structured day, revised");
+    expect(payload.energy).toBe(-1);
+    expect(payload.sleep).toBe(2);
+    expect(payload.tags).toEqual(["work", "family"]);
+    await act(async () => root.unmount());
+  });
+
+  it("malformed structured values degrade to absent at decrypt time — never a payload the server would reject", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-ddd", "weird channels day", "2026-09-03", null, null, {
+        energy: "high",
+        sleep: 99,
+        tags: "work",
+      }),
+    ] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "weird channels day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("weird channels day, revised");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    const [updatedId, blob] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    // Nothing structured survived sanitization: the re-encrypt emits the v1
+    // shape (empty structured), which the server accepts everywhere.
+    expect(payload.v).toBe(1);
+    expect(payload.energy).toBeUndefined();
+    expect(payload.sleep).toBeUndefined();
+    expect(payload.tags).toBeUndefined();
+    await act(async () => root.unmount());
+  });
+
+  it("tag sanitization mirrors the server's cleaning — strip, lowercase, cap, dedupe", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-eee", "taggy day", "2026-09-03", null, null, {
+        tags: ["  Work ", "WORK", "a-very-long-tag-name-over-24-chars", "", "family"],
+      }),
+    ] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "taggy day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("taggy day, revised");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    const [updatedId, blob] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    expect(payload.tags).toEqual(["work", "a-very-long-tag-name-ove", "family"]);
+    await act(async () => root.unmount());
   });
 
   it("saving an unchanged edit is a no-op straight back to the entry", async () => {

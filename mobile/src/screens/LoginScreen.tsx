@@ -39,28 +39,30 @@ import { queueOnboarding } from "../onboarding";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy } from "../components/errors";
+import { t as tr } from "../strings";
 
 /** Calm, domain-aware copy for a failed sign-in/registration. */
 function signInFailureCopy(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 401) return "That username or password didn't match.";
-    if (err.status === 409) return "That username is already taken. Try another, or sign in instead.";
+    if (err.status === 401) return tr("login.badCredentials");
+    if (err.status === 409) return tr("login.usernameTaken");
   }
   return requestFailureCopy(err);
 }
 
 /** On-device strength heuristic: length + character variety. No zxcvbn, no
- *  network — just enough to nudge away from "password123". */
-export function passwordStrength(password: string): { label: "weak" | "fair" | "strong"; hint: string } {
+ *  network — just enough to nudge away from "password123". The returned
+ *  label/hint are catalog lookups (rendered verbatim on screen). */
+export function passwordStrength(password: string): { label: string; hint: string } {
   let score = 0;
   if (password.length >= 8) score++;
   if (password.length >= 14) score++;
   if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
   if (/\d/.test(password)) score++;
   if (/[^a-zA-Z0-9]/.test(password)) score++;
-  if (score <= 2) return { label: "weak", hint: "Longer is stronger — aim for a short sentence or several words." };
-  if (score <= 4) return { label: "fair", hint: "Good start — more length or a symbol makes it stronger." };
-  return { label: "strong", hint: "" };
+  if (score <= 2) return { label: tr("login.strength.weak"), hint: tr("login.strengthWeakHint") };
+  if (score <= 4) return { label: tr("login.strength.fair"), hint: tr("login.strengthFairHint") };
+  return { label: tr("login.strength.strong"), hint: "" };
 }
 
 /**
@@ -69,11 +71,11 @@ export function passwordStrength(password: string): { label: "weak" | "fair" | "
  * password is acceptable; otherwise calm copy for the alert.
  */
 export function passwordPolicyError(password: string): string {
-  if (password.length < 12) return "Use at least 12 characters — this password derives your encryption keys.";
+  if (password.length < 12) return tr("login.policyMin");
   const classes = [/[a-z]/.test(password), /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)]
     .filter(Boolean).length;
   if (password.length < 16 && classes < 3) {
-    return "Use a 16-character passphrase, or 12+ characters from at least three character types.";
+    return tr("login.policyVariety");
   }
   return "";
 }
@@ -95,13 +97,13 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       const policyError = passwordPolicyError(password);
       if (policyError) {
         Alert.alert(
-          password.length < 12 ? "Password too short" : "Password needs more variety",
+          password.length < 12 ? tr("login.policyShortTitle") : tr("login.policyVarietyTitle"),
           policyError,
         );
         return;
       }
       if (password !== confirm) {
-        Alert.alert("Passwords don't match", "Type the same password twice — there is no reset if it's lost.");
+        Alert.alert(tr("login.mismatchTitle"), tr("login.mismatchBody"));
         return;
       }
     }
@@ -151,7 +153,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
       vault.lock();
       Alert.alert(
-        mode === "register" ? "Couldn't create account" : "Sign in failed",
+        mode === "register" ? tr("login.registerFailedTitle") : tr("login.signInFailedTitle"),
         signInFailureCopy(err),
       );
     } finally {
@@ -176,74 +178,72 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         MindPattern
       </Text>
       <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
-        Your patterns, from your words. Encrypted on this device.
+        {tr("login.subtitle")}
       </Text>
       <TextInput
         style={inputTheme(t)}
-        placeholder="username"
+        placeholder={tr("login.usernamePlaceholder")}
         placeholderTextColor={t.colors.placeholder}
         autoCapitalize="none"
         value={username}
         onChangeText={setUsername}
-        accessibilityLabel="Username"
+        accessibilityLabel={tr("login.usernameA11y")}
         textContentType="username"
         autoComplete="username"
       />
       <TextInput
         style={inputTheme(t)}
-        placeholder="password"
+        placeholder={tr("common.passwordPlaceholder")}
         placeholderTextColor={t.colors.placeholder}
         secureTextEntry
         value={password}
         onChangeText={setPassword}
         onSubmitEditing={submit}
-        accessibilityLabel="Password"
+        accessibilityLabel={tr("common.passwordA11y")}
         textContentType={mode === "register" ? "newPassword" : "password"}
         autoComplete={mode === "register" ? "new-password" : "current-password"}
       />
       {mode === "register" && (
         <TextInput
           style={inputTheme(t)}
-          placeholder="confirm password"
+          placeholder={tr("login.confirmPlaceholder")}
           placeholderTextColor={t.colors.placeholder}
           secureTextEntry
           value={confirm}
           onChangeText={setConfirm}
           onSubmitEditing={submit}
-          accessibilityLabel="Confirm password"
+          accessibilityLabel={tr("login.confirmA11y")}
           textContentType="newPassword"
           autoComplete="new-password"
         />
       )}
       {strength && (
         <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }} accessibilityLiveRegion="polite">
-          Password strength: {strength.label}.{strength.hint ? ` ${strength.hint}` : ""}
+          {`${tr("login.strength", { label: strength.label })}${strength.hint ? ` ${strength.hint}` : ""}`}
         </Text>
       )}
       {mismatch && (
         <Text style={{ color: t.colors.error, fontSize: t.type.meta.fontSize }} accessibilityRole="alert">
-          Passwords don't match.
+          {tr("login.mismatchInline")}
         </Text>
       )}
       {mode === "register" && (
         <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, lineHeight: 19 }}>
-          Choose a password of at least 12 characters — a 16-character passphrase, or 12–15
-          characters from at least three character types.
+          {tr("login.policyHint")}
         </Text>
       )}
       {mode === "register" && (
         <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, lineHeight: 19 }}>
-          There is no password reset. If you forget this password, no one — including us — can
-          recover your journal.
+          {tr("login.noReset")}
         </Text>
       )}
       <PrimaryButton
-        label={mode === "login" ? "Sign in" : "Create account"}
+        label={mode === "login" ? tr("login.signIn") : tr("login.createAccount")}
         onPress={submit}
         busy={busy}
       />
       <GhostButton
-        label={mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
+        label={mode === "login" ? tr("login.switchToRegister") : tr("login.switchToSignIn")}
         onPress={() => {
           setMode(mode === "login" ? "register" : "login");
           setConfirm("");
