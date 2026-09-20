@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 
 let baseUrl = "https://queue.example.test";
-vi.mock("../src/api/client", () => {
+vi.mock("../src/api/client", async (importOriginal) => {
+  // canonicalOrigin stays the REAL shared helper (H-1) — queue scoping and
+  // the client's origin pin must not drift between mock and production.
+  const { canonicalOrigin } = await importOriginal<typeof import("../src/api/client")>();
   class ApiError extends Error {
     constructor(public status: number, message: string, public code?: string, public retryAfterMs?: number) {
       super(message);
@@ -15,6 +18,7 @@ vi.mock("../src/api/client", () => {
     }
   }
   return {
+    canonicalOrigin,
     ApiError,
     OriginPinnedError,
     getBaseUrl: vi.fn(async () => baseUrl),

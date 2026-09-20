@@ -21,7 +21,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from datetime import date as date_type, timedelta
+from datetime import date as date_type, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import delete, func, select, update
@@ -236,8 +236,14 @@ def _decode_entry_blob(value: str) -> bytes:
 
 
 def _validate_entry_date(entry_date: date_type, user: User) -> None:
-    """Shared create/replace calendar boundary enforcement."""
-    today = date_type.today()
+    """Shared create/replace calendar boundary enforcement.
+
+    ``today`` is server-UTC (2026-09-20 audit fix L-5): ``date.today()``
+    answers in the host's local timezone, so on any non-UTC host the
+    forward-grace bound drifted by hours from the "server-UTC today + 1"
+    contract the grace-day reasoning (and the threshold math) assumes.
+    """
+    today = datetime.now(timezone.utc).date()
     if entry_date > today + timedelta(days=FORWARD_GRACE_DAYS):
         raise ApiError(
             status_code=422, detail="entry_date cannot be in the future", code="validation_error"
@@ -299,8 +305,13 @@ async def create_entry(
         async with _user_locks.hold(f"entries:{user.id}"):
             fresh_user = await _fresh_active_entry_user(session, user.id, expected_epoch)
             _validate_entry_date(body.entry_date, fresh_user)
-            await _assert_within_quota(session, fresh_user, len(blob), request.app.state.settings)
 
+            # Duplicate BEFORE quota (2026-09-20 audit fix L-6): an
+            # idempotent retry of an already-stored client_entry_id at the
+            # quota boundary used to answer 413, so an offline queue could
+            # not distinguish "already applied" from "genuinely full" and
+            # wedged on an unretryable error. The 409 is the terminal,
+            # correct verdict for a retry — it must win the race.
             existing = await session.execute(
                 select(Entry.id).where(
                     Entry.user_id == fresh_user.id, Entry.client_entry_id == body.client_entry_id
@@ -308,6 +319,7 @@ async def create_entry(
             )
             if existing.scalar_one_or_none() is not None:
                 raise ApiError(status_code=409, detail="entry already exists", code="conflict")
+            await _assert_within_quota(session, fresh_user, len(blob), request.app.state.settings)
 
             row = Entry(
                 user_id=fresh_user.id,

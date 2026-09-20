@@ -10,6 +10,8 @@ import os
 # explicitly, before any app module is imported.
 os.environ.setdefault("MINDPATTERN_ENV", "development")
 
+import pathlib
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -72,6 +74,14 @@ async def _shared_test_db_cleanup():
     so a non-SQLite URL must name a database containing "test" (the CI
     contract uses .../mindpattern_test). Parallel pytest workers would need
     one database each — the CI job runs serially.
+
+    L-42 (2026-09-20): a SQLite URL used to skip the name guard entirely,
+    so pointing MINDPATTERN_TEST_DB_URL at a real existing sqlite FILE (a
+    dev mindpattern.db, say) wiped it on the first test. A file-backed
+    sqlite URL is now accepted only when the file does NOT exist yet, or
+    lives under the system temp directory, or the destructive intent is
+    explicit (MINDPATTERN_TEST_DB_ALLOW_EXISTING_SQLITE=1). In-memory
+    sqlite (empty database component) stays always-allowed.
     """
     url = _test_db_url()
     if not url:
@@ -87,6 +97,18 @@ async def _shared_test_db_cleanup():
                 "per-test cleanup deletes all rows, so only a throwaway "
                 "database whose name contains 'test' is accepted"
             )
+    elif not _existing_sqlite_file_is_allowed(url):
+        from sqlalchemy.engine import make_url
+
+        database = make_url(url).database or ""
+        raise RuntimeError(
+            f"MINDPATTERN_TEST_DB_URL points at existing sqlite file "
+            f"{database!r}; the per-test cleanup deletes every row in it. "
+            "Point at a throwaway file (not yet created), use a path under "
+            "the temp directory, or set "
+            "MINDPATTERN_TEST_DB_ALLOW_EXISTING_SQLITE=1 to opt in "
+            "explicitly."
+        )
     from app.db import build_engine
     from app.models import Base
 
@@ -98,3 +120,38 @@ async def _shared_test_db_cleanup():
             for table in reversed(Base.metadata.sorted_tables):
                 await conn.execute(table.delete())
         await engine.dispose()
+
+
+def _existing_sqlite_file_is_allowed(url: str) -> bool:
+    """Whether a sqlite test URL may point at an ALREADY-EXISTING file.
+
+    In-memory databases (empty/``:memory:`` database component) are always
+    fine. For file-backed URLs: a not-yet-created file is fine (the suite
+    will create and own it), anything under tempfile.gettempdir() is
+    conventionally scratch space, and everything else needs the explicit
+    opt-in env var. Relative and absolute paths are both judged by their
+    resolved absolute location, so ``./db.sqlite`` cannot sneak past a
+    guard written for ``/abs/db.sqlite``.
+    """
+    import tempfile
+
+    from sqlalchemy.engine import make_url
+
+    database = make_url(url).database or ""
+    if database in ("", ":memory:") or database.startswith(":memory:"):
+        return True
+    path = pathlib.Path(database)
+    if not path.is_file():
+        return True
+    if os.environ.get("MINDPATTERN_TEST_DB_ALLOW_EXISTING_SQLITE", "").strip() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return True
+    try:
+        path = path.resolve()
+        return str(path).startswith(str(pathlib.Path(tempfile.gettempdir()).resolve()) + os.sep)
+    except OSError:  # unresolvable path — do not guess it is scratch space
+        return False

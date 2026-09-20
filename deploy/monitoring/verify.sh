@@ -5,16 +5,21 @@
 #   1. promtool (if on PATH): full semantic validation —
 #        promtool check config prometheus.yml   (also loads rule_files)
 #        promtool check rules  alerts.yml
-#      A placeholder MINDPATTERN_METRICS_TOKEN is exported because
-#      prometheus.yml fails closed on the real one being unset.
+#      The config check runs against a staged copy whose bearer_token_file
+#      path is rewritten to a placeholder file: the committed config points
+#      at the CONTAINER path /etc/prometheus/metrics-token, which cannot
+#      exist on the host.
 #   2. Always: YAML syntax + structure of every file in this directory
 #      (and ../backup-offsite/docker-compose.yml when present), using the
 #      repo virtualenv's python (../../.venv) with PyYAML, falling back to
-#      any python3 that imports yaml. The structural pass ALSO verifies
-#      that every alert expression only references metric names that
-#      backend/app/metrics.py actually exports (plus Prometheus' own up /
-#      probe_success and the textfile heartbeat) — so an alert can never
-#      silently drift from the exposition.
+#      any python3 that imports yaml. The structural pass ALSO derives the
+#      exported metric list from backend/app/metrics.py's render() itself
+#      (read-only) and verifies that every alert expression references
+#      only names the API actually exports (plus Prometheus' own up /
+#      probe_success and the textfile heartbeat) — so neither an alert nor
+#      the grounding check itself can silently drift from the exposition.
+#      It further fails if the mindpattern-api job stops using
+#      bearer_token_file (the ${VAR} env-expansion class of breakage).
 #   3. sh -n syntax check of the two shell scripts (shellcheck if present).
 #
 # Exit 0 = everything checked passed. Exit 1 = at least one check failed.
@@ -45,12 +50,25 @@ fi
 # --- promtool (optional, semantic) ------------------------------------------
 if command -v promtool >/dev/null 2>&1; then
   note "promtool $(promtool --version 2>&1 | head -n 1): check config + check rules"
-  if MINDPATTERN_METRICS_TOKEN=verify-placeholder promtool check config prometheus.yml; then
+  # The committed config points bearer_token_file at the CONTAINER path
+  # /etc/prometheus/metrics-token. Stage a copy with that path rewritten
+  # to a placeholder file (and alerts.yml reachable from both resolution
+  # bases promtool is known to use for rule_files) so the check is honest
+  # about the config as shipped.
+  promtool_tmp=$(mktemp -d)
+  mkdir -p "$promtool_tmp/etc/prometheus"
+  sed "s|/etc/prometheus/metrics-token|$promtool_tmp/etc/prometheus/metrics-token|" \
+    prometheus.yml > "$promtool_tmp/etc/prometheus/prometheus.yml"
+  cp alerts.yml "$promtool_tmp/etc/prometheus/"
+  cp alerts.yml "$promtool_tmp/"
+  printf 'verify-placeholder-token' > "$promtool_tmp/etc/prometheus/metrics-token"
+  if (cd "$promtool_tmp" && promtool check config etc/prometheus/prometheus.yml); then
     note "promtool check config prometheus.yml: OK"
   else
     fail "promtool check config prometheus.yml"
   fi
-  if MINDPATTERN_METRICS_TOKEN=verify-placeholder promtool check rules alerts.yml; then
+  rm -rf "$promtool_tmp"
+  if promtool check rules alerts.yml; then
     note "promtool check rules alerts.yml: OK"
   else
     fail "promtool check rules alerts.yml"
@@ -70,16 +88,32 @@ import yaml
 
 base = Path(sys.argv[1])
 
-# Exactly what backend/app/metrics.py renders (keep in sync with its
-# render() method). Anything else mindpattern_* in an alert expr is a bug.
-EXPORTED = {
-    "mindpattern_requests_total",
-    "mindpattern_recompute_seconds_bucket",
-    "mindpattern_recompute_seconds_count",
-    "mindpattern_recompute_seconds_sum",
-    "mindpattern_llm_calls_total",
-    "mindpattern_keystore_sessions",
-}
+# Derive the exported metric list from backend/app/metrics.py ITSELF
+# (read-only) instead of a hand-copied set: parse the render() method —
+# the single place exposition lines are emitted — and collect every
+# mindpattern_* name literal it writes. Drift (a metric added to or
+# removed from the exposition) then fails or relaxes this check in lock
+# step, instead of silently leaving a removed metric "grounded".
+metrics_src = (base / ".." / ".." / "backend" / "app" / "metrics.py").read_text(
+    encoding="utf-8"
+)
+render_match = re.search(
+    r"^    def render\(.*?(?=^    def |^class |\Z)", metrics_src, re.M | re.S
+)
+if not render_match:
+    errors = ["could not locate render() in backend/app/metrics.py"]
+    EXPORTED = set()
+else:
+    # Skip comment lines and "# TYPE ..." string literals: the base
+    # histogram family named there is not itself a series — only the
+    # _bucket/_count/_sum exposition lines are.
+    render_code = "\n".join(
+        line for line in render_match.group(0).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    render_code = re.sub(r'"# TYPE [^"]*"', '""', render_code)
+    EXPORTED = set(re.findall(r"mindpattern_[a-zA-Z0-9_:]+", render_code))
+    print(f"verify: metrics.py render() exports: {', '.join(sorted(EXPORTED))}")
 TEXTFILE = {"mindpattern_backup_last_success_timestamp_seconds"}  # backup-heartbeat.sh
 BUILTIN = {"up", "probe_success"}  # provided by Prometheus / blackbox job
 
@@ -112,6 +146,24 @@ if isinstance(prom, dict):
                 errors.append("prometheus.yml: every scrape config needs a job_name")
         if not any(j.get("job_name") == "mindpattern-api" for j in jobs):
             errors.append("prometheus.yml: no mindpattern-api scrape job")
+        else:
+            api_job = next(j for j in jobs if j.get("job_name") == "mindpattern-api")
+            # The credential MUST travel by bearer_token_file: Prometheus
+            # does not env-expand config contents, so `bearer_token: ${VAR}`
+            # would send the literal string and 401 every scrape.
+            if str(api_job.get("bearer_token", "")).find("$") != -1 or (
+                api_job.get("bearer_token") and not api_job.get("bearer_token_file")
+            ):
+                errors.append(
+                    "prometheus.yml: mindpattern-api uses bearer_token (env vars are "
+                    "NOT expanded — use bearer_token_file)"
+                )
+            if api_job.get("bearer_token_file") != "/etc/prometheus/metrics-token":
+                errors.append(
+                    "prometheus.yml: mindpattern-api must use "
+                    "bearer_token_file: /etc/prometheus/metrics-token "
+                    "(mounted by the monitoring compose configs: entry)"
+                )
     rules = prom.get("rule_files")
     if not isinstance(rules, list) or "alerts.yml" not in rules:
         errors.append("prometheus.yml: rule_files must include alerts.yml")

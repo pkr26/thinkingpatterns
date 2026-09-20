@@ -418,3 +418,138 @@ describe("cancel paths", () => {
     expect(nav.navigate).toHaveBeenCalledWith("Crisis");
   });
 });
+
+describe("M-25: sharing-disclosure version gate (v2)", () => {
+  /** Same drive as the grant describe's helper: code → lookup → confirm →
+   *  the password card. */
+  async function drive(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    await pressLabel(root, "Share with Dr. Real");
+    await flush();
+    await pressAlertButton("Continue to password");
+    await flush();
+  }
+
+  it("a matching v2 server offers the normal grant flow", async () => {
+    vi.mocked(api.meta).mockResolvedValue({
+      sharing_available: true,
+      sharing_disclosure_version: "v2",
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Add your therapist");
+    expect(textOf(root)).not.toContain("Sharing terms updated");
+    // The v2 disclosure names measures explicitly.
+    expect(textOf(root)).not.toContain("wellbeing measures"); // not on this screen yet (lookup card)
+  });
+
+  it("an OLDER server disclosure (v1) shows the calm terms-updated state, not a grant entry", async () => {
+    vi.mocked(api.meta).mockResolvedValue({
+      sharing_available: true,
+      sharing_disclosure_version: "v1",
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("Sharing terms updated");
+    expect(text).toContain("wellbeing measures (PHQ-9 questionnaires)");
+    expect(text).not.toContain("Add your therapist");
+    expect(text).not.toContain("e.g. 7X2KQM4N");
+  });
+
+  it("a NEWER server disclosure (v3) shows the same calm state", async () => {
+    vi.mocked(api.meta).mockResolvedValue({
+      sharing_available: true,
+      sharing_disclosure_version: "v3",
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Sharing terms updated");
+    expect(textOf(root)).not.toContain("Add your therapist");
+  });
+
+  it("the stale state keeps existing sharing visible and revocable", async () => {
+    vi.mocked(api.meta).mockResolvedValue({
+      sharing_available: true,
+      sharing_disclosure_version: "v1",
+    } as never);
+    vi.mocked(api.listConsents).mockResolvedValue([activeConsent] as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Dr. Active");
+    expect(textOf(root)).toContain("Sharing since 2026-09-01");
+    expect(touchableByLabel(root, "Stop sharing")).toBeTruthy();
+  });
+
+  it("a legacy meta without the field never counts as stale", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ sharing_available: true } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Add your therapist");
+    expect(textOf(root)).not.toContain("Sharing terms updated");
+  });
+
+  it("a 409 disclosure_outdated rejection gets the dedicated calm copy (nothing was shared)", async () => {
+    vi.mocked(api.grantConsent).mockRejectedValue(
+      new RealApiError(409, "sharing disclosure is outdated; refresh and review it again"),
+    );
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await drive(root);
+    await reauth(root);
+    expect(lastAlert()[0]).toBe("Sharing terms updated");
+    expect(lastAlert()[1]).toContain("nothing was shared");
+    expect(lastAlert()[1]).toContain("PHQ-9");
+    // Not the generic paths:
+    expect(lastAlert()[0]).not.toBe("Could not complete");
+    expect(lastAlert()[0]).not.toBe("That password didn't match");
+  });
+
+  it("the same 409 with the machine code (once the client allowlist carries it) also matches", async () => {
+    const coded = Object.assign(new RealApiError(409, "conflict"), {
+      code: "disclosure_outdated",
+    });
+    vi.mocked(api.grantConsent).mockRejectedValue(coded);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await drive(root);
+    await reauth(root);
+    expect(lastAlert()[0]).toBe("Sharing terms updated");
+  });
+
+  it("an ORDINARY 409 conflict on grant is not mislabeled as the disclosure gate", async () => {
+    vi.mocked(api.grantConsent).mockRejectedValue(
+      new RealApiError(409, "pairing code already consumed", "conflict"),
+    );
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await drive(root);
+    await reauth(root);
+    expect(lastAlert()[0]).not.toBe("Sharing terms updated");
+    expect(lastAlert()[0]).toBe("Could not complete");
+  });
+});
+
+describe("L-66: a failed consents load is unknown status, not 'not sharing'", () => {
+  it("renders the honest could-not-load note — never the verified empty state", async () => {
+    vi.mocked(api.listConsents).mockRejectedValue(new ApiError(0, "server unreachable"));
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("Couldn’t load who you are sharing with");
+    expect(text).not.toContain("You are not sharing with anyone");
+  });
+
+  it("a recovery load that succeeds returns to the verified empty state", async () => {
+    vi.mocked(api.listConsents).mockRejectedValueOnce(new ApiError(0, "server unreachable"));
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Couldn’t load who you are sharing with");
+    // A later refresh (e.g. returning to the screen) succeeds empty.
+    const root2 = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root2)).toContain("You are not sharing with anyone");
+  });
+});

@@ -39,8 +39,10 @@ import { MoodCalendar } from "../components/MoodCalendar";
 import { filterEntries } from "../historyFind";
 import { vault } from "../vault";
 import { useSession } from "../store";
-import { recordMood, recentMoods } from "../moodLog";
+import { recordMood, recentMoods, removeMoodDay, localDateISO } from "../moodLog";
 import { localSentiment, moodLabel } from "../mood";
+import { detectCrisisLanguage } from "../crisisDetect";
+import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { useTheme } from "../theme";
 import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
 import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
@@ -389,10 +391,19 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       });
       if (loadEpoch !== historyLoadEpochRef.current) return;
       const receivedRevision = page.revision ?? null;
-      if (
-        (expectedRevision === null && receivedRevision !== null) ||
-        (expectedRevision !== null && receivedRevision !== expectedRevision)
-      ) {
+      // A PINNED continuation must land on the exact snapshot it pinned:
+      // anything else means the journal moved under the walk, and the only
+      // safe rendering is a restart from page one (offsets are meaningless
+      // against a different snapshot).
+      // An UNPINNED continuation (legacy headerless server, or the token
+      // this screen itself dropped after an edit/delete — L-67) ADOPTS the
+      // revision this page reports instead of restarting: that is how the
+      // initial load obtains its token, and it preserves the user's
+      // search/day filters across their own edits instead of 409-wiping
+      // them. The append trades a page possibly drawn from a moved
+      // snapshot (deduped by clientEntryId below) — the same trade the
+      // legacy fallback always made.
+      if (expectedRevision !== null && receivedRevision !== expectedRevision) {
         // The page client normally catches this first. Retain a UI-level
         // guard so a future alternate client/mock cannot append a page from a
         // different snapshot (including a mixed legacy/modern deployment).
@@ -459,12 +470,54 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const badgeValue = (entry: HistoryEntry): number | undefined =>
     entry.sentiment ?? logMoods[entry.entryDate];
 
+  /** The local revision token is dead the moment THIS device edits or
+   *  deletes an entry: the server mints a fresh one, so the next "Load
+   *  older" pinned to the stale token would 409-restart from page one and
+   *  wipe the user's search/day filters (audit L-67). Dropping it here
+   *  sends the next continuation UNPINNED, which re-acquires the current
+   *  snapshot token from that page's response instead of restarting. */
+  const invalidateEntriesRevision = () => {
+    entriesRevisionRef.current = null;
+  };
+
+  /** After a delete, the device-local mood log must not keep counting the
+   *  erased day (audit L-68): the local streak/trend and the calendar's
+   *  badge fallback all read that value. Fire-and-forget — a failed
+   *  hygiene write must never fail the (already committed) server action.
+   *  removeMoodDay snapshots the key at ITS call time, and vault.get()
+   *  throws when a lock landed mid-delete — both degrade quietly here. */
+  const forgetLocalMoodDay = (entry: HistoryEntry) => {
+    void (async () => {
+      try {
+        const userId = await api.getUserId();
+        if (!userId || !vault.isUnlocked()) return;
+        await removeMoodDay(vault.get().dataKey, userId, entry.entryDate);
+      } catch {
+        // Locked vault or dead storage: disposable metadata, not an error.
+      }
+    })();
+    // The badge/calendar state drops the day immediately, whatever the
+    // disk write does.
+    setLogMoods((prev) => {
+      if (!(entry.entryDate in prev)) return prev;
+      const next = { ...prev };
+      delete next[entry.entryDate];
+      return next;
+    });
+  };
+
   const runDelete = async (entry: HistoryEntry) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
       await api.deleteEntry(entry.clientEntryId);
+      // L-67: this device just moved the collection revision; the walk's
+      // token must be re-acquired or the next "Load older" 409-restarts
+      // and wipes the filters.
+      invalidateEntriesRevision();
+      // L-68: the local mood log stops counting the deleted day.
+      forgetLocalMoodDay(entry);
       setEntries((prev) => prev.filter((e) => e.clientEntryId !== entry.clientEntryId));
       // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state fails the edit/detail checks and falls through to the identical list return
       setMode({ kind: "list" });
@@ -473,6 +526,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         // Already gone server-side: the end state the user asked for.
+        invalidateEntriesRevision(); // the server state moved all the same
+        forgetLocalMoodDay(entry);
         setEntries((prev) => prev.filter((e) => e.clientEntryId !== entry.clientEntryId));
         // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
         setMode({ kind: "list" });
@@ -565,6 +620,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         }
         return;
       }
+      // L-67: the replacement moved the collection revision on the server;
+      // drop the walk's token so the next "Load older" re-acquires it
+      // instead of 409-restarting (which would wipe the filters).
+      invalidateEntriesRevision();
       // Keep the device-local mood log in step with the day's newest text.
       void recordMood(vault.get().dataKey, userId, entry.entryDate, entry.sentiment ?? localSentiment(trimmed)).catch(
         () => {},
@@ -573,6 +632,24 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
       setMode({ kind: "detail", entry: updated });
       showStatus(tr("history.updated"), "ok");
+      // H-6 (2026-09-20 audit): the EDIT path runs the same on-device crisis
+      // detection as a new entry. The server only ever sees ciphertext, so
+      // this detector is the only net for a user who edits yesterday's
+      // entry into crisis language — the same text as a NEW entry gets the
+      // dialog, an edited one must too. Never before or instead of saving:
+      // the replacement is already committed server-side at this point.
+      // Same per-day throttle stamp and calm copy as EntryScreen.
+      if (detectCrisisLanguage(trimmed)) {
+        const today = localDateISO();
+        const flagged = await crisisDialogShownOn(userId, today).catch(() => false);
+        if (!flagged) {
+          await recordCrisisDialogShown(userId, today).catch(() => {});
+          Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
+            { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
+            { text: tr("common.notNow"), style: "cancel" },
+          ]);
+        }
+      }
     } catch (err) {
       Alert.alert(tr("history.couldNotUpdateTitle"), requestFailureCopy(err));
     } finally {

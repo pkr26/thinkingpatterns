@@ -12,12 +12,17 @@
   {
     "id": "D1.sub-3-char-token-gap",
     "status": "BLOCKED",
-    "summary": "tokens shorter than 3 chars are exempt from grounding ('wo-rk dominates' passes): tiny-token stitching can smuggle fragments into labels, though content remains bounded by the 80-char cap and the surviving words"
+    "summary": "hyphen-joined label tokens ('wo-rk') are rejected: the label's whitespace tokenizer keeps the fragment whole while the corpus tokenizer splits on it, so it can never be corpus-grounded \u2014 tiny-token stitching no longer smuggles fragments into labels (the surviving space-separated form is bounded by the 80-char cap and grounding of the remaining words)"
   },
   {
     "id": "D1.structural-defenses",
     "status": "BLOCKED",
     "summary": "digit phones, ungrounded vocab, injection imperatives, bad kinds, oversize labels all dropped; occurrences 1e30 clamped=True; NaN confidence defaulted to 0.5; bad detail keys dropped (verified above)"
+  },
+  {
+    "id": "D1.case-table",
+    "status": "BLOCKED",
+    "summary": "all 16 sanitizer case-table rows behaved as their recorded expectations (blocked or survived)"
   },
   {
     "id": "D2.consent-gate",

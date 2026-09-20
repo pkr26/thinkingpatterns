@@ -165,16 +165,18 @@ describe("QuestionScreen", () => {
 
   it("an OFFLINE phase check (status 0) still renders the on-device question, not an error card", async () => {
     // The phase fetch needs the network; the generic pool does not. An
-    // offline day-one user gets the question with the baseline caption.
+    // offline user gets the question — with the HONEST offline caption
+    // (2026-09-20 audit L-57): status 0 means "no response", the phase is
+    // unknowable, so the card never asserts the baseline program copy at
+    // an account that may already be in the insight phase.
     vi.mocked(api.insights).mockRejectedValue(new ApiError(0, "server unreachable"));
     const root = await render(<QuestionScreen />);
     await flush();
     expect(textOf(root)).toContain("What took up most space in your mind today?");
-    expect(textOf(root)).toContain("For now, one question a day.");
-    // The day counter is unknowable offline — the card falls back to the
-    // default threshold wording.
-    expect(textOf(root)).toContain("After 30 days of writing");
-    expect(textOf(root)).toContain("nothing leaves this device for it.");
+    expect(textOf(root)).toContain("Can't reach the server right now");
+    // The baseline program copy is NOT shown while the phase is assumed.
+    expect(textOf(root)).not.toContain("After 30 days of writing");
+    expect(textOf(root)).not.toContain("nothing leaves this device for it.");
     // No error surface at all: no alert role, no error color, no dialog.
     expect(root.root.findAll((n) => n.props.accessibilityRole === "alert")).toHaveLength(0);
     const { allStyles } = await import("../helpers/rtr");
@@ -263,6 +265,42 @@ describe("QuestionScreen", () => {
     expect(textOf(root)).toContain("One question a day. No advice — just something to sit with.");
     expect(textOf(root)).toContain("Refresh");
     expect(api.openProcessingSession).not.toHaveBeenCalled();
+  });
+
+  it("a feedback_blob_invalid recompute opens a FRESH processing session for the retry (M-12)", async () => {
+    vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+    vi.mocked(api.questionToday)
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // mount auto-load: stops at the key step
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // the press's phase-2 read
+      .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
+    // Seed a pending tap so buildFeedbackBlob actually ships a blob — the
+    // server's feedback pre-flight is what fails with feedback_blob_invalid
+    // (consuming the single-use processing token on the way out).
+    const { recordFeedbackTap } = await import("../../src/questionFeedback");
+    await recordFeedbackTap(dataKey, "user-1", "pid-x", true);
+    let opens = 0;
+    vi.mocked(api.openProcessingSession).mockImplementation(async () => {
+      opens += 1;
+      return { session_token: `st-${opens}` } as never;
+    });
+    vi.mocked(api.recompute)
+      .mockRejectedValueOnce(new ApiError(422, "feedback blob failed authentication", "feedback_blob_invalid"))
+      .mockResolvedValue({ question_stored: true } as never);
+
+    const root = await render(<QuestionScreen />);
+    await flush();
+    await pressLabel(root, "Show today's question");
+    await flush();
+
+    // The dead token must NOT be replayed (a guaranteed 403
+    // processing_session_invalid): the retry runs on a freshly opened
+    // session, the corrupted feedback queue is dropped, and the question
+    // still loads in the same flow.
+    expect(api.openProcessingSession).toHaveBeenCalledTimes(2);
+    expect(api.recompute).toHaveBeenNthCalledWith(1, "st-1", expect.any(String));
+    expect(api.recompute).toHaveBeenNthCalledWith(2, "st-2");
+    expect(textOf(root)).toContain("What repeats?");
+    expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
   });
 
   it("on 404, opens the key-bearing session once and only on consent", async () => {

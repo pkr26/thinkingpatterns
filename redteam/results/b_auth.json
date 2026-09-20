@@ -6,13 +6,13 @@
   },
   {
     "id": "B1.verifier-enables-llm-egress",
-    "status": "BLOCKED",
-    "summary": "captured verifier flipped llm-consent ON (409) \u2014 a stolen credential chain reaches the plaintext-egress switch, the most sensitive setting in the system"
+    "status": "FINDING",
+    "summary": "captured verifier flipped llm-consent ON (200) \u2014 a stolen credential chain reaches the plaintext-egress switch, the most sensitive setting in the system"
   },
   {
     "id": "B1.wrong-verifier-rejected",
-    "status": "FINDING",
-    "summary": "a WRONG verifier on destructive ops -> {'llm-consent': 409, 'account-delete': 204} (must be flat 403; anything else means re-authentication stopped comparing the proof)"
+    "status": "BLOCKED",
+    "summary": "a WRONG verifier on destructive ops -> {'llm-consent': 403, 'account-delete': 403} (must be flat 403; anything else means re-authentication stopped comparing the proof)"
   },
   {
     "id": "B1.hostile-tokens",
@@ -22,7 +22,7 @@
   {
     "id": "B1.token-type-confusion",
     "status": "BLOCKED",
-    "summary": "verify_token outcomes with a leaked secret: {'string': 'TokenError', 'negative': 'TokenError', 'huge': 'accepted', 'nan-str': 'TokenError'} \u2014 all rejected as TokenError"
+    "summary": "verify_token outcomes with a leaked secret: {'string': 'TokenError', 'negative': 'TokenError', 'huge': 'TokenError', 'nan-str': 'TokenError'} \u2014 all rejected as TokenError"
   },
   {
     "id": "B1.epoch-both-mounts",
@@ -67,7 +67,7 @@
   {
     "id": "B3.login-timing",
     "status": "BLOCKED",
-    "summary": "median login latency known=74ms vs unknown=74ms (ratio 1.00, samples 4v4) \u2014 equal-CPU scrypt burn keeps them indistinguishable within noise"
+    "summary": "median login latency known=78ms vs unknown=79ms (ratio 1.01, samples 4v4) \u2014 equal-CPU scrypt burn keeps them indistinguishable within noise"
   },
   {
     "id": "B3.username-recycling",

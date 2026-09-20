@@ -1,8 +1,10 @@
 /**
  * App shell: a four-state machine — login → key unlock → patients → one
  * patient. All key material lives in React state (memory only): closing
- * the tab forgets everything; there is nothing sensitive in localStorage
- * beyond per-patient visit-date stamps (see PatientView).
+ * the tab forgets everything; there is nothing sensitive in storage
+ * beyond per-patient visit-date stamps (see PatientView — since 2026-09-20
+ * those live in per-tab sessionStorage, or in lock-scrubbed localStorage
+ * where sessionStorage is unavailable).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearSession, api, hasSession, setUnauthorizedHandler, type Patient } from "./api";
@@ -11,7 +13,7 @@ import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
 import { theme } from "./ui";
-import { localStore } from "./platform";
+import { localStore, visitAnchorStore } from "./platform";
 
 type View =
   | { kind: "login"; error?: string }
@@ -59,7 +61,15 @@ export function App(): React.JSX.Element {
     lifecycle.current += 1;
     loginAttempt.current += 1;
     const retiring = sessionRef.current;
-    if (retiring) localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+    // Visit-date stamps (audit L-75, 2026-09-20 decision): while anchors
+    // are session-backed they DELIBERATELY survive this lock boundary — a
+    // 10-minute idle lock or a token expiry mid-clinic-day must not erase
+    // the "new since reviewed" delta; the browser session's end clears
+    // them. Only the localStorage fallback keeps the old scrub-on-lock
+    // contract, because localStorage would otherwise outlive the session.
+    if (retiring && !visitAnchorStore.sessionBacked()) {
+      localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+    }
     clearSession();
     replacePortalSession(null);
     setDisplayName("");
@@ -76,12 +86,16 @@ export function App(): React.JSX.Element {
   }, []);
 
   // Teardown matters on route replacement / hot reload too, not just the
-  // explicit sign-out button.
+  // explicit sign-out button. Same L-75 rule as lockDown: session-backed
+  // anchors survive (the browser session owns their lifetime); only the
+  // localStorage fallback is scrubbed, matching its old contract.
   useEffect(() => () => {
     lifecycle.current += 1;
     clearSession();
     const retiring = sessionRef.current;
-    if (retiring) localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+    if (retiring && !visitAnchorStore.sessionBacked()) {
+      localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+    }
     wipePortalSession(retiring);
     sessionRef.current = null;
   }, []);

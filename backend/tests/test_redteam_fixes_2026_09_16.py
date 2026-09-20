@@ -112,9 +112,14 @@ class TestCrisisNormalization:
         # The end-to-end impact chain from the audit: a disguised crisis
         # phrase recurring in the journal used to ride a pattern label into
         # the daily question verbatim. With normalization, the pool filter
-        # catches it.
+        # catches it. L-40 (2026-09-20): this used to read
+        # ``assert not matches_suppress(label) or True`` — vacuous, so it
+        # pinned nothing. The load-bearing fact is the POSITIVE one: the
+        # suppress tier, through normalization, recognizes the disguised
+        # label (it is exactly the "s u i c i d e" gap-joined form pinned
+        # in OBVIOUS_CRISIS above), which is why the pool filter drops it.
         label = "the s u i c i d e thoughts are loud again"
-        assert not crisis.matches_suppress(label) or True  # informative only
+        assert crisis.matches_suppress(label)
         pattern = Pattern(
             kind="rumination",
             label=label,

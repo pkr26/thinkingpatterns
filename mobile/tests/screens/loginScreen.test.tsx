@@ -38,7 +38,7 @@ const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { LoginScreen } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, pressLabel, typeInto, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
+const { render, flush, textOf, pressLabel, typeInto, inputByPlaceholder, pressAlertButton, lastAlert } = await import("../helpers/rtr");
 const { resetApi, SALT_B64 } = await import("../helpers/apiMock");
 
 /** The most recent keys the mocked deriveKeys produced, for zeroization asserts. */
@@ -619,5 +619,44 @@ describe("passwordPolicyError (mirrors the portal's policy)", () => {
     expect(passwordPolicyError("Cafébrûlée123")).toBe("");
     // A password-manager-length string is fine (no maximum).
     expect(passwordPolicyError("a".repeat(100))).toBe("");
+  });
+});
+
+describe("L-65: partial register failure points at sign-in, not a dead end", () => {
+  // The account EXISTS once api.register resolves; a later failure in the
+  // flow (session write, unlock proof, salt cache) used to render as a
+  // generic "couldn't create account" — the retry would 409 on the taken
+  // username with no hint to just sign in.
+  it("a post-register failure says the account was created and how to get in", async () => {
+    vi.mocked(api.setSession).mockRejectedValue(new ApiError(0, "server unreachable"));
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "Correct horse!");
+    await pressLabel(root, "Create account");
+    await flush();
+
+    expect(api.register).toHaveBeenCalledTimes(1); // the account WAS created
+    const [title, body] = lastAlert();
+    expect(title).toBe("Account created");
+    expect(body).toContain("Switch to sign-in");
+    expect(body).toContain("username and password");
+    // The failed completion did not queue onboarding or leave keys live.
+    expect(takePendingOnboarding()).toBe(false);
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
+  it("a failure BEFORE the register call keeps the ordinary register copy", async () => {
+    vi.mocked(api.register).mockRejectedValue(new ApiError(409, "username already taken"));
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "Correct horse!");
+    await pressLabel(root, "Create account");
+    await flush();
+    expect(lastAlert()[0]).toBe("Couldn't create account");
+    expect(lastAlert()[1]).toContain("already taken");
   });
 });

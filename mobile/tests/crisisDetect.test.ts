@@ -5,7 +5,13 @@
  * important — that everyday journal text does NOT trip it.
  */
 import { describe, expect, it } from "vitest";
-import { detectCrisisLanguage, matchVariants, normalizeCrisisText } from "../src/crisisDetect";
+import {
+  detectCrisisLanguage,
+  foldedVariants,
+  matchVariants,
+  matchesCrisisSuppress,
+  normalizeCrisisText,
+} from "../src/crisisDetect";
 
 describe("detectCrisisLanguage — true positives", () => {
   it.each([
@@ -194,5 +200,52 @@ describe("dual-variant matching + benign masking (2026-09-17)", () => {
   it("the primary variant equals normalizeCrisisText on compound-free text", () => {
     const text = "s u i c i d e notes everywhere";
     expect(matchVariants(text)[0]).toBe(normalizeCrisisText(text));
+  });
+});
+
+describe("letter-doubling fold (audit H-7, 2026-09-20)", () => {
+  // A letter typed twice ("kiill myself", "suiccide") matched no tier; the
+  // folded channel collapses same-letter runs on BOTH sides. Mirrors
+  // backend TestLetterDoublingFold.
+  it.each([
+    "kiill myself",
+    "suiccide",
+    "i want to kiill myself",
+    "suuiicide",
+    "i want to diie",
+    "i nearly tookk my own life",
+    "sleeep forever",
+    "i cannnot go on",
+    "kiillmyself",
+  ])("dialog + suppress fire on %j", (text) => {
+    expect(detectCrisisLanguage(text)).toBe(true);
+    expect(matchesCrisisSuppress(text)).toBe(true);
+  });
+
+  it.each([
+    // "of myself" is the folded twin of "off myself" — the collision the
+    // fold exemption exists for.
+    "i am so ashamed of myself",
+    "proud of myself for once",
+    "tired of myself but hanging on",
+    "i feel good today",
+    "coffee and a good book",
+  ])("ordinary prose stays silent on %j", (text) => {
+    expect(detectCrisisLanguage(text)).toBe(false);
+    expect(matchesCrisisSuppress(text)).toBe(false);
+  });
+
+  it("benign compounds re-mask after folding (doubling in the compound's first word)", () => {
+    // The literal mask misses "suiciide squad"; the folded channel
+    // re-masks with the folded compound spelling.
+    expect(detectCrisisLanguage("we watched suiciide squad last night")).toBe(false);
+    expect(matchesCrisisSuppress("we discussed suiciide prevention in class")).toBe(false);
+  });
+
+  it("foldedVariants returns the run-collapsed twins, benign compounds masked", () => {
+    const [primary] = foldedVariants("kiill myself");
+    expect(primary).toBe("kil myself");
+    const [masked] = foldedVariants("we watched suiciide squad last night");
+    expect(masked).toBe("we watched last night");
   });
 });

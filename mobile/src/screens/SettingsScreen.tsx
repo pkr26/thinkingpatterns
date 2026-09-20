@@ -268,11 +268,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       await signOut(); // revokes tokens, clears the session
       Alert.alert(tr("settings.deletedTitle"), tr("settings.deletedBody"));
     } catch (err) {
+      // A VERIFIER rejection (403) must RETHROW to the outer handler so the
+      // password card STAYS UP for one corrected retry (audit L-62: this
+      // inner catch used to swallow it, clearing the card only on the
+      // delete path — the documented retry contract applied to the LLM
+      // toggle alone). Nothing was deleted: the account still exists.
+      if (isVerificationFailedError(err)) throw err;
       // The server still holds the account — keep the local session intact
       // so the user can retry instead of believing it worked.
-      if (isVerificationFailedError(err)) {
-        Alert.alert(tr("settings.deleteFailedTitle"), tr("settings.deleteFailedVerifier"));
-      } else if (isSessionExpiredError(err)) {
+      if (isSessionExpiredError(err)) {
         Alert.alert(tr("settings.deleteFailedTitle"), tr("settings.deleteFailedSession"));
       } else {
         Alert.alert(tr("settings.deleteFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
@@ -427,24 +431,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   React.useEffect(() => {
     void loadHapticsSetting().then(setHaptics);
   }, []);
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const stored = await (await import("@react-native-async-storage/async-storage")).default.getItem(
-          themeStorageKey(),
-        );
-        if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
-          setThemeModeState(stored);
-        }
-      } catch {
-        /* non-sensitive preference; default stands */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // The persisted theme preference (audit L-63: this used to exist twice,
+  // byte-for-byte — one dead duplicate). One read, cancellation-guarded;
+  // a missing/invalid value leaves the provider's default selected.
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -565,31 +554,36 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       <Text style={themed.label}>{tr("settings.appearanceLabel")}</Text>
       <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
         <View style={{ flexDirection: "row", gap: 8 }}>
-          {(["system", "dark", "light"] as ThemeMode[]).map((mode) => (
-            <TouchableOpacity
-              key={mode}
-              style={[
-                styles.moodOptionLike,
-                {
-                  backgroundColor: themeMode === mode ? t.colors.primary : t.colors.cardDeep,
-                  borderRadius: t.radius.md,
-                  minHeight: 40,
-                },
-              ]}
-              onPress={() => {
-                touchActivity();
-                setThemeModeState(mode);
-                setThemeMode(mode);
-              }}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: themeMode === mode }}
-              accessibilityLabel={tr("settings.themeA11y", { mode })}
-            >
-              <Text style={{ color: themeMode === mode ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
-                {tr(mode === "system" ? "settings.themeSystem" : mode === "dark" ? "settings.themeDark" : "settings.themeLight")}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {(["system", "dark", "light"] as ThemeMode[]).map((mode) => {
+            // L-64: the radio's a11y label interpolates the LOCALIZED mode
+            // name — a Spanish screen reader heard "Tema: dark" before.
+            const modeLabel = tr(mode === "system" ? "settings.themeSystem" : mode === "dark" ? "settings.themeDark" : "settings.themeLight");
+            return (
+              <TouchableOpacity
+                key={mode}
+                style={[
+                  styles.moodOptionLike,
+                  {
+                    backgroundColor: themeMode === mode ? t.colors.primary : t.colors.cardDeep,
+                    borderRadius: t.radius.md,
+                    minHeight: 40,
+                  },
+                ]}
+                onPress={() => {
+                  touchActivity();
+                  setThemeModeState(mode);
+                  setThemeMode(mode);
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: themeMode === mode }}
+                accessibilityLabel={tr("settings.themeA11y", { mode: modeLabel })}
+              >
+                <Text style={{ color: themeMode === mode ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
+                  {modeLabel}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
           <Text style={themed.rowText}>{tr("settings.hapticsLabel")}</Text>

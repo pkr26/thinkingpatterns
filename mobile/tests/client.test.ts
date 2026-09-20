@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { parseServerUrl, detailToMessage } from "../src/api/client";
+import { parseServerUrl, detailToMessage, canonicalOrigin } from "../src/api/client";
 
 describe("parseServerUrl", () => {
   it("accepts https servers and normalizes trailing slashes", () => {
@@ -96,6 +96,30 @@ describe("parseServerUrl", () => {
     for (const host of ["localhost.evil.com", "127.0.0.2", "[::2]", "mylocalhost"]) {
       expect(parseServerUrl(`http://${host}`)?.insecure).toBe(true);
     }
+  });
+});
+
+describe("canonicalOrigin (H-1 shared loopback unification)", () => {
+  it("maps every loopback alias of one server to the 127.0.0.1 spelling", () => {
+    expect(canonicalOrigin("http://localhost:8000")).toBe("http://127.0.0.1:8000");
+    expect(canonicalOrigin("http://127.0.0.1:8000")).toBe("http://127.0.0.1:8000");
+    expect(canonicalOrigin("http://[::1]:8000")).toBe("http://127.0.0.1:8000");
+    expect(canonicalOrigin("http://LOCALHOST:8000")).toBe("http://127.0.0.1:8000");
+    // Portless loopback keeps its portless canonical form.
+    expect(canonicalOrigin("http://localhost")).toBe("http://127.0.0.1");
+  });
+
+  it("passes every non-loopback origin through untouched", () => {
+    // A different host — including loopback look-alikes — is a genuinely
+    // different origin and must never be collapsed. Loopback aliases on a
+    // DIFFERENT PORT canonicalize to that port's 127.0.0.1 form (still a
+    // distinct origin from any other port).
+    expect(canonicalOrigin("https://one.example.test")).toBe("https://one.example.test");
+    expect(canonicalOrigin("http://localhost.evil.com:8000")).toBe("http://localhost.evil.com:8000");
+    expect(canonicalOrigin("http://127.0.0.2:8000")).toBe("http://127.0.0.2:8000");
+    expect(canonicalOrigin("http://localhost:8001")).toBe("http://127.0.0.1:8001");
+    expect(canonicalOrigin("http://127.0.0.1:8001")).toBe("http://127.0.0.1:8001");
+    expect(canonicalOrigin("not a url")).toBe("not a url"); // unparseable input passes through
   });
 });
 

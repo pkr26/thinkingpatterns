@@ -17,12 +17,22 @@ export interface SearchableEntry {
   text: string;
 }
 
-/** Case-insensitive substring over the entry text, or an exact date match
+/** Fold text for matching: NFD normalization (so NFC-typed and NFD-pasted
+ *  spellings of the same grapheme compare equal), combining-mark removal
+ *  (so "café" and "cafe" find each other), then lowercase. ASCII — entry
+ *  dates included — passes through byte-identically after the case fold. */
+function foldForSearch(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/** Case- and diacritic-insensitive substring over the entry text (Unicode
+ *  normalization applied to BOTH sides — L-53: an NFD paste from another
+ *  app must match NFC-typed text and vice versa), or an exact date match
  *  (so "2026-07" filters to July, "2026-07-14" to the day). */
 export function filterEntries<T extends SearchableEntry>(entries: T[], query: string): T[] {
-  const q = query.trim().toLowerCase();
+  const q = foldForSearch(query.trim());
   if (!q) return entries;
-  return entries.filter((e) => e.text.toLowerCase().includes(q) || e.entryDate.toLowerCase().includes(q));
+  return entries.filter((e) => foldForSearch(e.text).includes(q) || foldForSearch(e.entryDate).includes(q));
 }
 
 export interface CalendarDay {

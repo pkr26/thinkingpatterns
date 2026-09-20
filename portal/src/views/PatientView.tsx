@@ -15,10 +15,12 @@ import {
   ApiError,
   api,
   THERAPIST_ENTRY_PAGE_SIZE,
+  THERAPIST_MEASURE_PAGE_SIZE,
   THERAPIST_NOTE_PAGE_SIZE,
   type Note,
   type Patient,
   type PortalEntry,
+  type PortalMeasure,
 } from "../api";
 import {
   decryptEntry,
@@ -31,7 +33,7 @@ import {
   type PatternPayload,
 } from "../crypto";
 import { Button, Card, ErrorBanner, Note as NoteText, theme } from "../ui";
-import { localStore } from "../platform";
+import { visitAnchorStore } from "../platform";
 
 export interface PortalSession {
   username: string;
@@ -63,6 +65,18 @@ const MAX_EVIDENCE_ENTRIES = ENTRY_PAGE_SIZE * MAX_ENTRY_PAGES;
 const NOTE_PAGE_SIZE = THERAPIST_NOTE_PAGE_SIZE;
 const MAX_NOTE_PAGES = 20;
 const MAX_NOTES_PER_LOAD = 1_000;
+// Measures (audit L-76, 2026-09-20): the server now continues with
+// limit/offset over a deterministic order, so the chart pages through
+// EVERYTHING it will share instead of silently dropping measure #61+.
+// 20 pages × 100 rows = 2_000 rows — exactly the backend's per-patient
+// measure quota, so a full traversal is always finite and complete.
+const MEASURE_PAGE_LIMIT = THERAPIST_MEASURE_PAGE_SIZE;
+const MAX_MEASURE_PAGES = 20;
+/** Rendering window per instrument: the trend row shows the newest 60
+ *  readings and says so when older ones exist — an honest display slice,
+ *  never a silent data truncation (everything fetched is decrypted and
+ *  counted). */
+const MEASURE_TREND_WINDOW = 60;
 // A revision mismatch means the server refused to combine pages from two
 // collection snapshots. Restart once from offset zero; retrying forever lets
 // a busy or hostile server turn a read-only chart into an unbounded request
@@ -71,6 +85,21 @@ const MAX_COLLECTION_CHANGE_RESTARTS = 1;
 
 const lastVisitKey = (therapistId: string, userId: string): string =>
   `mindpattern.lastVisit.${therapistId}.${userId}`;
+
+/** Local calendar date (YYYY-MM-DD) on the CLINICIAN's clock (audit L-80,
+ *  2026-09-20).  The delta anchor and the printed "generated" date use
+ *  this one basis: a UTC `toISOString()` stamp read "yesterday" for
+ *  clinicians east of UTC during their evening, while the pattern dates
+ *  they compare against are plain calendar days.  Anchoring to the local
+ *  calendar day keeps "marked reviewed" on the same date the clinician's
+ *  wall clock showed, and the anchor-vs-first_seen comparison stays a
+ *  pure date-to-date comparison with no time-of-day seam. */
+function localDateISO(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 /** Session-note starters (2026-09-17): light scaffolds, never clinical
  *  templates — the therapist's own record, their own words. */
@@ -92,7 +121,11 @@ function describePattern(pattern: PatternPayload): string {
     case "temporal":
       return `'${pattern.label}' concentrates on ${d.day ?? "certain days"} (${d.day_count ?? "?"} of ${pattern.occurrences} mentions).`;
     case "mood_correlation":
-      return `Entries read ${d.direction === "lower" ? "lower" : "higher"} on days '${pattern.label}' appears (mood delta ${String(d.mood_delta ?? "?")}).`;
+      // direction is absent when the backend could not resolve one; render
+      // the honest unknown like the neighboring arms, never a fabricated
+      // "higher" (audit L-82 — `=== "lower" ? … : "higher"` fell through
+      // to a positive-sounding claim for undefined).
+      return `Entries read ${String(d.direction ?? "?")} on days '${pattern.label}' appears (mood delta ${String(d.mood_delta ?? "?")}).`;
     case "link":
       return `About ${String(d.lag_days ?? 1)} day(s) after '${pattern.label}' comes up, entries read ${String(d.direction ?? "lower")}.`;
     case "mood_shift":
@@ -132,22 +165,28 @@ function sortForReview(patterns: PatternPayload[]): PatternPayload[] {
 
 /** Inline-SVG mood sparkline over the drill-down entries (their sentiment
  *  is already decrypted on this page). Pure presentation; the accessible
- *  label summarizes the window. */
+ *  label summarizes the window.
+ *
+ *  Points arrive pre-filtered to numeric sentiment (see the call site):
+ *  entries without an explicit mood pick carry null, and coercing those
+ *  to 0 fabricated a mid-scale trend for patients who never make mood
+ *  picks — audit H-13.  A null must never become a number on its way to
+ *  this chart. */
 function MoodSparkline(props: { points: { date: string; sentiment: number }[] }): React.JSX.Element | null {
-  const pts = props.points.filter((p) => typeof p.sentiment === "number");
+  const pts = props.points;
   if (pts.length < 2) return null;
   const w = 320;
   const h = 48;
   const step = w / (pts.length - 1);
   const y = (v: number): number => h / 2 - (v * (h / 2 - 3));
-  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${y(p.sentiment as number).toFixed(1)}`).join(" ");
-  const avg = pts.reduce((sum, p) => sum + (p.sentiment as number), 0) / pts.length;
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${y(p.sentiment).toFixed(1)}`).join(" ");
+  const avg = pts.reduce((sum, p) => sum + p.sentiment, 0) / pts.length;
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
       style={{ width: "100%", maxWidth: 420, height: 48, display: "block", marginTop: 8 }}
       role="img"
-      aria-label={`Mood over the ${pts.length} evidence days (average ${(avg).toFixed(2)})`}
+      aria-label={`Mood over the ${pts.length} mood-tagged evidence entries (average ${(avg).toFixed(2)})`}
     >
       <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke={theme.border} strokeWidth={1} />
       <path d={path} fill="none" stroke={theme.accent} strokeWidth={1.6} />
@@ -180,7 +219,15 @@ function patternKey(pattern: PatternPayload, index: number): string {
 }
 
 function isRetryableCollectionChange(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 409 && error.code === "collection_changed";
+  // The backend signals "rows changed while paging" two ways: the
+  // revision-aware `collection_changed` and the legacy code `conflict`
+  // (same 409, same "…changed while paging; retry the request" detail).
+  // Both are safe to answer with exactly one restart from offset zero —
+  // audit L-79: retrying only the former turned the latter into a hard
+  // error where a single restart was always sufficient.
+  return error instanceof ApiError
+    && error.status === 409
+    && (error.code === "collection_changed" || error.code === "conflict");
 }
 
 async function loadStableCollection<T>(load: () => Promise<T>): Promise<T> {
@@ -202,6 +249,13 @@ export function PatientView(props: {
   onSignOut?: () => void;
 }): React.JSX.Element {
   const { patient, session } = props;
+  /** Notes-only chart mode (audit M-22, 2026-09-20): a stopped/revoked
+   *  consent ends entries/patterns/measures, but the server permits this
+   *  therapist's OWN notes at any consent status — and the list view
+   *  promises "Your notes about this patient stay".  In this mode the
+   *  insights and measures loads are skipped entirely (they would only
+   *  403/404) and the pattern chrome is hidden. */
+  const notesOnly = patient.status !== "active";
   const [patterns, setPatterns] = useState<PatternPayload[] | null>(null);
   const [phaseNote, setPhaseNote] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -221,6 +275,10 @@ export function PatientView(props: {
   const [noteQuery, setNoteQuery] = useState("");
   /** The note being edited (id + textarea buffer). */
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  /** Two-step delete (audit M-23, 2026-09-20): one stray click must never
+   *  destroy a clinical note.  The first press only arms the confirm
+   *  button for THAT note; the second press performs the DELETE. */
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // Every async decrypt/load carries this generation.  Leaving the patient,
   // signing out, or selecting another pattern makes old plaintext results
   // ineligible to repopulate React state.
@@ -238,15 +296,39 @@ export function PatientView(props: {
     setEntries(null);
     setNoteQuery("");
     setEditing(null);
+    setConfirmDeleteId(null);
     setMeasures(null);
 
     // Measures (MBC): loaded independently of insights so a baseline-phase
     // patient's recorded questionnaires still surface. Failures render as
-    // "no measures" rather than blocking the chart.
+    // "no measures" rather than blocking the chart.  Skipped entirely for
+    // stopped consents — the read requires an active consent.
     const measuresLoad = (async (): Promise<void> => {
       try {
-        if (!patient.ephemeral_pub || !patient.wrapped_key) return;
-        const rows = await api.patientMeasures(patient.user_id);
+        if (notesOnly || !patient.ephemeral_pub || !patient.wrapped_key) return;
+        // Page through EVERYTHING the server will share (audit L-76): the
+        // traversal below once sliced to the newest 60 rows and silently
+        // dropped the rest while the write quota kept charging them.
+        // Continuation is offset-based over the server's deterministic
+        // order; a full page means "maybe more", a short page is terminal.
+        const rows: PortalMeasure[] = [];
+        const seen = new Set<string>();
+        for (let page = 0; page < MAX_MEASURE_PAGES; page += 1) {
+          const current = await api.patientMeasures(patient.user_id, {
+            offset: rows.length,
+            limit: MEASURE_PAGE_LIMIT,
+          });
+          const fresh = current.filter((row) => !seen.has(row.id));
+          if (page > 0 && current.length > 0 && fresh.length === 0) {
+            // A pre-paging backend ignores offset/limit and answers every
+            // request with its same fixed first rows.  Everything it can
+            // share is already retained — stop rather than loop on it.
+            break;
+          }
+          for (const row of fresh) seen.add(row.id);
+          rows.push(...fresh);
+          if (current.length < MEASURE_PAGE_LIMIT) break;
+        }
         if (operation !== loadGeneration.current || rows.length === 0) return;
         const dataKey = await unwrapPatientDataKey(
           session.privateKey,
@@ -258,7 +340,7 @@ export function PatientView(props: {
         );
         const readings: MeasureReading[] = [];
         try {
-          for (const row of rows.slice(0, 60)) {
+          for (const row of rows) {
             const reading = await decryptMeasure(dataKey, patient.user_id, row);
             if (reading) readings.push(reading);
           }
@@ -332,6 +414,14 @@ export function PatientView(props: {
       }
     });
 
+    if (notesOnly) {
+      // Stopped consent (M-22): entries/patterns/measures are gone; the
+      // insights read would only fail.  Notes remain (loaded above) and
+      // the header carries the honest "sharing ended" line.
+      await notesLoad;
+      return;
+    }
+
     try {
       const summary = await api.patientInsights(patient.user_id);
       if (!summary.blob || summary.phase !== "insight") {
@@ -365,7 +455,11 @@ export function PatientView(props: {
         // The pre-session delta (2026-09-17 fix): the stamp moves ONLY on the
         // explicit "Mark reviewed" action — a 30-second glance no longer
         // resets the delta, and a second browser sees the same anchor.
-        const stamp = localStore.get(lastVisitKey(session.userId, patient.user_id));
+        // Storage basis per the L-75 decision: per-tab sessionStorage
+        // (survives idle locks, dies with the browser session), falling
+        // back to lock-scrubbed localStorage where sessionStorage is
+        // unavailable.
+        const stamp = visitAnchorStore.get(lastVisitKey(session.userId, patient.user_id));
         setLastReviewed(stamp ? dayOf(stamp) : null);
         setNewCount(stamp ? surfaced.filter((p) => p.detail.first_seen && p.detail.first_seen > stamp).length : surfaced.length);
         setStats(payload.stats);
@@ -395,6 +489,35 @@ export function PatientView(props: {
     [notes, selectedPid],
   );
   const generalNotes = useMemo(() => notes.filter((n) => n.pattern_pid === null), [notes]);
+  /** Measures grouped per instrument, newest-active instrument first
+   *  (audit L-76, 2026-09-20).  The decrypted instrument name is part of
+   *  the display — "14" is only interpretable next to the questionnaire
+   *  that produced it, and the day a second instrument exists, one flat
+   *  list would interleave unrelated scales.  `measures` arrives sorted
+   *  oldest-first, so each group keeps that order; only the last
+   *  MEASURE_TREND_WINDOW readings render, with the remainder counted in
+   *  `hidden` for the honest "+N earlier not shown" line. */
+  const measureGroups = useMemo(() => {
+    if (!measures) return [] as { instrument: string; readings: MeasureReading[]; hidden: number }[];
+    const byInstrument = new Map<string, MeasureReading[]>();
+    for (const reading of measures) {
+      const bucket = byInstrument.get(reading.measure);
+      if (bucket) bucket.push(reading);
+      else byInstrument.set(reading.measure, [reading]);
+    }
+    return [...byInstrument.entries()]
+      .map(([instrument, readings]) => ({
+        instrument,
+        readings: readings.slice(-MEASURE_TREND_WINDOW),
+        hidden: Math.max(0, readings.length - MEASURE_TREND_WINDOW),
+      }))
+      .sort((a, b) => {
+        const aNewest = a.readings[a.readings.length - 1]?.measureDate ?? "";
+        const bNewest = b.readings[b.readings.length - 1]?.measureDate ?? "";
+        return bNewest.localeCompare(aNewest);
+      });
+  }, [measures]);
+  const hiddenMeasureCount = measureGroups.reduce((sum, group) => sum + group.hidden, 0);
 
   const openDrilldown = async (pattern: PatternPayload) => {
     const operation = ++drilldownGeneration.current;
@@ -466,13 +589,28 @@ export function PatientView(props: {
         for (const row of rows) {
           if (!keep.has(row.entry_date) || seen.has(row.id)) continue;
           seen.add(row.id);
-          const payload = await decryptEntry(dataKey, patient.user_id, row);
-          decrypted.push({
-            id: row.id,
-            entry_date: row.entry_date,
-            text: payload.text,
-            sentiment: payload.sentiment,
-          });
+          // Per-item degradation (audit L-78, 2026-09-20): one
+          // undecryptable entry (relocated blob, dead consent key, corrupt
+          // row) used to abort the whole loop and discard every other
+          // decryptable entry behind the pattern.  Notes and measures
+          // already degrade per row; entries now do too.  Key-material
+          // failures above remain hard errors — they affect every row.
+          try {
+            const payload = await decryptEntry(dataKey, patient.user_id, row);
+            decrypted.push({
+              id: row.id,
+              entry_date: row.entry_date,
+              text: payload.text,
+              sentiment: payload.sentiment,
+            });
+          } catch {
+            decrypted.push({
+              id: row.id,
+              entry_date: row.entry_date,
+              text: "(entry could not be decrypted with this consent's key)",
+              sentiment: null,
+            });
+          }
         }
       } finally {
         dataKey.fill(0);
@@ -519,6 +657,7 @@ export function PatientView(props: {
     try {
       await api.deleteNote(note.id);
       setNotes((prev) => prev.filter((n) => n.id !== note.id));
+      setConfirmDeleteId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "could not delete the note");
     } finally {
@@ -557,8 +696,10 @@ export function PatientView(props: {
         <div>
           <h1 style={{ color: theme.text, fontSize: 20, margin: 0 }}>{patient.username}</h1>
           <NoteText>
-            sharing since {dayOf(patient.granted_at)} · read-only — you cannot change their data
-            {newCount > 0 && ` · ${newCount} pattern${newCount === 1 ? "" : "s"} new${lastReviewed ? ` since you marked reviewed ${lastReviewed}` : " for you to review"}`}
+            {notesOnly
+              ? `sharing ended ${patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — their entries and patterns are no longer reachable; your private notes below remain`
+              : `sharing since ${dayOf(patient.granted_at)} · read-only — you cannot change their data`}
+            {!notesOnly && newCount > 0 && ` · ${newCount} pattern${newCount === 1 ? "" : "s"} new${lastReviewed ? ` since you marked reviewed ${lastReviewed}` : " for you to review"}`}
           </NoteText>
         </div>
         <div className="no-print" style={{ display: "flex", gap: 8 }}>
@@ -568,33 +709,57 @@ export function PatientView(props: {
         </div>
       </header>
 
-      <div className="no-print" style={{ marginBottom: 14 }}>
-        <Button
-          label={lastReviewed ? "Mark reviewed (update the delta anchor)" : "Mark reviewed (start the delta anchor)"}
-          small
-          onPress={() => {
-            const now = new Date().toISOString();
-            localStore.set(lastVisitKey(session.userId, patient.user_id), now);
-            setLastReviewed(dayOf(now));
-            setNewCount(0);
-          }}
-        />
-        <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
-          {lastReviewed
-            ? `New-pattern counting is anchored to ${lastReviewed}; it moves only when you mark reviewed.`
-            : "The new-pattern count anchors the first time you mark reviewed."}
-        </span>
-      </div>
+      {!notesOnly && (
+        <div className="no-print" style={{ marginBottom: 14 }}>
+          <Button
+            label={lastReviewed ? "Mark reviewed (update the delta anchor)" : "Mark reviewed (start the delta anchor)"}
+            small
+            onPress={() => {
+              // L-80 (2026-09-20): the anchor is the LOCAL calendar date,
+              // not a UTC instant — a clinician east of UTC marking reviewed
+              // in their evening must not see "yesterday" as the anchor.
+              // L-75: the stamp persists in per-tab sessionStorage (it
+              // survives idle locks and dies with the browser session).
+              const now = localDateISO(new Date());
+              visitAnchorStore.set(lastVisitKey(session.userId, patient.user_id), now);
+              setLastReviewed(now);
+              setNewCount(0);
+            }}
+          />
+          <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
+            {lastReviewed
+              ? `New-pattern counting is anchored to ${lastReviewed} on this computer's calendar; it moves only when you mark reviewed.`
+              : "The new-pattern count anchors the first time you mark reviewed."}
+          </span>
+        </div>
+      )}
 
       <ErrorBanner message={error} />
 
+      {notesOnly && (
+        <Card title="Sharing ended">
+          <NoteText>
+            This patient stopped sharing. Their journal entries, patterns, and recorded measures are no
+            longer reachable; your private clinician notes below remain, and may remain in your account
+            after the patient stops sharing — delete them when your records policy requires it.
+          </NoteText>
+        </Card>
+      )}
+
       {phaseNote && <Card title="Baseline phase"><NoteText>{phaseNote}</NoteText></Card>}
 
-      {measures && measures.length > 0 && (
-        <Card title={`Recorded measures (${measures.length})`}>
-          <NoteText>
-            {measures.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
-          </NoteText>
+      {measureGroups.length > 0 && (
+        <Card title={`Recorded measures (${measures?.length ?? 0})`}>
+          {measureGroups.map((group) => (
+            <NoteText key={group.instrument}>
+              {group.instrument}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+            </NoteText>
+          ))}
+          {hiddenMeasureCount > 0 && (
+            <NoteText tone="warn">
+              +{hiddenMeasureCount} earlier measure{hiddenMeasureCount === 1 ? "" : "s"} not shown — the trend shows the newest {MEASURE_TREND_WINDOW} per recorded instrument.
+            </NoteText>
+          )}
           <NoteText>
             Patient-recorded questionnaire scores, shared with you by consent.
             MindPattern displays them; interpretation is yours.
@@ -612,7 +777,12 @@ export function PatientView(props: {
         </Card>
       )}
 
-      {patterns === null && !phaseNote && <NoteText>Loading decrypted patterns… (keys never leave this page)</NoteText>}
+      {/* L-77 (2026-09-20): gate on !error — a failed insights load used to
+          leave this line on screen forever beside the error banner, reading
+          as an endless decrypt.  notesOnly never fetches patterns at all. */}
+      {!notesOnly && patterns === null && !phaseNote && !error && (
+        <NoteText>Loading decrypted patterns… (keys never leave this page)</NoteText>
+      )}
 
       {patterns !== null && patterns.length === 0 && !phaseNote && (
         <Card title="Patterns"><NoteText>No recurring pattern has enough evidence yet.</NoteText></Card>
@@ -647,7 +817,17 @@ export function PatientView(props: {
 
       {selected && (
         <Card title={`Evidence entries (${entries?.length ?? 0})`}>
-          {entries !== null && <MoodSparkline points={entries.map((e) => ({ date: e.entry_date, sentiment: e.sentiment ?? 0 }))} />}
+          {/* H-13 (2026-09-20): entries without an explicit mood pick carry
+              null sentiment; they are DROPPED here, never coerced to 0 —
+              `?? 0` fabricated a mid-scale trend and average for patients
+              who never make mood picks (the normal case on mobile). */}
+          {entries !== null && (
+            <MoodSparkline
+              points={entries
+                .filter((e): e is EntryRow & { sentiment: number } => typeof e.sentiment === "number")
+                .map((e) => ({ date: e.entry_date, sentiment: e.sentiment }))}
+            />
+          )}
           {entries === null && <NoteText>Decrypting the entries behind this pattern…</NoteText>}
           {entries !== null && entries.length === 0 && (
             <NoteText>No decryptable entries behind this pattern (the evidence window may predate the shared corpus).</NoteText>
@@ -697,6 +877,7 @@ export function PatientView(props: {
                   value={editing.text}
                   onChange={(e) => setEditing({ id: note.id, text: e.target.value })}
                   placeholder="Editing note…"
+                  aria-label={`Edit note from ${dayOf(note.created_at)}`}
                   rows={3}
                   style={{
                     backgroundColor: theme.cardDeep,
@@ -719,8 +900,27 @@ export function PatientView(props: {
             )}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span style={{ color: theme.muted, fontSize: 11 }}>{dayOf(note.created_at)}</span>
-              <Button label="Edit" small onPress={() => setEditing({ id: note.id, text: note.text })} disabled={busy} />
-              <Button label="Delete" small danger onPress={() => void removeNote(note)} disabled={busy} />
+              <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
+              <Button
+                label={confirmDeleteId === note.id ? "Confirm delete" : "Delete"}
+                small
+                danger
+                onPress={() => {
+                  // M-23 (2026-09-20): DELETE is irreversible; the first
+                  // press only arms the confirmation for THIS note.
+                  if (confirmDeleteId !== note.id) {
+                    setConfirmDeleteId(note.id);
+                    return;
+                  }
+                  void removeNote(note);
+                }}
+                disabled={busy}
+              />
+              {confirmDeleteId === note.id && (
+                <span style={{ color: theme.accentBright, fontSize: 12 }}>
+                  Permanently delete this note? Press again to confirm.
+                </span>
+              )}
             </div>
           </div>
         ))}
@@ -748,7 +948,14 @@ ${tpl}` : tpl)}
           {(selected ? patternNotes : generalNotes).length > 0 && (
             <button
               type="button"
-              onClick={() => setDraft((selected ? patternNotes : generalNotes)[0]?.text ?? draft)}
+              onClick={() => {
+                // H-13 (2026-09-20): notes arrive created_at ASCENDING, so
+                // the newest note — the one "copy forward" promises — is the
+                // LAST element.  `[0]` seeded the draft with the oldest
+                // session's text.
+                const source = (selected ? patternNotes : generalNotes).at(-1);
+                if (source) setDraft(source.text);
+              }}
               style={{
                 backgroundColor: theme.cardDeep,
                 color: theme.body,
@@ -767,6 +974,7 @@ ${tpl}` : tpl)}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={selected ? "Note about this pattern…" : "Note about this patient…"}
+          aria-label={selected ? "New note about this pattern" : "New note about this patient"}
           rows={3}
           style={{
             backgroundColor: theme.cardDeep,
@@ -792,8 +1000,11 @@ ${tpl}` : tpl)}
       <div className="print-only" style={{ display: "none" }}>
         <h1 style={{ fontSize: 18 }}>MindPattern session summary — {patient.username}</h1>
         <p style={{ fontSize: 12 }}>
-          Sharing since {dayOf(patient.granted_at)} · summary generated {new Date().toISOString().slice(0, 10)}
-          {lastReviewed && ` · delta anchored ${lastReviewed}`}
+          {notesOnly
+            ? `Sharing ended ${patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — notes-only record`
+            : `Sharing since ${dayOf(patient.granted_at)}`}{" "}
+          · summary generated {localDateISO(new Date())}
+          {lastReviewed && ` · delta anchored ${lastReviewed} (clinic-local date)`}
           {newCount > 0 && ` · ${newCount} new pattern${newCount === 1 ? "" : "s"}`}
         </p>
         {stats && (

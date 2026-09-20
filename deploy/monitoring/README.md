@@ -33,6 +33,12 @@ export MINDPATTERN_COMPOSE_NETWORK=mindpattern_default
 export MINDPATTERN_METRICS_TOKEN=<the token the api service uses>
 export GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)
 
+# The scrape credential travels by FILE (Prometheus does not env-expand
+# config contents). Create the token file — owner-only, never committed
+# (gitignored); `docker compose up` refuses to start without it:
+umask 077
+printf '%s' "$MINDPATTERN_METRICS_TOKEN" > deploy/monitoring/token
+
 docker compose -f deploy/monitoring/docker-compose.yml \
   --profile monitoring up -d
 
@@ -82,11 +88,17 @@ its UI.
    paths, no per-user data — by design in `backend/app/metrics.py`), but
    treat it as a secret anyway.
 
-2. **The Prometheus side.** `prometheus.yml` contains
-   `bearer_token: ${MINDPATTERN_METRICS_TOKEN}`; Prometheus expands it at
-   config load and **refuses to start when unset** (fail closed). Export it
-   (or pass `--env-file`) before `up` — the compose file here also
-   hard-fails on the missing variable.
+2. **The Prometheus side.** `prometheus.yml` reads the credential with
+   `bearer_token_file: /etc/prometheus/metrics-token`, mounted from
+   `deploy/monitoring/token` by the compose `configs:` entry in this
+   directory. Prometheus does **not** expand environment variables inside
+   its config files — a `bearer_token: ${VAR}` line would send the literal
+   string and 401 on every scrape, which is why the token travels by file.
+   Fail closed, twice: `docker compose up` refuses to start when the token
+   file is missing (compose resolves `configs: file:` eagerly), and
+   Prometheus fails to load the config when the file exists but cannot be
+   read. Keep the host file `0600`/owner-only and never commit it (it is
+   gitignored).
 
 ## Alert philosophy and severity mapping
 

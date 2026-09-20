@@ -11,7 +11,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 
-vi.mock("../src/api/client", () => {
+vi.mock("../src/api/client", async (importOriginal) => {
+  const { canonicalOrigin } = await importOriginal<typeof import("../src/api/client")>();
   class OriginPinnedError extends Error {
       constructor(public expected: string, public actual: string) {
         super(`refusing to send data pinned to ${expected} while ${actual} is selected`);
@@ -23,6 +24,7 @@ vi.mock("../src/api/client", () => {
     }
   }
   return {
+    canonicalOrigin,
     ApiError,
     OriginPinnedError,
     api: {

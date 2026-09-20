@@ -30,6 +30,7 @@ from app.api import account as account_api
 from app.api import auth as auth_api
 from app.api import entries as entries_api
 from app.api import insights as insights_api
+from app.cache import RateLimitCheck
 from app.api import meta as meta_api
 from app.cache import FixedWindowCounter, HitResult, MAX_TRACKED_KEYS, client_key, make_rate_limiter
 from app.config import Settings, DEFAULT_INSECURE_SECRET, _bool_env, _cors_origins
@@ -333,16 +334,17 @@ EXPECTED_ROUTES = {
 
 
 def _limiter_bucket(route: APIRoute) -> str | None:
-    """The first closed-over string of a make_rate_limiter dependency."""
+    """The bucket name of a make_rate_limiter dependency.
+
+    Pin updated 2026-09-20 (M-1): make_rate_limiter now returns a
+    RateLimitCheck callable OBJECT carrying (bucket, limit_attr,
+    window_attr) as attributes — the introspection HardeningMiddleware's
+    malformed-body edge counting is built on — instead of a closure named
+    ``check`` with cells. Same pinned fact, readable surface.
+    """
     for depends in route.dependencies:
-        if depends.dependency.__name__ != "check":
-            continue
-        contents = [c.cell_contents for c in (depends.dependency.__closure__ or ())]
-        for value in contents:
-            if isinstance(value, str) and value.endswith(("_limit", "_window")):
-                continue
-            if isinstance(value, str):
-                return value
+        if isinstance(depends.dependency, RateLimitCheck):
+            return depends.dependency.bucket
     return None
 
 
@@ -369,16 +371,21 @@ def test_route_wiring_prefixes_tags_and_limiter_buckets():
 
 
 def test_limiter_composite_key_shape():
-    """The counter key is bucket:client — pinned so buckets never collide."""
+    """The counter key is bucket:client — pinned so buckets never collide.
+
+    Pin updated 2026-09-20 (M-1): the spec rides the RateLimitCheck
+    attributes instead of closure cells (see _limiter_bucket above).
+    """
     route = next(
         r
         for r in entries_api.router.routes
         if isinstance(r, APIRoute) and r.path == "/entries" and "POST" in r.methods
     )
-    check = next(d.dependency for d in route.dependencies if d.dependency.__name__ == "check")
-    contents = [c.cell_contents for c in (check.__closure__ or ())]
-    assert "entries-create" in contents
-    assert "entries_rate_limit" in contents and "entries_rate_window" in contents
+    check = next(
+        d.dependency for d in route.dependencies if isinstance(d.dependency, RateLimitCheck)
+    )
+    assert check.bucket == "entries-create"
+    assert (check.limit_attr, check.window_attr) == ("entries_rate_limit", "entries_rate_window")
 
 
 # ---------------------------------------------------------------------------
@@ -2028,7 +2035,9 @@ async def test_meta_payload_is_exact(client):
         "llm_data_retention": None,
         "llm_policy_fingerprint": None,
         "sharing_available": True,
-        "sharing_disclosure_version": "v1",
+        # v2 (2026-09-20, audit H-14): the disclosure copy now names
+        # measures + caseload summaries.
+        "sharing_disclosure_version": "v2",
         "sharing_access_log_retention_days": 730,
     }
 

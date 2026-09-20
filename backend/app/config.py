@@ -158,9 +158,14 @@ class Settings:
     # Fail closed: production is the DEFAULT. Development (dev secret,
     # SQLite, /docs) requires an explicit MINDPATTERN_ENV=development opt-in.
     environment: str = "production"
-    database_url: str = "sqlite+aiosqlite:///./mindpattern.db"
+    # repr=False on every credential-bearing field (L-13, 2026-09-20): a
+    # generated repr(Settings) must never embed the token secret, the DB
+    # URL's password component, the metrics bearer, the LLM API key, or the
+    # therapist enrollment token. Today nothing logs that repr — this keeps
+    # the first casual ``logger.info(settings)`` harmless.
+    database_url: str = field(default="sqlite+aiosqlite:///./mindpattern.db", repr=False)
 
-    token_secret: str = DEFAULT_INSECURE_SECRET
+    token_secret: str = field(default=DEFAULT_INSECURE_SECRET, repr=False)
     token_ttl_seconds: int = 86_400
 
     processing_session_ttl: int = 300
@@ -207,7 +212,7 @@ class Settings:
     # Bearer token for GET /metrics. Empty: the endpoint is open in
     # development and DISABLED (404) in every other environment — privacy
     # fail-closed. Set it to scrape from Prometheus &c.
-    metrics_token: str = ""
+    metrics_token: str = field(default="", repr=False)
 
     # Connection pool for the (Postgres) production engine. SQLite ignores
     # these — its StaticPool single shared connection is what keeps
@@ -217,7 +222,7 @@ class Settings:
     db_pool_timeout: int = 30
 
     llm_url: str = ""
-    llm_api_key: str = ""
+    llm_api_key: str = field(default="", repr=False)
     llm_model: str = "gpt-4o-mini"
     # Human-facing processing terms. In production, an LLM endpoint cannot
     # be enabled without these explicit declarations; their values feed the
@@ -231,7 +236,7 @@ class Settings:
     # it and supply a controlled enrollment secret; there is no anonymous
     # public route that elevates somebody to a clinician role by default.
     therapist_sharing_enabled: bool | None = None
-    therapist_enrollment_token: str = ""
+    therapist_enrollment_token: str = field(default="", repr=False)
 
     cors_origins: list[str] = field(default_factory=list)
     trust_proxy_headers: bool = False
@@ -329,7 +334,6 @@ class Settings:
             "read_rate_window",
             "export_rate_limit",
             "export_rate_window",
-            "access_log_retention_days",
             "body_read_timeout_seconds",
             "max_entries_per_user",
             "recompute_entry_limit",
@@ -385,8 +389,14 @@ class Settings:
         # ciphertext is already 8x the 2M-char text analysis budget.
         if self.analysis_blob_budget > 64 * 1024 * 1024:
             raise RuntimeError("analysis_blob_budget must be <= 64 MiB")
-        if self.access_log_retention_days > 3_650:
-            raise RuntimeError("access_log_retention_days must be <= 3650")
+        # Retention gets an explicit two-sided bound (M-29, 2026-09-20):
+        # 0 or negative would prune the ENTIRE therapist access-audit table
+        # on the first startup sweep — the audit trail is a compliance
+        # artifact, not a tuning knob with a floor of "any int". The
+        # 10-year ceiling bounds the un-prunable worst case against the
+        # documented 730-day default.
+        if not 1 <= self.access_log_retention_days <= 3_650:
+            raise RuntimeError("access_log_retention_days must be between 1 and 3650")
         if self.environment != "development":
             # SQLite is dev/test only — rejected for ANY non-development
             # value ("prod", "staging", a typo), not just the exact string

@@ -92,3 +92,41 @@ describe("pattern mutes riding the feedback channel (2026-09-19)", () => {
     expect(await buildFeedbackBlob(DATA_KEY, USER)).toBeNull();
   });
 });
+
+describe("M-35: serialized appends (same-frame taps cannot lose events)", () => {
+  it("two events issued in the same tick with a gated first read BOTH persist", async () => {
+    const storage = (await import("./helpers/storageMock")).default;
+    const originalGetItem = storage.getItem.bind(storage);
+    let gated = true;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
+      if (gated) {
+        gated = false;
+        await gate;
+      }
+      return originalGetItem(k);
+    };
+    try {
+      const tap = recordFeedbackTap(DATA_KEY, USER, "temporal:work", true);
+      const mute = recordPatternMute(DATA_KEY, USER, "topic:guitar", true);
+      await Promise.resolve(); // the first append's gated read is in flight
+      release();
+      await Promise.all([tap, mute]);
+    } finally {
+      (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
+    }
+    const blob = await buildFeedbackBlob(DATA_KEY, USER);
+    expect(blob).toBeTruthy();
+    const plain = envelope.decrypt(
+      DATA_KEY,
+      Buffer.from(blob!, "base64"),
+      envelope.buildAad("feedback", USER),
+    );
+    const parsed = JSON.parse(plain.toString("utf8"));
+    // Without the mutex, the second append read the same (empty) pending
+    // list and the last write dropped the first event.
+    expect(parsed.feedback).toEqual([{ pid: "temporal:work", resonated: true }]);
+    expect(parsed.muted).toEqual(["topic:guitar"]);
+  });
+});

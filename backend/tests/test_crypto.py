@@ -123,3 +123,33 @@ def test_generate_key_shape():
 def test_module_constants_stable():
     # These constants define the wire format; changing them breaks old blobs.
     assert (NONCE_SIZE, KEY_SIZE, MIN_BLOB_SIZE) == (12, 32, 28)
+
+
+def test_encrypt_with_nonce_absent_from_production_paths():
+    """L-1 (2026-09-20): crypto.encrypt()'s docstring promises that
+    encrypt_with_nonce — the fixed-nonce seam — is "asserted absent from
+    [production paths] by tests". This is that test: a source scan over the
+    whole application tree. The only legal reference outside this test file
+    is the definition module itself (app/security/crypto.py, whose internal
+    delegation from encrypt() IS the seam). Any other app/ module calling
+    it would put a caller-chosen nonce into a request path — precisely the
+    nonce-reuse hazard the random-nonce contract exists to prevent: a
+    repeated nonce under the same AES-GCM key leaks plaintext equality and
+    breaks authentication outright.
+    """
+    from pathlib import Path
+
+    app_root = Path(crypto.__file__).resolve().parents[1]
+    definition_module = (app_root / "security" / "crypto.py").resolve()
+    offenders = []
+    for source in sorted(app_root.rglob("*.py")):
+        if source.resolve() == definition_module:
+            continue
+        text = source.read_text(encoding="utf-8")
+        if "encrypt_with_nonce(" in text:
+            offenders.append(str(source))
+    assert not offenders, (
+        "encrypt_with_nonce( called outside app/security/crypto.py (the "
+        "definition module) — a fixed-nonce seam must never be reachable "
+        f"from a request path: {offenders}"
+    )

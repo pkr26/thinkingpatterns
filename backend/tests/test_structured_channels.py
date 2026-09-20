@@ -234,8 +234,12 @@ class TestAvoidance:
 
     def test_silence_after_theme_surfaces(self):
         corpus = self._planted()
+        # The replication gate (audit H-9) applies to avoidance now: the
+        # second run must bring a NEW observable theme-day→silence
+        # transition, so the extra seeds another "dinner" theme day whose
+        # next day is skipped and journaled-past afterwards.
         extra = [
-            JournalEntry("conflict again today", T0 + timedelta(days=1)),
+            JournalEntry("conflict at dinner again", T0 + timedelta(days=1)),
             JournalEntry("quiet day", T0 + timedelta(days=4)),
         ]
         result = _run_twice(corpus, T0, extra=extra)

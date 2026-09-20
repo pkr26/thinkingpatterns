@@ -11,7 +11,12 @@ vi.mock("../src/api/client", async () => {
 });
 
 import { deriveKeys } from "../src/crypto/MindPatternCrypto";
-import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../src/reauth";
+import {
+  verifyPasswordForVault,
+  isVerificationFailedError,
+  isSessionExpiredError,
+  LOCAL_MISMATCH_DELAY_MS,
+} from "../src/reauth";
 import { vault } from "../src/vault";
 import { api, ApiError } from "../src/api/client";
 
@@ -93,6 +98,72 @@ describe("verifyPasswordForVault", () => {
     // Same password, DIFFERENT salt (the cross-origin poisoning case).
     vi.mocked(api.getCachedSalt).mockResolvedValue(Buffer.alloc(16, 9).toString("base64"));
     expect(await verifyPasswordForVault(PASSWORD)).toEqual({ ok: false, reason: "wrong-password" });
+  });
+
+  it("pads a local wrong-password attempt with the same pause as UnlockScreen (L-49)", async () => {
+    // The pause is a floor on top of PBKDF2's own cost: every attempt takes
+    // at least LOCAL_MISMATCH_DELAY_MS however fast the derivation ran.
+    expect(LOCAL_MISMATCH_DELAY_MS).toBe(500);
+    const before = Date.now();
+    expect(await verifyPasswordForVault("wrong password")).toEqual({ ok: false, reason: "wrong-password" });
+    expect(Date.now() - before).toBeGreaterThanOrEqual(LOCAL_MISMATCH_DELAY_MS);
+  });
+});
+
+describe("verifyPasswordForVault after a BIOMETRIC unlock (H-2)", () => {
+  /** The vault state UnlockScreen's biometric path produces: real data key,
+   *  placeholder-zero auth key, authKeyKnown:false. The OLD code compared
+   *  a real derivation against those zeros — every correct password came
+   *  back "wrong-password", permanently blocking account deletion and LLM
+   *  consent in an app with no password reset. */
+  const biometricVault = () => {
+    vault.lock();
+    vault.unlock(
+      { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32), dataKey: freshKeys().dataKey },
+      undefined,
+      { authKeyKnown: false },
+    );
+  };
+
+  beforeEach(() => {
+    vi.mocked(api.login).mockClear();
+    vi.mocked(api.login).mockResolvedValue({ token: "tok", user_id: "user-1" } as never);
+  });
+
+  it("verifies the CORRECT password online via api.login and adopts the real key", async () => {
+    biometricVault();
+    const result = await verifyPasswordForVault(PASSWORD);
+    expect(api.login).toHaveBeenCalledWith("alice", freshKeys().authKey.toString("base64"));
+    expect(result).toEqual({ ok: true, verifierB64: freshKeys().authKey.toString("base64") });
+    // The session now holds the REAL auth key and is locally comparable again.
+    const session = vault.get();
+    expect(session.authKeyKnown).toBe(true);
+    expect(session.authKey.equals(freshKeys().authKey)).toBe(true);
+    expect(session.dataKey.equals(freshKeys().dataKey)).toBe(true);
+    // A SECOND re-auth verifies locally — no more login round-trip needed.
+    vi.mocked(api.login).mockClear();
+    expect(await verifyPasswordForVault(PASSWORD)).toEqual({
+      ok: true,
+      verifierB64: freshKeys().authKey.toString("base64"),
+    });
+    expect(api.login).not.toHaveBeenCalled();
+  });
+
+  it("a definitive 401 from login is the ONLY wrong-password verdict", async () => {
+    biometricVault();
+    vi.mocked(api.login).mockRejectedValue(new ApiError(401, "invalid credentials") as never);
+    expect(await verifyPasswordForVault(PASSWORD)).toEqual({ ok: false, reason: "wrong-password" });
+    // The vault keeps its honest unknown state — no key adoption happened.
+    expect(vault.get().authKeyKnown).toBe(false);
+  });
+
+  it("an unreachable server is UNVERIFIED, never 'wrong password' — and never a success", async () => {
+    biometricVault();
+    for (const failure of [new ApiError(0, "server unreachable"), new ApiError(500, "boom"), new Error("network")]) {
+      vi.mocked(api.login).mockRejectedValue(failure as never);
+      expect(await verifyPasswordForVault(PASSWORD)).toEqual({ ok: false, reason: "offline" });
+      expect(vault.get().authKeyKnown).toBe(false); // fails closed
+    }
   });
 });
 

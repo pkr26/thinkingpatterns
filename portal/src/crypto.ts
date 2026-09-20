@@ -304,6 +304,7 @@ export async function decryptCaseloadSummary(
   let salt: Bytes | null = null;
   let shared: Bytes | null = null;
   let kek: Bytes | null = null;
+  let plain: Bytes | null = null;
   try {
     ephDer = unb64(ephemeralPubSpkiB64);
     thDer = unb64(therapistPubSpkiB64);
@@ -325,7 +326,7 @@ export async function decryptCaseloadSummary(
     salt.set(ephDer, 0);
     salt.set(thDer, ephDer.length);
     kek = await hkdf(shared, salt, WRAP_INFO, KEY_SIZE);
-    const plain = await decrypt(
+    plain = await decrypt(
       kek,
       wrapped,
       buildAad(SUMMARY_CONTEXT, userId, therapistId),
@@ -344,7 +345,12 @@ export async function decryptCaseloadSummary(
     // Tamper/relocation/wrong key: no summary, rendered as "—".
     return null;
   } finally {
-    zeroize(ephDer, thDer, wrapped, salt, shared, kek);
+    // The decrypted summary plaintext is zeroized like every sibling
+    // decrypt (audit L-73): a caseload overview left in the heap after a
+    // failed JSON.parse would be the one unscrubbed plaintext in the
+    // module. ephDer/thDer/salt are public inputs; shared/kek are secret;
+    // wipe all module-owned buffers to keep the lifecycle auditable.
+    zeroize(ephDer, thDer, wrapped, salt, shared, kek, plain);
   }
 }
 

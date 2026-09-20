@@ -18,9 +18,13 @@ submission-ready self-assessment; every claim is testable in this repo.
   Konjarski 2018; EWMA charts per Smit/Schat/Ceulemans 2023; rumination
   clustering per Ehring & Watkins 2008...).
 - **Honest statistics**: Benjamini–Hochberg correction across every
-  simultaneous claim, replication gating, effect-size floors, a
-  ground-truth probe (9/9) and a 60-day noise-control simulation (zero
-  false cards) — all CI-gated.
+  simultaneous claim, replication gating, effect-size floors, and a
+  ground-truth probe (9/9) — all CI-gated. A 60-day noise-control
+  simulation (zero false cards) exists as a reproducible manual report
+  (`reports/simulation60/`, deterministic seed); CI does not run the
+  60-day replay itself — it pins the smaller statistical regressions
+  (false-alarm-rate sims, noise-corpus tests) that guard the same
+  guarantees per-change.
 
 ## User experience
 
@@ -41,8 +45,11 @@ submission-ready self-assessment; every claim is testable in this repo.
   endpoint absence; full access audit log.
 - Cross-platform crypto pinned byte-for-byte (backend ⇄ mobile ⇄ portal,
   incl. edge-case AAD vectors in CI).
-- Known, documented residuals: AsyncStorage device-key custody pending
-  Keychain; plaintext during the processing window; metadata visibility.
+- Known, documented residuals: plaintext during the processing window;
+  metadata visibility. (The former AsyncStorage device-key residual is
+  remediated: the session-token key is held only by iOS Keychain /
+  Android Keystore with no AsyncStorage fallback, and sign-in fails
+  closed if that native secure-storage seam is unavailable.)
 
 ## Submission checklist
 

@@ -235,6 +235,60 @@
    "score": -1.0,
    "pa": 0.0,
    "na": 1.0
+  },
+  {
+   "text": "quiero morir",
+   "score": -0.65,
+   "pa": 0.075,
+   "na": 0.725
+  },
+  {
+   "text": "me quiero morir",
+   "score": -0.65,
+   "pa": 0.075,
+   "na": 0.725
+  },
+  {
+   "text": "pienso en el suicidio",
+   "score": -0.95,
+   "pa": 0.0,
+   "na": 0.95
+  },
+  {
+   "text": "no quiero vivir",
+   "score": -0.5035,
+   "pa": 0.0,
+   "na": 0.5035
+  },
+  {
+   "text": "estoy muy cansado de vivir",
+   "score": -0.35000000000000003,
+   "pa": 0.28,
+   "na": 0.63
+  },
+  {
+   "text": "tengo depresi\u00f3n y ansiedad",
+   "score": -1.0,
+   "pa": 0.0,
+   "na": 1.0
+  },
+  {
+   "text": "tengo depresio\u0301n y ansiedad",
+   "score": -1.0,
+   "pa": 0.0,
+   "na": 1.0
+  },
+  {
+   "text": "don\u2019t feel good",
+   "score": -0.3515,
+   "pa": 0.0,
+   "na": 0.3515
+  },
+  {
+   "text": "constructor constructor constructor",
+   "score": 0.0,
+   "pa": 0.0,
+   "na": 0.0
   }
  ],
  "stats": {

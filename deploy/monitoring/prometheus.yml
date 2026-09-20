@@ -18,11 +18,20 @@
 #   address would be refused.
 #
 # TOKEN
-#   ${MINDPATTERN_METRICS_TOKEN} is expanded by Prometheus itself at config
-#   load. If the variable is unset, Prometheus refuses to start — the same
-#   fail-closed posture as the backup service's BACKUP_KEY. The token must
-#   be the SAME value the api service was given (README, "Enabling /metrics"
-#   — production /metrics 404s until the api has MINDPATTERN_METRICS_TOKEN).
+#   Prometheus does NOT expand environment variables inside config files —
+#   a `bearer_token: ${VAR}` line would send the literal string and 401 on
+#   every scrape. The credential therefore travels by FILE:
+#   `bearer_token_file: /etc/prometheus/metrics-token`, mounted from
+#   deploy/monitoring/token on the host (see the monitoring
+#   docker-compose.yml `configs:` entry). Create that file with the SAME
+#   value the api service was given (README, "Enabling /metrics" —
+#   production /metrics 404s until the api has MINDPATTERN_METRICS_TOKEN)
+#   before starting the stack:
+#     umask 077 && printf '%s' "$MINDPATTERN_METRICS_TOKEN" > token
+#   Fail-closed posture: `docker compose up` refuses to start when the
+#   file is missing (compose resolves `configs: file:` eagerly), and
+#   Prometheus fails to load the config when the file exists but cannot
+#   be read. The file is gitignored (never commit a real token).
 
 global:
   scrape_interval: 30s
@@ -35,12 +44,15 @@ scrape_configs:
   - job_name: mindpattern-api
     # GET http://api:8000/metrics with `Authorization: Bearer <token>`.
     # The endpoint is the only source of the mindpattern_* series; see
-    # backend/app/metrics.py for exactly what is (and is deliberately not)
+    # backend/app/metrics.py for exactly what is (and deliberately not)
     # exported: aggregate counters only, never usernames, paths, or
     # per-user latencies.
     metrics_path: /metrics
     scheme: http
-    bearer_token: ${MINDPATTERN_METRICS_TOKEN}
+    # Container-absolute path, mounted from deploy/monitoring/token (0600,
+    # owner-only, never committed). NOT `bearer_token:` — Prometheus does
+    # not env-expand config contents.
+    bearer_token_file: /etc/prometheus/metrics-token
     static_configs:
       - targets: ["api:8000"]
 

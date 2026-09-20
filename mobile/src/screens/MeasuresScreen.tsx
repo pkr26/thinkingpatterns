@@ -13,6 +13,11 @@
  * offline crisis resources AFTER the response is safely saved — the same
  * never-before-saving discipline as the entry crisis dialog, throttled
  * through the same per-day stamp.
+ *
+ * i18n (audit M-16, 2026-09-20): every string on this screen — including
+ * the PHQ-9 item and option labels (measures.phq9.*) — resolves through
+ * t(); nothing is hardcoded English anymore. The structural item list and
+ * option values live in src/phq9.ts; only their display copy is local.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -23,7 +28,6 @@ import { vault } from "../vault";
 import { useSession } from "../store";
 import { localDateISO } from "../moodLog";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
-import { detectCrisisLanguage } from "../crisisDetect";
 import {
   PHQ9_ITEMS,
   PHQ9_OPTIONS,
@@ -37,6 +41,7 @@ import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/butt
 import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
 import { MainShell } from "../components/BottomNav";
 import { requestFailureCopy } from "../components/errors";
+import { t as tr } from "../strings";
 
 interface MeasureRow {
   client_measure_id: string;
@@ -96,9 +101,9 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     setError(null);
     try {
       const userId = await api.getUserId();
-      if (!userId) throw new Error("account id missing — sign in again");
+      if (!userId) throw new Error(tr("common.accountMissing"));
       const rows = (await api.listMeasures()) as MeasureRow[];
-      if (!vault.isUnlocked()) throw new Error("vault is locked");
+      if (!vault.isUnlocked()) throw new Error(tr("measures.lockedBody"));
       const dataKey = vault.get().dataKey;
       const decrypted: Reading[] = [];
       for (const row of rows) {
@@ -112,7 +117,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         setOffline(true);
         setReadings(null);
       } else {
-        setError(err instanceof ApiError ? requestFailureCopy(err) : "Could not load your measures.");
+        setError(err instanceof ApiError ? requestFailureCopy(err) : tr("measures.loadFailed"));
       }
     } finally {
       setLoading(false);
@@ -130,11 +135,11 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     try {
       const userId = await api.getUserId();
       if (!userId) {
-        Alert.alert("Session damaged", "Account id missing — please sign in again.");
+        Alert.alert(tr("measures.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
         return;
       }
       if (!vault.isUnlocked()) {
-        Alert.alert("Locked", "Your keys are locked — unlock and try again.");
+        Alert.alert(tr("measures.lockedTitle"), tr("measures.lockedBody"));
         return;
       }
       const today = localDateISO();
@@ -146,7 +151,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       ).toString("base64");
       await api.createMeasure(clientMeasureId, blob, today);
       setResponses(PHQ9_ITEMS.map(() => null));
-      showStatus("Recorded — encrypted, as always.", "ok");
+      showStatus(tr("measures.recordedStatus"), "ok");
       await load();
       // SAFETY: only after the response is safely stored. Same throttle
       // stamp and calm copy as the entry crisis dialog.
@@ -155,26 +160,26 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         if (!flagged) {
           await recordCrisisDialogShown(userId, today).catch(() => {});
           Alert.alert(
-            "Support is available",
-            "Some of what you marked sounds heavy. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
+            tr("measures.crisisTitle"),
+            tr("measures.crisisBody"),
             [
-              { text: "View support resources", onPress: () => navigation.navigate("Crisis") },
-              { text: "Not now", style: "cancel" },
+              { text: tr("measures.viewResources"), onPress: () => navigation.navigate("Crisis") },
+              { text: tr("common.notNow"), style: "cancel" },
             ],
           );
         }
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        showStatus("Already recorded — refreshing.", "neutral");
+        showStatus(tr("measures.alreadyRecorded"), "neutral");
         await load();
         return;
       }
       const copy =
         err instanceof ApiError && err.status === 0
-          ? "Recording needs a connection right now. Your picks are still on screen."
-          : "Could not record just now. Your picks are still on screen.";
-      Alert.alert("Not recorded", copy);
+          ? tr("measures.recordOfflineBody")
+          : tr("measures.recordFailedBody");
+      Alert.alert(tr("measures.notRecordedTitle"), copy);
     } finally {
       setBusy(false);
     }
@@ -188,16 +193,13 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         keyboardShouldPersistTaps="handled"
       >
         <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-          A standard wellbeing questionnaire (PHQ-9), completed by you. MindPattern stores the
-          score encrypted and never interprets it — reading it is your clinician's job, and it
-          is shared only through your existing therapist consent.
+          {tr("measures.intro")}
         </Text>
 
         {loading && <ActivityIndicator color={t.colors.primaryBright} />}
         {offline && (
           <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-            Your recorded history needs a connection to load. Completing the questionnaire
-            also needs one — nothing here works offline yet.
+            {tr("measures.offlineNote")}
           </Text>
         )}
         {error && (
@@ -208,7 +210,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         {readings !== null && readings.length > 0 && (
           <View style={[styles.historyCard, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
             <Text style={{ color: t.colors.text, fontSize: t.type.body.fontSize, fontWeight: "600" }}>
-              Your recorded scores
+              {tr("measures.historyTitle")}
             </Text>
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
               {readings.map((r) => `${r.date}: ${r.score}`).join("   ·   ")}
@@ -217,22 +219,23 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         )}
         {readings !== null && readings.length === 0 && !loading && (
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-            Nothing recorded yet.
+            {tr("measures.emptyNote")}
           </Text>
         )}
 
         <Text style={{ color: t.colors.text, fontSize: t.type.body.fontSize, fontWeight: "600" }}>
-          Over the last 2 weeks, how often have you been bothered by:
+          {tr("measures.stemsHeader")}
         </Text>
-        {PHQ9_ITEMS.map((item, index) => (
+        {PHQ9_ITEMS.map((_item, index) => (
           <View key={index} style={{ gap: t.spacing.sm }}>
             <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize }}>
-              {index + 1}. {item.text}
-              {index === PHQ9_ITEM9_INDEX ? " (safety item — support is always one tap away)" : ""}
+              {index + 1}. {tr(`measures.phq9.item${index + 1}`)}
+              {index === PHQ9_ITEM9_INDEX ? tr("measures.item9Note") : ""}
             </Text>
-            <View style={styles.optionRow} accessibilityLabel={`Question ${index + 1}`}>
+            <View style={styles.optionRow} accessibilityLabel={tr("measures.questionA11y", { index: index + 1 })}>
               {PHQ9_OPTIONS.map((option) => {
                 const selected = responses[index] === option.value;
+                const optionLabel = tr(`measures.phq9.option${option.value}`);
                 return (
                   <TouchableOpacity
                     key={option.value}
@@ -251,7 +254,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
                     }}
                     accessibilityRole="radio"
                     accessibilityState={{ selected }}
-                    accessibilityLabel={`Question ${index + 1}: ${option.label}`}
+                    accessibilityLabel={tr("measures.questionOptionA11y", { index: index + 1, label: optionLabel })}
                   >
                     <Text
                       numberOfLines={2}
@@ -261,7 +264,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
                         textAlign: "center",
                       }}
                     >
-                      {option.label}
+                      {optionLabel}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -271,13 +274,13 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         ))}
 
         <PrimaryButton
-          label="Record this check-in"
+          label={tr("measures.recordButton")}
           onPress={submit}
           disabled={!phq9Complete(responses)}
           busy={busy}
         />
         <InlineStatus message={status} tone={statusTone} />
-        <GhostButton label="Back to settings" onPress={() => navigation.goBack()} center={false} />
+        <GhostButton label={tr("measures.backToSettings")} onPress={() => navigation.goBack()} center={false} />
         <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
       </ScrollView>
     </MainShell>

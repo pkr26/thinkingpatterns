@@ -18,7 +18,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { webcrypto } from "node:crypto";
+import { webcrypto, createPrivateKey, createPublicKey, diffieHellman, hkdfSync } from "node:crypto";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
@@ -26,14 +26,30 @@ const tscBin = join(here, "..", "node_modules", ".bin", "tsc");
 const buildDir = join(here, "..", ".verify-build");
 
 const vectorsJson = JSON.parse(readFileSync(vectorsPath, "utf8"));
-const { vectors, encrypt_vectors: encryptVectors } = vectorsJson;
-// Fail CLOSED: a renamed/dropped key must not read as "0 vectors verified".
+const {
+  vectors,
+  encrypt_vectors: encryptVectors,
+  wrap_vectors: wrapVectors,
+  aad_edge_cases: edgeCases,
+} = vectorsJson;
+// Fail CLOSED on EVERY section: a renamed/dropped/gutted key must not read
+// as "0 vectors verified" and exit 0. wrap_vectors and aad_edge_cases have
+// no generator — they are hand-maintained, so a generator that overwrites
+// the file wholesale is exactly the drift this gate must catch.
 if (!Array.isArray(vectors) || vectors.length < 4) {
   console.error(`vectors.json: "vectors" key missing or has ${vectors?.length ?? "no"} entries (expected >= 4)`);
   process.exit(1);
 }
 if (!Array.isArray(encryptVectors) || encryptVectors.length < 2) {
   console.error(`vectors.json: "encrypt_vectors" key missing or has ${encryptVectors?.length ?? "no"} entries (expected >= 2)`);
+  process.exit(1);
+}
+if (!Array.isArray(wrapVectors) || wrapVectors.length < 3) {
+  console.error(`vectors.json: "wrap_vectors" key missing or has ${wrapVectors?.length ?? "no"} entries (expected >= 3, hand-maintained section with no generator)`);
+  process.exit(1);
+}
+if (!Array.isArray(edgeCases) || edgeCases.length < 1) {
+  console.error(`vectors.json: "aad_edge_cases" key missing or has ${edgeCases?.length ?? "no"} entries (expected >= 1, hand-maintained section with no generator)`);
   process.exit(1);
 }
 
@@ -48,12 +64,13 @@ async function loadRealModules() {
   const compiled = spawnSync(tscBin, [
     join(here, "..", "src", "crypto", "kdf.ts"),
     join(here, "..", "src", "crypto", "envelope.ts"),
+    join(here, "..", "src", "crypto", "sharing.ts"),
     "--module", "commonjs",
     "--target", "es2022",
     "--esModuleInterop",
     "--skipLibCheck",
     "--outDir", buildDir,
-  ], { stdio: "pipe" });
+  ], { stdio: "pipe", cwd: join(here, "..") });
   if (compiled.status !== 0) {
     console.error("tsc failed to compile src/crypto:\n" + compiled.stderr.toString());
     process.exit(1);
@@ -66,7 +83,8 @@ async function loadRealModules() {
   // engine.js's conditional require: quick-crypto fails under node -> node:crypto.
   const kdf = await import(join(buildDir, "kdf.js"));
   const envelope = await import(join(buildDir, "envelope.js"));
-  return { kdf, envelope, mode: "REAL MODULES" };
+  const sharing = await import(join(buildDir, "sharing.js"));
+  return { kdf, envelope, sharing, mode: "REAL MODULES" };
 }
 
 async function loadReferenceFallback() {
@@ -96,6 +114,18 @@ async function loadReferenceFallback() {
           { name: "AES-GCM", iv: nonce, additionalData: aad ?? Buffer.alloc(0), tagLength: 128 }, ck, plaintext));
         return Buffer.concat([nonce, ct]);
       },
+    },
+    // Reference copy of sharing.ts's KEK derivation (HKDF-SHA256, salt =
+    // ephemeral_spki || therapist_spki, info "mindpattern/wrap/v1") for the
+    // webcrypto fallback ONLY — in REAL MODULES mode the shipping
+    // sharing.deriveWrapKek is used. ECDH itself is node:crypto in both
+    // modes (webcrypto has no raw ECDH-secret export usable here).
+    sharing: {
+      WRAP_CONTEXT: "consent-wrap",
+      deriveWrapKek: (shared, ephemeralSpki, therapistSpki) => Buffer.from(
+        hkdfSync(
+          "sha256", shared, Buffer.concat([ephemeralSpki, therapistSpki]),
+          Buffer.from("mindpattern/wrap/v1", "utf8"), 32)),
     },
   };
 }
@@ -183,9 +213,93 @@ for (const [i, v] of encryptVectors.entries()) {
   }
 }
 
+// Therapist-sharing wrap vectors (hand-maintained section, no generator):
+// reproduce the pinned wrap bytes through the SHIPPING sharing.ts
+// construction, then prove the therapist side unwraps them back to the
+// data key. Both directions together also pin that the vector's pub/priv
+// keypairs are consistent (a mismatched pair yields a different ECDH
+// secret and GCM auth failure).
+for (const [i, v] of wrapVectors.entries()) {
+  const ephemeralSpki = Buffer.from(v.ephemeral_pub_spki, "base64");
+  const therapistSpki = Buffer.from(v.therapist_pub_spki, "base64");
+  const dataKey = Buffer.from(v.data_key, "base64");
+  const nonce = Buffer.from(v.nonce, "base64");
+  const wrapped = Buffer.from(v.wrapped, "base64");
+  const aad = await impl.envelope.buildAad(impl.sharing.WRAP_CONTEXT, v.user_id, v.therapist_id);
+  try {
+    // Patient side with the vector's fixed keys — the exact construction
+    // wrapDataKeyForTherapist runs on device:
+    //   ECDH(ephemeral_priv, therapist_pub) -> deriveWrapKek ->
+    //   buildAad("consent-wrap", userId, therapistId) -> AES-256-GCM.
+    const shared = diffieHellman({
+      privateKey: createPrivateKey({
+        key: Buffer.from(v.ephemeral_priv_pkcs8, "base64"), format: "der", type: "pkcs8",
+      }),
+      publicKey: createPublicKey({ key: therapistSpki, format: "der", type: "spki" }),
+    });
+    const kek = impl.sharing.deriveWrapKek(shared, ephemeralSpki, therapistSpki);
+    const blob = await impl.envelope.encryptWithFixedNonce(kek, dataKey, aad, nonce);
+    if (b64(blob) !== v.wrapped) {
+      console.error(`wrap vector ${i}: pinned wrap bytes MISMATCH`);
+      failures += 1;
+    }
+    // Therapist side: the vector's therapist private key must unwrap the
+    // pinned blob back to the data key.
+    const sharedT = diffieHellman({
+      privateKey: createPrivateKey({
+        key: Buffer.from(v.therapist_priv_pkcs8, "base64"), format: "der", type: "pkcs8",
+      }),
+      publicKey: createPublicKey({ key: ephemeralSpki, format: "der", type: "spki" }),
+    });
+    const kekT = impl.sharing.deriveWrapKek(sharedT, ephemeralSpki, therapistSpki);
+    const back = await impl.envelope.decrypt(kekT, wrapped, aad);
+    if (b64(back) !== v.data_key) {
+      console.error(`wrap vector ${i}: therapist-side unwrap MISMATCH`);
+      failures += 1;
+    }
+  } catch (err) {
+    console.error(`wrap vector ${i}: wrap verification failed: ${err.message}`);
+    failures += 1;
+  }
+}
+
+// A fresh on-device wrap through the shipping wrapDataKeyForTherapist must
+// unwrap on the therapist side with a fresh ephemeral key (REAL MODULES
+// only — the webcrypto fallback has no copy of the app's wrap code).
+if (impl.mode.startsWith("REAL")) {
+  const v = wrapVectors[0];
+  const dataKey = Buffer.from(v.data_key, "base64");
+  const therapistSpki = Buffer.from(v.therapist_pub_spki, "base64");
+  try {
+    const wrap = impl.sharing.wrapDataKeyForTherapist(dataKey, v.therapist_pub_spki, v.user_id, v.therapist_id);
+    if (wrap.ephemeralPubB64 === v.ephemeral_pub_spki) {
+      console.error("wrap round-trip: fresh wrap reused the vector's ephemeral key");
+      failures += 1;
+    }
+    const ephemeralSpki = Buffer.from(wrap.ephemeralPubB64, "base64");
+    const sharedT = diffieHellman({
+      privateKey: createPrivateKey({
+        key: Buffer.from(v.therapist_priv_pkcs8, "base64"), format: "der", type: "pkcs8",
+      }),
+      publicKey: createPublicKey({ key: ephemeralSpki, format: "der", type: "spki" }),
+    });
+    const kekT = impl.sharing.deriveWrapKek(sharedT, ephemeralSpki, therapistSpki);
+    const aad = await impl.envelope.buildAad(impl.sharing.WRAP_CONTEXT, v.user_id, v.therapist_id);
+    const back = await impl.envelope.decrypt(kekT, Buffer.from(wrap.wrappedKeyB64, "base64"), aad);
+    if (b64(back) !== v.data_key) {
+      console.error("wrap round-trip: fresh wrap did not unwrap to the data key");
+      failures += 1;
+    }
+  } catch (err) {
+    console.error(`wrap round-trip failed: ${err.message}`);
+    failures += 1;
+  }
+} else {
+  console.log("note: webcrypto fallback cannot exercise wrapDataKeyForTherapist (fresh-wrap round-trip skipped) — run `npm install && npm test` for that");
+}
+
 // AAD edge-case corpus (promoted 2026-09-17 from redteam/a_crypto.py A6):
 // surrogates, DEL/control chars, CJK, RTL, combining marks, empty parts.
-const edgeCases = vectorsJson.aad_edge_cases ?? [];
 for (const c of edgeCases) {
   const got = await impl.envelope.buildAad(...c.parts);
   const want = Buffer.from(c.aad_b64, "base64");
@@ -201,4 +315,6 @@ if (failures > 0) {
   console.error(`\n${failures} check(s) FAILED`);
   process.exit(1);
 }
-console.log(`all ${vectors.length} vectors + ${encryptVectors.length} encrypt vectors + ${edgeCases.length} AAD edge cases verified`);
+console.log(
+  `all ${vectors.length} vectors + ${encryptVectors.length} encrypt vectors + ` +
+  `${wrapVectors.length} wrap vectors + ${edgeCases.length} AAD edge cases verified`);

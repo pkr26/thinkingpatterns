@@ -496,6 +496,10 @@ describe("UnlockScreen biometric unlock (offered only when a wrap exists)", () =
     expect(unwrapBiometricDataKey).toHaveBeenCalledWith("user-1");
     expect(vault.isUnlocked()).toBe(true);
     expect(vault.ownerUserId()).toBe("user-1");
+    // H-2: the authKey slot is honestly marked UNKNOWN (placeholder zeros)
+    // — reauth.ts must verify online rather than compare against zeros.
+    expect(vault.get().authKeyKnown).toBe(false);
+    expect(vault.get().authKey.equals(Buffer.alloc(32))).toBe(true);
     expect(refreshActiveDays).toHaveBeenCalledTimes(1);
     // Biometric unlock restores LOCAL decryption — no server login, no
     // token refresh, no proof rewrite (those belong to the password path).

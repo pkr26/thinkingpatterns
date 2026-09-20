@@ -188,4 +188,59 @@ describe("MeasuresScreen", () => {
     await flush();
     expect(textOf(root)).toContain("needs a connection");
   });
+
+  // M-16 regression (2026-09-20): the whole screen — including the PHQ-9
+  // item and option labels, the most safety-adjacent string class — used
+  // to be hardcoded English; everything resolves through t() now.
+  it("renders the questionnaire in Spanish under the es locale (M-16)", async () => {
+    const { __setLocaleForTests } = await import("../src/strings");
+    __setLocaleForTests("es");
+    try {
+      const nav = { navigate: vi.fn(), goBack: vi.fn() };
+      const root = await render(<MeasuresScreen navigation={nav} />);
+      await flush();
+      const text = textOf(root);
+      // The stem and the standard Spanish PHQ-9 wording.
+      expect(text).toContain("Durante las últimas 2 semanas, ¿con qué frecuencia le han molestado los siguientes problemas?");
+      expect(text).toContain("1. Poco interés o placer en hacer las cosas");
+      expect(text).toContain("9. Pensar que estaría mejor muerto/a o en lastimarse de alguna manera");
+      // The safety-item note rides along, localized.
+      expect(text).toContain("pregunta de seguridad");
+      // Option labels resolve per locale — the submit gate keys off them.
+      expect(text).toContain("Para nada");
+      expect(text).toContain("Casi todos los días");
+      expect(text).toContain("Registrar este registro");
+      // English is gone.
+      expect(text).not.toContain("Over the last 2 weeks");
+      expect(text).not.toContain("Not at all");
+      // The crisis dialog copy is Spanish too (safety class).
+      for (let i = 0; i < PHQ9_ITEMS.length; i++) {
+        await pressOption(root, `Pregunta ${i + 1}: ${i === 8 ? "Varios días" : "Para nada"}`);
+      }
+      await pressLabel(root, "Registrar este registro");
+      await flush();
+      expect(Alert.alert).toHaveBeenCalledWith(
+        "Hay apoyo disponible",
+        expect.stringContaining("no tiene que cargarlo en soledad"),
+        expect.anything(),
+      );
+      expect(nav.navigate).not.toHaveBeenCalledWith("Crisis"); // dismissible, not auto
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
+  it("phq9.ts owns structure only — display copy lives in the locale catalogs", async () => {
+    // The item list still has exactly nine entries and the scorer, gates
+    // and payload contract are untouched by the i18n move.
+    expect(PHQ9_ITEMS).toHaveLength(9);
+    expect(phq9Score([3, 3, 3, 3, 3, 3, 3, 3, 3])).toBe(27);
+    const { t } = await import("../src/strings");
+    for (let i = 1; i <= 9; i++) {
+      expect(t(`measures.phq9.item${i}`).length).toBeGreaterThan(10);
+    }
+    for (const v of [0, 1, 2, 3]) {
+      expect(t(`measures.phq9.option${v}`).length).toBeGreaterThan(3);
+    }
+  });
 });

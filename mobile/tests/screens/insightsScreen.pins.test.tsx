@@ -24,10 +24,12 @@ vi.mock("../../src/api/client", async () => {
 });
 
 const refreshActiveDays = vi.fn(async () => {});
+// L-59: the screen adopts the already-fetched count instead of re-fetching.
+const applyActiveDays = vi.fn();
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ refreshActiveDays, unlockDays: 30, touchActivity }) };
+  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, unlockDays: 30, touchActivity }) };
 });
 
 const { api } = await import("../../src/api/client");
@@ -103,6 +105,7 @@ function expectNoStyle(root: Awaited<ReturnType<typeof render>>, notExpected: Re
 beforeEach(() => {
   resetApi(api as never);
   refreshActiveDays.mockClear();
+  applyActiveDays.mockClear();
   touchActivity.mockClear();
   storage.__reset();
   vault.lock();

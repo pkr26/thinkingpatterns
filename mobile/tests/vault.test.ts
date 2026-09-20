@@ -31,7 +31,7 @@ describe("vault", () => {
     // L5: get() returns a fresh object each call — callers cannot mutate the
     // vault's own reference — while sharing the underlying buffers so
     // zeroize-on-lock still reaches every copy.
-    expect(vault.get()).toStrictEqual({ authKey: keys.authKey, dataKey: keys.dataKey });
+    expect(vault.get()).toStrictEqual({ authKey: keys.authKey, dataKey: keys.dataKey, authKeyKnown: true });
     expect(listener).toHaveBeenCalledTimes(1);
 
     // The master key is zeroized on hand-off: only auth/data remain useful.
@@ -100,5 +100,42 @@ describe("vault", () => {
     vault.lock();
     expect(a).toHaveBeenCalledTimes(2);
     expect(b).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("authKeyKnown + adoptAuthKey (H-2: biometric unlock sessions)", () => {
+  it("a biometric unlock stores placeholder zeros with authKeyKnown false", () => {
+    const keys = keysOf(7);
+    vault.unlock(keys, "user-1", { authKeyKnown: false });
+    const session = vault.get();
+    expect(session.authKeyKnown).toBe(false);
+    expect(session.authKey.equals(Buffer.alloc(32, 8))).toBe(true); // the placeholder bytes survive
+    expect(session.dataKey.equals(Buffer.alloc(32, 9))).toBe(true);
+    expect(vault.ownerUserId()).toBe("user-1"); // the account binding is intact
+  });
+
+  it("adoptAuthKey replaces the placeholder, flips the flag and keeps the session", () => {
+    const keys = keysOf(7);
+    const placeholder = keys.authKey;
+    vault.unlock(keys, "user-1", { authKeyKnown: false });
+    const real = Buffer.alloc(32, 42);
+    const listener = vi.fn();
+    vault.subscribe(listener);
+    vault.adoptAuthKey(real);
+    const session = vault.get();
+    expect(session.authKeyKnown).toBe(true);
+    expect(session.authKey).toBe(real); // vault owns the very buffer
+    expect(session.dataKey.equals(Buffer.alloc(32, 9))).toBe(true); // untouched
+    expect(vault.ownerUserId()).toBe("user-1"); // untouched
+    expect(listener).toHaveBeenCalledTimes(1);
+    // The replaced placeholder was zeroized like every key hand-off.
+    expect(placeholder.equals(Buffer.alloc(32))).toBe(true);
+    // A later lock zeroizes the adopted key too.
+    vault.lock();
+    expect(real.equals(Buffer.alloc(32))).toBe(true);
+  });
+
+  it("adoptAuthKey throws when the vault is locked", () => {
+    expect(() => vault.adoptAuthKey(Buffer.alloc(32))).toThrow("vault is locked");
   });
 });

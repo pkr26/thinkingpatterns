@@ -56,10 +56,24 @@ async def c2_resource_exhaustion() -> None:
         codes = await asyncio.gather(*[one(i) for i in range(8)])
         dt = time.perf_counter() - t0
         peak = _rss_mb()
-        verdict("C2.scrypt-amplification", "BLOCKED",
-                f"8 concurrent registrations (64MiB scrypt each): {sorted(set(codes))}, "
+        # Gate on what was OBSERVED, never a hardcoded verdict (2026-09-19
+        # audit, H-15): 8 concurrent scrypt registrations against
+        # CapacityLimiter(4) must end in bounded outcomes only — 201 for
+        # the batches that ran, 503 where the limiter refused — with no
+        # 5xx/no crash. If the limiter queues instead of refusing, that is
+        # still capped (all 201, wall-clock stretched); what would be a
+        # FINDING is any other code (or nothing refused while memory
+        # ballooned past the per-op budget).
+        rejected = sum(1 for c in codes if c == 503)
+        unexpected = sorted({c for c in codes} - {201, 503})
+        capped = not unexpected and (rejected >= 1 or all(c == 201 for c in codes))
+        verdict("C2.scrypt-amplification",
+                "BLOCKED" if capped else "FINDING",
+                f"8 concurrent registrations (64MiB scrypt each): {sorted(set(codes))} "
+                f"({rejected} x 503 refused, {codes.count(201)} x 201 served), "
                 f"{dt:.1f}s wall, RSS {before:.0f}->{peak:.0f}MB — bounded by the "
-                f"CapacityLimiter(4)+auth rate limits; amplification exists but is capped")
+                f"CapacityLimiter(4)+auth rate limits; amplification exists but is capped"
+                + (f"; UNEXPECTED codes {unexpected}" if unexpected else ""))
 
         # Deeply nested JSON -> must be 400, not a RecursionError 500.
         # Serialized by hand: httpx's own encoder would overflow client-side

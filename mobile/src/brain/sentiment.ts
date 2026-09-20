@@ -41,6 +41,17 @@ interface Tables {
   emojiOrder: string[];
 }
 let tables: Tables | null = null;
+/** Null-prototype copies for every lexicon table used as a Record lookup
+ *  (2026-09-20 audit H-18): a plain object literal resolves inherited
+ *  Object.prototype names, so the all-lowercase token "constructor"
+ *  (the only inherited name matching WORD_RE) returned the inherited
+ *  FUNCTION — arithmetic yielded NaN, NaN rode into the mood log, and
+ *  the log's sanitizer dropped the whole day. With null prototypes the
+ *  lookup is undefined like any unknown word, and the server parity
+ *  (score 0.0) holds. */
+function nullProto<T>(src: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null) as Record<string, T>, src);
+}
 function T(): Tables {
   if (tables === null) {
     const lex = LEXICON as unknown as Record<string, never> & {
@@ -56,10 +67,10 @@ function T(): Tables {
       scalars: lex.scalars,
       butWords: new Set(lex.word_sets.but_words),
       negators: new Set(lex.word_sets.negators),
-      intensifiers: lex.intensifiers,
-      irregularForms: lex.irregular_forms,
-      sentimentLexicon: lex.sentiment_lexicon,
-      emojiValences: lex.emoji_valences,
+      intensifiers: nullProto(lex.intensifiers),
+      irregularForms: nullProto(lex.irregular_forms),
+      sentimentLexicon: nullProto(lex.sentiment_lexicon),
+      emojiValences: nullProto(lex.emoji_valences),
       emojiOrder: lex.emoji_order,
     };
   }
@@ -68,6 +79,38 @@ function T(): Tables {
 
 /** The engine's word tokenizer: [a-z']+ on lowered text (patterns.WORD_RE). */
 const WORD_RE = /[a-z']+/g;
+
+/** Fold Latin diacritics to base letters and U+2019 to ASCII ' before
+ *  tokenization (2026-09-20 audit H-8) — brain._fold_sentiment_text,
+ *  behavior-identical (the brain-vector fixtures pin both engines).
+ *  Without it [a-z']+ mangles every accented word ("depresión" ->
+ *  "depresi" + "n") and iOS Smart Punctuation's U+2019 splits "don't",
+ *  defeating every contraction negator. Same Latin-only rule as the
+ *  crisis engine's foldLatinMarks: Devanagari/Arabic marks survive. */
+export function foldSentimentText(text: string): string {
+  // Fast path: pure-ASCII English (the common case) needs no folding.
+  if (/^[\x00-\x7f]*$/.test(text)) return text;
+  let lowered = text.replace(/\u2019/g, "'");
+  // Compose FIRST: a decomposed (NFD) accent is a BARE combining mark,
+  // which per-char folding cannot see — "depresió n" (NFD) must fold
+  // exactly like the precomposed "depresión" (the crisis engine's
+  // pipeline composes for the same reason).
+  lowered = lowered.normalize("NFKC");
+  let out = "";
+  for (const ch of lowered) {
+    const decomposed = ch.normalize("NFKD");
+    const base = decomposed[0];
+    if (
+      decomposed.length > 1 && base !== undefined && base < "\u0250" &&
+      /^[\u0300-\u036f]+$/.test(decomposed.slice(1))
+    ) {
+      out += base;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
 
 /** Deterministic morphological candidates — brain.word_forms, verbatim. */
 export function wordForms(token: string): string[] {
@@ -152,11 +195,13 @@ export function valenceWalk(tokens: string[]): number[] {
   return sentiments;
 }
 
-/** Tokenize text exactly as the server does: lowered [a-z']+ plus every
- *  emoji occurrence as its own token, appended in the engine's own
- *  emoji-map iteration order. */
+/** Tokenize text exactly as the server does: lowered, folded [a-z']+
+ *  plus every emoji occurrence as its own token, appended in the
+ *  engine's own emoji-map iteration order. */
 export function tokenize(text: string): string[] {
-  const tokens = (text.toLowerCase().match(WORD_RE) ?? []) as string[];
+  // Lowercase FIRST, then fold — the server's exact order. The fold is
+  // what keeps accented words and iOS U+2019 contractions whole (H-8).
+  const tokens = (foldSentimentText(text.toLowerCase()).match(WORD_RE) ?? []) as string[];
   for (const emoji of T().emojiOrder) {
     const count = text.split(emoji).length - 1;
     for (let i = 0; i < count; i++) tokens.push(emoji);

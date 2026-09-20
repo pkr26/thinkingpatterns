@@ -190,7 +190,13 @@ def processing_policy_fingerprint(settings: Settings) -> str | None:
     if not settings.llm_url.strip():
         return None
     policy = {
-        "url": settings.llm_url.rstrip("/"),
+        # Strip BEFORE normalizing the trailing slash (2026-09-20 audit
+        # fix L-20): "https://host/ " and "https://host" are the same
+        # provider and must not mint different fingerprints — a stray
+        # trailing space used to silently invalidate every persisted
+        # consent (conservative direction, but still operator-hostile
+        # drift).
+        "url": settings.llm_url.strip().rstrip("/"),
         "model": settings.llm_model,
         "provider": settings.llm_provider_name.strip(),
         "retention": settings.llm_data_retention.strip(),
@@ -350,15 +356,66 @@ _CLINICAL_TERMS = frozenset(
     }
 )
 
+# Advice and imperative guardrails (2026-09-20 audit fix M-6): a narrative
+# is ONE calm observational sentence about a finding the brain already
+# established. The module's threat model treats model output as hostile,
+# and the audit demonstrated that prompt-injected journals can land
+# second-person advice verbatim ("You should stop reaching out to your
+# friends; they are tired of you.") — manipulative isolation/self-blame
+# content rendered under pattern cards for vulnerable users. The SHAPES
+# are rejected, not a sentiment guess: an observation has no reason to
+# command its reader or to tell them what they should do.
+_SECOND_PERSON_ADVICE = re.compile(
+    r"\byou\s+(?:should|shouldn'?t|must|mustn'?t|need(?:\s+to)?|ought(?:\s+to)?"
+    r"|have\s+to|would\s+have\s+to|might\s+want\s+to|could\s+try)\b"
+    r"|\byou'?d\s+better\b"
+    r"|\bwhy\s+don'?t\s+you\b"
+    r"|\bit\s+(?:would|might)\s+help\s+(?:if|to)\s+you\b",
+    re.IGNORECASE,
+)
+# Sentence-LEADING command verbs ("Stop reaching out...", "Take a break
+# from..."). Anchored to a sentence boundary so ordinary past-tense prose
+# ("you stopped", "it started") is untouched; only the imperative mood is
+# refused. "never"/"always" lead absolutist commands, not observations.
+_IMPERATIVE_OPENERS = re.compile(
+    r"(?:^|[.;:!?]\s+)(?:stop|start|quit|try|remember|consider|make\s+sure"
+    r"|be\s+sure|don'?t|do\s+not|never|always|take|call|text|visit"
+    r"|reach\s+out|hold\s+on|let\s+go|focus|avoid|block|delete)\b",
+    re.IGNORECASE,
+)
+# Manipulative isolation / self-blame content has no observational use even
+# embedded mid-sentence; substring match on the lowercased text.
+_MANIPULATION_PHRASES = (
+    "tired of you",
+    "burden",
+    "better off without you",
+    "nobody cares",
+    "no one cares",
+    "not worth it",
+    "your fault",
+    "the problem is you",
+    "push them away",
+)
+
+# Spelled-out domains with ANY second word ("quietplace dot online"): the
+# finite TLD list in _SPELLED_CONTACT only knows common suffixes, so an
+# attacker-chosen TLD sailed through. A "word dot word" join between
+# alphabetic runs is never legitimate reframe vocabulary, whatever the
+# suffix (2026-09-20 audit fix M-6, widening the TLD handling).
+_SPELLED_DOMAIN = re.compile(r"[a-z]\s+dot\s+[a-z]", re.IGNORECASE)
+
 
 def _clean_narrative(raw: object) -> str | None:
     """One calm sentence, or None. Hostile-input rules: control characters
     stripped, length capped, URLs/domains/phones/spelled contacts rejected,
     NO digits at all (statistics live in the brain's own record — a digit
-    in a narrative is a minted claim, a dosage, or a phone fragment), and
-    crisis language rejected (the narrative must never quote or echo what
-    the suppress tier exists to keep unquoted). The narrative renders
-    under pattern cards, so it gets stricter-than-label treatment."""
+    in a narrative is a minted claim, a dosage, or a phone fragment),
+    second-person advice / imperative / manipulative-isolation constructions
+    rejected (2026-09-20 audit fix M-6 — a reframe observes, it never
+    instructs), and crisis language rejected (the narrative must never
+    quote or echo what the suppress tier exists to keep unquoted). The
+    narrative renders under pattern cards, so it gets stricter-than-label
+    treatment."""
     from . import crisis
 
     if not isinstance(raw, str):
@@ -366,7 +423,16 @@ def _clean_narrative(raw: object) -> str | None:
     text = _CONTROL_CHARS.sub(" ", raw).strip()
     if not text or len(text) > MAX_NARRATIVE_CHARS:
         return None if not text else text[:MAX_NARRATIVE_CHARS].rstrip()
-    if _URL_OR_PHONE.search(text) or _SPELLED_CONTACT.search(text):
+    if (
+        _URL_OR_PHONE.search(text)
+        or _SPELLED_CONTACT.search(text)
+        or _SPELLED_DOMAIN.search(text)
+    ):
+        return None
+    if _SECOND_PERSON_ADVICE.search(text) or _IMPERATIVE_OPENERS.search(text):
+        return None
+    lowered_text = text.lower()
+    if any(phrase in lowered_text for phrase in _MANIPULATION_PHRASES):
         return None
     # Any digit: minted statistics ("87% of Sundays"), phone fragments
     # ("555-0134" defeats the \d{5,} rule via the hyphen), dates, dosages.

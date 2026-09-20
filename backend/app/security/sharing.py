@@ -67,9 +67,11 @@ NOTE_CONTEXT = "note"
 SPKI_P256_B64_CHARS = 124
 SPKI_P256_DER_BYTES = 91
 
-# Pairing codes: 8 chars from a 31-symbol ambiguous-free alphabet
-# (no 0/O, 1/I/L) ≈ 39.6 bits of entropy. Short-lived (15 min) and
-# single-use; the server stores only an HMAC of the code.
+# Pairing codes: 8 chars from a 30-symbol ambiguous-free alphabet
+# (no 0/O, 1/I/L, and no U — kept out with the other confusables when the
+# set was fixed; vectors pin the alphabet byte-for-byte, so it must not
+# change) = 8 × log2(30) ≈ 39.25 (~39.2) bits of entropy. Short-lived
+# (15 min) and single-use; the server stores only an HMAC of the code.
 PAIRING_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 PAIRING_CODE_CHARS = 8
 PAIRING_TTL_SECONDS = 900
@@ -264,11 +266,13 @@ def load_private_key_pkcs8(der: bytes) -> ec.EllipticCurvePrivateKey:
 def generate_pairing_code() -> str:
     alphabet = PAIRING_ALPHABET
     n = len(alphabet)
-    # Rejection sampling (2026-09-17 audit): 256 % 31 == 8, so indexing by
-    # byte % n favors the first 8 symbols. Drawing only bytes below the
+    # Rejection sampling (2026-09-17 audit): 256 % 30 == 16, so indexing by
+    # byte % n favors the first 16 symbols. Drawing only bytes below the
     # largest complete multiple of n keeps every symbol equally likely
-    # (~0.4 bits of the code's entropy reclaimed). Rejection is rare and
-    # bounded — the loop refills from os.urandom in small batches.
+    # (the modulo bias costs only ~0.003 bits/char, but the reclaim is
+    # free). Rejection is rare and bounded — the loop refills from
+    # os.urandom in small batches. The limit derives from the ACTUAL
+    # alphabet length, so it stays correct if the set ever changes.
     limit = 256 - (256 % n)
     chars: list[str] = []
     while len(chars) < PAIRING_CODE_CHARS:

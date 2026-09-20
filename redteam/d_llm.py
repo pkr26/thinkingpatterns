@@ -40,7 +40,13 @@ def d1_sanitizer_corpus() -> None:
               "work dominates my week and sleep is rough"]
 
     cases = [
-        # (name, model item, expect_blocked)
+        # (name, model item, expect_blocked) — expectations reconciled with
+        # the 2026-09-16+ sanitizer rules and now ASSERTED by D1.case-table
+        # below (they used to be printed only, so drift kept verdicts green):
+        # spelled phone labels and "dot com" addresses are rejected by
+        # shape (_SPELLED_CONTACT / number-word runs) even when planted in
+        # the corpus first; a hyphen-joined label token ("wo-rk") can never
+        # be corpus-grounded because the corpus tokenizer splits on it.
         ("digit-phone", {"kind": "temporal", "label": "URGENT call 555-0134",
                          "occurrences": 5, "confidence": 0.9}, True),
         ("classic-injection", {"kind": "mood_shift", "label":
@@ -51,17 +57,17 @@ def d1_sanitizer_corpus() -> None:
         ("planted-word-phone", {"kind": "temporal", "label":
                                 "call five five five zero one three four",
                                 "occurrences": 9, "confidence": 0.9,
-                                "detail": {"day": "Sunday"}}, False),
+                                "detail": {"day": "Sunday"}}, True),
         ("planted-word-phone-recurring", {"kind": "recurring_phrase", "label":
                                           "call five five five zero one three four",
-                                          "occurrences": 9, "confidence": 0.9}, False),
+                                          "occurrences": 9, "confidence": 0.9}, True),
         ("planted-dot-com-url", {"kind": "topic_placeholder", "label":
                                  "visit evil dot com often"}, True),  # bad kind first
         ("planted-dot-com-url-goodkind", {"kind": "temporal", "label":
                                           "visit evil dot com often",
-                                          "occurrences": 3, "confidence": 0.5}, False),
+                                          "occurrences": 3, "confidence": 0.5}, True),
         ("hyphen-token-split", {"kind": "temporal", "label": "wo-rk dominates",
-                                "occurrences": 3, "confidence": 0.5}, False),
+                                "occurrences": 3, "confidence": 0.5}, True),
         ("echo-own-vocab", {"kind": "mood_shift", "label": "you are worthless",
                             "occurrences": 3, "confidence": 0.5}, False),
         ("occurrences-overflow", {"kind": "temporal", "label": "work",
@@ -117,9 +123,15 @@ def d1_sanitizer_corpus() -> None:
 
     hyphen = any(n == "hyphen-token-split" and not b for n, b, _ in results)
     verdict("D1.sub-3-char-token-gap", "PARTIAL" if hyphen else "BLOCKED",
-            "tokens shorter than 3 chars are exempt from grounding ('wo-rk dominates' "
-            "passes): tiny-token stitching can smuggle fragments into labels, though "
-            "content remains bounded by the 80-char cap and the surviving words")
+            ("hyphen-joined label tokens ('wo-rk') are rejected: the label's "
+             "whitespace tokenizer keeps the fragment whole while the corpus "
+             "tokenizer splits on it, so it can never be corpus-grounded — "
+             "tiny-token stitching no longer smuggles fragments into labels "
+             "(the surviving space-separated form is bounded by the 80-char "
+             "cap and grounding of the remaining words)")
+            if not hyphen else
+            ("tokens shorter than 3 chars are exempt from grounding ('wo-rk "
+             "dominates' passes): tiny-token stitching can smuggle fragments"))
 
     # Clamps and structural rejections held?
     clamps_ok = all(
@@ -131,6 +143,27 @@ def d1_sanitizer_corpus() -> None:
             f"digit phones, ungrounded vocab, injection imperatives, bad kinds, "
             f"oversize labels all dropped; occurrences 1e30 clamped={occ_clamped}; "
             f"NaN confidence defaulted to 0.5; bad detail keys dropped (verified above)")
+
+    # The WHOLE case table is asserted, not just printed (2026-09-19 audit,
+    # L-44): the per-row expectations used to be informational only, so a
+    # sanitizer change that flipped rows kept every verdict green.
+    mismatches = [
+        (n, blocked, expect_blocked)
+        for n, blocked, expect_blocked in results
+        if blocked != expect_blocked
+    ]
+    verdict("D1.case-table",
+            "BLOCKED" if not mismatches else "FINDING",
+            (f"all {len(cases)} sanitizer case-table rows behaved as their recorded "
+             f"expectations (blocked or survived)")
+            if not mismatches else
+            (f"{len(mismatches)}/{len(cases)} case-table rows deviate from their "
+             f"recorded expectations: "
+             + "; ".join(f"{n} {'blocked' if b else 'survived'} but expected "
+                         f"{'blocked' if e else 'survived'}"
+                         for n, b, e in mismatches[:4])
+             + " — update the expectation ONLY after confirming the new behavior "
+               "is intended"))
 
 
 # ---------------------------------------------------------------------------
@@ -219,24 +252,36 @@ async def d2_egress() -> None:
         r = await client.post("/api/v1/insights/recompute",
                               headers={**auth_headers(eager["token"]),
                                        "X-Processing-Token": tok})
-        sent = fake.requests[-1]["body"] if fake.requests else {}
-        msgs = sent.get("messages", [])
-        user_msg = msgs[1]["content"] if len(msgs) > 1 else ""
-        leaked = "private therapy notes" in user_msg
-        missing_limits = ("max_tokens" not in sent and "temperature" not in sent)
-        verdict("D2.plaintext-egress", "FINDING" if leaked else "BLOCKED",
-                f"consent-ON recompute ({r.status_code}): decrypted journal text "
-                f"arrives at the endpoint verbatim (leaked={leaked}, {len(user_msg)} "
-                f"chars of entries JSON, bearer auth={'ok' if fake.requests[-1]['auth'] else 'missing'}, "
-                f"model={sent.get('model')}) — this is the documented, consent-gated "
-                f"design; recorded because it is THE plaintext disclosure path")
-        verdict("D2.missing-generation-limits", "FINDING" if missing_limits else "BLOCKED",
-                ("payload carries max_tokens=512 and temperature=0 (2026-09-16 "
-                 "fix) — generation length and sampling are no longer "
-                 "endpoint-controlled")
-                if not missing_limits else
-                ("payload carries no max_tokens/temperature — output length and "
-                 "sampling are entirely endpoint-controlled"))
+        if not fake.requests:
+            # Gate on "the LLM was actually called" (2026-09-19 audit,
+            # L-44): an empty capture used to print the consent-ON
+            # plaintext-egress observation as BLOCKED "by design" even
+            # when a drift/failure meant the egress path never ran at all.
+            verdict("D2.plaintext-egress", "ERROR",
+                    f"consent-ON recompute returned {r.status_code} but the LLM "
+                    f"endpoint captured ZERO requests — the egress path did not run; "
+                    f"drift or failure, verdict withheld")
+            verdict("D2.missing-generation-limits", "ERROR",
+                    "no LLM request captured — generation-limit check cannot run")
+        else:
+            sent = fake.requests[-1]["body"]
+            msgs = sent.get("messages", [])
+            user_msg = msgs[1]["content"] if len(msgs) > 1 else ""
+            leaked = "private therapy notes" in user_msg
+            missing_limits = ("max_tokens" not in sent and "temperature" not in sent)
+            verdict("D2.plaintext-egress", "FINDING" if leaked else "BLOCKED",
+                    f"consent-ON recompute ({r.status_code}): decrypted journal text "
+                    f"arrives at the endpoint verbatim (leaked={leaked}, {len(user_msg)} "
+                    f"chars of entries JSON, bearer auth={'ok' if fake.requests[-1]['auth'] else 'missing'}, "
+                    f"model={sent.get('model')}) — this is the documented, consent-gated "
+                    f"design; recorded because it is THE plaintext disclosure path")
+            verdict("D2.missing-generation-limits", "FINDING" if missing_limits else "BLOCKED",
+                    ("payload carries max_tokens=512 and temperature=0 (2026-09-16 "
+                     "fix) — generation length and sampling are no longer "
+                     "endpoint-controlled")
+                    if not missing_limits else
+                    ("payload carries no max_tokens/temperature — output length and "
+                     "sampling are entirely endpoint-controlled"))
 
         # -- endpoint controls what the user sees: injected label round trip ---
         fake.response = {"patterns": [{"kind": "temporal",

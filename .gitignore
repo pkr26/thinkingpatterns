@@ -28,8 +28,10 @@ coverage/
 # dev artifacts — never commit real databases
 backend/mindpattern.db
 backend/demo.db
-*.db
 .tools/
+
+# Monitoring scrape credential (0600, operator-created — never commit)
+deploy/monitoring/token
 
 # Tool caches (local-only)
 .ruff_cache/

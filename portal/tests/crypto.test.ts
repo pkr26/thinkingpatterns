@@ -520,6 +520,32 @@ describe("decryptCaseloadSummary", () => {
       await decryptCaseloadSummary(key, FIXTURE.pub_b64, "AAAA", "BBBB", "u", "t"),
     ).toBeNull();
   });
+
+  it("L-73 (2026-09-20): the decrypted summary plaintext is zeroized after parsing", async () => {
+    // Every sibling decrypt wipes its WebCrypto plaintext buffer in a
+    // finally; decryptCaseloadSummary used to leave the caseload overview
+    // (pattern counts, sensitive presence) in the heap.  The captured
+    // ArrayBuffer behind the returned Uint8Array view must be all zeros
+    // once the call resolves.
+    const { decryptCaseloadSummary } = await import("../src/crypto");
+    const key = await fixtureKey();
+    const capture = captureDecryptBuffer();
+    try {
+      await expect(
+        decryptCaseloadSummary(
+          key,
+          FIXTURE.pub_b64,
+          FIXTURE.eph_b64,
+          FIXTURE.wrapped_b64,
+          "user-42",
+          "therapist-7",
+        ),
+      ).resolves.toMatchObject({ patterns: 7, sensitive: true });
+      expectWiped(capture.bytes());
+    } finally {
+      capture.restore();
+    }
+  });
 });
 
 // --- measures (MBC, 2026-09-19) -------------------------------------------------

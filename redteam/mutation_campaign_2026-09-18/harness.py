@@ -397,6 +397,25 @@ def parse_failures(kind: str, output: str) -> list[str]:
     return ordered[:8]
 
 
+# pytest exit codes that mean the ORACLE (not the code under test) is
+# broken: 2 interrupted, 3 internal error, 4 usage error (a renamed or
+# deleted test file lands here), 5 no tests collected. Counting any of
+# these as KILLED would print PASSED while verifying nothing — they are
+# SETUP-ERRORs, reported loudly, never kills.
+PYTEST_SETUP_EXITS = {2, 3, 4, 5}
+
+
+def oracle_setup_error(kind: str, returncode: int, output: str) -> str | None:
+    """Why this non-zero exit is a broken oracle rather than a kill, or None."""
+    if kind != "pytest":
+        return None
+    if returncode in PYTEST_SETUP_EXITS:
+        return f"pytest exited {returncode} (oracle broken, not a kill)"
+    if "no tests ran" in output:
+        return "pytest collected no tests (oracle broken, not a kill)"
+    return None
+
+
 def run_mutant(m: dict) -> dict:
     target = ROOT / m["file"]
     original = target.read_bytes()
@@ -417,6 +436,14 @@ def run_mutant(m: dict) -> dict:
         )
         elapsed = round(time.monotonic() - t0, 1)
         out = (proc.stdout or "") + (proc.stderr or "")
+        setup_error = oracle_setup_error(m["tests"]["kind"], proc.returncode, out)
+        if setup_error:
+            # The oracle could not run (renamed test file, collection
+            # crash, bad flag): a KILLED verdict here would verify
+            # nothing. Fail loudly instead of green.
+            return {**m, "killed": None, "status": "SETUP-ERROR",
+                    "detail": setup_error, "returncode": proc.returncode,
+                    "seconds": elapsed, "output_tail": out[-1500:]}
         killed = proc.returncode != 0
         return {**m, "killed": killed, "status": "KILLED" if killed else "SURVIVED",
                 "failing_tests": parse_failures(m["tests"]["kind"], out),

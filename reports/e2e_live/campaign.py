@@ -447,13 +447,39 @@ def plain_mood_corpus(end: date, days: int, crisis: bool) -> list[dict]:
 
 DIALOG_REGEXES = [re.compile(p, re.I) for p in CRISIS_PHRASES["dialog"]]
 
+# The crisis-leak oracle must be at least as strong as the engine it audits:
+# run the REAL backend tiers (read-only import — this script already puts
+# backend/ on sys.path for app.security). The old raw-text dialog-regex
+# scan missed everything the engine's normalization/variant/suppress tiers
+# exist to catch (leet digits, split variants, diacritics, zero-width
+# tricks, suppress-tier phrasing), so a regression there was invisible to
+# this campaign (2026-09-19 audit, L-97).
+from app.services import crisis as _crisis_engine  # noqa: E402
+
 
 def quotes_crisis_language(text: str) -> str | None:
+    """True engine verdict first (dialog OR suppress tier); then a
+    best-effort regex only to name WHICH phrase fired for the check
+    message."""
+    try:
+        if not (_crisis_engine.matches_dialog(text) or _crisis_engine.matches_suppress(text)):
+            return None
+    except Exception:
+        # Engine import blew up mid-run: fall back to the (weaker) regex
+        # scan rather than silently passing everything.
+        for rx in DIALOG_REGEXES:
+            m = rx.search(text)
+            if m:
+                return m.group(0)
+        return None
     for rx in DIALOG_REGEXES:
         m = rx.search(text)
         if m:
             return m.group(0)
-    return None
+    # Engine tier fired through a normalization/variant the plain regexes
+    # cannot see — that is precisely the class of leak this oracle must
+    # still catch.
+    return "<crisis language caught by the engine's normalization/variant tiers>"
 
 
 # ------------------------------------------------------------- scenarios ----
@@ -1014,8 +1040,6 @@ async def s_sharing(c, users, ther):
     check("therapist insight read is consent-gated and byte-identical to patient's",
           r.status_code == 200 and t_blob is not None and t_blob == p_blob,
           f"{r.status_code} blobs_equal={t_blob == p_blob}")
-    tpayload = house.decrypt_blob(t_blob, crypto.build_aad("insights", alice.user_id, "patterns")) \
-        if hasattr(house, "decrypt_blob") else None
     # portal decrypts with the unwrapped key through the same AAD path
     portal_plain = json.loads(crypto.decrypt(
         unwrapped, base64.b64decode(t_blob),

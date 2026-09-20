@@ -278,14 +278,32 @@ def test_question_for_known_dates_pinned():
     # are excluded from the pool (crisis interlock), so the rotation lands
     # on generic questions for these dates.
     # 2026-09-17: the generic pool grew 8 -> 60, so the rotation lands on
-    # new slots (the pool itself is pinned array-for-array by the shared
-    # contract tests).
+    # new slots (the pool itself is pinned array-for-array — against the
+    # shared JSON contract — by test_generic_questions_pinned_to_shared_contract
+    # below, added 2026-09-20: the old comment claimed a shared-contract pin
+    # that no backend test actually performed).
     assert questions.question_for_today("user-a", PIN_PATTERNS, date(2026, 9, 3)) == (
         "What's one thing worth keeping from today?"
     )
     assert questions.question_for_today("user-a", PIN_PATTERNS, date(2026, 9, 4)) == (
         "What mattered most to you today?"
     )
+
+
+def test_generic_questions_pinned_to_shared_contract():
+    """L-24 (2026-09-20): the backend's embedded GENERIC_QUESTIONS must be
+    byte-for-byte the shared/generic_questions.json pool — the mobile client
+    rotates day-1 questions over the same list, and a silent divergence
+    splits the cross-platform contract. Reads the real shared file from the
+    repository root (backend/tests -> backend -> repo)."""
+    import json
+    from pathlib import Path
+
+    shared = Path(__file__).resolve().parents[2] / "shared" / "generic_questions.json"
+    assert shared.exists(), f"shared contract file missing: {shared}"
+    payload = json.loads(shared.read_text(encoding="utf-8"))
+    assert payload["v"] == 1
+    assert tuple(payload["questions"]) == tuple(questions.GENERIC_QUESTIONS)
 
 
 def test_temporal_template_falls_back_when_day_missing():

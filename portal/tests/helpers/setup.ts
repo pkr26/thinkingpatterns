@@ -1,6 +1,18 @@
-/** Node-runtime window shim: the views read location.origin and
- * localStorage through the platform seam; tests need both to exist. */
+/** Node-runtime window shim: the views read location.origin,
+ *  localStorage and sessionStorage through the platform seam; tests need
+ *  all three to exist.  sessionStorage is a SEPARATE map from localStorage
+ *  so the L-75 anchor-store decision (sessionStorage first, localStorage
+ *  fallback) is observable exactly as in a browser. */
 const mem = new Map<string, string>();
+const sessionMem = new Map<string, string>();
+const makeStorage = (store: Map<string, string>) => ({
+  get length() { return store.size; },
+  key: (index: number) => [...store.keys()][index] ?? null,
+  getItem: (k: string) => store.get(k) ?? null,
+  setItem: (k: string, v: string) => void store.set(k, v),
+  removeItem: (k: string) => void store.delete(k),
+  clear: () => void store.clear(),
+});
 // Minimal EventTarget (2026-09-19): the App registers real listeners
 // (idle-lock bump, bfcache pageshow) — a no-op addEventListener left them
 // untestable. dispatchEvent takes any object with a .type so tests can
@@ -25,13 +37,7 @@ Object.defineProperty(globalThis, "window", {
       return true;
     },
     print: () => undefined,
-    localStorage: {
-      get length() { return mem.size; },
-      key: (index: number) => [...mem.keys()][index] ?? null,
-      getItem: (k: string) => mem.get(k) ?? null,
-      setItem: (k: string, v: string) => void mem.set(k, v),
-      removeItem: (k: string) => void mem.delete(k),
-      clear: () => void mem.clear(),
-    },
+    localStorage: makeStorage(mem),
+    sessionStorage: makeStorage(sessionMem),
   },
 });

@@ -1153,3 +1153,228 @@ describe("formatEntryDate", () => {
     expect(formatEntryDate("not-a-date")).toBe("not-a-date");
   });
 });
+
+describe("HistoryScreen edit-path crisis detection (H-6, 2026-09-20)", () => {
+  const oneEntry = (id = "e-2026-09-03-crisis") => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow(id, "an ordinary day", "2026-09-03"),
+    ] as never);
+  };
+
+  it("editing an entry into crisis language points at support AFTER the update commits", async () => {
+    oneEntry();
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "an ordinary day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("I want to kill myself");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    // The replacement landed first (never before or instead of saving)…
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    expect(textOf(root)).toContain("Updated ✓");
+    // …then the same calm, throttled dialog a NEW entry gets.
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Support is available",
+      expect.stringContaining("you do not have to carry it alone"),
+      expect.anything(),
+    );
+    const buttons = lastAlert()[2] as Array<{ text: string; onPress?: () => void }>;
+    const view = buttons.find((b) => b.text === "View support resources");
+    expect(view).toBeTruthy();
+    await act(async () => {
+      view!.onPress?.();
+    });
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+    await act(async () => root.unmount());
+  });
+
+  it("the per-day throttle applies to edits too — a second crisis edit the same day stays quiet", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-crisis-a", "first ordinary day", "2026-09-03"),
+      entryRow("e-2026-09-02-crisis-b", "second ordinary day", "2026-09-02"),
+    ] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    let editor = await openEditor(root, "first ordinary day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("I want to kill myself");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+
+    // A different day's entry, same crisis language, same calendar day:
+    // the stamp suppresses the repeat (dialog-fatigue guard).
+    await pressLabel(root, "Back to history");
+    editor = await openEditor(root, "second ordinary day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("I want to end my life");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    expect(api.updateEntry).toHaveBeenCalledTimes(2);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
+  it("a non-crisis edit never raises the dialog", async () => {
+    oneEntry("e-2026-09-03-calm");
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "an ordinary day");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("a calmer revision");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+});
+
+describe("HistoryScreen pagination after edit/delete (L-67, 2026-09-20)", () => {
+  it("a delete re-acquires the snapshot token on the next continuation instead of 409-restarting", async () => {
+    // Two rows on page one: the delete target plus a keeper, so the list
+    // (and its search box) survive the delete.
+    const victim = entryRow("e-2026-09-03-p1", "page one entry", "2026-09-03");
+    const keeper = entryRow("e-2026-09-02-p1b", "page one keeper", "2026-09-02");
+    const page2 = entryRow("e-2026-08-01-p2", "page two entry", "2026-08-01");
+    let serverRevision = "5";
+    vi.mocked(api.listEntriesPage).mockImplementation(async (opts) => {
+      const offset = (opts as { offset?: number } | undefined)?.offset ?? 0;
+      if (offset === 0) return { entries: [victim, keeper], nextOffset: 2, revision: serverRevision } as never;
+      return { entries: [page2], nextOffset: null, revision: serverRevision } as never;
+    });
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(1, {
+      limit: 100, offset: 0, pageBytes: 2 * 1024 * 1024,
+    });
+    expect(textOf(root)).toContain("Load older entries");
+
+    // A search filter is active while the delete happens — the fix means no
+    // full reload runs, so the filter must survive the delete.
+    const search = inputByPlaceholder(root, "Search your entries");
+    await act(async () => {
+      (search.props as { onChangeText: (t: string) => void }).onChangeText("page");
+    });
+    await flush();
+
+    // Delete the visible entry (double confirmation).
+    await pressLabel(root, "page one entry");
+    await pressLabel(root, "Delete this entry");
+    await pressAlertButton("Delete");
+    await pressAlertButton("Delete permanently");
+    await flush();
+    expect(textOf(root)).toContain("Entry deleted");
+
+    // The server's revision moved (this delete, or any other device's write).
+    serverRevision = "6";
+    // The user clears their search to page deeper… (the list re-mounted
+    // around the detail round-trip, so the input node is re-found.)
+    const searchAgain = inputByPlaceholder(root, "Search your entries");
+    await act(async () => {
+      (searchAgain.props as { onChangeText: (t: string) => void }).onChangeText("");
+    });
+    await flush();
+    await pressLabel(root, "Load older entries");
+    await flush();
+
+    // …and the continuation goes out UNPINNED (the stale token was dropped
+    // by the delete) and ADOPTS the fresh revision — no 409, no restart.
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(2, {
+      limit: 100, offset: 2, pageBytes: 2 * 1024 * 1024,
+    });
+    expect(textOf(root)).toContain("page two entry");
+    expect(textOf(root)).toContain("page one keeper");
+    expect(textOf(root)).not.toContain("Reloading the latest history from the start.");
+    await act(async () => root.unmount());
+  });
+
+  it("a successful edit drops the token the same way (no self-inflicted 409 on the next page)", async () => {
+    const page1 = entryRow("e-2026-09-03-edit-p1", "editable entry", "2026-09-03");
+    const page2 = entryRow("e-2026-08-01-edit-p2", "older page entry", "2026-08-01");
+    let serverRevision = "5";
+    vi.mocked(api.listEntriesPage).mockImplementation(async (opts) => {
+      const offset = (opts as { offset?: number } | undefined)?.offset ?? 0;
+      if (offset === 0) return { entries: [page1], nextOffset: 1, revision: serverRevision } as never;
+      return { entries: [page2], nextOffset: null, revision: serverRevision } as never;
+    });
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+
+    const editor = await openEditor(root, "editable entry");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("editable entry, revised");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    expect(textOf(root)).toContain("Updated ✓");
+
+    serverRevision = "6";
+    await pressLabel(root, "Back to history");
+    await pressLabel(root, "Load older entries");
+    await flush();
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(2, {
+      limit: 100, offset: 1, pageBytes: 2 * 1024 * 1024,
+    });
+    expect(textOf(root)).toContain("older page entry");
+    expect(textOf(root)).not.toContain("Reloading the latest history from the start.");
+    await act(async () => root.unmount());
+  });
+
+  it("an UNRELATED revision change on a pinned walk still restarts (the guard is intact)", async () => {
+    const page1 = entryRow("e-2026-09-03-guard", "guard page one", "2026-09-03");
+    const fresh = entryRow("e-2026-09-04-guard-fresh", "guard fresh page", "2026-09-04");
+    vi.mocked(api.listEntriesPage)
+      .mockResolvedValueOnce({ entries: [page1], nextOffset: 1, revision: "5" } as never)
+      .mockResolvedValueOnce({ entries: [], nextOffset: null, revision: "9" } as never)
+      .mockResolvedValueOnce({ entries: [fresh], nextOffset: null, revision: "9" } as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Load older entries");
+    await flush();
+    await flush();
+    // The pinned continuation landed on a DIFFERENT snapshot: restart from
+    // page one remains the only safe rendering.
+    expect(api.listEntriesPage).toHaveBeenNthCalledWith(2, {
+      limit: 100, offset: 1, pageBytes: 2 * 1024 * 1024, expectedRevision: "5",
+    });
+    expect(textOf(root)).toContain("Reloading the latest history from the start.");
+    await act(async () => root.unmount());
+  });
+});
+
+describe("HistoryScreen delete removes the day's local mood value (L-68, 2026-09-20)", () => {
+  it("deleting an entry drops the day from the device-local mood log, streak and badge", async () => {
+    await recordMood(dataKey, "user-1", "2026-09-03", 0.5);
+    await recordMood(dataKey, "user-1", "2026-09-02", -0.5);
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-mood", "mood backed day", "2026-09-03"),
+      entryRow("e-2026-09-02-mood", "neighbour day", "2026-09-02"),
+    ] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    // The badge is the mood log's day value (no explicit payload pick).
+    const badgesBefore = moodBadges(root);
+    expect(badgesBefore).toContain("Mood: Good");
+
+    await pressLabel(root, "mood backed day");
+    await pressLabel(root, "Delete this entry");
+    await pressAlertButton("Delete");
+    await pressAlertButton("Delete permanently");
+    await flush();
+
+    // The device-local log no longer counts the deleted day; its sibling stays.
+    const days = await recentMoods(dataKey, "user-1", 30);
+    expect(days.map((d) => d.date)).toEqual(["2026-09-02"]);
+    // The rendered fallback badge for that day is gone too — only the
+    // neighbour's distinct value (Low) is still badged.
+    expect(moodBadges(root)).toEqual(["Mood: Low"]);
+    await act(async () => root.unmount());
+  });
+});

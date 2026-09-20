@@ -19,6 +19,8 @@ import { clearRecomputeStamp } from "./brainSync";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { clearCrisisDialogStamp } from "./crisisDialog";
 import { syncReminderSchedule } from "./reminderSync";
+import { disableBiometricUnlock } from "./biometricUnlock";
+import { cancelDailyReminder } from "./nativeFeatures";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
@@ -92,6 +94,11 @@ interface SessionState {
    *  interaction (typing, tapping) while the vault is unlocked. */
   touchActivity: () => void;
   refreshActiveDays: () => Promise<void>;
+  /** Applies a server-known active-days count WITHOUT a second /insights
+   *  round-trip: the Insights screen already holds that response, and
+   *  issuing a second GET per load doubled latency and rate budget
+   *  (audit L-59). Server value, sanitized like refreshActiveDays does. */
+  applyActiveDays: (days: unknown) => void;
   signOut: () => Promise<void>;
 }
 
@@ -104,6 +111,7 @@ const SessionContext = createContext<SessionState>({
   setUnlockDays: () => {},
   touchActivity: () => {},
   refreshActiveDays: async () => {},
+  applyActiveDays: () => {},
   signOut: async () => {},
 });
 
@@ -221,6 +229,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
      []);
 
+  /** The L-59 half of refreshActiveDays: adopt an already-fetched count.
+   *  Server-controlled input gets the same type/range refusal as above. */
+  const applyActiveDays = useCallback((days: unknown): void => {
+    if (typeof days !== "number" || !Number.isFinite(days) || days < 0) return;
+    setActiveDays(Math.min(3650, Math.floor(days)));
+  }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
+     []);
+
   const signOut = useCallback(async (): Promise<void> => {
     // Coordinate with any in-flight queue flush FIRST: the uploads below
     // (logout revocation + session clear) turn its pending requests into
@@ -253,7 +269,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       await clearRecomputeStamp(userId).catch(() => {});
       await clearUnlockProof(userId).catch(() => {});
       await clearCrisisDialogStamp(userId).catch(() => {});
+      // M-19 (2026-09-20 audit): the biometric data-key wrap must not
+      // outlive the session it belonged to — sign-out hygiene is exactly
+      // what biometricUnlock.ts documents for this call. Currently inert
+      // security-wise (unwrapping needs a live session + matching userId),
+      // but the sealed key sitting in the Keychain indefinitely after
+      // sign-out on a shared device contradicts that module's contract.
+      // Best-effort: a Keychain failure must not fail the sign-out.
+      await disableBiometricUnlock(userId).catch(() => {});
     }
+    // M-19: the daily reminder is device-global, so it is cancelled with or
+    // without a resolvable account id — the shared-device user must not be
+    // nudged by a signed-out session (account deletion already did this).
+    await cancelDailyReminder().catch(() => {});
     if (username) await api.clearCachedSalt(username).catch(() => {});
     await api.clearSession();
     setAuthStatus("loggedOut");
@@ -273,9 +301,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setUnlockDays,
       touchActivity,
       refreshActiveDays,
+      applyActiveDays,
       signOut,
     }),
-    [authStatus, unlocked, activeDays, unlockDays, markLoggedIn, touchActivity, refreshActiveDays, signOut],
+    [authStatus, unlocked, activeDays, unlockDays, markLoggedIn, touchActivity, refreshActiveDays, applyActiveDays, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

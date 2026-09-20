@@ -138,10 +138,30 @@ async def main() -> None:
                 healthy = False
         alive = proc.poll() is None
         if not healthy or not alive:
-            verdict("C1.server-boot", "BLOCKED",
-                    "2-worker uvicorn is REFUSED: the deployment lock makes the "
-                    "second worker exit at startup (single-process contract is "
-                    "now enforced, not just documented)")
+            # Require the EXPECTED refusal signature before attributing a
+            # dead/unhealthy 2-worker boot to the deployment lock: a bad
+            # import, a DB error, or a port clash also leaves an unhealthy
+            # boot, and calling any of those "lock refused" would print a
+            # false BLOCKED (2026-09-19 audit, M-34).
+            try:
+                proc._redteam_log.flush()
+                with open("/tmp/redteam_c1_server.log") as fh:
+                    log_text = fh.read()
+            except OSError:
+                log_text = ""
+            refused = "already serving this deployment" in log_text
+            if refused:
+                verdict("C1.server-boot", "BLOCKED",
+                        "2-worker uvicorn is REFUSED: the deployment lock makes the "
+                        "second worker exit at startup with 'another worker/process is "
+                        "already serving this deployment' (single-process contract is "
+                        "now enforced, not just documented)")
+            else:
+                verdict("C1.server-boot", "ERROR",
+                        f"2-worker uvicorn unhealthy/dead WITHOUT the deployment-lock "
+                        f"refusal signature (healthy={healthy}, alive={alive}) — cause "
+                        f"unidentified, refusing to claim the lock refused it. "
+                        f"Server log tail: {log_text[-600:]!r}")
             return
         verdict("C1.server-boot", "FINDING", "2-worker uvicorn booted (guard failed)")
 

@@ -39,6 +39,19 @@ function isTap(event: FeedbackEvent): event is FeedbackTap {
   return typeof (event as FeedbackTap).resonated === "boolean";
 }
 
+/** Serializes the queue's read-modify-write cycles (audit M-35,
+ *  2026-09-20): two taps landing in the same frame (or a tap racing a
+ *  mute) used to read the same pending list, each append its own event,
+ *  and the last write to storage silently dropped the other — a lost
+ *  answer the user believed was recorded. The moodLog.ts idiom: chain the
+ *  operation onto the tail of the previous one. */
+let feedbackMutex: Promise<unknown> = Promise.resolve();
+function serialized<T>(operation: () => Promise<T>): Promise<T> {
+  const run = feedbackMutex.then(operation, operation);
+  feedbackMutex = run.catch(() => {});
+  return run;
+}
+
 async function readPending(dataKey: Buffer, userId: string): Promise<FeedbackEvent[]> {
   const raw = await AsyncStorage.getItem(key(userId));
   if (!raw) return [];
@@ -74,14 +87,18 @@ export async function recordPatternMute(
 async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent): Promise<void> {
   const keyCopy = Buffer.from(dataKey);
   try {
-    const pending = await readPending(keyCopy, userId);
-    pending.push(event);
-    const blob = encrypt(
-      keyCopy,
-      Buffer.from(JSON.stringify(pending.slice(-MAX_PENDING)), "utf8"),
-      buildAad("feedback-local", userId),
-    );
-    await AsyncStorage.setItem(key(userId), blob.toString("base64"));
+    // Serialized (M-35): same-frame taps must not read the same pending
+    // list and overwrite each other's event.
+    await serialized(async () => {
+      const pending = await readPending(keyCopy, userId);
+      pending.push(event);
+      const blob = encrypt(
+        keyCopy,
+        Buffer.from(JSON.stringify(pending.slice(-MAX_PENDING)), "utf8"),
+        buildAad("feedback-local", userId),
+      );
+      await AsyncStorage.setItem(key(userId), blob.toString("base64"));
+    });
   } finally {
     zeroize(keyCopy);
   }

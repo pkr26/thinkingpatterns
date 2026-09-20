@@ -4,265 +4,809 @@
   "sample": "i want to kill myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "control-case",
   "sample": "I WANT TO KILL MYSELF",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "control-spaces",
   "sample": "kill   myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "control-apostrophe",
   "sample": "can\u2019t go on",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "control-curly",
   "sample": "don\u2019t want to live",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "leetspeak",
   "sample": "i will su1c1de tonight",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "leetspeak",
   "sample": "k1ll myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "leetspeak",
   "sample": "1 want to d1e so bad",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "leetspeak",
   "sample": "un4l1ve myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "homoglyph",
   "sample": "\u0455uicide is on my mind",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "homoglyph",
   "sample": "k\u0456ll myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "homoglyph",
   "sample": "\u0441utting myself again",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "homoglyph",
   "sample": "want to d\u0456e",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "zero-width",
   "sample": "su\u200bicide",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "zero-width",
   "sample": "kill my\u200bself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "soft-hyphen",
   "sample": "su\u00adicide",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "punct-split",
   "sample": "s.u.i.c.i.d.e",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "punct-split",
   "sample": "k.i.l.l myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "punct-split",
   "sample": "c-u-t-t-i-n-g myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "space-split",
   "sample": "s u i c i d e",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "space-split",
   "sample": "k ill myself",
   "intent": "crisis",
-  "dialog": false,
-  "suppress": false
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "unlisted-phrase",
   "sample": "i am going to off myself",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "unlisted-phrase",
   "sample": "put me out of my misery",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "unlisted-phrase",
   "sample": "i don't see any future for me",
   "intent": "crisis",
   "dialog": false,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": false,
+  "want_suppress": true
  },
  {
   "technique": "unlisted-phrase",
   "sample": "everyone would be happier if i was gone",
   "intent": "crisis",
   "dialog": false,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": false,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "quiero morir",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "me quiero matar",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "je veux mourir",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "ich will sterben",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "voglio morire",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "quero morrer",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "\u6211\u60f3\u6b7b",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "\u6b7b\u306b\u305f\u3044",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "\u0623\u0631\u064a\u062f \u0623\u0646 \u0623\u0645\u0648\u062a",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "non-english",
   "sample": "\u092e\u0948\u0902 \u092e\u0930\u0928\u093e \u091a\u093e\u0939\u0924\u093e \u0939\u0942\u0901",
   "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
  },
  {
   "technique": "benign",
   "sample": "killed it at the presentation today",
   "intent": "benign",
   "dialog": false,
-  "suppress": false
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
  },
  {
   "technique": "benign",
   "sample": "cutting back on sugar this month",
   "intent": "benign",
   "dialog": false,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": false,
+  "want_suppress": true
  },
  {
   "technique": "benign",
   "sample": "that movie was suicide squad and i liked it",
   "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "benign-mask-gap",
+  "sample": "thinking about suicide, silence and pain",
+  "intent": "crisis",
   "dialog": true,
-  "suppress": true
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "benign-mask-gap",
+  "sample": "i keep thinking about suicide, silence is all i have",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "benign-mask-gap",
+  "sample": "thinking about suicide. Silence would be better.",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "benign-mask-gap",
+  "sample": "help me with suicide. Prevention is everyone's job.",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "su icide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "ki ll myself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "kil l myself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "kill my self",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "sui cide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "su i cide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "suici de",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "su.i.cide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "cu tting myself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "k y s",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "residual-split",
+  "sample": "end i t all",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "concat",
+  "sample": "killmyself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "concat",
+  "sample": "i will killmyself tonight",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "invisible",
+  "sample": "su\u034ficide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "invisible",
+  "sample": "su\ufe0ficide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "homoglyph",
+  "sample": "\u043aill myself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "homoglyph",
+  "sample": "kill \u043cyself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "homoglyph",
+  "sample": "k\u0131ll myself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "homoglyph",
+  "sample": "su\u0131c\u0131de",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "diacritic",
+  "sample": "je veux me suicid\u00e9",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "leetspeak",
+  "sample": "5uicide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "leetspeak",
+  "sample": "$uicide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "\u6211\u60f3\u53bb\u6b7b",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "\uc790\uc0b4\ud558\uace0 \uc2f6\ub2e4",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "intihar etmek istiyorum",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "benign",
+  "sample": "i wanna diet after the holidays",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "benign",
+  "sample": "my mom wants to diet with me",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "benign",
+  "sample": "i can't go online until the wifi is fixed",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "unmapped-digit-benign",
+  "sample": "grade6test study grind",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "unmapped-digit-benign",
+  "sample": "hello9world keeps ringing",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "unmapped-digit-benign",
+  "sample": "my6self and the team6win drill",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "leet-mapped-digit",
+  "sample": "i will 5u1c1de tonight",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "past-tense",
+  "sample": "i almost killed myself last year",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "past-tense",
+  "sample": "i nearly took my own life",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "sms-shorthand",
+  "sample": "i want 2 die",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "sms-shorthand",
+  "sample": "no reason 2 live",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "trailing-leet",
+  "sample": "suicid3",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "trailing-leet",
+  "sample": "i want to d13",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "estoy pensando en el suicidio",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "quiero suicidarme",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "no quiero vivir",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "non-english",
+  "sample": "estoy cansada de vivir",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "letter-doubling",
+  "sample": "kiill myself",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "letter-doubling",
+  "sample": "suiccide",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "letter-doubling",
+  "sample": "i want to diie",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "letter-doubling",
+  "sample": "i nearly tookk my own life",
+  "intent": "crisis",
+  "dialog": true,
+  "suppress": true,
+  "want_dialog": true,
+  "want_suppress": true
+ },
+ {
+  "technique": "letter-doubling",
+  "sample": "i am so ashamed of myself",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
+ },
+ {
+  "technique": "letter-doubling",
+  "sample": "we watched suiciide squad last night",
+  "intent": "benign",
+  "dialog": false,
+  "suppress": false,
+  "want_dialog": false,
+  "want_suppress": false
  }
 ]

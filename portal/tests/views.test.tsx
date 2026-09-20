@@ -119,6 +119,9 @@ const session = {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  // L-75 (2026-09-20): delta anchors now live in per-tab sessionStorage
+  // (the shim provides it), so tests that pin anchor behavior seed it there.
+  window.sessionStorage.clear();
 });
 
 describe("LoginView", () => {
@@ -523,7 +526,13 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("Discuss Sunday dread next session.");
 
     mockedApi.deleteNote.mockResolvedValueOnce(null);
+    // M-23 (2026-09-20): deletion is two-step — the first press arms the
+    // confirmation and must NOT reach the API.
     await press(root, "Delete");
+    await flush();
+    expect(mockedApi.deleteNote).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Permanently delete this note?");
+    await press(root, "Confirm delete");
     await flush();
     expect(mockedApi.deleteNote).toHaveBeenCalledWith("n1");
     expect(textOf(root)).not.toContain("Discuss Sunday dread next session.");
@@ -547,7 +556,7 @@ describe("PatientView", () => {
     await flush();
     expect(textOf(root)).toContain("could not save the note");
 
-    // note delete
+    // note delete (two-step confirm first, M-23)
     mockedApi.notes.mockResolvedValueOnce({
       notes: [
         { id: "nd", client_note_id: "cd", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
@@ -558,6 +567,7 @@ describe("PatientView", () => {
     await flush();
     mockedApi.deleteNote.mockRejectedValueOnce("offline");
     await press(root, "Delete");
+    await press(root, "Confirm delete");
     await flush();
     expect(textOf(root)).toContain("could not delete the note");
   });
@@ -802,13 +812,13 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("No decryptable entries behind this pattern");
   });
 
-  it("flags patterns new since the last visit via the local stamp", async () => {
-    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+  it("flags patterns new since the last visit via the session anchor", async () => {
+    window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     // first_seen 2026-08-20 is NOT newer than the stamp; refresh the stamp
     // to a date before first_seen to see the badge.
-    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-08-01T00:00:00.000Z");
+    window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-08-01T00:00:00.000Z");
     const root2 = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     // 2026-09-17: the delta anchor is explicit — the copy names the anchor
@@ -822,16 +832,21 @@ describe("PatientView 2026-09-17 wave", () => {
   it("the visit delta anchors only on the explicit Mark reviewed action", async () => {
     // Load with a stamp of 2026-08-01: one new pattern shows, and the
     // stamp itself is NOT rewritten by opening the chart.
-    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-08-01T00:00:00.000Z");
+    window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-08-01T00:00:00.000Z");
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     expect(textOf(root)).toContain("since you marked reviewed 2026-08-01");
-    expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBe("2026-08-01T00:00:00.000Z");
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBe("2026-08-01T00:00:00.000Z");
 
     await press(root, "Mark reviewed (update the delta anchor)");
     await flush();
-    expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).not.toBe("2026-08-01T00:00:00.000Z");
+    // L-80 (2026-09-20): the new anchor is the CLINICIAN-LOCAL calendar
+    // date (YYYY-MM-DD), not a UTC instant — a plain date string here.
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).not.toBe("2026-08-01T00:00:00.000Z");
     expect(textOf(root)).not.toContain("pattern new since");
+    // The anchor copy names the local-calendar basis explicitly (L-80).
+    expect(textOf(root)).toContain("on this computer's calendar");
   });
 
   it("review ordering puts the sensitive card first", async () => {
@@ -895,6 +910,12 @@ describe("PatientView 2026-09-17 wave", () => {
       ],
       nextOffset: null,
     });
+    // H-13 (2026-09-20): the sparkline exists only over GENUINE mood picks.
+    // Two numeric sentiments are needed for a line; nulls are dropped, not
+    // fabricated as 0 (the old pin leaned on that fabrication).
+    vi.mocked(mockedCrypto.decryptEntry)
+      .mockResolvedValueOnce({ text: "decrypted e-1", sentiment: 0.25 })
+      .mockResolvedValueOnce({ text: "decrypted e-2", sentiment: -0.4 });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     await openCard(root, "temporal — work");
@@ -973,7 +994,10 @@ describe("PatientView recorded measures (MBC, 2026-09-19)", () => {
     );
     await rtr.flush();
     expect(rtr.textOf(root)).toContain("Recorded measures (2)");
-    expect(rtr.textOf(root)).toContain("2026-09-04: 14  ·  2026-09-11: 9");
+    // L-76 (2026-09-20): the decrypted INSTRUMENT name renders beside its
+    // readings — a bare number is only interpretable next to the scale
+    // that produced it.
+    expect(rtr.textOf(root)).toContain("phq9: 2026-09-04: 14  ·  2026-09-11: 9");
     expect(rtr.textOf(root)).toContain("interpretation is yours");
   });
 
@@ -991,5 +1015,319 @@ describe("PatientView recorded measures (MBC, 2026-09-19)", () => {
     );
     await rtr.flush();
     expect(rtr.textOf(root)).not.toContain("Recorded measures");
+  });
+});
+
+/** Audit-fix regressions (2026-09-20): H-13, M-21, M-22, M-23, L-76,
+ *  L-77, L-78, L-79, L-81, L-82. */
+describe("audit fixes 2026-09-20", () => {
+  it("H-13: null-sentiment entries render but never fabricate sparkline points", async () => {
+    // No entry carries a numeric sentiment (the normal case: mobile keeps
+    // payload sentiment null without an explicit pick) — the sparkline must
+    // disappear, not draw a fabricated mid-scale trend at 0.
+    mockedApi.patientEntries.mockResolvedValue({
+      entries: [
+        { id: "1", client_entry_id: "e-a", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+        { id: "2", client_entry_id: "e-b", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+      ],
+      nextOffset: null,
+    });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await press(root, "See the evidence");
+    await flush();
+    expect(textOf(root)).toContain("decrypted e-a");
+    expect(textOf(root)).toContain("decrypted e-b");
+    expect(root.root.findAllByType("svg")).toHaveLength(0);
+  });
+
+  it("H-13: the sparkline counts only mood-tagged entries, dropping nulls", async () => {
+    mockedApi.patientEntries.mockResolvedValue({
+      entries: [
+        { id: "1", client_entry_id: "e-1", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+        { id: "2", client_entry_id: "e-2", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+        { id: "3", client_entry_id: "e-3", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+      ],
+      nextOffset: null,
+    });
+    vi.mocked(mockedCrypto.decryptEntry)
+      .mockResolvedValueOnce({ text: "decrypted e-1", sentiment: 0.25 })
+      .mockResolvedValueOnce({ text: "decrypted e-2", sentiment: null })
+      .mockResolvedValueOnce({ text: "decrypted e-3", sentiment: 0.7 });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await press(root, "See the evidence");
+    await flush();
+    const svg = root.root.findAllByType("svg");
+    expect(svg).toHaveLength(1);
+    expect(String(svg[0]!.props["aria-label"])).toContain("2 mood-tagged evidence entries");
+  });
+
+  it("H-13: copy forward seeds the NEWEST note (notes arrive created_at ascending)", async () => {
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+        { id: "n1", client_note_id: "c1", pattern_pid: null, blob: "b", created_at: "2026-09-17T00:00:00Z", updated_at: "2026-09-17T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    // Decrypts run in arrival order: oldest first, newest second.
+    vi.mocked(mockedCrypto.decryptNote)
+      .mockResolvedValueOnce("oldest session note")
+      .mockResolvedValueOnce("newest session note");
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await press(root, "Copy forward last note");
+    await flush();
+    const draft = root.root.findAllByType("textarea").find((n) => n.props.placeholder === "Note about this patient…");
+    expect(draft?.props.value).toBe("newest session note");
+  });
+
+  it("M-21: the summary count renders with its as-of date when no scan exists", async () => {
+    mockedApi.patients.mockResolvedValueOnce([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+    ]);
+    vi.mocked(mockedCrypto.decryptCaseloadSummary)
+      .mockResolvedValueOnce({ patterns: 4, sensitive: false, newest: "2026-09-18", forDate: "2026-09-19" });
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    expect(textOf(root)).toContain("4 patterns as of 2026-09-19");
+  });
+
+  it("M-21: a completed scan row shadows the server summary, not the reverse", async () => {
+    mockedApi.patients.mockResolvedValueOnce([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+      { ...patient, user_id: "user-2", username: "patientb", summary_blob: "SB2==", summary_eph_pub: "SE2==" },
+    ]);
+    vi.mocked(mockedCrypto.decryptCaseloadSummary)
+      .mockResolvedValueOnce({ patterns: 4, sensitive: false, newest: "2026-09-18", forDate: "2026-09-19" })
+      .mockResolvedValueOnce({ patterns: 3, sensitive: false, newest: "2026-09-17", forDate: "2026-09-19" });
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    await press(root, "Scan caseload for triage");
+    await flush(8);
+    // The scan just decrypted the live payloads (6 patterns in the mock);
+    // the stale summary's count must not shadow it, and its undated "4
+    // patterns" must not render either.
+    expect(textOf(root)).toContain("6 patterns (scanned just now)");
+    expect(textOf(root)).not.toContain("as of 2026-09-19");
+  });
+
+  it("M-22: a stopped consent opens notes-only — no insights or measures reads, notes stay", async () => {
+    const stopped = {
+      ...patient,
+      status: "revoked",
+      revoked_at: "2026-09-10T00:00:00Z",
+      ephemeral_pub: null,
+      wrapped_key: null,
+    };
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    const root = await render(<PatientView patient={stopped} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(mockedApi.patientInsights).not.toHaveBeenCalled();
+    expect(mockedApi.patientMeasures).not.toHaveBeenCalled();
+    expect(mockedApi.notes).toHaveBeenCalledWith("user-1", { offset: 0 });
+    expect(textOf(root)).toContain("sharing ended 2026-09-10");
+    expect(textOf(root)).toContain("no longer reachable");
+    expect(textOf(root)).toContain("existing note text");
+    expect(textOf(root)).not.toContain("Loading decrypted patterns");
+    expect(textOf(root)).not.toContain("Mark reviewed");
+    // The therapist can still write against their own record.
+    await typeTextarea(root, "Note about this patient…", "post-revoke follow-up");
+    await press(root, "Save note");
+    await flush();
+    expect(mockedApi.createNote).toHaveBeenCalledWith("user-1", expect.objectContaining({ blob: "SEALEDNOTE==" }));
+  });
+
+  it("M-22: the stopped list row hands the revoked patient to the notes-only chart", async () => {
+    const onOpen = vi.fn();
+    const stopped = { ...patient, user_id: "user-9", status: "revoked", revoked_at: "2026-09-10T00:00:00Z" };
+    mockedApi.patients.mockResolvedValueOnce([stopped]);
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={onOpen} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    expect(buttonByLabel(root, "Open my notes")).toBe(true);
+    expect(buttonByLabel(root, "Open patterns")).toBe(false);
+    await press(root, "Open my notes");
+    expect(onOpen).toHaveBeenCalledWith(stopped);
+  });
+
+  it("M-23: a single Delete press never reaches the API", async () => {
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "nd", client_note_id: "cd", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await press(root, "Delete");
+    await flush();
+    expect(mockedApi.deleteNote).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Permanently delete this note?");
+    // Arming one note does not arm another note's delete button.
+    expect(buttonByLabel(root, "Confirm delete")).toBe(true);
+  });
+
+  it("L-76: measures page through everything, render per instrument, and disclose the display slice", async () => {
+    mockedApi.patientInsights.mockResolvedValueOnce({
+      phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==",
+    } as never);
+    const dateFor = (n: number): string =>
+      new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
+    const rowFor = (n: number) => ({
+      id: `m-${n}`,
+      client_measure_id: `m-${n}`,
+      blob: "B==",
+      measure_date: dateFor(n),
+      received_at: "x",
+    });
+    mockedApi.patientMeasures
+      .mockResolvedValueOnce(Array.from({ length: 100 }, (_, i) => rowFor(i)) as never)
+      .mockResolvedValueOnce(Array.from({ length: 50 }, (_, i) => rowFor(100 + i)) as never);
+    vi.mocked(mockedCrypto.decryptMeasure).mockImplementation(
+      async (_dataKey: Uint8Array<ArrayBuffer>, _userId: string, row: { client_measure_id: string }) => {
+        const n = Number(row.client_measure_id.slice(2));
+        return { measure: "phq9", score: n % 28, completedAt: null, measureDate: dateFor(n) };
+      },
+    );
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush(6);
+    // Continuation is offset-based; the second page starts past the first.
+    expect(mockedApi.patientMeasures).toHaveBeenNthCalledWith(1, "user-1", { offset: 0, limit: 100 });
+    expect(mockedApi.patientMeasures).toHaveBeenNthCalledWith(2, "user-1", { offset: 100, limit: 100 });
+    expect(mockedApi.patientMeasures).toHaveBeenCalledTimes(2);
+    // ALL 150 rows were fetched, decrypted, and counted — not a silent 60.
+    expect(vi.mocked(mockedCrypto.decryptMeasure)).toHaveBeenCalledTimes(150);
+    expect(rtr.textOf(root)).toContain("Recorded measures (150)");
+    expect(rtr.textOf(root)).toContain("phq9:");
+    // Newest reading renders; oldest is outside the 60-per-instrument window.
+    expect(rtr.textOf(root)).toContain(`${dateFor(149)}: ${149 % 28}`);
+    expect(rtr.textOf(root)).not.toContain(`${dateFor(0)}: 0`);
+    expect(rtr.textOf(root)).toContain("+90 earlier measures not shown");
+  });
+
+  it("L-76: a second instrument renders as its own named trend line", async () => {
+    mockedApi.patientInsights.mockResolvedValueOnce({
+      phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==",
+    } as never);
+    const dateFor = (n: number): string =>
+      new Date(Date.UTC(2026, 0, 1) + n * 86_400_000).toISOString().slice(0, 10);
+    mockedApi.patientMeasures.mockResolvedValueOnce([
+      { id: "m-0", client_measure_id: "m-0", blob: "B==", measure_date: dateFor(0), received_at: "x" },
+      { id: "m-1", client_measure_id: "m-1", blob: "B==", measure_date: dateFor(1), received_at: "x" },
+      { id: "m-2", client_measure_id: "m-2", blob: "B==", measure_date: dateFor(2), received_at: "x" },
+      { id: "m-3", client_measure_id: "m-3", blob: "B==", measure_date: dateFor(3), received_at: "x" },
+    ] as never);
+    vi.mocked(mockedCrypto.decryptMeasure)
+      .mockResolvedValueOnce({ measure: "phq9", score: 12, completedAt: null, measureDate: dateFor(0) })
+      .mockResolvedValueOnce({ measure: "gad7", score: 8, completedAt: null, measureDate: dateFor(1) })
+      .mockResolvedValueOnce({ measure: "phq9", score: 10, completedAt: null, measureDate: dateFor(2) })
+      .mockResolvedValueOnce({ measure: "gad7", score: 6, completedAt: null, measureDate: dateFor(3) });
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    expect(rtr.textOf(root)).toContain("Recorded measures (4)");
+    expect(rtr.textOf(root)).toContain("phq9: ");
+    expect(rtr.textOf(root)).toContain("gad7: ");
+    expect(rtr.textOf(root)).not.toContain("not shown");
+  });
+
+  it("L-77: a failed insights load stops saying 'Loading decrypted patterns…'", async () => {
+    mockedApi.patientInsights.mockRejectedValueOnce(new Error("insights down"));
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("insights down");
+    expect(textOf(root)).not.toContain("Loading decrypted patterns");
+  });
+
+  it("L-78: one undecryptable entry degrades per row instead of discarding the drill-down", async () => {
+    mockedApi.patientEntries.mockResolvedValue({
+      entries: [
+        { id: "1", client_entry_id: "e-1", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+        { id: "2", client_entry_id: "e-2", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+        { id: "3", client_entry_id: "e-3", blob: "b", entry_date: "2026-09-02", received_at: "x" },
+      ],
+      nextOffset: null,
+    });
+    vi.mocked(mockedCrypto.decryptEntry)
+      .mockResolvedValueOnce({ text: "decrypted e-1", sentiment: null })
+      .mockRejectedValueOnce(new Error("blob failed authentication"))
+      .mockResolvedValueOnce({ text: "decrypted e-3", sentiment: null });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await press(root, "See the evidence");
+    await flush();
+    expect(textOf(root)).toContain("decrypted e-1");
+    expect(textOf(root)).toContain("decrypted e-3");
+    expect(textOf(root)).toContain("(entry could not be decrypted with this consent's key)");
+    expect(textOf(root)).not.toContain("could not load the evidence entries");
+  });
+
+  it("L-79: a legacy 409 code 'conflict' restarts the traversal once like collection_changed", async () => {
+    mockedApi.patientInsights.mockResolvedValueOnce({
+      phase: "baseline", active_days: 3, streak: 0, days_remaining: 27, blob: null,
+    });
+    const stale = {
+      id: "stale-note", client_note_id: "stale-client", pattern_pid: null, blob: "stale",
+      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
+    };
+    const fresh = {
+      id: "fresh-note", client_note_id: "fresh-client", pattern_pid: null, blob: "fresh",
+      created_at: "2026-09-17T00:00:00Z", updated_at: "2026-09-17T00:00:00Z",
+    };
+    mockedApi.notes
+      .mockResolvedValueOnce({ notes: [stale], nextOffset: 1, revision: "41" })
+      .mockRejectedValueOnce(new ApiError(409, "notes changed while paging; retry the request", "conflict"))
+      .mockResolvedValueOnce({ notes: [fresh], nextOffset: 1, revision: "42" })
+      .mockResolvedValueOnce({ notes: [], nextOffset: null, revision: "42" });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush(12);
+    expect(mockedApi.notes).toHaveBeenNthCalledWith(3, "user-1", { offset: 0 });
+    expect(vi.mocked(mockedCrypto.decryptNote).mock.calls.map((call) => call[3])).toEqual(["fresh-client"]);
+    expect(textOf(root)).toContain("existing note text");
+  });
+
+  it("L-81: note draft and edit textareas carry programmatic labels", async () => {
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    const draft = root.root.findAllByType("textarea").find((n) => n.props.placeholder === "Note about this patient…");
+    expect(draft?.props["aria-label"]).toBe("New note about this patient");
+    await press(root, "Edit");
+    const edit = root.root.findAllByType("textarea").find((n) => n.props.placeholder === "Editing note…");
+    expect(String(edit?.props["aria-label"])).toBe("Edit note from 2026-09-16");
+  });
+
+  it("L-82: mood_correlation without a direction renders the honest unknown", async () => {
+    vi.mocked(mockedCrypto.decryptInsights).mockResolvedValueOnce({
+      stats: {
+        patterns: [
+          { kind: "mood_correlation", label: "family", occurrences: 6, confidence: 0.7, detail: { mood_delta: -0.3, pattern_pid: "mood_correlation:family", evidence_dates: [] } },
+        ],
+      },
+    } as never);
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("read ? on days 'family' appears");
+    expect(textOf(root)).not.toContain("read higher on days 'family' appears");
   });
 });

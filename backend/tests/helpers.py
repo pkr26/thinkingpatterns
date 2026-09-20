@@ -219,14 +219,24 @@ class ClientEmulator:
         therapist_pub_b64: str,
         therapist_id: str,
         verifier: str | None = None,
+        disclosure: str | None = None,
     ) -> dict:
         """POST /consents with the X-Account-Verifier re-auth, wrapping the
-        data key to the therapist's public key first (mobile parity)."""
+        data key to the therapist's public key first (mobile parity). The
+        disclosure version defaults to the server's CURRENT one (imported,
+        not hardcoded, so a future bump keeps the emulator honest); tests
+        that exercise the stale-disclosure path pass an explicit override."""
+        from app.api.consents import SHARING_DISCLOSURE_VERSION
+
         wrap = patient_wrap_for(self, therapist_pub_b64, therapist_id)
         response = await client.post(
             "/api/consents",
             headers={**self.headers, "X-Account-Verifier": verifier or self.auth_key_b64},
-            json={"code": code, **wrap, "disclosure": "v1"},
+            json={
+                "code": code,
+                **wrap,
+                "disclosure": disclosure or SHARING_DISCLOSURE_VERSION,
+            },
         )
         return {
             "status": response.status_code,

@@ -78,6 +78,7 @@ import hashlib
 import json
 import math
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -120,6 +121,22 @@ STATISTICAL_KINDS = frozenset(
         "inertia",
         "instability",
         "mood_shift",
+        # 2026-09-20 audit H-9: the newer statistical kinds were missing —
+        # they took the direct-measurement promotion path and surfaced on
+        # their FIRST qualification (their sample floors are >=
+        # STRONG_EVIDENCE by construction, so the direct paths were always
+        # satisfied). That is exactly the single-run-fluke surfacing the
+        # replication gate exists to stop (A/B-proven: gated `inertia`
+        # stayed candidate while ungated `energy_inertia` surfaced on
+        # identical machinery; `cadence` surfaced first-run).
+        "cadence",
+        "avoidance",
+        "energy_inertia",
+        "pa_inertia",
+        "na_inertia",
+        "energy_mood_coupling",
+        "sense_making",
+        "activity_diversity",
     }
 )
 
@@ -135,9 +152,40 @@ STATISTICAL_KINDS = frozenset(
 #     ~11-day EWMA memory re-qualifies one fluke for days running): the
 #     two qualification days must be >= REPLICATION_MIN_SPREAD_DAYS apart,
 #     so the window has genuinely moved between observations.
-EVIDENCE_DATE_KINDS = frozenset({"temporal", "mood_correlation", "link", "avoidance"})
-WINDOW_STAT_KINDS = frozenset({"inertia", "instability", "mood_shift", "cadence"})
+# Flavor assignments for the 2026-09-20 additions (audit H-9): the inertia
+# family and energy_mood_coupling ride EWMA/window machinery → WINDOW_STAT;
+# sense_making/activity_diversity/avoidance anchor on concrete high-density
+# or silent days → EVIDENCE_DATE. "topic" appears in EVIDENCE_DATE_KINDS
+# only for its RISING form (see _is_statistical_kind): a steady-presence
+# topic is a direct measurement, but "taking up more space lately" is a
+# p-value-tested inference the same gate must cover.
+EVIDENCE_DATE_KINDS = frozenset(
+    {"temporal", "mood_correlation", "link", "avoidance", "sense_making", "activity_diversity", "topic"}
+)
+WINDOW_STAT_KINDS = frozenset(
+    {
+        "inertia",
+        "instability",
+        "mood_shift",
+        "cadence",
+        "energy_inertia",
+        "pa_inertia",
+        "na_inertia",
+        "energy_mood_coupling",
+    }
+)
 REPLICATION_MIN_SPREAD_DAYS = 2
+
+
+def _is_statistical(kind: str, detail: dict[str, Any]) -> bool:
+    """The replication gate's kind test: STATISTICAL_KINDS membership, plus
+    the topic RISING trend (audit H-9) — a rising-trend claim carries a
+    p-value and can fluke past it once, exactly like every other inference
+    kind, while a steady-presence topic merely reports what is literally in
+    the text and keeps direct-measurement surfacing."""
+    if kind in STATISTICAL_KINDS:
+        return True
+    return kind == "topic" and detail.get("trend") == "rising"
 
 # --- statistical gates -------------------------------------------------------
 ALPHA = 0.05
@@ -210,7 +258,10 @@ CONFIRM_AGE_DAYS = 21  # emerging → confirmed by age
 # sentiment stops feeding the mood detectors (explicit client mood tags
 # still count — they are the user's own report, never a translation
 # guess), and rumination's English negativity classifier steps aside
-# (recurring phrases still surface: repetition is script-independent).
+# (recurring phrases still surface for the TOKENIZABLE scripts — the
+# [a-z']+ tokenizer reads Latin-script text only; Cyrillic/Greek/etc.
+# journals yield no sentence tokens, so phrase repetition itself steps
+# aside for them too, audit M-10).
 LANGUAGE_MIN_TOKENS = 50  # too little text to judge a language honestly
 LANGUAGE_HIT_FLOOR = 0.10  # ~10% recognized = English with names/slang;
 # Latin-script non-English prose lands ~2-5%
@@ -1400,6 +1451,56 @@ _KNOWN_TOKENS_ES: frozenset[str] = (
 
 # --- NLP primitives -------------------------------------------------------------
 
+# Per-character fold cache for _fold_sentiment_text: journals repeat the
+# same accented characters thousands of times, and NFKD per call would
+# otherwise be the recompute's hottest loop after the regex itself.
+_FOLD_CACHE: dict[str, str] = {}
+
+
+def _fold_sentiment_text(text: str) -> str:
+    """Fold Latin diacritics to base letters and U+2019 to ASCII ' BEFORE
+    [a-z']+ tokenization (2026-09-20 audit H-8).
+
+    Without the fold the tokenizer mangles every accented word
+    ("depresión" -> "depresi" + "n"), scoring accented Spanish 0.0 while
+    an unaccented typo of the same word scored normally — 70 of the ES
+    lexicon's keys were structurally unreachable. And iOS Smart
+    Punctuation substitutes U+2019 for ', defeating every contraction
+    negator ("don’t feel good" read POSITIVE). Both spellings of every ES
+    key live in the lexicon, so folding cannot drift lookup values.
+
+    Same Latin-only rule as the crisis engine's _fold_latin_marks: only a
+    decomposable char whose BASE is Latin (below U+0250) with pure
+    combining marks reduces, so Devanagari/Arabic vowel marks survive.
+    MUST stay behavior-identical to mobile's foldSentimentText (the
+    brain-vector fixtures pin both engines).
+    """
+    if text.isascii():
+        return text  # fast path: pure-ASCII English needs no folding
+    text = text.replace("\u2019", "'")
+    # Compose FIRST: a decomposed (NFD) accent is a BARE combining mark,
+    # which per-char folding cannot see — "depresió n" (NFD) must fold
+    # exactly like the precomposed "depresión" (the crisis engine's
+    # pipeline composes for the same reason).
+    text = unicodedata.normalize("NFKC", text)
+    out: list[str] = []
+    for ch in text:
+        folded = _FOLD_CACHE.get(ch)
+        if folded is None:
+            decomposed = unicodedata.normalize("NFKD", ch)
+            base = decomposed[0]
+            if (
+                len(decomposed) > 1
+                and ord(base) < 0x0250
+                and all("\u0300" <= c <= "\u036f" for c in decomposed[1:])
+            ):
+                folded = base
+            else:
+                folded = ch
+            _FOLD_CACHE[ch] = folded
+        out.append(folded)
+    return "".join(out)
+
 
 def word_forms(token: str) -> list[str]:
     """Deterministic morphological candidates for one token.
@@ -1555,7 +1656,9 @@ def sentences_of(text: str) -> list[str]:
     """Normalized sentences of at least MIN_SENTENCE_TOKENS tokens."""
     out: list[str] = []
     for raw in SENTENCE_RE.findall(text):
-        tokens = WORD_RE.findall(raw.lower())
+        # Folded before tokenization (audit H-8): accented words must
+        # survive as whole tokens, and iOS U+2019 must not split "don't".
+        tokens = WORD_RE.findall(_fold_sentiment_text(raw.lower()))
         if len(tokens) >= MIN_SENTENCE_TOKENS:
             out.append(" ".join(tokens))
         if len(out) >= MAX_SENTENCES_PER_ENTRY:
@@ -1784,11 +1887,27 @@ def load_state(raw: bytes | None) -> dict:
 
 
 def dump_state(state: dict) -> bytes:
-    """Byte-stable serialization (sort_keys) so identical brains dump identically."""
+    """Byte-stable serialization (sort_keys) so identical brains dump identically.
+
+    Pattern records may arrive as plain dicts — direct callers holding
+    JSON-shaped state (audit L-16). They are re-validated through
+    _stored_from_dict instead of crashing on the StoredPattern attribute
+    seam, degrading to amnesia for records that fail validation, exactly
+    like load_state; the docstring's "whatever the caller held is
+    re-validated" promise now holds on both legs of the roundtrip."""
+    patterns: dict[str, StoredPattern] = {}
+    for pid, rec in state.get("patterns", {}).items():
+        if isinstance(rec, StoredPattern):
+            patterns[pid] = rec
+            continue
+        if isinstance(pid, str):
+            normalized = _stored_from_dict(rec, pid)
+            if normalized is not None:
+                patterns[pid] = normalized
     payload = {
-        "v": state["v"],
-        "patterns": {pid: rec.to_dict() for pid, rec in state["patterns"].items()},
-        "history": state["history"],
+        "v": state.get("v", STATE_VERSION),
+        "patterns": {pid: rec.to_dict() for pid, rec in patterns.items()},
+        "history": state.get("history") or [],
         # Per-pattern mutes (2026-09-19): a patient-side presentation
         # preference. Must survive the update() copy-on-entry roundtrip
         # (dump_state → load_state) or every recompute would forget it.
@@ -2031,9 +2150,21 @@ def _detect_themes(
                 )
             )
 
-        if len(without_theme) >= MOOD_MIN_PER_SIDE:
-            moods_with = [s for _, s in with_theme]
-            moods_without = [s for _, s in without_theme]
+        # Day-level mood groups (2026-09-20 audit M-8): clustered same-day
+        # entries are not independent observations — a user who journals
+        # five times on a theme-day contributed five trials to the Welch
+        # test (10 theme-days x 5 entries measured n=50 on 10 independent
+        # days, p=2.4e-46, d=4.8). One calendar day, one mean residual —
+        # exactly the correction the weekday Bernoulli above already has.
+        def _day_means(pairs: list[tuple[JournalEntry, float]]) -> list[float]:
+            buckets: dict[date, list[float]] = {}
+            for e, s in pairs:
+                buckets.setdefault(e.entry_date, []).append(s)
+            return [sum(v) / len(v) for _, v in sorted(buckets.items())]
+
+        moods_with = _day_means(with_theme)
+        moods_without = _day_means(without_theme)
+        if len(moods_without) >= MOOD_MIN_PER_SIDE:
             delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
             effect = statsig.cohens_d(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
             _, pvalue = statsig.welch_test(
@@ -2503,10 +2634,18 @@ def _phrase_pid(kind: str, cluster_members: list[phrase_miner.SentenceRef]) -> s
     the most-frequent variant changed between runs, fragmenting the
     pattern's lifecycle. The earliest member persists as the cluster
     gains members, so the identity is stable within the analysis window.
+
+    The CLASSIFICATION does not participate in the id (2026-09-20 audit
+    L-17): a cluster whose mean negativity oscillates across the
+    rumination bar used to flip between "rumination:<digest>" and
+    "recurring_phrase:<digest>" — two pids for one underlying pattern,
+    churning the lifecycle and double-carding it outside the
+    semantic-flip machinery. ``kind`` stays in the signature so callers
+    keep naming the classification; the identity is the cluster alone.
     """
     anchor = min(cluster_members, key=lambda r: (r.day, r.text))
     digest = hashlib.blake2b(anchor.text.encode("utf-8"), digest_size=6).hexdigest()
-    return f"{kind}:{digest}"
+    return f"phrase:{digest}"
 
 
 def _window_sentences(window: list[JournalEntry]) -> list[phrase_miner.SentenceRef]:
@@ -2560,9 +2699,9 @@ def _detect_phrases(
 
     ``allow_rumination=False`` (language gate): the negativity/negation
     classifiers are English, and scoring a language the lexicons do not
-    know produces noise dressed as a worry. Repetition itself is
-    script-independent, so clusters still surface — always as the neutral
-    recurring_phrase kind.
+    know produces noise dressed as a worry. Repetition itself needs no
+    lexicon, so clusters still surface for the tokenizable (Latin-script)
+    languages — always as the neutral recurring_phrase kind.
     """
     signals: list[_Signal] = []
     for cluster in clusters:
@@ -2587,6 +2726,15 @@ def _detect_phrases(
             "last": days[-1].isoformat(),
             "variants": variants[:3],
         }
+        # Suppress-tier tripwire over EVERY variant (2026-09-20 audit
+        # L-18): the stored display list is trimmed to three, but a
+        # suppress-tier variant sorted 4th+ must still flag the record at
+        # surfacing. Detection-time bit, stored only when true; it can
+        # only ever err conservative (a stored True may over-suppress if
+        # the phrase contract later narrows — it can never under-suppress,
+        # and the label/variants checks stay recomputed live).
+        if any(crisis.matches_suppress(variant) for variant in variants):
+            detail["suppress_variant_seen"] = True
         if is_rumination:
             detail["negativity"] = round(negativity, 3)
             detail["mean_negators"] = round(negators, 2)
@@ -3149,18 +3297,42 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
             # the label would silently change under an intact history. The
             # old record retires instead (a surfaced claim fades honestly;
             # a never-surfaced candidate archives quietly) and the flipped
-            # signal starts over under a fresh pid: new candidate clock,
-            # and for statistical kinds the replication gate re-applies.
+            # signal continues under a fork pid: new candidate clock, and
+            # for statistical kinds the replication gate re-applies.
             if record.state in ("emerging", "confirmed"):
                 record.state = "fading"
             elif record.state == "candidate":
                 record.state = "archived"
             base_pid = signal.pid
-            suffix = 2
-            while f"{base_pid}~{suffix}" in patterns or f"{base_pid}~{suffix}" in qualified_pids:
-                suffix += 1
-            signal.pid = f"{base_pid}~{suffix}"
-            record = None
+            # REUSE before minting (2026-09-20 audit H-11): detectors
+            # always emit the base pid, and the base record's semantic
+            # detail froze at this flip — every later run re-flips against
+            # it. Without reuse each run minted ~3, ~4, … each holding one
+            # qualification day, so the genuinely-supported flipped claim
+            # could never re-establish itself (and the store churned one
+            # record per recompute). A fork whose STORED semantic detail
+            # equals the incoming signal's IS that claim — continue it.
+            semantic_key = _SEMANTIC_DETAIL_KEYS.get(signal.kind)
+            reuse: StoredPattern | None = None
+            if semantic_key is not None:
+                target = signal.detail.get(semantic_key)
+                suffix = 2
+                while (candidate := patterns.get(f"{base_pid}~{suffix}")) is not None:
+                    if candidate.kind == signal.kind and candidate.detail.get(
+                        semantic_key
+                    ) == target:
+                        reuse = candidate
+                        break
+                    suffix += 1
+            if reuse is not None:
+                signal.pid = reuse.pid
+                record = reuse
+            else:
+                suffix = 2
+                while f"{base_pid}~{suffix}" in patterns or f"{base_pid}~{suffix}" in qualified_pids:
+                    suffix += 1
+                signal.pid = f"{base_pid}~{suffix}"
+                record = None
         qualified_pids.add(signal.pid)
         if record is None:
             record = StoredPattern(
@@ -3211,7 +3383,7 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
                 date.fromisoformat(record.qualification_days[-1])
                 - date.fromisoformat(record.qualification_days[0])
             ).days
-            if record.kind in STATISTICAL_KINDS:
+            if _is_statistical(record.kind, record.detail):
                 if _replication_satisfied(record, signal, prior_evidence):
                     record.state = "emerging"
             elif (
@@ -3233,27 +3405,35 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
             # independent-second-observation bar as first promotion) — one
             # lucky re-qualification after months of silence is the same
             # single-run fluke the promotion gate exists to stop.
-            if record.kind not in STATISTICAL_KINDS or _replication_satisfied(
+            if not _is_statistical(record.kind, record.detail) or _replication_satisfied(
                 record, signal, prior_evidence
             ):
                 record.state = "emerging"
                 record.first_qualified = today_iso
 
     # Aging: patterns that stopped qualifying fade, archive, then are dropped.
-    # A STATISTICAL pattern that never earned a card (still a candidate)
-    # skips the user-visible "fading" state entirely — surfacing a claim the
-    # replication gate just refused to promote would be the same fluke with
-    # a sadder label. Direct-measurement candidates keep the normal path.
+    # A candidate NEVER surfaced — promoting it to "fading" would surface a
+    # card the user has never seen, for a claim that never earned one
+    # (audit M-9: a 4-occurrence phrase with one qualification day showed
+    # up as a "fading" card nine days after it left the corpus). Statistical
+    # candidates skip fading for the same reason plus the replication
+    # verdict; every candidate therefore archives quietly. Only patterns
+    # that actually surfaced (emerging/confirmed) fade visibly.
     for pid in sorted(patterns):
         record = patterns[pid]
-        if pid in qualified_pids or not record.last_qualified:
+        if pid in qualified_pids:
+            continue
+        if not record.last_qualified:
+            # Corrupt store (audit L-14): an empty timestamp used to skip
+            # aging entirely — the record surfaced forever and never
+            # dropped. Treat it as maximally stale so this run archives
+            # (and, on a later run, drops) it.
+            record.state = "archived"
+            if (today - date.fromisoformat(record.first_seen or "1970-01-01")).days > DROP_DAYS:
+                del patterns[pid]
             continue
         stale_days = (today - date.fromisoformat(record.last_qualified)).days
-        if (
-            record.state == "candidate"
-            and stale_days > GRACE_DAYS
-            and record.kind in STATISTICAL_KINDS
-        ):
+        if record.state == "candidate" and stale_days > GRACE_DAYS:
             record.state = "archived"
         if record.state in ACTIVE_STATES and stale_days > GRACE_DAYS:
             record.state = "fading"
@@ -3284,6 +3464,10 @@ def _record_is_sensitive(record: StoredPattern) -> bool:
     content (label, or any stored phrase variant — the representative is
     often the mildest phrasing of a darker cluster)."""
     if crisis.matches_suppress(record.label):
+        return True
+    # Detection-time bit set when ANY cluster variant tripped the suppress
+    # tier (audit L-18) — the stored display list is trimmed to three.
+    if record.detail.get("suppress_variant_seen") is True:
         return True
     variants = record.detail.get("variants")
     if isinstance(variants, list):
@@ -3362,7 +3546,11 @@ def update(
 
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
     for entry in window:
-        tokens = WORD_RE.findall(entry.text.lower())
+        # Folded before tokenization (audit H-8): every accented word must
+        # survive [a-z']+ as one whole token ("depresión" used to become
+        # "depresi" + "n"), and iOS U+2019 must read as ' so contraction
+        # negators still fire.
+        tokens = WORD_RE.findall(_fold_sentiment_text(entry.text.lower()))
         # Emoji ride along as their own tokens: they score mood through
         # EMOJI_VALENCES but never become themes or phrase shingles (the
         # theme/phrase lookups simply never match them). Counted per
@@ -3407,8 +3595,10 @@ def update(
     # higher share wins if it clears the floor, otherwise the language is
     # "other" and the historical suppressions apply (topics, text
     # sentiment, rumination classification step aside; client mood tags
-    # and script-independent phrase repetition still count). Too little
-    # text keeps the historical English default.
+    # still count). Phrase repetition needs WORD_RE tokenization, so it
+    # steps aside for non-Latin scripts too (M-10, 2026-09-20: the README
+    # promise was corrected to match). Too little text keeps the
+    # historical English default.
     language = "en"
     if len(scored) >= LANGUAGE_MIN_TOKENS:
         en_hits = sum(1 for t in scored if t in _KNOWN_TOKENS)
@@ -3425,7 +3615,15 @@ def update(
     mood_entries = (
         per_entry
         if language_ok
-        else [(e, t, th, m) for (e, t, th, m) in per_entry if e.sentiment is not None]
+        # `isfinite`, not just `is not None` (audit L-15): a NaN tag would
+        # pass the filter and slip a fabricated text-score into the
+        # "explicitly tagged" series. (The API rejects non-finite tags, so
+        # this is the hostile-store belt-and-braces.)
+        else [
+            (e, t, th, m)
+            for (e, t, th, m) in per_entry
+            if e.sentiment is not None and math.isfinite(e.sentiment)
+        ]
     )
 
     day_buckets: dict[date, list[float]] = {}
@@ -3524,8 +3722,18 @@ def update(
         )
         signals.extend(_detect_mood_shift(shift_series))
         signals.extend(_detect_links(day_themes, day_residuals, today, resid_lag1))
-        signals.extend(_detect_avoidance(day_themes, set(day_buckets), today))
-        signals.extend(_detect_cadence(set(day_buckets), today))
+        # Writing calendar from ALL window entry dates (2026-09-20 audit
+        # H-10): avoidance and cadence observe WHEN the user journaled —
+        # pure writing-metadata, not something the lexicon scored. Under
+        # language "other" the mood-day calendar held only mood-TAGGED
+        # days, so a daily journal without tags manufactured silence that
+        # never happened (probe: a 30/30-day German journal surfaced an
+        # "avoidance" card for a user with zero silent days). Mood-day
+        # censoring stays where it belongs: the mood series and the
+        # weekday mood base rate above.
+        entry_day_set = {entry.entry_date for entry in window}
+        signals.extend(_detect_avoidance(day_themes, entry_day_set, today))
+        signals.extend(_detect_cadence(entry_day_set, today))
         signals.extend(_detect_mood_dynamics(day_sentiments, day_residuals, today))
         energy_inertia = _inertia_signal(
             day_energies,
@@ -3787,7 +3995,10 @@ def update(
         # "other" means the engine stepped aside for text-derived claims
         # (clients render an honest note instead of silence).
         "language": language,
-        "active_days": len(day_buckets),
+        # Distinct WRITING days (audit H-10): under language "other" the
+        # mood-bucket calendar counted only mood-tagged days and understated
+        # the user's actual journaling cadence.
+        "active_days": len({entry.entry_date for entry in window}),
         "avg_sentiment": round(sum(sentiments) / len(sentiments), 3) if sentiments else 0.0,
         "first_date": _iso(window[0].entry_date) if window else None,
         "last_date": _iso(window[-1].entry_date) if window else None,

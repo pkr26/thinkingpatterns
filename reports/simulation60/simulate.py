@@ -14,11 +14,17 @@ Two coordinated tracks over the SAME corpora:
           confirmed) become visible per day — something the live server
           cannot show, because its wall clock only ever says "today".
 
-Determinism cross-check: the replay's final day (today, full corpus)
-must surface exactly what the live API's recompute surfaced.
+Determinism cross-check: the LIVE API recompute must surface exactly what
+the SINGLE-SHOT replay (one recompute on the final day — the "fresh
+account with imported history" view) surfaces; that is the comparison the
+script actually makes (`determinism_live_eq_singleshot`). The DAILY
+replay's final day is deliberately a different view: 30 incremental
+recomputes exercise pattern lifecycles a single pass cannot, so its
+surfaced set is not expected to equal the live one.
 
-Outputs: results.json (everything), timeline_*.csv (per-user daily
-timeline), stdout summary.
+Outputs: results.json (everything, including each user's per-day replay
+timeline), timeline_<user>.csv (per-user daily timeline: surfaced counts,
+new pids, state transitions), stdout summary.
 """
 
 from __future__ import annotations
@@ -503,6 +509,29 @@ async def run():
     out = Path(__file__).parent / "results.json"
     out.write_text(json.dumps(report, indent=2, default=str))
     print(f"\nwrote {out}")
+
+    # Per-user daily timeline CSVs (the docstring's timeline_<user>.csv —
+    # previously promised but never written, leaving `import csv` dead).
+    for u in report["users"]:
+        csv_path = out.parent / f"timeline_{u['name']}.csv"
+        with csv_path.open("w", newline="") as fh:
+            writer = csv.DictWriter(
+                fh,
+                fieldnames=["day", "date", "active_days", "recomputed",
+                            "surfaced", "new", "transitions"],
+            )
+            writer.writeheader()
+            for row in u["timeline"]:
+                writer.writerow({
+                    "day": row["day"],
+                    "date": row["date"],
+                    "active_days": row["active_days"],
+                    "recomputed": row["recomputed"],
+                    "surfaced": row["surfaced"],
+                    "new": "; ".join(row["new"]),
+                    "transitions": "; ".join(row["transitions"]),
+                })
+        print(f"wrote {csv_path}")
     return report
 
 

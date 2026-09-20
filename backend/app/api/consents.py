@@ -64,7 +64,22 @@ router = APIRouter(
 
 # Version of the sharing disclosure copy the mobile app shows before a
 # grant (Art. 7 record parity with the LLM consent flow).
-SHARING_DISCLOSURE_VERSION = "v1"
+#
+# v2 (2026-09-20 audit fix H-14): the copy now names the full data scope
+# the grant actually opens — journal entries, patterns/insights, WELLBEING
+# MEASURES (PHQ-9), and caseload summaries. v1 copy said only "every entry
+# and pattern", which understated the record against Art. 7 once the MBC
+# module (2026-09-19) made measures readable under the same consent.
+#
+# Legacy handling: v1 grants remain ACTIVE for entries/insights/notes —
+# refusing them would break live therapeutic shares the patient did agree
+# to — but they do NOT cover measures; the therapist measures read
+# (therapist.py) answers 409 disclosure_outdated for them so the patient
+# can re-consent under the honest copy first. The grant endpoint below
+# still refuses any client that presents a version other than the current
+# one (the server, not a mutable client build, is authoritative about
+# which disclosure was current).
+SHARING_DISCLOSURE_VERSION = "v2"
 
 # The wrap of a 32-byte data key is 12 + 32 + 16 = 60 bytes; a little
 # headroom for format evolution, still far below anything worth storing.

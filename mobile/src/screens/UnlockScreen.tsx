@@ -101,9 +101,15 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       // other two), and the auth key is only ever SENT at password login —
       // biometric unlock restores local decryption, not server
       // re-authentication. A 401 later still asks for the password.
+      // authKeyKnown:false (H-2) tells the vault the authKey slot holds
+      // PLACEHOLDER ZEROS: reauth.ts must never compare a real derivation
+      // against them (that reported every correct password as wrong) — it
+      // verifies online via api.login instead, until the real key is
+      // re-adopted.
       vault.unlock(
         { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32), dataKey },
         userId,
+        { authKeyKnown: false },
       );
       setPassword(""); // the field was empty anyway; keep the invariant
       setBiometricError(false);

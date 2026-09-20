@@ -34,6 +34,31 @@ describe("filterEntries", () => {
   it("no match yields an empty list, never an error", () => {
     expect(filterEntries(entries, "zzzz-not-there")).toEqual([]);
   });
+
+  // L-53: search folds Unicode normalization + diacritics on BOTH sides —
+  // an NFD paste from another app matches NFC-typed text and vice versa,
+  // and accent-insensitive typing still finds accented entries.
+  it("folds NFC/NFD normalization differences between query and text", () => {
+    const nfc = [{ clientEntryId: "n1", entryDate: "2026-09-01", text: "café au lait" }]; // é composed
+    const nfdQuery = "cafe\u0301"; // é decomposed (a paste from another app)
+    const nfd = [{ clientEntryId: "n2", entryDate: "2026-09-01", text: "reve\u0301 late" }]; // é decomposed
+    expect(filterEntries(nfc, nfdQuery)).toHaveLength(1);
+    expect(filterEntries(nfd, "café")).toHaveLength(0); // "café" is not in that text at all
+    expect(filterEntries(nfd, "revé")).toHaveLength(1); // NFC query, NFD text
+    expect(filterEntries(nfd, "reve\u0301")).toHaveLength(1); // NFD query, NFD text
+  });
+
+  it("matches diacritics-insensitively in both directions", () => {
+    const accented = [
+      { clientEntryId: "a1", entryDate: "2026-09-01", text: "El año pasado, más cansado" },
+    ];
+    expect(filterEntries(accented, "ano pasado").map((e) => e.clientEntryId)).toEqual(["a1"]);
+    expect(filterEntries(accented, "MAS CANSADO").map((e) => e.clientEntryId)).toEqual(["a1"]);
+    expect(filterEntries(accented, "jahr")).toEqual([]); // folding is not stemming
+    // An accented query also finds plain text ("cafe" finds "cafe").
+    const plain = [{ clientEntryId: "p1", entryDate: "2026-09-01", text: "cafe con leche" }];
+    expect(filterEntries(plain, "café").map((e) => e.clientEntryId)).toEqual(["p1"]);
+  });
 });
 
 describe("monthGrid", () => {

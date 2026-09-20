@@ -1,17 +1,17 @@
 {
  "v": 1,
- "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-17 audit): the matchers additionally test a whitespace-free copy of the text against space-free copies of the tier patterns (\\b and \\s+ removed; a trailing (?![a-z]) is re-added for patterns whose final word extends into a benign one — die/diet, dead/deadline, on/online, up, out, cutting, gone), closing every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself'). 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold.",
+ "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-17 audit): the matchers additionally test a whitespace-free copy of the text against space-free copies of the tier patterns (\\b and \\s+ removed; a trailing (?![a-z]) is re-added for patterns whose final word extends into a benign one — die/diet, dead/deadline, on/online, up, out, cutting, gone), closing every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself'). 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold. 2026-09-20 audit additions, identical in both engines: U+2065 joins the invisible set; mapped leet digits also fold at a word's TRAILING edge ('suicid3' -> 'suicide', 'd13' -> 'die'); a standalone '2' token folds to 'to' ('i want 2 die'); benign-compound masking covers the CJK/Spanish prevention campaigns as plain substrings. LETTER-DOUBLING CHANNEL (2026-09-20 audit H-7): the matchers additionally test a fourth set of variants in which same-letter runs collapse on BOTH sides — the folded text ('kiill myself' -> 'kil myself') is matched only against folded pattern twins ('kill(?:ed|ing)? myself' -> 'kil(?:ed|ing)? myself'), so a letter typed twice cannot bypass every tier while canonically double-lettered words ('kill', 'sleep', 'cannot') keep matching. 'off(?:ing)? myself' is EXEMPT from the folded tier because its fold ('of(?:ing)? myself') matches ordinary prose ('ashamed of myself'); benign compounds re-mask after folding with their own folded spellings ('suicide awareness' -> 'suicide awarenes'), so 'suiciide squaad' stays masked.",
  "regex_rules": "Every pattern must compile under BOTH Python re and ECMAScript RegExp. No lookahead/lookbehind. Consumers apply case-insensitive matching AFTER the shared normalization pipeline described in this file's description. \\s+ for whitespace, ['\\u2019]? for optional apostrophes, \\b word boundaries (Latin-script patterns only — \\b never fires next to CJK/Arabic/Devanagari in ECMAScript, so non-Latin patterns are plain substrings).",
  "dialog": [
   "\\bsuicid(?:e|al)\\b",
-  "\\bkill(?:ing)?\\s+myself\\b",
+  "\\bkill(?:ed|ing)?\\s+myself\\b",
   "\\b(?:wants?|wanted|wanting)\\s+to\\s+die\\b",
   "\\bwanna\\s+(?:to\\s+)?die\\b",
   "\\bwish\\s+(?:i\\s+)?(?:was|were)\\s+dead\\b",
   "\\bwish\\s+(?:i\\s+)?could\\s+die\\b",
   "\\bfeel(?:s|ing)?\\s+like\\s+dying\\b",
   "\\bend(?:ing)?\\s+it\\s+all\\b",
-  "\\b(?:end|ending|take|taking)\\s+my\\s+(?:own\\s+)?life\\b",
+  "\\b(?:end|ended|ending|take|took|taking)\\s+my\\s+(?:own\\s+)?life\\b",
   "\\bself[-\\s]?harm(?:ing)?\\b",
   "\\bhurt(?:ing)?\\s+myself\\b",
   "\\bharm(?:ing)?\\s+myself\\b",
@@ -43,6 +43,9 @@
   "\\bvoglio\\s+morire\\b",
   "\\bquero\\s+morrer\\b",
   "\\bme\\s+matar\\b",
+  "\\bsuicid(?:io|ios|arme|armi)\\b",
+  "\\bno\\s+quiero\\s+vivir\\b",
+  "\\bcansad[oa]s?\\s+de\\s+vivir\\b",
   "我想死",
   "我想去死",
   "自杀",
@@ -129,7 +132,20 @@
    "killmyself",
    "我想去死",
    "자살하고 싶다",
-   "i keep thinking about 5u1c1de"
+   "i keep thinking about 5u1c1de",
+   "i almost killed myself last year",
+   "i nearly took my own life",
+   "i want 2 die",
+   "no reason 2 live",
+   "suicid3",
+   "i want to d13",
+   "estoy pensando en el suicidio",
+   "quiero suicidarme",
+   "no quiero vivir",
+   "estoy cansada de vivir",
+   "su⁥icide",
+   "kiill myself",
+   "suiccide"
   ],
   "dialog_silent": [
    "This traffic is killing me",
@@ -159,7 +175,9 @@
    "i can't go online until the wifi is fixed",
    "i got my grade6test back today",
    "covid2wave news is exhausting",
-   "the route9walk home was lovely"
+   "the route9walk home was lovely",
+   "i am so ashamed of myself",
+   "we watched suiciide squad last night"
   ],
   "suppress_only_fires": [
    "this traffic is killing me",
@@ -183,7 +201,10 @@
   "suicide silence",
   "suicideboys",
   "suicide prevention",
-  "suicide awareness"
+  "suicide awareness",
+  "自杀预防",
+  "prevencion del suicidio",
+  "prevencion de suicidio"
  ],
  "redteam_corpus": [
   {
@@ -703,6 +724,118 @@
    "intent": "crisis",
    "dialog": true,
    "suppress": true
+  },
+  {
+   "technique": "past-tense",
+   "sample": "i almost killed myself last year",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "past-tense",
+   "sample": "i nearly took my own life",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "sms-shorthand",
+   "sample": "i want 2 die",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "sms-shorthand",
+   "sample": "no reason 2 live",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "trailing-leet",
+   "sample": "suicid3",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "trailing-leet",
+   "sample": "i want to d13",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "estoy pensando en el suicidio",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "quiero suicidarme",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no quiero vivir",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "estoy cansada de vivir",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "letter-doubling",
+   "sample": "kiill myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "letter-doubling",
+   "sample": "suiccide",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "letter-doubling",
+   "sample": "i want to diie",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "letter-doubling",
+   "sample": "i nearly tookk my own life",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "letter-doubling",
+   "sample": "i am so ashamed of myself",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "letter-doubling",
+   "sample": "we watched suiciide squad last night",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
   }
  ]
 }

@@ -153,30 +153,30 @@ def measure_item5(runs: int = 8):
             f"seed {seed}: presence={[p.label for p in presence]} "
             f"topics={[p.label for p in topics_all]} phrases={len(phrases)}"
         )
-        # cluster structure for the first seed
-        if seed == 2000 or True:
-            sentences = []
+        # cluster structure (every seed — the old `if seed == 2000 or True`
+        # guard was a dead condition, dedented, 2026-09-19 audit L-38)
+        sentences = []
+        for e in entries:
+            for s in brain.sentences_of(e.text):
+                sentences.append(phrase_miner.SentenceRef(text=s, day=e.entry_date))
+        clusters = phrase_miner.near_duplicate_clusters(sentences)
+        clustered_texts = {m.text for c in clusters for m in c.members}
+        for p in presence:
+            word = p.label
+            in_cluster = 0
+            total = 0
             for e in entries:
-                for s in brain.sentences_of(e.text):
-                    sentences.append(phrase_miner.SentenceRef(text=s, day=e.entry_date))
-            clusters = phrase_miner.near_duplicate_clusters(sentences)
-            clustered_texts = {m.text for c in clusters for m in c.members}
-            for p in presence:
-                word = p.label
-                in_cluster = 0
-                total = 0
-                for e in entries:
-                    toks = brain.WORD_RE.findall(e.text.lower())
-                    if word in toks:
-                        total += 1
-                        for s in brain.sentences_of(e.text):
-                            if s in clustered_texts and word in s.split():
-                                in_cluster += 1
-                                break
-                print(
-                    f"   presence {word!r}: occurrences={total} in_cluster={in_cluster} "
-                    f"clusters={len(clusters)}"
-                )
+                toks = brain.WORD_RE.findall(e.text.lower())
+                if word in toks:
+                    total += 1
+                    for s in brain.sentences_of(e.text):
+                        if s in clustered_texts and word in s.split():
+                            in_cluster += 1
+                            break
+            print(
+                f"   presence {word!r}: occurrences={total} in_cluster={in_cluster} "
+                f"clusters={len(clusters)}"
+            )
 
 
 if __name__ == "__main__":

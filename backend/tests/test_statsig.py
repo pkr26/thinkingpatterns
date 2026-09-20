@@ -168,6 +168,16 @@ class TestEffectiveSampleSize:
         assert statsig.effective_sample_size(100, 0.999) == pytest.approx(100 * 0.1 / 1.9)
         assert statsig.effective_sample_size(4, 0.5) == 3.0  # floor above n
 
+    def test_effective_never_exceeds_n_for_tiny_samples(self):
+        # L-19 (2026-09-19 audit): the old max(3.0, min(n, …)) clamp order
+        # returned 3.0 > n for n < 3 with strong lag-1 — an effective sample
+        # LARGER than the observed one. The cap is applied outermost now.
+        assert statsig.effective_sample_size(2, 0.9) == 2.0
+        assert statsig.effective_sample_size(1, 0.9) == 1.0
+        assert statsig.effective_sample_size(0, 0.9) == 0.0
+        # n >= 3 keeps the documented floor semantics.
+        assert statsig.effective_sample_size(3, 0.9) == 3.0
+
 
 class TestFisherZDifference:
     def test_equal_correlations_are_no_evidence(self):
@@ -217,3 +227,37 @@ def test_determinism_trivially_stable():
     b = list(range(30, 50))
     assert statsig.welch_test(a, b) == statsig.welch_test(a, b)
     assert statsig.binomial_sf(7, 20, 0.3) == statsig.binomial_sf(7, 20, 0.3)
+
+
+class TestBrownForsytheUpperTailOnly2026_09_20:
+    """Audit M-7: the former 2*min(upper, 1-upper) doubling manufactured
+    significance exactly when the point estimate said 'no difference' — the
+    lower tail fired on near-identical spreads. The recompute cases from
+    the finding, recomputed against the upper-tail-only return."""
+
+    def test_near_identical_spreads_are_never_a_claim(self):
+        # The finding's case: near-equal spread groups used to yield
+        # p = 2.36e-06 through the doubling. Upper tail only: no claim.
+        xs = [0.05, -0.04, 0.06, -0.05, 0.04, -0.06, 0.05, -0.05, 0.03, -0.03]
+        ys = [0.04, -0.05, 0.05, -0.04, 0.05, -0.05, 0.04, -0.04, 0.04, -0.04]
+        p = statsig.brown_forsythe_two_sided_p(xs, ys)
+        assert p > 0.5, p
+
+    def test_epsilon_difference_cannot_reach_zero(self):
+        # The finding's degenerate case: epsilon-different spreads used to
+        # round the upper tail to exactly 1.0 and double to p = 0.0.
+        xs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+        ys = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0000001]
+        assert statsig.brown_forsythe_two_sided_p(xs, ys) > 0.5
+
+    def test_genuine_threefold_spread_difference_survives(self):
+        # The finding's genuine case (3x spread) measured p ~ 7.6e-12 via
+        # the upper tail: the honest test still sees real instability.
+        tight = [0.01, -0.01, 0.02, -0.02, 0.015, -0.015, 0.005, -0.005, 0.0, 0.02]
+        wide = [0.06, -0.06, 0.05, -0.05, 0.07, -0.07, 0.04, -0.04, 0.065, -0.065]
+        assert statsig.brown_forsythe_two_sided_p(wide, tight) < 1e-4
+
+    def test_identical_multisets_stay_at_one(self):
+        xs = [0.3, -0.2, 0.1, 0.0, -0.1, 0.2, -0.3, 0.05, -0.05, 0.15]
+        assert statsig.brown_forsythe_two_sided_p(xs, list(reversed(xs))) > 0.9
+        assert statsig.brown_forsythe_two_sided_p(xs, sorted(xs)) > 0.9

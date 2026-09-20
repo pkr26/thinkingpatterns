@@ -108,6 +108,12 @@ const LEET: Record<string, string> = {
 };
 const LEET_RE = /([a-z])([0134578@!$])([a-z])/g;
 const LEET_EDGE_RE = /(^|\s)([0134578@!$])([a-z])/g;
+/** 2026-09-20 audit H-7: mapped digits also fold at a word's TRAILING edge
+ *  ("suicid3" -> "suicide"; "d13" -> "die" inside a phrase). The lookahead
+ *  accepts any non-letter or end-of-string so "suicid3!" folds too
+ *  (punctuation folds to spaces only later). The class still lists exactly
+ *  the mapped characters — 2/6/9 stay digits ("grade6test" untouched). */
+const LEET_TRAIL_RE = /([a-z])([0134578@!$]+)(?=[^a-z]|$)/g;
 
 /** Punctuation becomes a space; letters (any script), digits, ASCII
  *  apostrophes and hyphens survive (Hangul syllables included — a Korean
@@ -126,6 +132,10 @@ function leetFold(text: string): string {
   for (;;) {
     let folded = text.replace(LEET_RE, (_m, a: string, d: string, b: string) => a + LEET[d] + b);
     folded = folded.replace(LEET_EDGE_RE, (_m, ws: string, d: string, c: string) => ws + LEET[d] + c);
+    folded = folded.replace(
+      LEET_TRAIL_RE,
+      (_m, a: string, run: string) => a + [...run].map((d) => LEET[d]).join(""),
+    );
     if (folded === text) return text;
     text = folded;
   }
@@ -187,7 +197,11 @@ export function normalizeCrisisText(text: string): string {
 /** The shared pipeline from pre-punct form to tokens. */
 function normalizeToTokens(text: string): string[] {
   const out = normalizePrePunct(text).replace(PUNCT_TO_SPACE, " ");
-  return out.split(/[\s-]+/).filter((t) => t.length > 0);
+  const tokens = out.split(/[\s-]+/).filter((t) => t.length > 0);
+  // 2026-09-20 audit H-7: SMS shorthand — a standalone "2" token IS "to"
+  // ("i want 2 die", "no reason 2 live"). Folded at the TOKEN level, so 2
+  // stays an unmapped leet digit everywhere else (2=z is ambiguous).
+  return tokens.map((t) => (t === "2" ? "to" : t));
 }
 
 /** ASCII single letters only — the backend engine's rule; non-Latin
@@ -292,17 +306,95 @@ const SUPPRESS_CONCAT_PATTERNS: readonly RegExp[] = [
  *  as whole words joined by whitespace/hyphens only: punctuation between
  *  the words ("suicide, silence") is not the compound, so real ideation
  *  next to a masked word cannot be silenced. Longest-first so
- *  "suicide squad" can never eat only half of a longer entry. */
+ *  "suicide squad" can never eat only half of a longer entry. Non-ASCII
+ *  compounds (CJK, 2026-09-20 audit L-23) are masked as plain substrings:
+ *  \b never fires next to CJK in either engine, so the anchored form
+ *  would never match at all. */
+const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const benignMask = (compound: string): RegExp => {
+  const words = compound.split(/\s+/);
+  if (/^[\x00-\x7f\s]*$/.test(compound)) {
+    return new RegExp(`\\b${words.map(escapeRe).join("[\\s\\-]+")}\\b`, "gi");
+  }
+  return new RegExp(words.map(escapeRe).join("[\\s\\-]+"), "gi");
+};
 const BENIGN_MASKS: readonly RegExp[] = [...CRISIS_BENIGN_COMPOUNDS]
   .sort((a, b) => b.length - a.length)
-  .map((compound) =>
-    new RegExp(`\\b${compound.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\-]+")}\\b`, "gi"),
-  );
+  .map(benignMask);
 
 function maskBenign(text: string): string {
   let out = text;
   for (const mask of BENIGN_MASKS) out = out.replace(mask, " ");
   return out;
+}
+
+// --- 2026-09-20 audit H-7: letter-doubling ---------------------------------
+// "kiill myself" / "suiccide" (a letter typed twice) matched NO tier and no
+// variant: the doubled run is not a split, not leet, not a homoglyph. The
+// fix is a fourth matching channel folded on BOTH sides: the normalized
+// text with same-letter runs collapsed ("kiill myself" -> "kil myself")
+// matched against tier twins folded the same way ("kill(?:ed|ing)?
+// myself" -> "kil(?:ed|ing)? myself"). Folding both sides is what keeps
+// canonically double-lettered words working ("kill", "sleep", "cannot"
+// fold on the pattern side exactly as the text does). ASCII letters only:
+// regex metacharacters, \s/\b escapes, classes and non-Latin scripts are
+// never part of a collapsed run, so a folded pattern stays a valid
+// pattern with unchanged anchors.
+const DEDUP_RUNS = /([a-z])\1+/g;
+
+function dedupFold(text: string): string {
+  return text.replace(DEDUP_RUNS, "$1");
+}
+
+// The one pattern exempt from the folded tier: "off(?:ing)? myself" folds
+// to "of(?:ing)? myself", which matches ordinary prose ("ashamed of
+// myself", "tired of myself"). Its unfolded form keeps matching as
+// before; doubled spellings of it ("offfing myself") stay accepted misses
+// rather than risk a dialog false positive on a benign sentence. MUST
+// mirror the backend's _FOLD_EXEMPT (same pattern string as the JSON).
+const FOLD_EXEMPT = "\\boff(?:ing)?\\s+myself\\b";
+
+const isFoldable = (p: string) => p !== FOLD_EXEMPT;
+
+/** Folded tier twins (audit H-7): the dialog/suppress patterns with
+ *  same-letter runs collapsed, matched only against the folded variants
+ *  below. Compiled once at module load. */
+const DIALOG_FOLDED_PATTERNS: readonly RegExp[] = CRISIS_DIALOG_PATTERNS.filter(isFoldable).map(
+  (p) => new RegExp(dedupFold(p), "i"),
+);
+const SUPPRESS_FOLDED_PATTERNS: readonly RegExp[] = [
+  ...CRISIS_DIALOG_PATTERNS,
+  ...CRISIS_SUPPRESS_EXTRA_PATTERNS,
+]
+  .filter(isFoldable)
+  .map((p) => new RegExp(dedupFold(p), "i"));
+const DIALOG_FOLDED_CONCAT_PATTERNS: readonly RegExp[] = CRISIS_DIALOG_PATTERNS.filter(isFoldable).map(
+  (p) => new RegExp(concatPattern(dedupFold(p)), "i"),
+);
+const SUPPRESS_FOLDED_CONCAT_PATTERNS: readonly RegExp[] = [
+  ...CRISIS_DIALOG_PATTERNS,
+  ...CRISIS_SUPPRESS_EXTRA_PATTERNS,
+]
+  .filter(isFoldable)
+  .map((p) => new RegExp(concatPattern(dedupFold(p)), "i"));
+
+// The benign compounds re-mask on the FOLDED text with their own folded
+// spellings ("awareness" -> "awarenes"): bare "suicide" is a dialog
+// pattern, so "suicide awareness" must stay masked in the folded channel
+// — including when the doubling is what hid it ("suiciide squaad").
+const BENIGN_MASKS_FOLDED: readonly RegExp[] = [...CRISIS_BENIGN_COMPOUNDS]
+  .map(dedupFold)
+  .sort((a, b) => b.length - a.length)
+  .map(benignMask);
+
+/** The letter-run-collapsed twins of the three canonical variants (audit
+ *  H-7). MUST mirror the backend's _folded_variants. Exported for the
+ *  parity suite. */
+export function foldedVariants(text: string): [string, string, string] {
+  let folded = dedupFold(maskBenign(normalizePrePunct(text)));
+  for (const mask of BENIGN_MASKS_FOLDED) folded = folded.replace(mask, " ");
+  const tokens = normalizeToTokens(folded);
+  return [primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens)];
 }
 
 /** Every normalized form the tiers match against — MUST stay
@@ -317,9 +409,14 @@ export function matchVariants(text: string): [string, string, string] {
  *  gentle support dialog). Pure: no I/O, no state. */
 export function detectCrisisLanguage(text: string): boolean {
   const [primary, orphan, concat] = matchVariants(text);
+  if (DIALOG_PATTERNS.some((p) => p.test(primary) || p.test(orphan))) return true;
+  if (DIALOG_CONCAT_PATTERNS.some((p) => p.test(concat))) return true;
+  // H-7 letter-doubling channel: only reached when the canonical forms
+  // are clean, so it can only ever ADD a catch.
+  const [fPrimary, fOrphan, fConcat] = foldedVariants(text);
   return (
-    DIALOG_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||
-    DIALOG_CONCAT_PATTERNS.some((p) => p.test(concat))
+    DIALOG_FOLDED_PATTERNS.some((p) => p.test(fPrimary) || p.test(fOrphan)) ||
+    DIALOG_FOLDED_CONCAT_PATTERNS.some((p) => p.test(fConcat))
   );
 }
 
@@ -328,8 +425,11 @@ export function detectCrisisLanguage(text: string): boolean {
  *  crisis-adjacent patterns. Pure: no I/O, no state. */
 export function matchesCrisisSuppress(text: string): boolean {
   const [primary, orphan, concat] = matchVariants(text);
+  if (SUPPRESS_PATTERNS.some((p) => p.test(primary) || p.test(orphan))) return true;
+  if (SUPPRESS_CONCAT_PATTERNS.some((p) => p.test(concat))) return true;
+  const [fPrimary, fOrphan, fConcat] = foldedVariants(text);
   return (
-    SUPPRESS_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||
-    SUPPRESS_CONCAT_PATTERNS.some((p) => p.test(concat))
+    SUPPRESS_FOLDED_PATTERNS.some((p) => p.test(fPrimary) || p.test(fOrphan)) ||
+    SUPPRESS_FOLDED_CONCAT_PATTERNS.some((p) => p.test(fConcat))
   );
 }

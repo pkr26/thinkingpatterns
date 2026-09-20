@@ -1,18 +1,13 @@
 [
   {
-    "id": "E1.contract-drift",
-    "status": "FINDING",
-    "summary": "66/74 samples diverge from the shared contract (shared/crisis_phrases.json redteam_corpus): [('i want to kill myself', True, True, False, True), ('I WANT TO KILL MYSELF', True, True, False, True), ('kill   myself', True, True, False, True), ('can\u2019t go on', True, True, False, True), ('don\u2019t want to live', True, True, False, True), ('i will su1c1de tonight', True, True, False, True)]"
-  },
-  {
     "id": "E1.python-suppress-bypass",
-    "status": "FINDING",
-    "summary": "65/65 crisis samples evade the suppress tier (the tier that keeps text off cards/questions). Bypasses by technique \u2014 benign-mask-gap: 4/4; concat: 2/2; control-apostrophe: 1/1; control-case: 1/1; control-curly: 1/1; control-plain: 1/1; control-spaces: 1/1; diacritic: 1/1; homoglyph: 8/8; invisible: 2/2; leet-mapped-digit: 1/1; leetspeak: 6/6; non-english: 13/13; punct-split: 3/3; residual-split: 11/11; soft-hyphen: 1/1; space-split: 2/2; unlisted-phrase: 4/4; zero-width: 2/2. Samples: ['i want to kill myself', 'I WANT TO KILL MYSELF', 'kill   myself', 'can\u2019t go on', 'don\u2019t want to live', 'i will su1c1de tonight', 'k1ll myself', '1 want to d1e so bad']..."
+    "status": "BLOCKED",
+    "summary": "0/79 crisis samples evade the suppress tier (the tier that keeps text off cards/questions). Bypasses by technique \u2014 benign-mask-gap: 0/4; concat: 0/2; control-apostrophe: 0/1; control-case: 0/1; control-curly: 0/1; control-plain: 0/1; control-spaces: 0/1; diacritic: 0/1; homoglyph: 0/8; invisible: 0/2; leet-mapped-digit: 0/1; leetspeak: 0/6; letter-doubling: 0/4; non-english: 0/17; past-tense: 0/2; punct-split: 0/3; residual-split: 0/11; sms-shorthand: 0/2; soft-hyphen: 0/1; space-split: 0/2; trailing-leet: 0/2; unlisted-phrase: 0/4; zero-width: 0/2. Samples: []"
   },
   {
     "id": "E1.python-dialog-bypass",
-    "status": "BLOCKED",
-    "summary": "0 samples are suppressed-but-no-dialog BY DESIGN (hopelessness phrasing sits in the suppress_extra tier: never quoted on cards/questions, but the conservative dialog tier stays first-person-ideation only): []"
+    "status": "INFO",
+    "summary": "2 samples are suppressed-but-no-dialog BY DESIGN (hopelessness phrasing sits in the suppress_extra tier: never quoted on cards/questions, but the conservative dialog tier stays first-person-ideation only): [\"i don't see any future for me\", 'everyone would be happier if i was gone']"
   },
   {
     "id": "E1.python-false-positives",
@@ -21,13 +16,13 @@
   },
   {
     "id": "E1.bypass-to-question-quote",
-    "status": "FINDING",
-    "summary": "of 10 bypassing labels fed to question generation, 10 are interpolated verbatim into reflective questions (e.g. ['i want to kill myself', 'I WANT TO KILL MYSELF']) \u2014 the full chain: disguised crisis text in a journal -> pattern card label -> daily question quoting it back"
+    "status": "BLOCKED",
+    "summary": "of 0 bypassing labels fed to question generation, 0 are interpolated verbatim into reflective questions (e.g. []) \u2014 the full chain: disguised crisis text in a journal -> pattern card label -> daily question quoting it back"
   },
   {
     "id": "E3.diagnosis-language",
-    "status": "FINDING",
-    "summary": "diagnosis/clinical vocabulary found: ['/Users/pradeepreddy/Desktop/mental_health_application/backend/app/services/llm.py:77:    \"author: observational, no advice, no diagnosis, no questions. \"', '/Users/pradeepreddy/Desktop/mental_health_application/backend/app/services/llm.py:330:# model must not tell a vulnerable user anything about medication, dosage', '/Users/pradeepreddy/Desktop/mental_health_application/backend/app/services/llm.py:331:# or diagnosis (\"stop taking your medication\", \"take twice the dose\").']"
+    "status": "BLOCKED",
+    "summary": "no diagnosis vocabulary in question templates or the LLM module (remaining grep hits are the prompt instruction 'no advice, no diagnosis' itself and the sanitizer's own forbidden-word blocklist)"
   },
   {
     "id": "E3.llm-kind-allowlist",

@@ -24,11 +24,17 @@ services:
       # Aggregate counters are cheap; 30d comfortably spans the incident
       # postmortem window (runbook: 5 business days) plus trend context.
       - --storage.tsdb.retention.time=30d
-    environment:
-      # Consumed by prometheus.yml's ${MINDPATTERN_METRICS_TOKEN} expansion
-      # at config load; Prometheus refuses to start when unset (fail closed,
-      # matching the api's own behavior without the token).
-      MINDPATTERN_METRICS_TOKEN: ${MINDPATTERN_METRICS_TOKEN:?export MINDPATTERN_METRICS_TOKEN (the same value the api service uses) before starting the monitoring stack}
+    # The scrape credential travels by FILE, not env: Prometheus does NOT
+    # expand variables inside prometheus.yml, so an env var could never
+    # reach `bearer_token:` (prometheus.yml reads it via
+    # bearer_token_file: /etc/prometheus/metrics-token). Compose resolves
+    # `configs: file: ./token` eagerly — `up` fails closed when the token
+    # file has not been created (see README.md here, "Token wiring").
+    configs:
+      - source: metrics_token
+        target: /etc/prometheus/metrics-token
+        # Read-only content mount; the HOST file must stay 0600/owner-only.
+        mode: 0444
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -104,6 +110,15 @@ networks:
   # Grafana must not sit on the production network; it only talks to
   # prometheus over this one.
   internal: {}
+
+# The /metrics bearer token, mounted at /etc/prometheus/metrics-token for
+# prometheus.yml's bearer_token_file. NOT committed: create it by hand from
+# the same value the api service uses (README.md here, "Token wiring"):
+#   umask 077 && printf '%s' "$MINDPATTERN_METRICS_TOKEN" > token
+# A missing file fails `docker compose up` eagerly (fail closed).
+configs:
+  metrics_token:
+    file: ./token
 
 volumes:
   prometheus_data: {}

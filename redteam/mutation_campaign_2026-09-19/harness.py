@@ -596,8 +596,31 @@ def parse_failures(kind: str, output: str) -> list[str]:
     return ordered[:8]
 
 
-def run_command(spec: dict, mutant_id: str) -> tuple[bool, list[str], str, float]:
-    """One command against the mutated tree. Returns (failed, failures, output, seconds)."""
+# pytest exit codes that mean the ORACLE (not the code under test) is
+# broken: 2 interrupted, 3 internal error, 4 usage error (a renamed or
+# deleted test file lands here), 5 no tests collected. Counting any of
+# these as KILLED would print PASSED while verifying nothing — they are
+# SETUP-ERRORs, reported loudly, never kills.
+PYTEST_SETUP_EXITS = {2, 3, 4, 5}
+
+
+def oracle_setup_error(kind: str, returncode: int, output: str) -> str | None:
+    """Why this non-zero exit is a broken oracle rather than a kill, or None."""
+    if kind != "pytest":
+        return None
+    if returncode in PYTEST_SETUP_EXITS:
+        return f"pytest exited {returncode} (oracle broken, not a kill)"
+    if "no tests ran" in output:
+        return "pytest collected no tests (oracle broken, not a kill)"
+    return None
+
+
+def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str], str, float]:
+    """One command against the mutated tree.
+
+    Returns (failed, setup_error, failures, output, seconds). A non-zero
+    pytest exit in PYTEST_SETUP_EXITS is a broken oracle (SETUP-ERROR),
+    not a kill — oracle rot must not be able to green the gate."""
     env = dict(os.environ, CI="true")
     env["PATH"] = str(ROOT / ".tools/node/bin") + os.pathsep + env.get("PATH", "")
     # Round-2 hygiene: never write .pyc during mutant runs (same-second
@@ -612,12 +635,14 @@ def run_command(spec: dict, mutant_id: str) -> tuple[bool, list[str], str, float
         )
         elapsed = round(time.monotonic() - t0, 1)
         out = (proc.stdout or "") + (proc.stderr or "")
-        return proc.returncode != 0, parse_failures(spec["kind"], out), out[-1500:], elapsed
+        return (proc.returncode != 0,
+                oracle_setup_error(spec["kind"], proc.returncode, out),
+                parse_failures(spec["kind"], out), out[-1500:], elapsed)
     except subprocess.TimeoutExpired as exc:
         elapsed = round(time.monotonic() - t0, 1)
         out = ((exc.stdout or b"").decode(errors="replace")
                + (exc.stderr or b"").decode(errors="replace"))
-        return True, [], out, elapsed
+        return True, None, [], out, elapsed
 
 
 def run_mutant(m: dict) -> dict:
@@ -636,9 +661,17 @@ def run_mutant(m: dict) -> dict:
         per_cmd: list[dict] = []
         killed = False
         for spec in specs:
-            failed, failures, out, seconds = run_command(spec, m["id"])
+            failed, setup_error, failures, out, seconds = run_command(spec, m["id"])
             per_cmd.append({"kind": spec["kind"], "cmd": " ".join(spec["cmd"][:6]),
-                            "failed": failed, "failures": failures, "seconds": seconds})
+                            "failed": failed, "setup_error": setup_error,
+                            "failures": failures, "seconds": seconds})
+            if setup_error:
+                # The oracle could not run (renamed test file, collection
+                # crash, bad flag): a KILLED verdict here would verify
+                # nothing. Fail loudly instead of green.
+                return {**m, "killed": None, "status": "SETUP-ERROR",
+                        "detail": f"{spec['kind']}: {setup_error}",
+                        "commands": per_cmd}
             if failed:
                 killed = True
                 break  # first failing oracle is enough

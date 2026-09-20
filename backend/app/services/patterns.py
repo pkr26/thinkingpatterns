@@ -185,7 +185,9 @@ class JournalEntry:
 
 @dataclass(frozen=True)
 class Pattern:
-    kind: str  # temporal | mood_correlation | recurring_phrase
+    kind: str  # the engine's kind taxonomy lives in brain.py (see
+    # STATISTICAL_KINDS and the _Signal constructions); 17 kinds as of
+    # 2026-09-20 — never enumerate them here, this field only carries them
     label: str
     occurrences: int
     confidence: float

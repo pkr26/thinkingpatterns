@@ -4,13 +4,18 @@ The on-device brain (mobile/src/brain/) needs byte-identical behavior for
 the pieces it runs locally — the graded sentiment engine first. This script
 serializes the AUTHORITATIVE runtime dicts (post-merge, exactly what the
 Python engine looks up) plus the scalar tuning constants into
-shared/brain_lexicon.json. The mobile copy (mobile/src/brain/lexicon.json)
-is a byte-for-byte copy pinned to this file by tests on both sides — the
-same standing as shared/vectors.json and shared/generic_questions.json.
+shared/brain_lexicon.json. The mobile runtime form is the generated TS
+module mobile/src/brain/lexicon.ts (see TS_OUT below) — pinned equal to
+the shared JSON by tests on both sides, the same standing as
+shared/vectors.json and shared/generic_questions.json.
 
-Run after any lexicon/constant change:
+Run after any lexicon/constant change — the script writes BOTH artifacts
+itself (the shared JSON contract and the mobile TS module); there is no
+manual copy step anymore. The old `cp .../mobile/src/brain/lexicon.json`
+instruction named an output form that no longer exists (2026-09-19
+audit, L-37):
+
     cd backend && ../.venv/bin/python scripts/dump_brain_lexicon.py
-    cp ../shared/brain_lexicon.json ../mobile/src/brain/lexicon.json
 """
 
 from __future__ import annotations

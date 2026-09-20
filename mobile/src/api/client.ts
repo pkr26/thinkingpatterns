@@ -58,8 +58,13 @@ const CONSENT_ID_PATTERN = /^[0-9a-f]{32}$/;
 /** Which sharing-disclosure copy the grant flow showed; recorded on the
  *  consent row server-side (GDPR Art. 7 parity with the LLM consent).
  *  Keep in sync with backend/app/api/consents.py SHARING_DISCLOSURE_VERSION
- *  — bump BOTH when the disclosure copy changes. */
-export const SHARING_DISCLOSURE_VERSION = "v1";
+ *  — bump BOTH when the disclosure copy changes.
+ *  v2 (2026-09-20 audit H-14): the copy now names wellbeing measures
+ *  (PHQ-9) and caseload summaries alongside entries and patterns — the
+ *  Art. 7 record must state the real data scope. Legacy v1 consents stay
+ *  active for entries/insights; the server gates measure reads on v2 and
+ *  answers 409 disclosure_outdated, which the grant flow surfaces. */
+export const SHARING_DISCLOSURE_VERSION = "v2";
 
 /** A sharing consent as the patient's app renders it (backend ConsentOut).
  *  The server is untrusted; unknown fields pass through untouched. */
@@ -82,11 +87,35 @@ export interface PairingLookup {
 }
 
 /** `URL#hostname` is canonicalized before it reaches this check. Keep the
- * permitted development loopback set deliberately exact: a look-alike such
- * as `localhost.` or `127.0.0.2` must still require TLS. */
+ *  permitted development loopback set deliberately exact: a look-alike such
+ *  as `localhost.` or `127.0.0.2` must still require TLS. */
 function isExplicitLoopbackHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
+/** Localhost, 127.0.0.1 and [::1] address the same device-local loopback
+ *  interface — unify their spelling. Shared by the offline queue's storage
+ *  scoping AND by request()'s origin pin (H-1): the queue canonicalizes the
+ *  pin it passes, so the send-point comparison must canonicalize too, or a
+ *  stored `localhost`/`[::1]` base URL makes every pinned upload throw
+ *  OriginPinnedError BEFORE the network — under the shipped default server
+ *  URL the queue could never flush at all. Canonicalizing only collapses
+ *  loopback aliases; every real origin switch still trips the pin. */
+export function canonicalOrigin(origin: string): string {
+  try {
+    const url = new URL(origin);
+    // WHATWG serializes IPv6 hosts WITH brackets ("[::1]"); accept both
+    // spellings so every loopback form maps to one canonical origin.
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (host === "localhost" || host === "::1" || host === "127.0.0.1") {
+      return `${url.protocol}//127.0.0.1${url.port ? `:${url.port}` : ""}`;
+    }
+    return origin;
+  } catch {
+    // Stryker disable next-line BlockStatement: unreachable for production inputs — canonicalOrigin only ever receives URL.origin output (always parseable); the guard exists for direct callers with arbitrary strings
+    return origin;
+  }
 }
 
 export function parseServerUrl(candidate: string): { url: string; insecure: boolean } | null {
@@ -305,6 +334,10 @@ export const API_ERROR_CODES = [
   "entry_blob_invalid",
   "entry_payload_malformed",
   "feedback_blob_invalid",
+  // 2026-09-20 audit H-14: the server returns this 409 when a legacy v1
+  // sharing consent cannot cover a measures read; TherapistShareScreen
+  // branches on it to show the calm "sharing terms updated" state.
+  "disclosure_outdated",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -318,9 +351,10 @@ function sanitizeCode(code: unknown): ApiErrorCode | undefined {
     : undefined;
 }
 
-/** Retry-After on a 429 is seconds (or an HTTP-date); it is untrusted input
- *  — clamp to a sane ceiling so a hostile server cannot park the queue for
- *  days. Returns undefined when absent or unparseable. */
+/** Retry-After on a 429 (or a 503 — the backend emits it there too) is
+ *  seconds (or an HTTP-date); it is untrusted input — clamp to a sane
+ *  ceiling so a hostile server cannot park the queue for days. Returns
+ *  undefined when absent or unparseable. */
 const MAX_RETRY_AFTER_MS = 60 * 60_000;
 export function parseRetryAfter(header: string | null): number | undefined {
   if (!header) return undefined;
@@ -363,6 +397,13 @@ interface RequestOptions {
    *  newly selected server. Checked after the current base URL is resolved
    *  and BEFORE a token is read or attached. */
   expectedOrigin?: string;
+  /** This request authenticates by verifier (auth/login), not by bearer:
+   *  send no Authorization header, and never treat its 401 as a dead
+   *  session. A wrong password during a biometric session's online
+   *  re-verification (reauth) would otherwise fire the vault-lock hook
+   *  under the "wrong password" alert — fail-closed but disorienting
+   *  (H-2 verification note, 2026-09-20). */
+  noBearer?: boolean;
 }
 
 /** Raised locally (no request is sent) when an origin-pinned request finds
@@ -384,8 +425,17 @@ async function request(
   opts: RequestOptions = {},
 ): Promise<any> {
   const base = await getBaseUrl();
-  if (opts.expectedOrigin !== undefined && new URL(base).origin !== opts.expectedOrigin) {
-    throw new OriginPinnedError(opts.expectedOrigin, new URL(base).origin);
+  const actualOrigin = new URL(base).origin;
+  // H-1: the offline queue pins uploads to the CANONICAL loopback spelling
+  // of its scope; a stored base URL may spell the same device-local server
+  // as `localhost`, `127.0.0.1` or `[::1]`. Canonicalize BOTH sides of the
+  // comparison (idempotent) so alias spellings of one loopback interface
+  // pass while every genuinely different origin still refuses.
+  if (
+    opts.expectedOrigin !== undefined &&
+    canonicalOrigin(actualOrigin) !== canonicalOrigin(opts.expectedOrigin)
+  ) {
+    throw new OriginPinnedError(opts.expectedOrigin, actualOrigin);
   }
   // Settings validates before persisting, but AsyncStorage can be restored
   // from an older backup or tampered with. Enforce the transport boundary at
@@ -394,7 +444,7 @@ async function request(
   if (!configured || (configured.insecure && !isLoopbackUrl(configured.url))) {
     throw new ApiError(0, "refusing to send data to an invalid or cleartext remote server URL");
   }
-  const token = await secureStore.getItem(TOKEN_KEY);
+  const token = opts.noBearer ? null : await secureStore.getItem(TOKEN_KEY);
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
   const controller = new AbortController();
@@ -460,8 +510,11 @@ async function request(
     }
     // Some network stacks / mocked responses carry no headers object at
     // all — treat Retry-After as absent rather than crashing the path.
+    // L-54: the backend attaches Retry-After to 503 maintenance responses
+    // as well as 429s; parsing only 429 made the offline queue fall back to
+    // its 30 s+ exponential backoff on an explicit server advisory.
     const retryAfter =
-      response.status === 429 && typeof response.headers?.get === "function"
+      (response.status === 429 || response.status === 503) && typeof response.headers?.get === "function"
         ? parseRetryAfter(response.headers.get("retry-after"))
         : undefined;
     throw new ApiError(
@@ -480,7 +533,7 @@ export class ApiError extends Error {
     message: string,
     /** Machine-readable v1 error code; undefined on legacy servers. */
     public code?: ApiErrorCode,
-    /** Server-advised retry delay (429 Retry-After), clamped; else absent. */
+    /** Server-advised retry delay (429/503 Retry-After), clamped; else absent. */
     public retryAfterMs?: number,
   ) {
     super(message);
@@ -640,7 +693,11 @@ export const api = {
     await AsyncStorage.removeItem(saltKey(username));
   },
   login: (username: string, authKeyB64: string) =>
-    request("POST", `${API_PREFIX}/auth/login`, { username, verifier: authKeyB64 }, {}, { sensitive: true }),
+    // noBearer: a login 401 means the VERIFIER was wrong (wrong password),
+    // never that the stored bearer died — so the vault-lock hook must not
+    // fire on it (biometric sessions use this endpoint for the online
+    // re-auth check; see reauth.ts).
+    request("POST", `${API_PREFIX}/auth/login`, { username, verifier: authKeyB64 }, {}, { sensitive: true, noBearer: true }),
   /** Server-side kill switch: invalidates every bearer token for the account. */
   logout: () => request("POST", `${API_PREFIX}/auth/logout`),
 
@@ -653,7 +710,39 @@ export const api = {
       `${API_PREFIX}/measures`,
       { client_measure_id: clientMeasureId, blob: blobB64, measure_date: measureDate },
     ),
-  listMeasures: () => request("GET", `${API_PREFIX}/measures`),
+  /** One offset page of the patient's own measures, newest first (the
+   *  server orders by (measure_date, received_at, id) DESC — a
+   *  deterministic total order, so offset pages tile cleanly). */
+  listMeasuresPage: (limit: number, offset: number) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return request("GET", `${API_PREFIX}/measures?${params.toString()}`);
+  },
+  /** All stored measures, newest first. M-4/L-55 (2026-09-20): the write
+   *  quota is 2000 but a single unpaged GET returned only the server's
+   *  default page of 100 — everything older was stored and quota-charged
+   *  yet invisible to the patient. Walk offset pages of the server cap
+   *  (500) until a short page, dedup by id (a concurrent insert shifts
+   *  offset windows by one), and stop at the quota bound so a lying
+   *  server cannot keep the app paging forever. */
+  listMeasures: async (): Promise<any[]> => {
+    const PAGE_SIZE = 500;
+    const MAX_MEASURES = 2000; // mirrors the server's per-user quota
+    const rows: any[] = [];
+    const seen = new Set<string>();
+    for (let offset = 0; offset < MAX_MEASURES; offset += PAGE_SIZE) {
+      const page = (await request("GET", `${API_PREFIX}/measures?limit=${PAGE_SIZE}&offset=${offset}`)) as any[];
+      if (!Array.isArray(page)) return rows;
+      for (const row of page) {
+        if (row && typeof row.id === "string") {
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+        }
+        rows.push(row);
+      }
+      if (page.length < PAGE_SIZE) break;
+    }
+    return rows;
+  },
   /** Offline-queue upload. Identical to createEntry but pinned to the origin
    *  the queue is scoped to: the request refuses to ship (OriginPinnedError,
    *  nothing sent) if the selected server moved, so queued ciphertext can

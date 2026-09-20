@@ -220,22 +220,31 @@ def effective_sample_size(n: int, lag1: float | None) -> float:
     with r = 0.5 carries the information of about n/3 independent points.
     Day-level mood residuals are exactly such a series (that is what the
     inertia detector measures), so tests over them must not count the raw
-    n. Clamped to [3, n]: the floor keeps Welch's degrees of freedom
-    defined, the cap means a zero/negative/unknown autocorrelation never
-    INFLATES the effective sample beyond the observed one.
+    n. Clamped to [3, n] — and to n itself when n < 3, so the effective
+    count can never exceed the observed one (audit L-19, 2026-09-20: the
+    old max(3.0, min(n, …)) order returned 3.0 > n for n < 3): the floor
+    keeps Welch's degrees of freedom defined, the cap means a
+    zero/negative/unknown autocorrelation never INFLATES the effective
+    sample beyond the observed one.
     """
     if n <= 0:
         return 0.0
     if lag1 is None or lag1 <= 0.0:
         return float(n)
     r = min(lag1, 0.9)  # cap: r -> 1 would nuke n_eff to the floor anyway
-    return max(3.0, min(float(n), n * (1.0 - r) / (1.0 + r)))
+    return min(float(n), max(3.0, n * (1.0 - r) / (1.0 + r)))
 
 
 def brown_forsythe_two_sided_p(
     xs: list[float], ys: list[float], n_eff_x: float | None = None, n_eff_y: float | None = None
 ) -> float:
-    """Two-sided Brown-Forsythe (median-centered Levene) p for H0: equal spread.
+    """Brown-Forsythe (median-centered Levene) p for H0: equal spread.
+
+    UPPER-TAILED only (2026-09-20 audit fix M-7 — the historical name keeps
+    the "_two_sided" suffix so existing brain.py callers stay source-stable,
+    but the doubling is gone; see the return site). An instability claim is
+    directional by construction ("swung MORE than usual"), so the standard
+    one-sided test is both the textbook form and the honest one.
 
     The instability detector replaced its variance-ratio F-test with this
     (2026-09-17): the F-test assumes iid normal observations and is
@@ -274,8 +283,13 @@ def brown_forsythe_two_sided_p(
     eff_x = n_eff_x if n_eff_x is not None else nx
     eff_y = n_eff_y if n_eff_y is not None else ny
     df2 = max(2, int(min(eff_x, nx) + min(eff_y, ny) - 2))
-    upper = f_sf(bf, 1, df2)
-    return min(1.0, 2.0 * min(upper, 1.0 - upper))
+    # Upper tail ONLY (2026-09-20 audit fix M-7): standard Brown-Forsythe
+    # is a one-sided spread test. The former "two-sided" doubling
+    # manufactured significance exactly when the point estimate said "no
+    # difference" — near-identical spreads drove the upper tail toward 1,
+    # and 2*(1-upper) then reported p ≈ 0 for "instability". Identical
+    # spreads must never be a claim, so the lower tail is simply dropped.
+    return min(1.0, f_sf(bf, 1, df2))
 
 
 def fisher_z_difference_p(

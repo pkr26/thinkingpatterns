@@ -10,12 +10,18 @@ Read paths are consent-gated per request: an ACTIVE consent row for
 (therapist, patient) is checked before any insight blob or entry row is
 touched, and revoked/unknown patients answer the same 404. Notes are the
 therapist's own record (they survive a revoke; account deletion on either
-side cascades them away with the row).
+side cascades them away with the row). The measures read additionally
+requires the consent to have been granted under the CURRENT sharing
+disclosure (H-14, 2026-09-20): legacy v1 grants never named measures, so
+they authorize entries/insights/notes but answer 409 disclosure_outdated
+for measures until the patient re-consents under the v2 copy.
 
 Auditing: grant/revoke (by the patient) and every patient-data read/write
-(by the therapist) append access_log rows. The patient LIST is not audited
-row-by-row — it exposes only the therapist's own consent metadata — while
-insights/entries/notes reads are, because those move patient content.
+(by the therapist) append access_log rows. The patient LIST is audited too
+(H-14, 2026-09-20): since the caseload-summary columns landed on the list,
+it moves patient-derived content, so every listed patient gets a
+``list_patients`` row — one per patient whose metadata (and, while the
+grant lives, summary) the therapist received.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ import os
 from datetime import date as date_type, timedelta
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +78,8 @@ from ..security.tokens import issue_token
 from ..services import threshold
 from .account import _require_verifier
 from .auth import SALT_BYTES, AUTH_KEY_SIZE, _auth_limiter, auth_work_slot, hash_verifier_off_loop
-from .consents import MAX_PATIENTS_PER_THERAPIST
+from .consents import MAX_PATIENTS_PER_THERAPIST, SHARING_DISCLOSURE_VERSION
+from .measures import MEASURE_PAGE_LIMIT, _measure_out
 from .entries import (
     ENTRIES_REVISION_HEADER,
     MAX_COLLECTION_REVISION,
@@ -193,8 +201,47 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
     return "unique" in str(orig).lower()
 
 
+def _is_fk_violation(exc: IntegrityError) -> bool:
+    """The write lost a parent row: the patient (or therapist) account was
+    hard-deleted while this request was between its consent read and its
+    commit — account deletion cascades the consent and every chart row, so
+    the insert dies on the foreign key. 23503 foreign_key_violation; the
+    SQLite fallback matches the driver's wording. Distinguished from a
+    duplicate by create_note (2026-09-20 audit fix L-12): a concurrent
+    deletion masquerading as "already exists" would hide the real outcome."""
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    if getattr(orig, "pgcode", None) == "23503" or getattr(orig, "sqlstate", None) == "23503":
+        return True
+    return "foreign key" in str(orig).lower()
+
+
 def _audit(session: AsyncSession, actor: User, user_id: str, action: str) -> None:
     session.add(AccessLog(actor_id=actor.id, actor_role=actor.role, user_id=user_id, action=action))
+
+
+def _disclosure_outdated_response() -> JSONResponse:
+    """409 envelope for a measures read under a legacy sharing disclosure
+    (H-14, 2026-09-20).
+
+    Returned directly rather than raised: the shared API error envelope
+    carries only detail+code, and the mobile client needs to branch on
+    ``meta.sharing_disclosure_version`` to offer the re-consent flow
+    instead of a dead end — so this one payload embeds the meta block the
+    decision needs. Same shape discipline as the envelope otherwise."""
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": (
+                "sharing disclosure is outdated; this consent does not cover "
+                "measures. The patient must review the updated disclosure and "
+                "re-consent."
+            ),
+            "code": "disclosure_outdated",
+            "meta": {"sharing_disclosure_version": SHARING_DISCLOSURE_VERSION},
+        },
+    )
 
 
 # --- registration & self ------------------------------------------------------
@@ -453,6 +500,7 @@ async def _active_consent(session: AsyncSession, therapist: User, user_id: str) 
     ],
 )
 async def list_patients(
+    request: Request,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
 ):
@@ -502,6 +550,25 @@ async def list_patients(
                     continue
                 consent, patient = row
                 active = consent.status == "active"
+                # H-16 (2026-09-20): gate the caseload summary on the
+                # patient being CURRENTLY insight-phase, not merely on the
+                # consent status. Every sibling patterns read is phase-gated
+                # ("nothing is revealed before the threshold, including
+                # stored leftovers"); the list used to keep serving the last
+                # insight-phase summary after entry deletions dropped the
+                # account back to baseline — until revoke or a future
+                # insight-phase recompute. Same _entry_dates +
+                # threshold.evaluate live check those reads use.
+                insight_phase = False
+                if active:
+                    dates = await _entry_dates(session, patient_id)
+                    insight_phase = (
+                        threshold.evaluate(
+                            dates, request.app.state.settings.unlock_threshold_days
+                        ).phase
+                        is threshold.Phase.INSIGHT
+                    )
+                serve_summary = active and insight_phase
                 out.append(
                     PatientOut(
                         user_id=patient.id,
@@ -516,17 +583,25 @@ async def list_patients(
                             if active and consent.wrapped_key is not None
                             else None
                         ),
-                        # Same rule for the caseload summary: encrypted to
-                        # this therapist, gone the moment the grant does.
+                        # Same rule for the caseload summary — plus the live
+                        # phase gate above: encrypted to this therapist, gone
+                        # the moment the grant does OR the account leaves the
+                        # insight phase.
                         summary_blob=(
                             base64.b64encode(bytes(consent.summary_blob)).decode("ascii")
-                            if active and consent.summary_blob is not None
+                            if serve_summary and consent.summary_blob is not None
                             else None
                         ),
-                        summary_eph_pub=consent.summary_eph_pub if active else None,
-                        summary_updated_at=consent.summary_updated_at if active else None,
+                        summary_eph_pub=consent.summary_eph_pub if serve_summary else None,
+                        summary_updated_at=consent.summary_updated_at if serve_summary else None,
                     )
                 )
+                # H-14 (2026-09-20): the list moves patient-derived caseload
+                # summaries, so it is audited like every other patient-data
+                # read — one row per listed patient (the exposure is
+                # per-patient), action ``list_patients``. Committed with the
+                # same per-patient transaction as the row above.
+                _audit(session, user, patient_id, "list_patients")
                 await session.commit()
     return out
 
@@ -576,6 +651,12 @@ async def read_patient_insights(
                 streak=state.streak,
                 days_remaining=state.days_remaining,
                 blob=blob,
+                # H-16 (2026-09-20): the rollback-replay detection contract
+                # applies on the therapist path too — the response used to
+                # hardcode 0 while the decrypted payload embeds N >= 1, so
+                # the documented byte-identical-shape promise (and the
+                # portal's stateSeqGuard) could never fire here.
+                state_seq=latest.state_seq if latest is not None else 0,
             )
             await session.commit()  # the audit row
     return response
@@ -593,40 +674,55 @@ async def read_patient_measures(
     user_id: str,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=200, ge=1, le=MEASURE_PAGE_LIMIT),
+    offset: int = Query(default=0, ge=0, le=100_000),
 ):
     """The patient's recorded wellbeing measures (MBC, 2026-09-19): opaque
     blobs under the SAME active-consent rule as entries — the portal
     decrypts with the per-consent unwrapped data key and interprets;
     this server never learns a score. Read is audit-logged like every
-    other patient-data access."""
+    other patient-data access.
+
+    H-14 (2026-09-20): the consent must ALSO have been granted under the
+    CURRENT sharing disclosure — the v1 copy named only entries and
+    patterns, so it cannot authorize measures. Legacy grants answer 409
+    disclosure_outdated (meta carries the current version) instead of
+    serving data the patient never agreed to share in those terms.
+
+    M-4 (2026-09-20): mirrors the patient read's deterministic
+    (measure_date, received_at, id) DESC ordering with limit/offset paging
+    (cap raised 200 -> 500): the old hardcoded 200-row, no-continuation
+    read truncated the MBC trend while the patient's write quota is 2000.
+    """
     if len(user_id) > 32:
         raise ApiError(status_code=404, detail="patient not found", code="not_found")
     out: list[MeasureOut] = []
     async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
         async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
-            await _active_consent(session, user, user_id)
+            consent = await _active_consent(session, user, user_id)
+            if consent.disclosure != SHARING_DISCLOSURE_VERSION:
+                # Nothing was served: return the re-consent signal before
+                # touching any ciphertext (and before any audit row — the
+                # refusal exposed no patient data).
+                return _disclosure_outdated_response()
             rows = (
                 (
                     await session.execute(
                         select(Measure)
                         .where(Measure.user_id == user_id)
-                        .order_by(Measure.measure_date.desc(), Measure.received_at.desc())
-                        .limit(200)
+                        .order_by(
+                            Measure.measure_date.desc(),
+                            Measure.received_at.desc(),
+                            Measure.id.desc(),
+                        )
+                        .offset(offset)
+                        .limit(limit)
                     )
                 )
                 .scalars()
                 .all()
             )
-            for row in rows:
-                out.append(
-                    MeasureOut(
-                        id=row.id,
-                        client_measure_id=row.client_measure_id,
-                        blob=base64.b64encode(bytes(row.blob)).decode("ascii"),
-                        measure_date=row.measure_date,
-                        received_at=row.received_at,
-                    )
-                )
+            out = [_measure_out(row) for row in rows]
             session.add(
                 AccessLog(
                     actor_id=user.id,
@@ -756,6 +852,16 @@ async def read_patient_entries(
                     .scalars()
                     .all()
                 )
+                # Audit durability (2026-09-20 audit fix M-30): journal
+                # ciphertext for this therapist is now in memory, so the
+                # audit row added above must survive ANY later failure. The
+                # consistency checks below deliberately raise 409 AFTER this
+                # fetch — a rolled-back audit row would mean the server
+                # fetched a chart with no surviving access record. Committing
+                # here in its own short transaction (nothing else is pending)
+                # pins the access fact before the checks that can refuse the
+                # page.
+                await session.commit()
                 rows_by_id = {row.id: row for row in rows}
                 if len(rows_by_id) != len(selected_ids):
                     # A second worker changed the page after its metadata
@@ -799,7 +905,11 @@ async def read_patient_entries(
             # and terminal pages, so a caller never needs to infer it from a
             # continuation header.
             response.headers[ENTRIES_REVISION_HEADER] = str(revision)
-            await session.commit()  # the audit row
+            # The audit row was already committed after the blob fetch (M-30);
+            # empty/oversized-refused pages never reached that commit and are
+            # correctly unaudited (no ciphertext was served). This trailing
+            # commit closes the read transaction symmetrically.
+            await session.commit()
     return result
 
 
@@ -1002,6 +1112,12 @@ async def list_notes(
                 .scalars()
                 .all()
             )
+            # Audit durability (2026-09-20 audit fix M-30, same fix as the
+            # entries read): note ciphertext is now in memory, and the
+            # mismatch/size checks below can raise 409 AFTER this point. The
+            # audit row added above must survive those refusals — the server
+            # fetched the chart either way.
+            await session.commit()
             # Normal writes hold this same chart lock.  A missing/changed row
             # therefore signals a bypassed deployment invariant rather than a
             # reason to return a short page that an old client mistakes for
@@ -1023,7 +1139,10 @@ async def list_notes(
         if final_revision != revision:
             raise collection_changed_error("notes", NOTES_REVISION_HEADER, final_revision)
         response.headers[NOTES_REVISION_HEADER] = str(revision)
-        await session.commit()  # the audit row
+        # The audit row was already committed after the blob fetch (M-30);
+        # refused pages that never fetched ciphertext are correctly
+        # unaudited. This closes the read transaction symmetrically.
+        await session.commit()
     # Modern byte-bounded pages always advance exactly by materialized rows.
     # The chart lock/mismatch check above turns a bypassed write invariant
     # into a retryable conflict instead of an ambiguous end-of-history signal.
@@ -1113,7 +1232,24 @@ async def create_note(
             await session.commit()
         except IntegrityError as exc:
             await session.rollback()
-            raise ApiError(status_code=409, detail="note already exists", code="conflict") from exc
+            if _is_unique_violation(exc):
+                # The duplicate is the genuine idempotent-retry/conflict case
+                # (the pre-check above is the fast path; the unique index on
+                # (therapist, client_note_id) decides races).
+                raise ApiError(
+                    status_code=409, detail="note already exists", code="conflict"
+                ) from exc
+            if _is_fk_violation(exc):
+                # L-12 (2026-09-20): the patient account was hard-deleted
+                # between _note_target's consent read and this commit (the
+                # deletion cascades the consent and the whole chart). The
+                # note was NOT created and nothing "already exists" — 404,
+                # the same flat answer an unknown pair gets, never a
+                # masquerading conflict.
+                raise ApiError(
+                    status_code=404, detail="patient not found", code="not_found"
+                ) from exc
+            raise
         # A concurrent update/delete uses this same chart fence.  Refresh and
         # construct the response before opening it, so a successful write
         # cannot turn into a stale-row error (or serialize changed data) in

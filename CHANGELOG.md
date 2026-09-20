@@ -6,6 +6,94 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-20 (second pass) — Audit-verification close-out: the 7 stragglers
+
+An independent verification pass (`AUDIT_VERIFICATION_2026-09-20.md`, 11
+verifier agents + live repros) confirmed 145/154 actionable findings fixed
+and closed the remainder:
+
+- **H-7 close-out (crisis engines)**: letter-doubling ("kiill myself",
+  "suiccide") still bypassed every tier on both engines — the one gap the
+  first pass left. Both engines now match a fourth, folded channel:
+  same-letter runs collapse on BOTH sides (text variant + tier-twin
+  pattern), so "kiill myself"→"kil myself" meets "kil(?:ed|ing)? myself".
+  "off(?:ing)? myself" is exempt from the folded tier (its fold matches
+  ordinary "of myself" prose); benign compounds re-mask after folding
+  ("suiciide squaad" stays silent). Corpus +6 rows (technique
+  letter-doubling incl. benign controls), fixtures extended, unit pins on
+  both platforms, e_crisis re-run (0/79 bypasses).
+- **M-4/L-55 close-out (mobile)**: `api.listMeasures()` now walks offset
+  pages (500/page, id-deduped against concurrent-insert shifts, stopping
+  at the 2000 quota bound) — the patient app previously saw only the
+  newest 100 of up to 2000 quota-charged PHQ-9 measures.
+- **L-19**: `effective_sample_size` clamps outermost to n — the old order
+  returned 3.0 > n for n<3 samples.
+- **L-30**: `TherapistNote.pattern_pid` (the one analysis-derived
+  plaintext) is now disclosed in the model comment, README's "Metadata
+  the server does hold", and the DPIA.
+- **L-38**: `_audit_measure.py`'s dead `if True:` block dedented.
+- **L-54**: the offline queue honors `Retry-After` on 503 maintenance
+  responses too (it was dropped after client parsing was fixed).
+- Verification-pass extras: login requests no longer carry the bearer or
+  trip the vault-lock hook on a wrong password (H-2's biometric
+  re-verification wart); the M-5 counter assertions were added to the
+  pinned test; three stale comments corrected (TherapistShareScreen,
+  brain.py language-detection, AccessLog action docstring).
+
+### 2026-09-20 — Deep-audit remediation: every Critical/High/Medium/Low finding fixed
+
+All 114 actionable findings from the 2026-09-19 full-repository audit
+(`AUDIT_FINDINGS.md`; 1 Critical, 20 High, 36 Medium, 57 Low) were fixed —
+the engine/NLP/crypto-parity work by the coordinating engineer, the
+API/security, mobile-app, portal and deploy/redteam work by parallel
+streams. Highlights, by severity:
+
+- **Critical C-1**: a vault lock landing mid-save used to encrypt the
+  entry (and the device mood log) under the zeroized key — a blob that
+  saves "successfully" and can never be decrypted again. The keys are now
+  re-acquired after the user-id await and snapshotted for the async mood
+  chain, so a mid-save lock dies loudly instead.
+- **Crisis engines (H-7/M-20/L-23)**: the Romance-language suicidio
+  family, Spanish hopelessness phrasing, past-tense ideation
+  ("killed myself"), SMS "2"→"to" and trailing leet digits ("suicid3",
+  "d13") now fire on both engines; U+2065 joined the invisible set
+  (parity restored, 58/7542 fuzz divergences gone); prevention-campaign
+  masking covers CJK and Spanish.
+- **Sentiment (H-8/H-18)**: "quiero" no longer reads +2.2 (it boosted
+  "quiero morir" positive); the Spanish death/self-harm lexicon class
+  shipped; Latin diacritics and iOS U+2019 fold before tokenization on
+  BOTH platforms (70 ES keys were structurally unreachable; curly
+  apostrophes defeated every contraction negator); the on-device engine's
+  lookup tables are null-prototype (the token "constructor" scored NaN
+  and silently deleted a day from the mood log). Cross-platform vectors
+  extended to 48 sentiment cases (NFC/NFD parity pinned).
+- **Brain lifecycle (H-9/H-10/H-11/M-8/M-9)**: every statistical kind —
+  including the newer inertia/coupling/sense-making/diversity/cadence/
+  avoidance families and RISING topic claims — now passes the replication
+  gate before surfacing; the avoidance/cadence writing calendar is built
+  from all journaling days (a daily "other"-language journal no longer
+  manufactures silence); semantic-flip forks are reused instead of
+  re-minted (a flipped claim can re-establish itself); mood-correlation
+  tests collapse clustered same-day entries to day means; never-surfaced
+  candidates archive quietly instead of surfacing as "fading" cards.
+- **Product surface**: export streams PHQ-9 measures (H-3) and the
+  offline decrypt tool reads them (and brain rows, M-31); disclosure v2
+  names measures with a legacy-consent path (H-14); the day's reflective
+  question is pinned on first write (H-12); therapist insights are
+  phase-gated and carry state_seq (H-16); the portal stops fabricating
+  sparkline moods (H-13); biometric-unlocked sessions can re-verify a
+  password online instead of always reporting "Wrong password" (H-2);
+  the offline queue flushes under the default localhost URL (H-1).
+- **Infrastructure/tooling**: malformed-JSON floods hit the rate limiter
+  (M-1); huge-integer token exp can't 500 (H-17); Prometheus reads its
+  bearer token from a mounted file (H-5); the mutation gate can't be
+  defeated by oracle rot and runs in CI (H-15/M-32/M-33); monitoring
+  metric grounding derives from `metrics.py` (L-83); redteam verdicts are
+  wired to their computed conditions and results were regenerated from a
+  clean tree (H-15/M-17/M-34).
+
+## Unreleased (prior)
+
 ### 2026-09-19 — Final wave: Spanish analysis language, monitoring, off-site backups, HealthKit seam, native checklist
 
 Spanish + language detection by the coordinating engineer; monitoring and

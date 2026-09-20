@@ -172,6 +172,65 @@ class TestDualVariantAndMasking:
         assert crisis.matches_dialog("suicidal thoughts again")
 
 
+class TestLetterDoublingFold:
+    """The 2026-09-20 audit H-7 close-out: a letter typed twice ("kiill
+    myself", "suiccide") matched no tier on either engine. The folded
+    channel collapses same-letter runs on BOTH sides (text variant + tier
+    twin). Mirrored by mobile/tests/crisisDetect.test.ts."""
+
+    def test_doubled_letters_fire_both_tiers(self):
+        for text in (
+            "kiill myself",
+            "suiccide",
+            "i want to kiill myself",
+            "suuiicide",
+            "i want to diie",
+            "i nearly tookk my own life",
+            "sleeep forever",
+            "i cannnot go on",
+            # Concatenated, too: the folded concat twin of the pattern.
+            "kiillmyself",
+        ):
+            assert crisis.matches_dialog(text), f"letter-doubling missed dialog on {text!r}"
+            assert crisis.matches_suppress(text), f"letter-doubling missed suppress on {text!r}"
+
+    def test_fold_never_fires_on_ordinary_prose(self):
+        # "of myself" is the folded twin of "off myself" — the exact
+        # collision the fold exemption exists for. Everything else here
+        # folds (coffee->cofe, feel->fel, sleep->slep) into nothing.
+        for text in (
+            "i am so ashamed of myself",
+            "proud of myself for once",
+            "tired of myself but hanging on",
+            "i feel good today",
+            "coffee and a good book",
+            "the meeting went well",
+        ):
+            assert not crisis.matches_dialog(text), f"fold fired on {text!r}"
+            assert not crisis.matches_suppress(text), f"fold fired on {text!r}"
+
+    def test_benign_compounds_remask_after_folding(self):
+        # The mask is literal, so doubling in the FIRST word HID the whole
+        # compound from it — the folded channel re-masks with folded
+        # compound spellings. (Doubling in the second word, "suicide
+        # awarenness", is the pre-existing literal-mask gap: the intact
+        # "suicide" fires the canonical tier exactly as any typo there
+        # always has.)
+        for text in (
+            "we watched suiciide squad last night",
+            "we discussed suiciide prevention in class",
+        ):
+            assert not crisis.matches_dialog(text), f"folded mask failed on {text!r}"
+            assert not crisis.matches_suppress(text), f"folded mask failed on {text!r}"
+
+    def test_folded_channel_only_adds_catches(self):
+        # The canonical variants are computed and matched first, unchanged;
+        # the folded twins are consulted only when those are clean, so a
+        # pre-existing verdict can never flip from True to False.
+        assert crisis._folded_variants("kiill myself")[0] == "kil myself"
+        assert crisis._match_variants("kiill myself") == ("kiill myself", "kiill myself", "kiillmyself")
+
+
 class TestAuditRemediation2026_09_17:
     """The 2026-09-17 audit remediation: the benign mask must not silence
     real ideation (the mask regression), residual splits and concatenation

@@ -606,7 +606,7 @@ describe("destructive delete", () => {
     expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
     expect(await storage.getItem("@mindpattern/reminders_user-1")).toBeNull();
     expect(await storage.getItem("@mindpattern/mirror_mood_to_health_user-1")).toBeNull();
-    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1" })).toBe(false);
+    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
     expect(cancelDailyReminder).toHaveBeenCalledTimes(1); // a deleted account is never nudged
     expect(api.clearCachedSalt).toHaveBeenCalledWith("alice");
   });
@@ -737,7 +737,7 @@ describe("verification-failure branching (403 vs 401)", () => {
     expect(textOf(root)).not.toContain("Enter your password to enable");
   });
 
-  it("a 403 on account deletion keeps the session and offers a retry", async () => {
+  it("a 403 on account deletion keeps the session AND the password card up for retry (L-62)", async () => {
     const { ApiError } = await import("../../src/api/client");
     vi.mocked(api.deleteAccount).mockRejectedValue(new ApiError(403, "verification_failed", "verification_failed"));
     const root = await render(<SettingsScreen navigation={nav} />);
@@ -747,7 +747,14 @@ describe("verification-failure branching (403 vs 401)", () => {
     await pressAlertButton("Continue to password");
     await flush();
     await reauth(root);
-    expect(Alert.alert).toHaveBeenCalledWith("Delete failed", expect.stringContaining("didn't accept that password"));
+    // The verifier rejection rethrows to the outer handler: the shared
+    // retry contract now covers the DELETE path too (the inner catch used
+    // to swallow it and clear the card).
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "That password didn't match",
+      "Check it and try again — nothing was changed.",
+    );
+    expect(textOf(root)).toContain("Enter your password to delete everything");
     expect(signOut).not.toHaveBeenCalled();
     expect(vault.isUnlocked()).toBe(true);
   });
@@ -768,10 +775,13 @@ describe("verification-failure branching (403 vs 401)", () => {
 });
 
 describe("theme radio initial value", () => {
-  /** The radio touchable for a theme mode, by its accessibility label. */
+  /** The radio touchable for a theme mode. L-64: the a11y label
+   *  interpolates the LOCALIZED mode name ("Theme: Dark"), never the raw
+   *  enum token — a Spanish screen reader heard "Tema: dark" before. */
+  const MODE_LABEL: Record<string, string> = { system: "System", dark: "Dark", light: "Light" };
   function radioOf(root: Awaited<ReturnType<typeof render>>, mode: string) {
     const node = root.root
-      .findAll((n) => n.props.accessibilityLabel === `Theme: ${mode}`)
+      .findAll((n) => n.props.accessibilityLabel === `Theme: ${MODE_LABEL[mode]}`)
       .find(() => true);
     if (!node) throw new Error(`no radio for ${JSON.stringify(mode)}`);
     return node;
@@ -1194,11 +1204,11 @@ describe("biometric unlock toggle", () => {
     await flush();
     // The confirmation states the trade BEFORE anything is stored.
     expect(Alert.alert).toHaveBeenCalledWith("Use biometric unlock?", expect.stringContaining("wrapped under your fingerprint or face"), expect.anything());
-    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1" })).toBe(false);
+    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
     await pressAlertButton("Enable");
     await flush();
     // The wrap stored the vault's own data key for this account.
-    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1" })).toEqual({
+    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toEqual({
       username: "user-1",
       password: keys.dataKey.toString("base64"),
     });
@@ -1219,7 +1229,7 @@ describe("biometric unlock toggle", () => {
     await flush();
     await pressAlertButton("Cancel");
     await flush();
-    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1" })).toBe(false);
+    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
   });
 
   it("reflects an existing wrap on mount, and turning it off removes it", async () => {
@@ -1235,7 +1245,7 @@ describe("biometric unlock toggle", () => {
       (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
     });
     await flush();
-    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1" })).toBe(false);
+    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
     expect(
       root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Biometric unlock")!.props.value,
     ).toBe(false);

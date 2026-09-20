@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Patient } from "../api";
 import { decryptCaseloadSummary, decryptInsights, keyFingerprint, unwrapPatientDataKey } from "../crypto";
 import type { Bytes, CaseloadSummary } from "../crypto";
-import { localStore } from "../platform";
+import { visitAnchorStore } from "../platform";
 import { Button, Card, ErrorBanner, Note, theme } from "../ui";
 import type { PortalSession } from "./PatientView";
 
@@ -111,7 +111,10 @@ export function PatientsView(props: {
       for (const patient of patients.filter((p) => p.status === "active")) {
         try {
           const summary = await api.patientInsights(patient.user_id);
-          const stamp = localStore.get(`mindpattern.lastVisit.${props.session.userId}.${patient.user_id}`);
+          // Same L-75 anchor store the chart uses (sessionStorage first,
+          // lock-scrubbed localStorage fallback): the scan and the chart
+          // must agree on which stamp the delta counts from.
+          const stamp = visitAnchorStore.get(`mindpattern.lastVisit.${props.session.userId}.${patient.user_id}`);
           const row: CaseloadScanRow = {
             userId: patient.user_id,
             patterns: 0,
@@ -224,8 +227,13 @@ export function PatientsView(props: {
               <strong style={{ color: theme.text, fontSize: 15 }}>{patient.username}</strong>
               <Note>
                 sharing since {dayOf(patient.granted_at)}
-                {summary && ` · ${summary.patterns} pattern${summary.patterns === 1 ? "" : "s"}`}
-                {!summary && row && row.patterns >= 0 && ` · ${row.patterns} pattern${row.patterns === 1 ? "" : "s"}`}
+                {/* M-21 (2026-09-20): a manual scan row is FRESHER than the
+                    server's last-recompute summary, so it wins when both
+                    exist; the summary count otherwise renders with its
+                    as-of date (forDate), because "4 patterns" is only
+                    interpretable next to the date it was true of. */}
+                {row && row.patterns >= 0 && ` · ${row.patterns} pattern${row.patterns === 1 ? "" : "s"} (scanned just now)`}
+                {(!row || row.patterns < 0) && summary && ` · ${summary.patterns} pattern${summary.patterns === 1 ? "" : "s"} as of ${summary.forDate ?? "an unknown date"}`}
                 {row && row.newSinceReviewed > 0 && ` · ${row.newSinceReviewed} new`}
                 {row && row.lastReviewed && ` · reviewed ${row.lastReviewed}`}
               </Note>
@@ -244,11 +252,20 @@ export function PatientsView(props: {
           <h2 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>STOPPED SHARING</h2>
           {stopped.map((patient) => (
             <Card key={patient.user_id} deep>
-              <strong style={{ color: theme.text, fontSize: 14 }}>{patient.username}</strong>
-              <Note>
-                access ended {patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — their
-                entries and patterns are no longer reachable. Your notes about this patient stay.
-              </Note>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div>
+                  <strong style={{ color: theme.text, fontSize: 14 }}>{patient.username}</strong>
+                  <Note>
+                    access ended {patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — their
+                    entries and patterns are no longer reachable. Your notes about this patient stay.
+                  </Note>
+                </div>
+                {/* M-22 (2026-09-20): the copy above promises the notes stay,
+                    but nothing could reach them. The chart opens in its
+                    notes-only mode for stopped consents (the server permits
+                    note access at any consent status). */}
+                <Button label="Open my notes" small onPress={() => props.onOpen(patient)} />
+              </div>
             </Card>
           ))}
         </>

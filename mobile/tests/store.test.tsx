@@ -28,6 +28,20 @@ vi.mock("../src/reminderSync", () => ({
   syncReminderSchedule: (...args: unknown[]) => syncReminderSchedule(...(args as [string])),
 }));
 
+// M-19 sign-out hygiene seams: the store must CALL disableBiometricUnlock
+// for the signed-out account and cancel the device-global reminder (their
+// internals carry their own suites).
+const disableBiometricUnlock = vi.fn(async () => {});
+vi.mock("../src/biometricUnlock", () => ({
+  disableBiometricUnlock: (...args: unknown[]) => disableBiometricUnlock(...(args as [string])),
+}));
+const cancelDailyReminder = vi.fn(async () => true);
+vi.mock("../src/nativeFeatures", () => ({
+  cancelDailyReminder: () => cancelDailyReminder(),
+  reminderCapability: () => ({ available: false, reason: "notification module not linked" }),
+  biometricCapability: () => ({ available: false, reason: "biometric module not linked" }),
+}));
+
 const { api, setUnauthorizedHandler } = await import("../src/api/client");
 const { abortInFlightFlush, flushQueueOnReconnect } = await import("../src/offlineQueue");
 const { resetApi } = await import("./helpers/apiMock");
@@ -511,6 +525,45 @@ describe("SessionProvider", () => {
       root.unmount();
     });
     expect(vi.mocked(setUnauthorizedHandler).mock.calls.at(-1)?.[0]).toBeNull();
+  });
+
+  // M-19 (2026-09-20 audit): sign-out removes the biometric data-key wrap
+  // for the account and cancels the device-global daily reminder — the
+  // shared-device user must not be nudged (or key-wrapped) by a session
+  // that no longer exists. Account deletion already did both.
+  it("signOut disables the biometric wrap and cancels the daily reminder", async () => {
+    vi.mocked(api.getUserId).mockResolvedValue("u-19");
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    disableBiometricUnlock.mockClear();
+    cancelDailyReminder.mockClear();
+    await act(async () => {
+      await session.signOut();
+    });
+    expect(disableBiometricUnlock).toHaveBeenCalledWith("u-19");
+    // Device-global: cancelled even when the account id resolves.
+    expect(cancelDailyReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("signOut cancels the reminder even with no resolvable account id", async () => {
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    disableBiometricUnlock.mockClear();
+    cancelDailyReminder.mockClear();
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    await act(async () => {
+      await session.signOut();
+    });
+    expect(disableBiometricUnlock).not.toHaveBeenCalled();
+    expect(cancelDailyReminder).toHaveBeenCalledTimes(1);
   });
 
   // M2 draft-stash hygiene: the plaintext draft must not outlive the

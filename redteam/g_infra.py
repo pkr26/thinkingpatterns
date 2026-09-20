@@ -140,12 +140,25 @@ def _boot_check(name: str, env_overrides: dict[str, str], expect_refuse: bool) -
     )
     r = subprocess.run([str(VENV_PY), "-c", code], cwd=str(BACKEND), env=env,
                        capture_output=True, text=True, timeout=60)
-    refused = "BOOT-OK" not in r.stdout
-    ok = refused == expect_refuse
-    verdict("G3." + name, "BLOCKED" if ok else "FINDING",
-            f"env={env_overrides.get('MINDPATTERN_ENV', 'production-default')} "
-            f"{'refused boot' if refused else 'booted'} as expected={expect_refuse}"
-            + ("" if ok else f" — stderr: {r.stderr.strip()[-160:]}"))
+    booted = "BOOT-OK" in r.stdout
+    # A refusal only counts when it is the EXPECTED fail-closed signature:
+    # a RuntimeError from Settings validation naming a MINDPATTERN_* knob.
+    # Any crash (import error, syntax error, missing module) used to read
+    # as "refused boot as expected" — with stderr inspected only on the
+    # failure path, never on the verdict (2026-09-19 audit, L-46).
+    refusal_sig = "RuntimeError" in r.stderr and "MINDPATTERN_" in r.stderr
+    if booted:
+        ok = expect_refuse is False
+    else:
+        ok = expect_refuse is True and refusal_sig
+    detail = (f"env={env_overrides.get('MINDPATTERN_ENV', 'production-default')} "
+              f"{'booted' if booted else ('refused boot (fail-closed RuntimeError)' if refusal_sig else 'DIED without the fail-closed signature')}"
+              f", expected={'refusal' if expect_refuse else 'boot'}")
+    if not booted and not refusal_sig:
+        detail += f" — stderr tail: {r.stderr.strip()[-300:]}"
+    elif not ok:
+        detail += f" — stderr: {r.stderr.strip()[-160:]}"
+    verdict("G3." + name, "BLOCKED" if ok else "FINDING", detail)
 
 
 def g3_config_and_hygiene() -> None:

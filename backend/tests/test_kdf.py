@@ -106,10 +106,43 @@ def test_production_iterations_constant():
     assert kdf.KDF_ITERATIONS == 600_000
 
 
+def test_vector_file_is_committed():
+    """L-41 (2026-09-20): the full-cost vector test below used to skip
+    silently when shared/vectors.json was missing, and it is slow-marked —
+    so a checkout that lost the file ran green while verifying nothing.
+    This fast check fails loudly even on runs that deselect slow tests:
+    vectors.json is committed, so "missing" means a broken checkout, not
+    "not generated yet" (the same hard-fail idiom as test_encrypt_vectors).
+    """
+    assert VECTORS_PATH.exists(), (
+        f"shared/vectors.json not found at {VECTORS_PATH} — it is committed; "
+        "restore it (or regenerate with scripts/generate_vectors.py)"
+    )
+    data = json.loads(VECTORS_PATH.read_text())
+    vectors = data.get("vectors")
+    assert isinstance(vectors, list) and len(vectors) >= 2, (
+        "vectors section missing/truncated: expected at least two pinned "
+        "600k-iteration KDF vectors"
+    )
+    for vector in vectors:
+        assert vector["iterations"] == 600_000, "pinned KDF vectors are the full-cost contract"
+        for field in ("password", "salt", "master_key", "auth_key", "data_key"):
+            assert vector.get(field), f"vector missing field {field!r}"
+
+
 @pytest.mark.slow
-@pytest.mark.skipif(not VECTORS_PATH.exists(), reason="vectors not generated yet")
 def test_pinned_production_vectors():
-    """Both vectors must reproduce byte-for-byte at 600k iterations."""
+    """Both vectors must reproduce byte-for-byte at 600k iterations.
+
+    Hard failure, never a silent skip (L-41): the file's presence and shape
+    are pinned by test_vector_file_is_committed above — fast and on every
+    run — so reaching this point with a missing file is impossible, and a
+    broken checkout cannot pass the KDF contract unverified.
+    """
+    assert VECTORS_PATH.exists(), (
+        f"shared/vectors.json not found at {VECTORS_PATH} — it is committed; "
+        "restore it (or regenerate with scripts/generate_vectors.py)"
+    )
     data = json.loads(VECTORS_PATH.read_text())
     assert len(data["vectors"]) >= 2
     for vector in data["vectors"]:

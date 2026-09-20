@@ -12,7 +12,9 @@ import heapq
 import ipaddress
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException, Request
 
@@ -73,9 +75,13 @@ class FixedWindowCounter:
     def check(self, key: str, window_seconds: int, now: float | None = None) -> HitResult:
         """Read the current count WITHOUT recording a hit.
 
-        Used by the login per-username bucket: the check must not count the
-        request (only *failed verifications* count), so garbage probes for a
-        victim's name cannot anonymously lock the real user out.
+        Used by the REGISTER per-username buckets (``register-name:...``):
+        the check must not count the request (only *actual conflicts* count),
+        so garbage probes for a victim's name cannot anonymously lock the
+        real user out of registering it. Login is deliberately IP-only —
+        there is no login per-username bucket anywhere (a keyed login deny
+        bucket would make a distributed attacker a trivial lockout lever
+        against any victim's name).
         """
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
@@ -129,16 +135,23 @@ def _aggregate_host(host: str) -> str:
 
 
 def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
-    """Best-effort client identity for rate limiting.
+    """Best-effort client identity for rate limiting (FastAPI call sites).
+
+    Reads the request's ``state``/``client`` attributes directly (rather
+    than delegating through ``request.scope``) because call sites — and the
+    suite's duck-typed request doubles — promise exactly those two fields.
+    :func:`client_key_from_scope` implements the same rules over a raw
+    ASGI scope for the middleware's pre-dispatch gate; the two are pinned
+    to agree by test.
 
     Behind a reverse proxy every request appears to come from the proxy's
     IP. Forwarding metadata is used only when HardeningMiddleware has
     established that the direct socket peer belongs to the explicit
-    MINDPATTERN_TRUSTED_PROXY_IPS allowlist. That middleware parses the
-    right-to-left forwarding chain, skips trusted proxy hops, and records a
-    sanitized client address in request.state. This function intentionally
-    never treats a raw X-Forwarded-For header as proof: a direct client can
-    freely forge one.
+    MINDPATTERN_TRUSTED_PROXY_IPS allowlist, which it records as
+    ``state.mindpattern_trusted_proxy`` plus the sanitized
+    ``state.mindpattern_forwarded_client`` address. This function
+    intentionally never treats a raw X-Forwarded-For header as proof: a
+    direct client can freely forge one.
     """
     if trust_proxy_headers and getattr(request.state, "mindpattern_trusted_proxy", False):
         forwarded = getattr(request.state, "mindpattern_forwarded_client", None)
@@ -146,6 +159,28 @@ def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
             return _aggregate_host(forwarded)
     if request.client and request.client.host:
         return _aggregate_host(request.client.host)
+    return "unknown-client"
+
+
+def client_key_from_scope(scope: Mapping[str, Any], trust_proxy_headers: bool = False) -> str:
+    """The same identity :func:`client_key` computes, from a raw ASGI scope.
+
+    HardeningMiddleware needs the rate-limit key BEFORE the request enters
+    the app (see middleware.py's malformed-body counting): at that point
+    there is no ``Request`` wrapper yet, but the middleware itself has
+    already recorded the proxy-trust decision and the sanitized forwarded
+    address in ``scope["state"]`` — exactly the fields ``client_key`` reads
+    through ``request.state`` — so both paths MUST agree on the key or the
+    edge counter and the dependency counter would silently split buckets.
+    """
+    state = scope.get("state") or {}
+    if trust_proxy_headers and state.get("mindpattern_trusted_proxy"):
+        forwarded = state.get("mindpattern_forwarded_client")
+        if isinstance(forwarded, str) and forwarded:
+            return _aggregate_host(forwarded)
+    client = scope.get("client")
+    if client and client[0]:
+        return _aggregate_host(client[0])
     return "unknown-client"
 
 
@@ -158,30 +193,48 @@ def _limit_response(retry_after: int) -> HTTPException:
     )
 
 
-def make_rate_limiter(bucket: str, limit_attr: str, window_attr: str):
-    """Dependency factory: 429 once the limit (read from settings at request
-    time, so tests and deployment config can tune it) is hit within the window."""
+class RateLimitCheck:
+    """The dependency ``make_rate_limiter`` returns, as a callable object.
 
-    async def check(request: Request) -> None:
+    Carrying the (bucket, limit_attr, window_attr) spec as ATTRIBUTES (rather
+    than burying it in closure cells) lets app wiring enumerate every
+    rate-limited route and its bucket at build time — the input
+    HardeningMiddleware needs to count malformed-JSON 422s into the same
+    buckets the route dependencies use (M-1, 2026-09-20). Pure bookkeeping:
+    the runtime behavior is the check below, unchanged.
+    """
+
+    def __init__(self, bucket: str, limit_attr: str, window_attr: str) -> None:
+        self.bucket = bucket
+        self.limit_attr = limit_attr
+        self.window_attr = window_attr
+
+    async def __call__(self, request: Request) -> None:
         settings = request.app.state.settings
-        limit = getattr(settings, limit_attr)
-        window = getattr(settings, window_attr)
+        limit = getattr(settings, self.limit_attr)
+        window = getattr(settings, self.window_attr)
         counter: FixedWindowCounter = request.app.state.rate_counter
         key = client_key(request, trust_proxy_headers=settings.trust_proxy_headers)
-        result = counter.hit(f"{bucket}:{key}", window)
+        result = counter.hit(f"{self.bucket}:{key}", window)
         if result.count > limit:
             raise _limit_response(result.retry_after)
 
-    return check
+
+def make_rate_limiter(bucket: str, limit_attr: str, window_attr: str) -> RateLimitCheck:
+    """Dependency factory: 429 once the limit (read from settings at request
+    time, so tests and deployment config can tune it) is hit within the window."""
+    return RateLimitCheck(bucket, limit_attr, window_attr)
 
 
 def check_keyed_limit_without_count(request: Request, key: str, limit: int, window: int) -> None:
     """429 once the key has reached its limit, without counting this request.
 
-    Paired with record_keyed_failure() on the login path: only failed
-    verifications for existing accounts consume the bucket, so an anonymous
-    attacker spraying garbage at a victim's username cannot lock the real
-    user out of their own account.
+    Paired with record_keyed_failure() on the REGISTER path (the
+    ``register-name:...`` buckets in auth.py and therapist.py): only ACTUAL
+    conflicts — the 409 "username already taken" answers — consume the
+    bucket, so an anonymous attacker spraying garbage or taken-name probes
+    cannot 429 the legitimate first registrant of a free name. Login needs
+    no such helper: it is deliberately IP-only.
     """
     counter: FixedWindowCounter = request.app.state.rate_counter
     result = counter.check(key, window)

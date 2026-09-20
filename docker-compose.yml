@@ -13,7 +13,24 @@ services:
     # required verification and docker-compose.dev.yml for local source
     # builds.
     image: ${MINDPATTERN_API_IMAGE:?set MINDPATTERN_API_IMAGE to the API @sha256 reference from the release env asset}
+    # Container hardening (2026-09-19 audit, L-85): the app needs no Linux
+    # capabilities and must never gain any (cap_drop ALL +
+    # no-new-privileges). The root filesystem is read-only — the only
+    # writable paths are /tmp (tmpfs) and the mounted volumes below.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     environment:
+      # POSTGRES_PASSWORD is interpolated RAW into this URL: it must be a
+      # hex string (openssl rand -hex 16, as the db service example shows)
+      # or another charset with no URL-reserved characters (: / @ # ? %).
+      # A password containing any of those would silently corrupt the
+      # connection URL — enforce hex-only generation in your secret store
+      # (2026-09-19 audit, L-86).
       MINDPATTERN_ENV: production
       MINDPATTERN_DB_URL: postgresql+asyncpg://${POSTGRES_USER:-mindpattern}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-mindpattern}
       MINDPATTERN_TOKEN_SECRET: ${MINDPATTERN_TOKEN_SECRET:?set a real secret in .env}
@@ -63,9 +80,22 @@ services:
     environment:
       # From .env — no committed credentials. Example .env:
       #   POSTGRES_PASSWORD=$(openssl rand -hex 16)
+      # Keep it HEX (or otherwise URL-safe): the api service interpolates
+      # it raw into MINDPATTERN_DB_URL (see the note there).
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-mindpattern}
+    # Same hardening bar as the api service (2026-09-19 audit, L-85).
+    # Postgres needs no capabilities beyond its volume; the data directory
+    # stays on the pgdata volume, /tmp and the socket dir get tmpfs.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /var/run/postgresql:size=16m,mode=1777
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -139,6 +169,16 @@ services:
     # loop keeps the previous day's file on any failure).  AES-CBC alone is
     # confidential but malleable; the sidecar HMAC makes tampering detectable
     # before a restore attempts to decrypt the dump.
+    # Hardened like its siblings (2026-09-19 audit, L-85): no capabilities,
+    # no privilege escalation, read-only rootfs — dumps land on the
+    # pgbackups volume, scratch space in tmpfs.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     entrypoint:
       - sh
       - -c

@@ -15,7 +15,8 @@ import { TherapistShareScreen } from "./screens/TherapistShareScreen";
 import { MeasuresScreen } from "./screens/MeasuresScreen";
 import { PrivacyScreen } from "./screens/PrivacyScreen";
 import { CrisisScreen } from "./screens/CrisisScreen";
-import { takePendingOnboarding } from "./onboarding";
+import { takePendingOnboarding, hasSeenOnboarding, onboardingSeenCached } from "./onboarding";
+import { api } from "./api/client";
 import { MainShell, NavDestination } from "./components/BottomNav";
 
 /** Wrap a main screen with the persistent bottom navigation (2026-09-17):
@@ -97,11 +98,60 @@ export function AppNavigator(): React.JSX.Element {
   const wasInMain = useRef(false);
   // Stryker disable next-line BooleanLiteral: showOnboarding is read only inside the main branch, and the first main render always flips wasInMain (it starts false) and overwrites the state — the initial value never reaches the tree
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // M-18 (2026-09-20 audit): backgrounding mid-onboarding locks the vault
+  // (inMain flips false) and CONSUMES the one-shot pending flag — the old
+  // gate re-entered main on the journal with the privacy/13+ panels never
+  // shown or completed. The gate is therefore re-derived on EVERY entry
+  // into the main flow from the PERSISTED per-account flag too: onboarding
+  // shows until recordOnboardingSeen lands, however the user left it.
+  // accountRef holds the signed-in account id once resolved (render-time
+  // reads must be synchronous); onboardingResolved gates the first main
+  // paint until that resolution is in (a BootSplash beat, not an Entry
+  // flash that would have to be walked back).
+  const accountRef = useRef<string | null>(null);
+  const [onboardingResolved, setOnboardingResolved] = useState(false);
   if (inMain !== wasInMain.current) {
     wasInMain.current = inMain;
     // Stryker disable next-line BooleanLiteral: leaving main sets wasInMain false, so re-entering main always fires the transition again and overwrites this value before it can render
-    setShowOnboarding(inMain ? takePendingOnboarding() : false);
+    setShowOnboarding(
+      inMain
+        ? takePendingOnboarding() || (accountRef.current !== null && onboardingSeenCached(accountRef.current) === false)
+        : false,
+    );
   }
+
+  // Prime the persisted-flag mirror for the signed-in account (and record
+  // which account the gate decides for). Fail toward "seen": with a broken
+  // store, looping the three panels on every entry would trap the user,
+  // while a failed recordOnboardingSeen only shows them once more.
+  React.useEffect(() => {
+    if (authStatus !== "loggedIn") {
+      accountRef.current = null;
+      setOnboardingResolved(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const userId = await api.getUserId().catch(() => null);
+      if (cancelled) return;
+      accountRef.current = userId;
+      if (!userId) {
+        setOnboardingResolved(true);
+        return;
+      }
+      await hasSeenOnboarding(userId).catch(() => {});
+      if (cancelled) return;
+      setOnboardingResolved(true);
+      // Resolution landing while the main flow is already past its
+      // transition (rare — the unlock screen usually covers this window):
+      // surface onboarding as the initial route now, not never.
+      if (onboardingSeenCached(userId) === false) setShowOnboarding(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus]);
+
   return (
     <Stack.Navigator>
       {authStatus === "loading" ? (
@@ -125,6 +175,15 @@ export function AppNavigator(): React.JSX.Element {
           <Stack.Screen name="Unlock" component={UnlockScreen} options={{ headerShown: false }} />
           {/* Vault-locked users are at their most vulnerable moment — the
               crisis screen must stay one tap away without unlocking. */}
+          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
+        </>
+      ) : !onboardingResolved && !showOnboarding ? (
+        // M-18: the persisted onboarding flag has not been resolved for the
+        // signed-in account yet. Holding the boot splash here (instead of
+        // rendering Entry first) lets onboarding, when due, be the FIRST
+        // screen of the main flow — no journal flash before the panels.
+        <>
+          <Stack.Screen name="Booting" component={BootSplash} options={{ headerShown: false }} />
           <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
         </>
       ) : (

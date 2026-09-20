@@ -60,6 +60,10 @@ async function loadCrypto() {
   }
   rmSync(buildDir, { recursive: true, force: true });
   mkdirSync(buildDir, { recursive: true });
+  // The compiled modules are CommonJS, but mobile/package.json says
+  // "type": "module" — mark the build dir so node loads them as CJS
+  // (without this, modern node refuses the .js output as an ES module).
+  writeFileSync(join(buildDir, "package.json"), '{"type":"commonjs"}');
   const compiled = spawnSync(tscBin, [
     join(here, "..", "src", "crypto", "kdf.ts"),
     join(here, "..", "src", "crypto", "envelope.ts"),
@@ -110,10 +114,15 @@ for (const entry of bundle.entries ?? []) {
 
 const insightDocs = [];
 for (const insight of bundle.insights ?? []) {
-  const kind = insight.kind; // "patterns" | "question"
+  const kind = insight.kind; // "patterns" | "question" | "brain"
   try {
     let aad;
     if (kind === "question") aad = envelope.buildAad("question", bundle.user_id, insight.for_date);
+    // 2026-09-20 audit M-31: brain-state rows are AAD-bound to the "brain"
+    // channel (insights.py binds build_aad("insights", user, "brain")) —
+    // the old patterns-only branch could never authenticate them and
+    // reported healthy rows as corrupted.
+    else if (kind === "brain") aad = envelope.buildAad("insights", bundle.user_id, "brain");
     else aad = envelope.buildAad("insights", bundle.user_id, "patterns");
     const payload = JSON.parse(envelope.decrypt(
       dataKey, Buffer.from(insight.blob, "base64"), aad,
@@ -124,14 +133,37 @@ for (const insight of bundle.insights ?? []) {
   }
 }
 
+// Wellbeing measures (PHQ-9/MBC — audit H-3, 2026-09-20): the export now
+// streams every stored measure row. Each blob is AAD-bound exactly like
+// the app's create path: ("measure", user_id, client_measure_id); the
+// payload is the client's own JSON ({"v":1,"measure":"phq9","score":N,
+// "completed_at":...}). Old bundles without a measures key decrypt
+// unchanged.
+const measureDocs = [];
+for (const measure of bundle.measures ?? []) {
+  try {
+    const payload = JSON.parse(envelope.decrypt(
+      dataKey,
+      Buffer.from(measure.blob, "base64"),
+      envelope.buildAad("measure", bundle.user_id, measure.client_measure_id),
+    ).toString("utf8"));
+    measureDocs.push({ ...measure, decrypted: payload });
+  } catch {
+    measureDocs.push({ ...measure, decrypted: null, error: "authentication failed" });
+  }
+}
+
 const outDir = outArg ?? bundlePath.replace(/\.json$/i, "") + "-decrypted";
+// 2026-09-20 audit L-95: the bundle carries user_id (username was removed
+// from the export); rendering `undefined` helped nobody.
 writeFileSync(join(outDir + ".json"), JSON.stringify({
-  username: bundle.username,
+  user_id: bundle.user_id,
   entries: entryDocs,
   insights: insightDocs,
+  measures: measureDocs,
 }, null, 2));
 
-const lines = [`# MindPattern journal — ${bundle.username}`, ""];
+const lines = [`# MindPattern journal — ${bundle.user_id}`, ""];
 for (const doc of entryDocs) {
   if (!doc.decrypted) {
     lines.push(`## ${doc.entry_date} — [undecryptable]`, "");
@@ -141,10 +173,23 @@ for (const doc of entryDocs) {
   if (doc.decrypted.sentiment != null) lines.push(`*mood note: ${doc.decrypted.sentiment}*`, "");
   lines.push(doc.decrypted.text ?? "", "");
 }
+if (measureDocs.length > 0) {
+  lines.push("## Wellbeing measures (PHQ-9)", "");
+  for (const doc of measureDocs) {
+    if (!doc.decrypted) {
+      lines.push(`- ${doc.measure_date}: [undecryptable]`);
+      continue;
+    }
+    lines.push(`- ${doc.decrypted.completed_at ?? doc.measure_date}: ` +
+               `${doc.decrypted.measure ?? "questionnaire"} score ${doc.decrypted.score}`);
+  }
+  lines.push("");
+}
 writeFileSync(join(outDir + ".md"), lines.join("\n"));
 
 console.log(`decrypted ${decrypted}/${(bundle.entries ?? []).length} entries, ` +
-            `${insightDocs.filter((d) => d.decrypted).length}/${(bundle.insights ?? []).length} insights`);
+            `${insightDocs.filter((d) => d.decrypted).length}/${(bundle.insights ?? []).length} insights, ` +
+            `${measureDocs.filter((d) => d.decrypted).length}/${(bundle.measures ?? []).length} measures`);
 console.log(`wrote ${outDir}.json and ${outDir}.md`);
 if (decrypted === 0 && (bundle.entries ?? []).length > 0) {
   console.error("nothing decrypted — wrong password?");

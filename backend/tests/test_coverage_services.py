@@ -150,27 +150,38 @@ def test_parse_entries_normalizes_structured_channels_and_rejects_hostile_shapes
             insights._parse_entries([_entry_payload(**changes)], [outer])
 
 
-def test_parse_feedback_filters_invalid_events_and_returns_stable_api_errors():
-    """Only bounded, typed feedback taps enter the encrypted brain state."""
+def test_parse_feedback_rejects_malformed_items_and_returns_stable_api_errors():
+    """Only bounded, typed feedback taps enter the encrypted brain state —
+    and a malformed item is a 400 for the WHOLE blob (audit L-11,
+    2026-09-20): the old silent per-item filtering drifted from the
+    docstring's "never a silent skip" contract and half-applied corrupt
+    queues invisibly. The pre-flight shape check on the recompute path
+    turns this into a quarantineable client error before any corpus work."""
     for raw in (b"{", b"\xff", b"[]", b'{"feedback": {}}'):
         with pytest.raises(ApiError) as excinfo:
             insights._parse_feedback(raw)
         assert excinfo.value.status_code == 400
         assert excinfo.value.code == "entry_payload_malformed"
 
-    payload = {
-        "feedback": [
-            {"pid": "accepted", "resonated": True},
-            "not-an-object",
-            {"pid": "", "resonated": True},
-            {"pid": "wrong-type", "resonated": 1},
-            {"pid": "x" * 129, "resonated": False},
-        ]
-    }
-    events = insights._parse_feedback(json.dumps(payload).encode("utf-8"))
+    accepted = json.dumps({"feedback": [{"pid": "accepted", "resonated": True}]}).encode("utf-8")
+    events = insights._parse_feedback(accepted)
     assert events.taps == [("accepted", True)]
     assert events.muted == []
     assert events.unmuted == []
+
+    malformed_payloads = [
+        {"feedback": ["not-an-object"]},
+        {"feedback": [{"pid": "", "resonated": True}]},
+        {"feedback": [{"pid": "wrong-type", "resonated": 1}]},
+        {"feedback": [{"pid": "x" * 129, "resonated": False}]},
+        {"feedback": [{"pid": "ok", "resonated": True}], "muted": ["ok", 7]},
+        {"feedback": [{"pid": "ok", "resonated": True}], "unmuted": [""]},
+    ]
+    for payload in malformed_payloads:
+        with pytest.raises(ApiError) as excinfo:
+            insights._parse_feedback(json.dumps(payload).encode("utf-8"))
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.code == "entry_payload_malformed"
 
 
 def test_chosen_pattern_pid_filters_suppressed_and_duplicate_questions(monkeypatch):
@@ -242,7 +253,12 @@ async def test_recompute_reports_deleted_account_after_the_lifecycle_fence(monke
     request = SimpleNamespace(app=SimpleNamespace(state=state))
 
     with pytest.raises(ApiError) as excinfo:
-        await insights.recompute(request, SimpleNamespace(id="deleted-user"), "session-token")
+        # token_epoch rides the fake user because the handler captures the
+        # authenticated epoch before its lock waits (audit M-2, 2026-09-20);
+        # the account delete still wins inside the fence (410 below).
+        await insights.recompute(
+            request, SimpleNamespace(id="deleted-user", token_epoch=1), "session-token"
+        )
 
     assert excinfo.value.status_code == 410
     assert excinfo.value.code == "account_deleted"

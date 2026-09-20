@@ -28,7 +28,13 @@ from common import (
 
 async def b1_verifier_and_tokens() -> None:
     section("B1: auth_key replay, verifier replay, token forgery")
-    app = await make_app(make_settings())
+    # llm_url MUST be set (a dev-loopback URL is enough — the consent
+    # endpoint only fingerprints the policy, it never calls the endpoint):
+    # without it llm-consent 409s `llm_unavailable` on EVERY attempt and
+    # the verifier-enables-llm-egress egress check below is structurally
+    # dead: it would read BLOCKED off a 409 without ever observing whether
+    # the stolen verifier passed re-authentication (2026-09-19 audit, H-15).
+    app = await make_app(make_settings(llm_url="http://127.0.0.1:9/v1"))
     async with make_client(app) as client:
         user = await register_user(client, "b1_user", "pw-b1", iterations=1000)
         captured_verifier = base64.b64encode(user["auth_key"]).decode()
@@ -115,11 +121,25 @@ async def b1_verifier_and_tokens() -> None:
             except Exception as e:  # noqa: BLE001
                 outcomes[name] = f"UNCAUGHT {type(e).__name__}"
         leak = [k for k, v in outcomes.items() if v.startswith("UNCAUGHT")]
+        accepted = sorted(k for k, v in outcomes.items() if v == "accepted")
+        # The summary must agree with the recorded outcomes: "huge"
+        # (a well-signed far-future exp) is legitimately ACCEPTED, so the
+        # blanket "all rejected as TokenError" text used to contradict the
+        # probe's own data (2026-09-19 audit, L-45).
+        if leak:
+            detail = (f"verify_token outcomes with a leaked secret: {outcomes} — "
+                      f"{'/'.join(leak)} raise uncaught exceptions "
+                      f"(would surface as 500, robustness only)")
+        elif accepted:
+            detail = (f"verify_token outcomes with a leaked secret: {outcomes} — "
+                      f"no uncaught exceptions; accepted shape(s): {', '.join(accepted)} "
+                      f"(a well-signed token with a merely far-future exp — forging "
+                      f"still requires the secret); the rest rejected as TokenError")
+        else:
+            detail = f"verify_token outcomes with a leaked secret: {outcomes} — all rejected as TokenError"
         verdict("B1.token-type-confusion",
                 "FINDING" if leak else "BLOCKED",
-                f"verify_token outcomes with a leaked secret: {outcomes} — "
-                + ("string exp raises uncaught TypeError (surfaces as 500, robustness only)"
-                   if leak else "all rejected as TokenError"))
+                detail)
 
         # Epoch coverage across both mounts
         r = await client.get("/api/entries", headers=auth_headers(user["token"]))
@@ -129,15 +149,11 @@ async def b1_verifier_and_tokens() -> None:
 
 async def b2_rate_limits() -> None:
     section("B2: rate-limit evasion")
-    from app.cache import FixedWindowCounter, client_key
+    from app.cache import FixedWindowCounter, client_key_from_scope
 
-    # IPv6 /64 aggregation holds
-    class FakeReq:
-        def __init__(self, host):
-            self.client = type("C", (), {"host": host})()
-            self.headers = {}
-
-    keys = {client_key(FakeReq(f"2001:db8::{i:x}")) for i in range(50)}
+    # IPv6 /64 aggregation holds (raw ASGI scope — the same input the
+    # middleware passes, immune to Request-wrapper signature changes)
+    keys = {client_key_from_scope({"client": (f"2001:db8::{i:x}", 1234)}) for i in range(50)}
     verdict("B2.ipv6-aggregation", "BLOCKED" if len(keys) == 1 else "FINDING",
             f"50 rotated IPv6 addresses inside one /64 collapse to {len(keys)} bucket(s)")
 

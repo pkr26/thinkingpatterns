@@ -14,6 +14,8 @@ import base64
 import json
 from datetime import date, timedelta
 
+import pytest
+
 from app.api.insights import _chosen_pattern_pid
 from app.security import crypto
 from tests.helpers import ClientEmulator, daterange
@@ -46,7 +48,11 @@ async def test_feedback_blob_object_body_shape_is_accepted(client):
     response = await client.post(
         "/api/insights/recompute",
         headers={**emu.headers, "X-Processing-Token": token},
-        json={"feedback_blob": _feedback_blob(emu, {"feedback": [("x:1", True)]})},
+        # Dict-shaped taps (a tuple item would be malformed input, not a
+        # wire shape, since the 2026-09-20 loud-parse fix L-11).
+        json={
+            "feedback_blob": _feedback_blob(emu, {"feedback": [{"pid": "x:1", "resonated": True}]})
+        },
     )
     assert response.status_code == 200, response.text
     assert response.json()["phase"] == "insight"
@@ -193,15 +199,30 @@ async def test_feedback_blob_with_mute_lists_is_accepted(client):
 
 def test_parse_feedback_partitions_taps_and_mutes():
     from app.api.insights import _parse_feedback
+    from app.deps import ApiError
 
+    # Well-formed blobs partition exactly as before.
     raw = json.dumps(
         {
-            "feedback": [{"pid": "a:1", "resonated": True}, {"pid": "x", "resonated": "yes"}],
-            "muted": ["a:1", 7, ""],
-            "unmuted": ["b:2", "way-too-long-" + "x" * 200],
+            "feedback": [{"pid": "a:1", "resonated": True}, {"pid": "x", "resonated": False}],
+            "muted": ["a:1"],
+            "unmuted": ["b:2"],
         }
     ).encode("utf-8")
     events = _parse_feedback(raw)
-    assert events.taps == [("a:1", True)]  # the malformed tap is dropped
-    assert events.muted == ["a:1"]  # non-strings and empties dropped
-    assert events.unmuted == ["b:2"]  # the over-length pid is dropped
+    assert events.taps == [("a:1", True), ("x", False)]
+    assert events.muted == ["a:1"]
+    assert events.unmuted == ["b:2"]
+
+    # Any malformed item now fails the WHOLE blob with the stable 400 (audit
+    # L-11, 2026-09-20): partial silent application of a corrupt feedback
+    # queue is gone.
+    for payload in (
+        {"feedback": [{"pid": "x", "resonated": "yes"}]},
+        {"feedback": [{"pid": "a:1", "resonated": True}], "muted": ["a:1", 7]},
+        {"feedback": [], "unmuted": ["way-too-long-" + "x" * 200]},
+    ):
+        with pytest.raises(ApiError) as excinfo:
+            _parse_feedback(json.dumps(payload).encode("utf-8"))
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.code == "entry_payload_malformed"

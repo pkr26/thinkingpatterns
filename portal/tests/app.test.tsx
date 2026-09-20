@@ -68,6 +68,7 @@ const { render, flush, textOf, press, typeInto } = await import("./helpers/rtr")
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   clearSession();
 });
 
@@ -132,7 +133,7 @@ describe("App", () => {
     expect(textOf(root)).toContain("Create a therapist account instead");
   });
 
-  it("sign-out from a patient chart aborts the portal session, wipes raw keys, and removes visit metadata", async () => {
+  it("sign-out aborts the portal session, wipes raw keys, and keeps the session-backed delta anchor (L-75)", async () => {
     const crypto = vi.mocked(await import("../src/crypto"));
     const wrapKek = new Uint8Array(32).fill(7);
     const noteKey = new Uint8Array(32).fill(9);
@@ -144,7 +145,7 @@ describe("App", () => {
         ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
       },
     ]);
-    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+    window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
     const root = await login();
     await press(root, "Open patterns");
     await flush();
@@ -158,19 +159,54 @@ describe("App", () => {
 
     expect(hasSession()).toBe(false);
     expect([...noteKey]).toEqual(new Array(32).fill(0));
+    // L-75 decision (2026-09-20): visit-date stamps are date-only anchors
+    // in per-tab sessionStorage, so a sign-out / idle lock / expiry no
+    // longer scrubs them — the clinician keeps the "new since reviewed"
+    // delta within the browser session, and the session's end clears it.
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBe("2026-09-01T00:00:00.000Z");
     expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
     expect(textOf(root)).toContain("Your in-memory keys were cleared");
   });
 
-  it("component teardown removes this therapist's visit metadata too", async () => {
+  it("L-75 fallback: without sessionStorage the old scrub-on-lock contract returns", async () => {
+    // Some privacy modes expose no (or a dead) sessionStorage; the anchor
+    // store then falls back to localStorage, which MUST keep the old
+    // behavior of being removed at every lock boundary.
+    const windowShim = (window as unknown as { sessionStorage?: Storage }).sessionStorage;
+    delete (window as unknown as { sessionStorage?: Storage }).sessionStorage;
+    try {
+      vi.mocked(api.patients).mockResolvedValueOnce([
+        {
+          user_id: "user-1", username: "patienta", status: "active",
+          granted_at: "2026-09-01T00:00:00Z", revoked_at: null,
+          ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
+        },
+      ]);
+      window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+      const root = await login();
+      await press(root, "Open patterns");
+      await flush();
+      await press(root, "Sign out");
+      await flush();
+      expect(hasSession()).toBe(false);
+      expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
+    } finally {
+      (window as unknown as { sessionStorage?: Storage }).sessionStorage = windowShim;
+    }
+  });
+
+  it("component teardown keeps the session-backed anchor and never touches localStorage (L-75)", async () => {
     const root = await login();
-    window.localStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
-    window.localStorage.setItem("mindpattern.lastVisit.other-therapist.user-1", "2026-09-01T00:00:00.000Z");
+    window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+    window.sessionStorage.setItem("mindpattern.lastVisit.other-therapist.user-1", "2026-09-01T00:00:00.000Z");
 
     await act(async () => { root.unmount(); });
 
+    // Session-backed anchors survive teardown (the browser session owns
+    // their lifetime) and localStorage was never involved.
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeTruthy();
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.other-therapist.user-1")).toBeTruthy();
     expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
-    expect(window.localStorage.getItem("mindpattern.lastVisit.other-therapist.user-1")).toBeTruthy();
   });
 
   it("2026-09-19: a FAILED key unlock wipes the password-derived wrap KEK too", async () => {

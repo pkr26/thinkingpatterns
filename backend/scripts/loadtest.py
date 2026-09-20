@@ -10,7 +10,16 @@ throughput. No assertions, no pass/fail: it is a measurement tool for
 capacity planning against the single-process deployment contract.
 
 Usage:
-    python scripts/loadtest.py --url http://localhost:8000 --users 20
+    python scripts/loadtest.py --url http://localhost:8000 --users 20 \
+        --db-url postgresql+asyncpg://u:p@localhost/mindpattern
+
+The 30-day threshold cannot be fast-forwarded through the API (the
++/-1-day backdating guard is a security property), so measuring the FULL
+recompute pipeline needs accounts that old: pass --db-url to backdate the
+persistent load handles' created_at (seed_demo's mechanism) before the
+entries are seeded. Without it (or before the handles have aged), the
+recompute phase stays in the baseline phase — which the script now reports
+and counts as a FAILURE for capacity purposes, never as a silent success.
 
 Cost model to keep in mind while reading results:
   * login is scrypt(N=2^16)-bound: ~4/s per process (the auth limiter).
@@ -41,6 +50,7 @@ class Stats:
     label: str
     latencies: list[float] = field(default_factory=list)
     failures: int = 0
+    elapsed: float = 0.0  # wall seconds for the whole phase (set by phase())
 
     def record(self, seconds: float, ok: bool) -> None:
         if ok:
@@ -53,10 +63,15 @@ class Stats:
             return f"{self.label}: ALL FAILED ({self.failures})"
         lat = sorted(self.latencies)
         p = lambda q: lat[min(len(lat) - 1, int(q * len(lat)))]  # noqa: E731
+        # Completion rate = successes / WALL time (Little's law under the
+        # phase's actual concurrency). The old "throughput" divided by
+        # sum(latencies) — that is 1/mean-latency, understating the rate
+        # by roughly the concurrency factor (2026-09-19 audit, L-35).
+        rate = len(lat) / self.elapsed if self.elapsed > 0 else float("nan")
         return (
             f"{self.label}: n={len(lat)} fail={self.failures} "
             f"p50={p(0.50):.3f}s p95={p(0.95):.3f}s max={lat[-1]:.3f}s "
-            f"throughput={len(lat) / sum(lat):.2f}/s"
+            f"completion-rate={rate:.2f}/s (wall {self.elapsed:.1f}s)"
         )
 
 
@@ -77,6 +92,12 @@ class LoadUser:
         self.token: str | None = None
         self.user_id: str | None = None
         self.data_key: bytes | None = None
+        # Set in main(): True when the seeded corpus has >= 30 distinct
+        # entry days, so recompute MUST cross into the insight phase and
+        # run the real analyzer (a 200 that stays baseline/analyzer=none
+        # measured a no-op — 2026-09-19 audit, H-20).
+        self.expect_analysis = False
+        self.last_recompute_state = "not-run"
 
     async def register(self) -> bool:
         auth_key, data_key = derive(self.password, self.salt, None)
@@ -148,7 +169,23 @@ class LoadUser:
             "/api/v1/insights/recompute",
             headers={"Authorization": f"Bearer {self.token}", "X-Processing-Token": token},
         )
-        return r.status_code == 200
+        if r.status_code != 200:
+            return False
+        # Assert on the WORK DONE, not just the status: phase must be
+        # "insight" and the analyzer must have actually run ("brain" or
+        # "llm") when the seeded corpus crossed the 30-distinct-day
+        # threshold. A plain 200 in baseline phase measures a no-op and
+        # used to be counted as recompute capacity (2026-09-19 audit, H-20).
+        body = r.json()
+        self.last_recompute_state = (
+            f"phase={body.get('phase')} analyzer={body.get('analyzer')} "
+            f"active_days={body.get('active_days')}"
+        )
+        if self.expect_analysis and (
+            body.get("phase") != "insight" or body.get("analyzer") not in ("brain", "llm")
+        ):
+            return False
+        return True
 
 
 async def phase(client: httpx.AsyncClient, label: str, coros) -> Stats:
@@ -164,7 +201,8 @@ async def phase(client: httpx.AsyncClient, label: str, coros) -> Stats:
         stats.record(time.monotonic() - t0, bool(ok))
 
     await asyncio.gather(*(timed(i, c) for i, c in enumerate(coros)))
-    print(f"  {stats.summary()}  (wall {time.monotonic() - started:.1f}s)")
+    stats.elapsed = time.monotonic() - started
+    print(f"  {stats.summary()}")
     return stats
 
 
@@ -172,16 +210,37 @@ async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--users", type=int, default=20)
-    parser.add_argument("--entries-per-user", type=int, default=5)
+    parser.add_argument(
+        "--entries-per-user",
+        type=int,
+        default=32,
+        help="entries (on distinct days) seeded per user; >= 30 distinct days "
+        "is required for recompute to cross into the insight phase and "
+        "measure real analyzer work instead of a baseline no-op "
+        "(2026-09-19 audit, H-20)",
+    )
     parser.add_argument(
         "--days-back",
         type=int,
         default=35,
-        help="entries spread over N days (drives the brain's window size)",
+        help="entries spread over N days (drives the brain's window size; "
+        "keep >= entries-per-user so every entry lands on its own day)",
+    )
+    parser.add_argument(
+        "--db-url",
+        default=None,
+        help="Optional SQLAlchemy URL of the API database. The entry API "
+        "only accepts dates within +/-1 day of account creation (the "
+        "threshold-inflation guard), so seeding 30+ distinct PAST days "
+        "requires backdating the load handles' created_at — exactly what "
+        "scripts/seed_demo.py does for the demo account. Without it, a "
+        "fresh database rejects the backdated entries (422) and the "
+        "recompute phase measures only the baseline no-op.",
     )
     args = parser.parse_args()
 
-    from datetime import date, timedelta
+    from datetime import date, datetime, timedelta
+    from datetime import timezone as tz
 
     password = "loadtest-password-1"
     async with httpx.AsyncClient(base_url=args.url, timeout=120) as client:
@@ -201,20 +260,82 @@ async def main() -> int:
             print("  server for the probe.")
 
         today = date.today()
+        if args.days_back < args.entries_per_user:
+            print(
+                f"  WARNING: --days-back ({args.days_back}) < --entries-per-user "
+                f"({args.entries_per_user}): entry days collide, distinct-day "
+                f"count drops below the 30-day threshold and recompute measures "
+                f"a baseline no-op. Raise --days-back."
+            )
+        # One entry per DISTINCT day, spread across the window: the day is
+        # computed so different entry indices never collide on the same
+        # date when days_back >= entries_per_user. Distinct calendar days
+        # are what the 30-day threshold counts.
+        days = [
+            today
+            - timedelta(days=(e * args.days_back) // max(args.entries_per_user - 1, 1))
+            for e in range(args.entries_per_user)
+        ]
+        distinct_days = len(set(days))
+        if distinct_days >= 30 and not args.db_url:
+            print(
+                f"  NOTE: {distinct_days} distinct entry days require accounts that "
+                f"old — pass --db-url to backdate the load handles' created_at "
+                f"(seed_demo's mechanism) or the API's +/-1-day backdating "
+                f"guard will 422 every entry older than the account."
+            )
+        if distinct_days < 30:
+            print(
+                f"  WARNING: only {distinct_days} distinct entry days seeded — "
+                f"below the 30-day insight threshold, so the recompute phase "
+                f"will exercise the BASELINE path only (no analyzer work). "
+                f"Use --entries-per-user 30 --days-back >= 30."
+            )
+
+        if args.db_url and distinct_days >= 30:
+            from sqlalchemy import update
+            from sqlalchemy.ext.asyncio import create_async_engine
+
+            from app.db import build_sessionmaker
+            from app.models import User
+
+            engine = create_async_engine(args.db_url)
+            Session = build_sessionmaker(engine)
+            async with Session() as db:
+                for u in users:
+                    await db.execute(
+                        update(User)
+                        .where(User.id == u.user_id)
+                        .values(
+                            created_at=datetime.now(tz.utc) - timedelta(days=args.days_back + 2)
+                        )
+                    )
+                await db.commit()
+            await engine.dispose()
+            print(f"  backdated {len(users)} load handles {args.days_back + 2} days")
+
         jobs = []
         for u in users:
-            for e in range(args.entries_per_user):
-                day = (
-                    today - timedelta(days=(e * args.days_back) // max(args.entries_per_user, 1))
-                ).isoformat()
+            u.expect_analysis = distinct_days >= 30
+            for day in days:
                 jobs.append(
                     u.create_entry(
-                        day, "a calm load test day with ordinary words about tea and walking"
+                        day.isoformat(),
+                        "a calm load test day with ordinary words about tea and walking",
                     )
                 )
         await phase(client, "create-entry", jobs)
 
-        await phase(client, "recompute", [u.recompute() for u in users])
+        recompute_stats = await phase(client, "recompute", [u.recompute() for u in users])
+        from collections import Counter
+
+        states = Counter(u.last_recompute_state for u in users)
+        print(f"  recompute outcomes: {dict(states)}")
+        if recompute_stats.failures and any(
+            "phase=baseline" in s or "analyzer=none" in s for s in states
+        ):
+            print("  (baseline/no-analyzer recomputes were counted as FAILURES:")
+            print("   a 200 without analyzer work is a no-op, not capacity)")
 
     print("==> done. Compare p95s against the deployment contract: login is")
     print("    scrypt-bound (~4/s ceiling); recompute is brain-bound (~3/s at")

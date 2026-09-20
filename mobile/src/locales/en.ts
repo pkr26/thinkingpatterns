@@ -152,6 +152,12 @@ export const en: Record<string, string> = {
   "login.signInFailedTitle": "Sign in failed",
   "login.badCredentials": "That username or password didn't match.",
   "login.usernameTaken": "That username is already taken. Try another, or sign in instead.",
+  // L-65: the account WAS created but a later step (session write, unlock
+  // proof) failed — the fix is signing in, not re-registering (which would
+  // 409 on the taken username and strand the user).
+  "login.registerPartialTitle": "Account created",
+  "login.registerPartialBody":
+    "Your account was created, but this device couldn't finish signing you in. Switch to sign-in and use your new username and password.",
 
   // ------------------------------------------------------------- onboarding
   "onboarding.panel1Title": "Write each day",
@@ -406,7 +412,7 @@ export const en: Record<string, string> = {
   "insights.ev.dayAfterValue": "~{lag} day later — seen on {after} such days vs {other} others",
   "insights.ev.carryover": "Carryover",
   "insights.ev.carryoverMood": "mood has been carrying over more strongly than it used to for you",
-  "insights.ev.carryoverEnergy": "your energy have been carrying over more strongly than it used to for you",
+  "insights.ev.carryoverEnergy": "your energy has been carrying over more strongly than it used to for you",
   "insights.ev.carryoverPositive": "your positive feelings have been carrying over more strongly than it used to for you",
   "insights.ev.carryoverNegative": "your negative feelings have been carrying over more strongly than it used to for you",
   "insights.ev.tracking": "Tracking together",
@@ -444,7 +450,7 @@ export const en: Record<string, string> = {
   "insights.tech.pairValue": "{recent} vs {earlier}",
   "insights.desc.temporal": "You've mentioned '{label}' {count} times, most often on {day}s.",
   "insights.desc.sameDay": "the same day",
-  "insights.desc.certainDay": "certain",
+  "insights.desc.certainDay": "certain day",
   "insights.desc.moodCorrelation": "Your entries read {direction} on days when '{label}' comes up (mood shift of {shift}).",
   "insights.desc.link": "The day after '{label}' comes up, your entries read {direction} than usual for you.",
   "insights.desc.inertia": "Your mood has been carrying over from day to day more than usual for you.",
@@ -503,6 +509,10 @@ export const en: Record<string, string> = {
   "question.refresh": "Refresh",
   "question.showToday": "Show today's question",
   "question.captionBaseline": "Today's question comes from a small built-in set — nothing leaves this device for it.",
+  // 2026-09-20 audit L-57: status-0 is "no response" (offline, timeout,
+  // local refusal) — the phase is UNKNOWABLE, so never caption it as the
+  // baseline program; say what is actually true instead.
+  "question.captionOffline": "Can't reach the server right now — here is a general question for today.",
   "question.captionInsight": "Computing your question can send your encryption key to the server once — held in memory for up to 5 minutes, never stored.",
   "question.accountMissingPlain": "Account id missing — please sign in again.",
 
@@ -617,19 +627,70 @@ export const en: Record<string, string> = {
   "settings.serverUrlA11y": "Server URL",
   "settings.saveServerUrl": "Save server URL",
 
+  // --------------------------------------------------------- measures (M-16)
+  // The whole Measures screen resolves through t(): the questionnaire is the
+  // most safety-adjacent string class in the app and was hardcoded English
+  // before the 2026-09-20 audit fix.
+  "measures.intro":
+    "A standard wellbeing questionnaire (PHQ-9), completed by you. MindPattern stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
+  "measures.offlineNote":
+    "Your recorded history needs a connection to load. Completing the questionnaire also needs one — nothing here works offline yet.",
+  "measures.loadFailed": "Could not load your measures.",
+  "measures.historyTitle": "Your recorded scores",
+  "measures.emptyNote": "Nothing recorded yet.",
+  "measures.stemsHeader": "Over the last 2 weeks, how often have you been bothered by:",
+  "measures.item9Note": " (safety item — support is always one tap away)",
+  "measures.questionA11y": "Question {index}",
+  "measures.questionOptionA11y": "Question {index}: {label}",
+  "measures.recordButton": "Record this check-in",
+  "measures.backToSettings": "Back to settings",
+  "measures.sessionDamagedTitle": "Session damaged",
+  "measures.sessionDamagedBody": "Account id missing — please sign in again.",
+  "measures.lockedTitle": "Locked",
+  "measures.lockedBody": "Your keys are locked — unlock and try again.",
+  "measures.recordedStatus": "Recorded — encrypted, as always.",
+  "measures.alreadyRecorded": "Already recorded — refreshing.",
+  "measures.notRecordedTitle": "Not recorded",
+  "measures.recordOfflineBody": "Recording needs a connection right now. Your picks are still on screen.",
+  "measures.recordFailedBody": "Could not record just now. Your picks are still on screen.",
+  "measures.crisisTitle": "Support is available",
+  "measures.crisisBody":
+    "Some of what you marked sounds heavy. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
+  "measures.viewResources": "View support resources",
+  // PHQ-9 item wording (public-domain instrument). The structural list and
+  // the option VALUES live in src/phq9.ts; only display copy lives here.
+  "measures.phq9.item1": "Little interest or pleasure in doing things",
+  "measures.phq9.item2": "Feeling down, depressed, or hopeless",
+  "measures.phq9.item3": "Trouble falling or staying asleep, or sleeping too much",
+  "measures.phq9.item4": "Feeling tired or having little energy",
+  "measures.phq9.item5": "Poor appetite or overeating",
+  "measures.phq9.item6": "Feeling bad about yourself — or that you are a failure or have let yourself or your family down",
+  "measures.phq9.item7": "Trouble concentrating on things, such as reading or watching television",
+  "measures.phq9.item8": "Moving or speaking so slowly that other people could have noticed — or being so fidgety or restless that you have been moving a lot more than usual",
+  "measures.phq9.item9": "Thoughts that you would be better off dead, or of hurting yourself in some way",
+  "measures.phq9.option0": "Not at all",
+  "measures.phq9.option1": "Several days",
+  "measures.phq9.option2": "More than half the days",
+  "measures.phq9.option3": "Nearly every day",
+
   // -------------------------------------------------------- therapist share
   "share.codeNotFoundTitle": "Code not found",
   "share.codeNotFoundBody": "Check the code with your therapist — it expires 15 minutes after they generate it.",
   "share.lookupFailedTitle": "Couldn’t look up the code",
   "share.grantTitle": "Share with {name}?",
+  // Sharing disclosure v2 (audit H-14/M-25): the scope this consent records
+  // now names every patient-derived class the therapist can read — journal
+  // entries, patterns/insights, wellbeing measures (PHQ-9 questionnaires)
+  // and the caseload summaries derived from them. Keep in sync with the
+  // server's SHARING_DISCLOSURE_VERSION bump to "v2".
   "share.grantBody":
-    "They will be able to read every journal entry and every pattern computed from them, from their therapist portal. They cannot change or delete anything — only read, and write their own private notes.\n\nYou can stop sharing at any time; that ends their access immediately, but it cannot unread what they have already seen. You will be asked for your password.",
+    "They will be able to read every journal entry, every pattern computed from them, your wellbeing measures (PHQ-9 questionnaires), and the summary of your account that appears on their caseload list — from their therapist portal. They cannot change or delete anything — only read, and write their own private notes.\n\nYou can stop sharing at any time; that ends their access immediately, but it cannot unread what they have already seen. You will be asked for your password.",
   "share.revokeTitle": "Stop sharing with {name}?",
   "share.revokeBody": "Their access ends immediately. They keep anything they have already read. You will be asked for your password.",
   "share.stopSharing": "Stop sharing",
   "share.noAccount": "no saved account on this device",
   "share.grantDoneTitle": "Sharing started",
-  "share.grantDoneBody": "{name} can now read your entries and patterns from their portal.",
+  "share.grantDoneBody": "{name} can now read your entries, patterns and wellbeing measures from their portal.",
   "share.revokeDoneTitle": "Sharing stopped",
   "share.revokeDoneBody": "Their access has ended.",
   "share.unavailableTitle": "Therapist sharing unavailable",
@@ -638,6 +699,11 @@ export const en: Record<string, string> = {
   "share.unreachableBody": "Sharing availability could not be confirmed — check your connection and try again. No pairing code or journal data is sent until it is.",
   "share.sharingNowLabel": "Sharing now",
   "share.notSharingNote": "You are not sharing with anyone. Your entries stay visible only to you.",
+  // L-66: a FAILED consents load is unknown status, not "not sharing" —
+  // this screen is where a revoke is verified, so false certainty is the
+  // worst failure direction here.
+  "share.listFailedNote":
+    "Couldn’t load who you are sharing with just now — check your connection and reopen this screen before relying on this list.",
   "share.sharingSince": "Sharing since {date}",
   "share.stoppedOn": "Stopped {date}",
   "share.addLabel": "Add your therapist",
@@ -649,8 +715,20 @@ export const en: Record<string, string> = {
   "share.fingerprintNote":
     "Key fingerprint: {fingerprint}\nRead it back to your therapist and check it matches the one their portal shows — a mismatch means the key was substituted in transit.",
   "share.disclosure":
-    "Sharing lets them read every entry and pattern (never change anything), and write their own private notes. You can stop at any time; what they already read cannot be unread.",
+    "Sharing lets them read your journal entries, your patterns and insights, your wellbeing measures (PHQ-9 questionnaires), and your caseload-summary line (never change anything), and write their own private notes. You can stop at any time; what they already read cannot be unread.",
   "share.shareWithName": "Share with {name}",
   "share.reauthGrantTitle": "Enter your password to share with {name}",
   "share.reauthRevokeTitle": "Enter your password to stop sharing",
+  // M-25: the server reports a sharing-disclosure version this app does not
+  // know (either direction of drift). Calm state: no new grant is offered
+  // until the versions line up, existing sharing and revoking stay intact.
+  "share.termsUpdatedTitle": "Sharing terms updated",
+  "share.termsUpdatedBody":
+    "What a therapist can read has changed — it now includes your wellbeing measures (PHQ-9 questionnaires). Update this app, then share again to see and accept the current terms. Your existing sharing keeps working, and you can stop it below at any time.",
+  // M-25: the server rejected a grant because the disclosure reviewed on
+  // this screen is no longer the current one (409 disclosure_outdated).
+  // Nothing was shared — the honest next step is to start again.
+  "share.grantOutdatedTitle": "Sharing terms updated",
+  "share.grantOutdatedBody":
+    "The sharing terms changed before this was sent, so nothing was shared. Nothing about you changed on the server. Start again to review the current terms — they now include your wellbeing measures (PHQ-9 questionnaires).",
 };

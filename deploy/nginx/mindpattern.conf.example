@@ -9,13 +9,15 @@
 # When this proxy is enabled, set both variables on the API service:
 #   MINDPATTERN_TRUST_PROXY_HEADERS=1
 #   MINDPATTERN_TRUSTED_PROXY_IPS=<the peer IP/CIDR API sees for nginx>
-# The image entrypoint refuses proxy-header mode without an explicit trusted
-# proxy allowlist.  This is the source address visible *inside the API
-# container*, not necessarily the host's loopback: a host nginx reaching a
-# Docker published port commonly appears as the Docker bridge gateway. Check
-# the API's direct peer in a controlled test/deployment and allowlist only
-# that fixed address/CIDR. If nginx runs in another container/host, use its
-# fixed private address/CIDR instead.
+# The API's CONFIG VALIDATION (backend/app/config.py — not the image
+# entrypoint; the entrypoint only runs migrations) refuses proxy-header
+# mode without an explicit trusted proxy allowlist.  This is the source
+# address visible *inside the API container*, not necessarily the host's
+# loopback: a host nginx reaching a Docker published port commonly appears
+# as the Docker bridge gateway. Check the API's direct peer in a
+# controlled test/deployment and allowlist only that fixed address/CIDR.
+# If nginx runs in another container/host, use its fixed private
+# address/CIDR instead.
 
 # Edge rate limiting: shed request floods BEFORE they occupy an application
 # concurrency slot (--limit-concurrency 100) or a scrypt worker. The API's
@@ -40,8 +42,27 @@ server {
     ssl_certificate     /etc/letsencrypt/live/portal.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/portal.example.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    # TLSv1.2 cipher suite tuned to the modern (Mozilla "intermediate")
+    # profile: AEAD-only, forward secrecy only. TLSv1.3 cipher suites are
+    # fixed by the protocol and not configurable here.
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    # Let the CLIENT pick its TLSv1.2 suite (all listed are strong);
+    # preferring server order only helps against exotic legacy clients.
+    ssl_prefer_server_ciphers off;
     ssl_session_timeout 1d;
     ssl_session_cache shared:SSL:10m;
+    # Session tickets off: the ticket key would outlive the certificate's
+    # forward-secrecy story on a long-lived proxy host.
+    ssl_session_tickets off;
+    # OCSP stapling: the proxy fetches and pins the CA's revocation answer
+    # so clients do not leak their browsing of this origin to the CA, and
+    # revocation actually works for clients behind blocking middleboxes.
+    # Needs the chain + a resolver for the OCSP responder's hostname.
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/portal.example.com/chain.pem;
+    resolver 9.9.9.9 1.1.1.1 valid=300s;
+    resolver_timeout 5s;
 
     server_tokens off;
     client_max_body_size 2m;
@@ -71,6 +92,25 @@ server {
 
     root /srv/mindpattern/portal/dist;
     index index.html;
+
+    # EXACT /api must be owned by the API too: `location /api/` alone does
+    # not match the bare path, and the SPA fallback below would otherwise
+    # answer the legacy mount with index.html + 200 — a web shell where the
+    # client expects an API (2026-09-19 audit, L-89).
+    location = /api {
+        limit_req zone=edge_api burst=20 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host portal.example.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+        proxy_no_cache 1;
+        proxy_cache_bypass 1;
+    }
 
     location /api/ {
         limit_req zone=edge_api burst=20 nodelay;

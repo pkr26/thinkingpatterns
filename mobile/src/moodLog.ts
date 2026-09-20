@@ -41,7 +41,13 @@ const MAX_DAYS = 400;
 
 /** Serializes every read-modify-write cycle: two rapid recordMood calls
  *  (or a record racing the legacy re-encryption write) used to lose one
- *  day's value to a last-write-wins race on a stale snapshot. */
+ *  day's value to a last-write-wins race on a stale snapshot.
+ *
+ *  READERS are serialized too (audit M-35, 2026-09-20): read() can WRITE
+ *  (the legacy-format migration inside it), so an unserialized reader
+ *  races concurrent recordMood writes exactly like another writer would —
+ *  and its stale-snapshot migration write can clobber a day that was just
+ *  recorded. */
 let logMutex: Promise<unknown> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
   const run = logMutex.then(operation, operation);
@@ -180,11 +186,13 @@ export async function recordMood(
   }
 }
 
-/** The most recent *days* mood entries, oldest first. */
+/** The most recent *days* mood entries, oldest first. Serialized with the
+ *  writers (M-35): see the logMutex comment — read() migrates legacy
+ *  bytes, which is a write. */
 export async function recentMoods(dataKey: Buffer, userId: string, days = 30): Promise<MoodDay[]> {
   const keyCopy = Buffer.from(dataKey);
   try {
-    const readResult = await read(keyCopy, userId);
+    const readResult = await serialized(() => read(keyCopy, userId));
     return readResult.days.slice(-days);
   // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
@@ -193,11 +201,12 @@ export async function recentMoods(dataKey: Buffer, userId: string, days = 30): P
   }
 }
 
-/** Consecutive writing days ending today (yesterday counts, with grace). */
+/** Consecutive writing days ending today (yesterday counts, with grace).
+ *  Serialized with the writers for the same reason as recentMoods. */
 export async function localStreak(dataKey: Buffer, userId: string, today = todayIso()): Promise<number> {
   const keyCopy = Buffer.from(dataKey);
   try {
-    const { days } = await read(keyCopy, userId);
+    const { days } = await serialized(() => read(keyCopy, userId));
     // Stryker disable next-line ConditionalExpression: with the guard skipped, an empty days array leaves cursor null and the !cursor guard below returns the same 0
     if (days.length === 0) return 0;
     const set = new Set(days.map((d) => d.date));
@@ -210,6 +219,29 @@ export async function localStreak(dataKey: Buffer, userId: string, today = today
       cursor = yesterday(cursor);
     }
     return streak;
+  // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
+  } finally {
+    // Stryker disable next-line CallExpression: zeroize only scribbles the private key copy — unobservable from any caller
+    zeroize(keyCopy);
+  }
+}
+
+/** Delete one day's value (audit L-68, 2026-09-20): deleting a journal
+ *  entry must also drop that day's device-local mood value, or the local
+ *  streak/trend keeps counting a day the user erased. Serialized with
+ *  every other writer; a day that is already absent is a no-op write
+ *  (the honest end state, not an error). */
+export async function removeMoodDay(dataKey: Buffer, userId: string, date: string): Promise<void> {
+  // Snapshot the key NOW, at call time — the serialized block may run
+  // after a lock zeroized the vault's shared buffer (recordMood's rule).
+  const keyCopy = Buffer.from(dataKey);
+  try {
+    await serialized(async () => {
+      const { days } = await read(keyCopy, userId);
+      const next = days.filter((d) => d.date !== date);
+      if (next.length === days.length) return; // absent already: no write
+      await write(keyCopy, userId, next);
+    });
   // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
     // Stryker disable next-line CallExpression: zeroize only scribbles the private key copy — unobservable from any caller

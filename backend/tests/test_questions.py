@@ -108,3 +108,34 @@ class TestPool:
         pattern_questions = [q for q in pool if "t0" in q or "t4" in q]
         assert pattern_questions  # top-5 patterns render
         assert not any("t5" in q for q in pool)  # beyond the cap: generic only
+
+
+class TestTopicTrendTemplates2026_09_20:
+    """Audit M-24: topic templates must select by detail.trend, mirroring
+    Pattern.describe() — a steady-presence topic never renders the rising
+    'taking up more space' claim."""
+
+    def test_rising_topic_renders_the_rising_template(self):
+        from app.services.patterns import Pattern
+
+        rendered = questions.render_pattern_questions(
+            Pattern("topic", "work", 9, 0.8, {"trend": "rising", "share": 0.31})
+        )
+        assert any("taking up more space" in q for q in rendered)
+
+    def test_steady_topic_renders_the_steady_template(self):
+        from app.services.patterns import Pattern
+
+        rendered = questions.render_pattern_questions(
+            Pattern("topic", "work", 9, 0.8, {"trend": "steady", "share": 0.31})
+        )
+        assert rendered
+        assert not any("taking up more space" in q for q in rendered)
+        assert any("steady presence" in q for q in rendered)
+
+    def test_missing_trend_defaults_to_steady(self):
+        # Old/foreign blobs without detail.trend must not fabricate a rise.
+        from app.services.patterns import Pattern
+
+        rendered = questions.render_pattern_questions(Pattern("topic", "work", 9, 0.8, {}))
+        assert not any("taking up more space" in q for q in rendered)

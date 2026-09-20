@@ -35,9 +35,16 @@ export const PROMPT_CHIPS: readonly string[] = [
 
 /** Deterministic per-day selection: a multiplicative hash of the date
  *  ordinal picks the rotation offset, then the first `count` pool entries
- *  (wrapping) come out in pool order. Same day → same chips, forever. */
+ *  (wrapping) come out in pool order. Same day → same chips, forever.
+ *
+ *  L-70 (2026-09-20 audit): the ordinal is the LOCAL CALENDAR day
+ *  (Date.UTC over the local y/m/d fields), not the UTC day a raw
+ *  getTime()/86_400_000 division yields — chips used to rotate mid-evening
+ *  for everyone outside UTC, "today's" starters changing under the user
+ *  while they wrote. Date.UTC keeps the ordinal an exact integer per local
+ *  day regardless of timezone or DST. */
 export function promptChipsFor(day: Date, count = 3): string[] {
-  const ordinal = Math.floor(day.getTime() / 86_400_000);
+  const ordinal = Math.floor(Date.UTC(day.getFullYear(), day.getMonth(), day.getDate()) / 86_400_000);
   // A small odd multiplier spreads consecutive days across the pool.
   const offset = ((ordinal * 7) % PROMPT_CHIPS.length + PROMPT_CHIPS.length) % PROMPT_CHIPS.length;
   const chips: string[] = [];

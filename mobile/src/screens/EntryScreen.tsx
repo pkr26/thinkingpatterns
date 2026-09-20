@@ -47,6 +47,7 @@ import {
 } from "react-native";
 import { api, ApiError } from "../api/client";
 import { encryptEntry } from "../crypto/MindPatternCrypto";
+import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
@@ -111,6 +112,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const textRef = useRef(text);
   const userIdRef = useRef<string | null>(null);
   const savingRef = useRef(false);
+  // Set by the mount effect's cleanup: the save flow consults it in its
+  // finally to honor the draft guarantee when an in-flight save dies
+  // after the screen already unmounted (audit L-56).
+  const unmountedRef = useRef(false);
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -194,12 +199,19 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     return () => {
       cancelled = true;
       focusSub?.();
+      unmountedRef.current = true;
       if (statusTimer.current) clearTimeout(statusTimer.current);
       // THE draft guarantee: any non-empty text on unmount — background
       // lock, navigation, session expiry — is stashed for this account.
+      // EXCEPT while a save is in flight (2026-09-20 audit L-56): the
+      // in-flight save owns the text now — stashing here meant the
+      // completed save ALSO restored as a draft, and re-saving it minted
+      // a fresh clientEntryId the server's dedupe could never catch. The
+      // save flow itself stashes in its finally if the entry never
+      // landed (sync failed AND queueing failed after the unmount).
       const draft = textRef.current;
       const owner = userIdRef.current;
-      if (owner && draft.trim()) stashDraft(owner, draft);
+      if (owner && draft.trim() && !savingRef.current) stashDraft(owner, draft);
     };
     // NOTE (privacy hardening): this screen no longer triggers the daily
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
@@ -245,17 +257,53 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     if (savingRef.current) return;
     savingRef.current = true;
     setBusy(true);
+    // Crisis detection is ON-DEVICE and pre-encryption by necessity: the
+    // server only ever sees ciphertext, so it cannot notice a crisis.
+    // The result is never stored or transmitted — it only decides whether
+    // to point at support resources after the entry is safely saved.
+    // Computed BEFORE the try so every failure path below can offer support.
+    const crisisLanguage = detectCrisisLanguage(trimmed);
+    // The throttled support pointer is hoisted to function scope (assigned
+    // once the account/date are known) so the OUTER catch's alert buttons
+    // can chain it too — try and catch are separate block scopes. `landed`
+    // is hoisted for the finally below (draft guarantee for the in-flight
+    // window, audit L-56); the account id comes from userIdRef there.
+    let maybeShowCrisisAlert: () => Promise<void> = async () => {};
+    let landed = false;
     try {
-      const keys = vault.get();
       const userId = await api.getUserId();
       if (!userId) {
         // AAD-binding an entry to "" would make it permanently undecryptable.
         Alert.alert(tr("common.sessionDamagedTitle"), tr("entry.sessionDamagedBody"));
         return;
       }
+      // Re-acquired AFTER the await, not before: vault.get() shares the
+      // vault's key buffers, and a lock landing during the await (app
+      // backgrounded, idle timeout, 401 hook) zeroizes them in place —
+      // encrypting under the zeroed key would produce a blob that saves
+      // "successfully" and can never be decrypted again. get() throws when
+      // locked, which lands in this try's existing error path instead.
+      const keys = vault.get();
       // LOCAL calendar day: the UTC day is wrong for non-UTC users in the
       // evening (it feeds entry ids, dates and the mood log).
       const today = localDateISO();
+      // Never before or instead of saving: the entry is already safe
+      // (synced or queued) before this dialog appears. Safe-messaging
+      // tone — acknowledge, point at humans, no diagnosis.
+      const showCrisisAlert = () =>
+        Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
+          { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
+          { text: tr("common.notNow"), style: "cancel" },
+        ]);
+      // Throttled to at most once per calendar day per account
+      // (src/crisisDialog.ts): a dialog on EVERY crisis-flagged save trains
+      // dismissal. The stamp records BEFORE the dialog so sequential saves
+      // cannot double-fire; a storage failure fails toward showing.
+      maybeShowCrisisAlert = async () => {
+        if (await crisisDialogShownOn(userId, today)) return;
+        await recordCrisisDialogShown(userId, today);
+        showCrisisAlert();
+      };
       // The explicit check-in pick, captured before the success path clears
       // it — only an explicit pick is ever mirrored OUT to the Health app
       // (the text-derived estimate stays device-local; a derived score is
@@ -276,35 +324,21 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // leaves the phone. The explicit check-in wins when there is one;
       // otherwise the quick text estimate fills in, as before. The streak
       // line refreshes once the write lands.
-      void recordMood(keys.dataKey, userId, today, selectedMood ?? localSentiment(trimmed), selectedEnergy ?? undefined)
-        .then(() => localStreak(keys.dataKey, userId))
+      // Private snapshot for the ASYNC chain: recordMood/localStreak snapshot
+      // the key at call time, but the localStreak continuation runs after
+      // recordMood's awaits — a lock in that window would zeroize the
+      // vault's shared buffer before localStreak snapshots it. This copy is
+      // immune and zeroized when the chain settles.
+      const dataKeyCopy = Buffer.from(keys.dataKey);
+      void recordMood(dataKeyCopy, userId, today, selectedMood ?? localSentiment(trimmed), selectedEnergy ?? undefined)
+        .then(() => localStreak(dataKeyCopy, userId))
         .then(setStreak)
-        .catch(() => {});
-      // Crisis detection is ON-DEVICE and pre-encryption by necessity: the
-      // server only ever sees ciphertext, so it cannot notice a crisis.
-      // The result is never stored or transmitted — it only decides whether
-      // to point at support resources after the entry is safely saved.
-      const crisisLanguage = detectCrisisLanguage(trimmed);
-      // Never before or instead of saving: the entry is already safe
-      // (synced or queued) before this dialog appears. Safe-messaging
-      // tone — acknowledge, point at humans, no diagnosis.
-      const showCrisisAlert = () =>
-        Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
-          { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
-          { text: tr("common.notNow"), style: "cancel" },
-        ]);
-      // Throttled to at most once per calendar day per account
-      // (src/crisisDialog.ts): a dialog on EVERY crisis-flagged save trains
-      // dismissal. The stamp records BEFORE the dialog so sequential saves
-      // cannot double-fire; a storage failure fails toward showing.
-      const maybeShowCrisisAlert = async () => {
-        if (await crisisDialogShownOn(userId, today)) return;
-        await recordCrisisDialogShown(userId, today);
-        showCrisisAlert();
-      };
+        .catch(() => {})
+        .finally(() => zeroize(dataKeyCopy));
       let queuedOffline = false;
       try {
         await api.createEntry(clientEntryId, blobB64, today);
+        landed = true;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           // Session expired: the client's unauthorized hook has already
@@ -313,15 +347,20 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           // screen stack, and this screen unmounts with it). The draft is
           // stashed for the re-unlock remount — it is NOT lost.
           stashDraft(userId, trimmed);
+          landed = true; // already stashed for the re-unlock remount
           vault.lock();
-          Alert.alert(tr("common.sessionExpiredTitle"), tr("entry.sessionExpiredBody"));
+          Alert.alert(tr("common.sessionExpiredTitle"), tr("entry.sessionExpiredBody"), [
+            { text: tr("common.ok"), onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } },
+          ]);
           return;
         }
         if (err instanceof ApiError && err.status === 422) {
           // The server permanently rejects this blob; queueing it would
           // poison the offline queue with an entry that can never sync. No
           // server detail text in the dialog — just the honest outcome.
-          Alert.alert(tr("entry.notAcceptedTitle"), tr("entry.notAcceptedBody"));
+          Alert.alert(tr("entry.notAcceptedTitle"), tr("entry.notAcceptedBody"), [
+            { text: tr("common.ok"), onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } },
+          ]);
           return;
         }
         // Offline, 5xx or throttled: queue the SAME encrypted entry —
@@ -329,6 +368,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         try {
           await enqueue({ userId, clientEntryId, blobB64, entryDate: today });
           queuedOffline = true;
+          landed = true;
         } catch (queueErr) {
           if (queueErr instanceof QueueFullError) {
             // The entry text is still on screen — a crisis-flagged entry
@@ -384,10 +424,23 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       }
       if (crisisLanguage) await maybeShowCrisisAlert();
     } catch (err) {
-      Alert.alert(tr("entry.couldNotSaveTitle"), requestFailureCopy(err));
+      // The entry went nowhere (unsaved) — a crisis-flagged entry must
+      // STILL point at support here, exactly like the queue-failure paths.
+      Alert.alert(tr("entry.couldNotSaveTitle"), requestFailureCopy(err), [
+        { text: tr("common.ok"), onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } },
+      ]);
     } finally {
       savingRef.current = false;
       setBusy(false);
+      // Draft guarantee for the in-flight window (audit L-56): the unmount
+      // cleanup skipped stashing while this save owned the text. If the
+      // screen went away AND the entry never landed (not synced, not
+      // queued, not already stashed by the 401 path), stash it here —
+      // a failed save must never eat the user's words either.
+      const owner = userIdRef.current;
+      if (unmountedRef.current && !landed && owner) {
+        stashDraft(owner, trimmed);
+      }
     }
   };
 

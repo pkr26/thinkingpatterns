@@ -10,8 +10,12 @@ therapist portal decrypts with the per-consent unwrapped data key.
 Why the app never interprets a score: MindPattern's charter is
 observations, not diagnosis. A patient-entered measure shared with THEIR
 clinician keeps interpretation where it belongs — the clinician's — while
-giving them trend data between sessions. The sharing disclosure copy (v2)
-names measures explicitly.
+giving them trend data between sessions. The sharing disclosure copy
+(SHARING_DISCLOSURE_VERSION "v2", 2026-09-20 audit fix H-14) names
+measures explicitly; grants recorded under the legacy v1 disclosure do
+NOT cover measures — the therapist measures read refuses them with 409
+disclosure_outdated rather than serving data the patient never agreed to
+share in those terms.
 
 Enforced here beyond blob opacity: the same date bounds as entries (no
 pre-account backdating, ≤ server-today+1), a per-account measure count
@@ -23,9 +27,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import date as date_type, timedelta
+from datetime import date as date_type, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,28 +53,50 @@ FORWARD_GRACE_DAYS = 1
 # the database. Measures are tiny (scores, not prose).
 MAX_MEASURES_PER_USER = 2000
 
-MEASURE_PAGE_LIMIT = 200
+# Page ceiling for BOTH measure read paths (patient + therapist mirror,
+# 2026-09-20 audit fix M-4). The old 100/200-row cliffs made measure
+# #201+ stored-and-quota-charged but invisible on every read path while
+# the write quota is 2000; the deterministic (measure_date, received_at,
+# id) ordering plus offset paging lets clients walk the whole history.
+MEASURE_PAGE_LIMIT = 500
 
 _user_locks = UserLocks()
 
 
+def _utc_today() -> date_type:
+    """Server-UTC calendar day (2026-09-20 audit fix L-5).
+
+    ``date.today()`` answers in the HOST's local timezone; the grace-day
+    contract ("≤ server-UTC today + 1") and the threshold math both
+    assume UTC. On any non-UTC host the local answer drifts by hours and
+    rejects/accepts the wrong edge entries near midnight.
+    """
+    return datetime.now(timezone.utc).date()
+
+
 def _decode_measure_blob(value: str) -> bytes:
     """b64 → bytes with the same 4xx discipline as entries: bad base64 is
-    a client bug (422 via schema length is not possible here, so 400),
-    never a 500, and never echoes the payload."""
+    a client bug (422/validation_error — aligned with entries' envelope
+    by 2026-09-20 audit fix L-7; clients branch on `code` and the two
+    modules must not diverge for identical client errors), never a 500,
+    and never echoes the payload."""
     try:
         blob = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ApiError(
-            status_code=400, detail="measure blob is not valid base64", code="bad_request"
+            status_code=422, detail="blob must be base64", code="validation_error"
         ) from exc
     if len(blob) < MIN_BLOB_SIZE:
-        raise ApiError(status_code=400, detail="measure blob is too small", code="bad_request")
+        raise ApiError(
+            status_code=422,
+            detail=f"blob must be at least {MIN_BLOB_SIZE} bytes",
+            code="validation_error",
+        )
     return blob
 
 
 def _validate_measure_date(measure_date: date_type, user: User) -> None:
-    today = date_type.today()
+    today = _utc_today()
     if measure_date > today + timedelta(days=FORWARD_GRACE_DAYS):
         raise ApiError(
             status_code=422,
@@ -86,10 +112,19 @@ def _validate_measure_date(measure_date: date_type, user: User) -> None:
         )
 
 
-async def _fresh_active_user(session: AsyncSession, user_id: str) -> User:
-    fresh = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if fresh is None or not fresh.is_active:
-        raise ApiError(status_code=410, detail="account no longer exists", code="account_deleted")
+async def _fresh_active_measure_user(
+    session: AsyncSession, user_id: str, expected_epoch: int
+) -> User:
+    """Re-check a measure mutation's authorization inside the lifecycle
+    fence (2026-09-20 audit fix M-3, mirroring entries
+    ``_fresh_active_entry_user``): a bearer that authenticated before a
+    logout but acquires the fence afterwards must fail closed — including
+    on ``token_epoch``, so a retired token can never complete a measure
+    insert after the logout commit. 401/unauthorized, the same envelope
+    entries uses (L-7 alignment; the old 410/account_deleted drifted)."""
+    fresh = await session.get(User, user_id, populate_existing=True)
+    if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+        raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
     return fresh
 
 
@@ -118,11 +153,30 @@ async def create_measure(
     session: AsyncSession = Depends(get_session),
 ):
     blob = _decode_measure_blob(body.blob)
+    # Capture the epoch this request authenticated under BEFORE waiting on
+    # the fences (2026-09-20 audit fix M-3): a logout/deletion can commit
+    # while we are queued, and the in-fence re-check below must see it.
+    expected_epoch = user.token_epoch
 
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         async with _user_locks.hold(f"measures:{user.id}"):
-            fresh_user = await _fresh_active_user(session, user.id)
+            fresh_user = await _fresh_active_measure_user(session, user.id, expected_epoch)
             _validate_measure_date(body.measure_date, fresh_user)
+
+            # Duplicate BEFORE quota (2026-09-20 audit fix L-6, same fix as
+            # entries): an idempotent retry of an already-stored
+            # client_measure_id at the quota boundary used to answer 413,
+            # so an offline queue could not tell "already applied" from
+            # "genuinely full" and would wedge. The duplicate answer (409)
+            # must win — it is the terminal, correct verdict for a retry.
+            existing = await session.execute(
+                select(Measure.id).where(
+                    Measure.user_id == fresh_user.id,
+                    Measure.client_measure_id == body.client_measure_id,
+                )
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise ApiError(status_code=409, detail="measure already exists", code="conflict")
 
             count = (
                 await session.execute(
@@ -137,15 +191,6 @@ async def create_measure(
                     detail="measure quota exceeded",
                     code="quota_exceeded",
                 )
-
-            existing = await session.execute(
-                select(Measure.id).where(
-                    Measure.user_id == fresh_user.id,
-                    Measure.client_measure_id == body.client_measure_id,
-                )
-            )
-            if existing.scalar_one_or_none() is not None:
-                raise ApiError(status_code=409, detail="measure already exists", code="conflict")
 
             row = Measure(
                 user_id=fresh_user.id,
@@ -189,20 +234,33 @@ async def create_measure(
     ],
 )
 async def list_measures(
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=MEASURE_PAGE_LIMIT),
+    offset: int = Query(default=0, ge=0, le=100_000),
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """The patient's own measures, newest completion first. Pagination is
-    deliberately simple: measures are few and small; the limit is capped."""
-    bounded = max(1, min(limit, MEASURE_PAGE_LIMIT))
+    """The patient's own measures, newest completion first.
+
+    Offset paging (2026-09-20 audit fix M-4): the write quota is 2000 but
+    reads used to hard-cap at 100-200 rows with no continuation, so
+    measure #201+ was stored and quota-charged yet invisible to the
+    patient, the therapist, and the export. ``id`` breaks
+    (measure_date, received_at) ties — without a deterministic total order
+    an offset page can skip or repeat a row across pages. Clients page by
+    offset until a short page.
+    """
     rows = (
         (
             await session.execute(
                 select(Measure)
                 .where(Measure.user_id == user.id)
-                .order_by(Measure.measure_date.desc(), Measure.received_at.desc())
-                .limit(bounded)
+                .order_by(
+                    Measure.measure_date.desc(),
+                    Measure.received_at.desc(),
+                    Measure.id.desc(),
+                )
+                .offset(offset)
+                .limit(limit)
             )
         )
         .scalars()

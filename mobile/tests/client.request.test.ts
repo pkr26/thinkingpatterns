@@ -294,6 +294,22 @@ describe("401 session-death hook", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("login never sends the bearer and never locks the vault, even mid-session (H-2 wart)", async () => {
+    // A biometric-unlocked session holds a live token while reauth verifies
+    // a password online. A wrong password answers 401 — that must stay
+    // "wrong password", not fire the vault-lock hook under the alert.
+    await api.setSession("tok-1", "user-1", "alice");
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "bad verifier" }, 401));
+    await expect(api.login("alice", "wrong-verifier")).rejects.toMatchObject({ status: 401 });
+    expect(handler).not.toHaveBeenCalled();
+    // And the stale bearer is not shipped on the verifier-authenticated
+    // request at all.
+    const sent = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(sent?.headers).not.toHaveProperty("Authorization");
+  });
+
   it("a throwing handler never masks the 401 ApiError", async () => {
     await api.setSession("tok-1", "user-1", "alice");
     setUnauthorizedHandler(() => {
@@ -914,6 +930,29 @@ describe("v1 error envelope", () => {
     vi.mocked(fetch).mockResolvedValue(withRetryAfter(null));
     await expect(api.meta()).rejects.toMatchObject({ retryAfterMs: undefined });
   });
+
+  // L-54: the backend emits Retry-After on 503 maintenance responses too;
+  // parsing only 429 left the offline queue on its 30 s+ local backoff
+  // while the server had explicitly asked for longer.
+  it("honors Retry-After on a 503, and only on 429/503", async () => {
+    const withRetryAfter = (status: number, value: string | null): Response => {
+      const response = jsonResponse({ detail: "unavailable" }, status);
+      if (value !== null) response.headers.set("retry-after", value);
+      return response;
+    };
+
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter(503, "120"));
+    await expect(api.meta()).rejects.toMatchObject({ status: 503, retryAfterMs: 120_000 });
+
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter(503, null));
+    await expect(api.meta()).rejects.toMatchObject({ status: 503, retryAfterMs: undefined });
+
+    // Other statuses carry no advisory even if a hostile proxy adds one.
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter(500, "120"));
+    await expect(api.meta()).rejects.toMatchObject({ status: 500, retryAfterMs: undefined });
+    vi.mocked(fetch).mockResolvedValue(withRetryAfter(403, "120"));
+    await expect(api.meta()).rejects.toMatchObject({ status: 403, retryAfterMs: undefined });
+  });
 });
 
 describe("listEntries drift hardening", () => {
@@ -946,5 +985,88 @@ describe("origin-pinned queue uploads", () => {
       api.createQueuedEntry("e-1", "AAAA", "2026-09-01", "https://one.example.test"),
     ).rejects.toMatchObject({ name: "OriginPinnedError" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // H-1: the queue canonicalizes loopback aliases before pinning; request()
+  // must canonicalize its side of the comparison too, or the SHIPPED
+  // DEFAULT base URL (http://localhost:8000) makes every pinned upload
+  // throw OriginPinnedError before the network — the queue could never
+  // flush at all. No setBaseUrl here: the default storage state IS the bug.
+  it("accepts a loopback-alias pin against the default localhost base URL (H-1)", async () => {
+    expect(await getBaseUrl()).toBe("http://localhost:8000");
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ ok: true }, 200, "http://localhost:8000"));
+    // The queue's canonical pin (127.0.0.1) against the stored localhost
+    // spelling: one device-local loopback interface, one decision.
+    await expect(
+      api.createQueuedEntry("e-1", "AAAA", "2026-09-01", "http://127.0.0.1:8000"),
+    ).resolves.toBeDefined();
+    // The raw localhost pin (any historical pin value) also passes.
+    await expect(
+      api.createQueuedEntry("e-2", "AAAA", "2026-09-01", "http://localhost:8000"),
+    ).resolves.toBeDefined();
+    // …but a genuinely different origin still refuses, loopback or not.
+    await expect(
+      api.createQueuedEntry("e-3", "AAAA", "2026-09-01", "http://127.0.0.1:9999"),
+    ).rejects.toMatchObject({ name: "OriginPinnedError" });
+    await expect(
+      api.createQueuedEntry("e-4", "AAAA", "2026-09-01", "https://other.example.test"),
+    ).rejects.toMatchObject({ name: "OriginPinnedError" });
+  });
+});
+
+describe("measures paging (M-4/L-55)", () => {
+  const row = (id: string) => ({ id, client_measure_id: `c-${id}`, blob: "eA==", measure_date: "2026-01-01" });
+  const pageOf = (n: number, start: number) => Array.from({ length: n }, (_, i) => row(`m-${start + i}`));
+
+  it("walks offset pages until a short page and returns the whole history", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(pageOf(500, 0), 200))
+      .mockResolvedValueOnce(jsonResponse(pageOf(37, 500), 200));
+
+    const rows = (await api.listMeasures()) as { id: string }[];
+    expect(rows).toHaveLength(537);
+    expect(rows[0]?.id).toBe("m-0");
+    expect(rows[536]?.id).toBe("m-536");
+    const calls = vi.mocked(fetch).mock.calls.map((c) => String(c[0]));
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("limit=500&offset=0");
+    expect(calls[1]).toContain("limit=500&offset=500");
+  });
+
+  it("a single short first page makes exactly one request", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(pageOf(3, 0), 200));
+    const rows = (await api.listMeasures()) as { id: string }[];
+    expect(rows).toHaveLength(3);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("dedups rows that a concurrent insert shifted into two pages", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    // Full page, then a short page whose first row is the SAME id (a
+    // newer measure inserted mid-walk shifts every offset window down).
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse(pageOf(500, 0), 200))
+      .mockResolvedValueOnce(jsonResponse([row("m-499"), ...pageOf(36, 500)], 200));
+
+    const rows = (await api.listMeasures()) as { id: string }[];
+    expect(rows).toHaveLength(536);
+    expect(rows.filter((r) => r.id === "m-499")).toHaveLength(1);
+  });
+
+  it("stops at the quota bound even if a lying server always answers full pages", async () => {
+    await api.setSession("tok-1", "user-1", "alice");
+    vi.mocked(fetch).mockImplementation(
+      (async (input: unknown) => {
+        const url = String(input);
+        const offset = Number(url.split("offset=")[1] ?? 0);
+        return jsonResponse(pageOf(500, offset), 200);
+      }) as unknown as typeof fetch,
+    );
+    const rows = (await api.listMeasures()) as { id: string }[];
+    expect(rows).toHaveLength(2000);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(2000);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
   });
 });

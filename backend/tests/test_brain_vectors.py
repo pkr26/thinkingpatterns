@@ -15,16 +15,19 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from pathlib import Path
 
 from app.services import brain, statsig
+from app.services.patterns import WORD_RE
 
 VECTORS = Path(__file__).resolve().parents[2] / "shared" / "brain_vectors.json"
 
 
 def _tokens(text: str) -> list[str]:
-    tokens = re.findall(r"[a-z']+", text.lower())
+    # The ENGINE's exact tokenization — the fold included (2026-09-20
+    # audit H-8). A hand-copied regex would silently pin drift instead of
+    # catching it the day one side changes tokenization.
+    tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
     tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
     return tokens
 

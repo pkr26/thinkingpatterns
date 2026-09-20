@@ -127,13 +127,19 @@ async def test_entry_page_ordering_carries_the_id_tiebreak(client, app):
         assert "entry_date" in ordering and "received_at" in ordering and "id" in ordering, query
 
 
-# --- P6: a same-day recompute must rewrite the stored question blob
+# --- P6 (REPURPOSED 2026-09-20, audit H-12): a same-day recompute must
+# NOT rewrite the stored question blob. The old pin asserted the opposite
+# (fresh ciphertext on every same-day recompute) and the audit proved that
+# behavior breaks "one question per day, stable within the day" — a
+# recompute after an evening entry served a different question than the one
+# the user may already have answered. The day's question is now pinned on
+# first write; the pin asserts byte-identical stability.
 
 
-async def test_same_day_recompute_rewrites_the_question_blob(client):
-    """The dated upsert must update the BLOB, not just created_at: a second
-    recompute of the same day stores fresh ciphertext (the nonce alone
-    guarantees new bytes on any successful rewrite). (Kills mutant P6.)"""
+async def test_same_day_recompute_preserves_the_question_blob(client):
+    """Audit H-12: recompute with an extra pattern -> SAME question for the
+    same day. The rotation pool changing underneath must never change an
+    already-served (possibly already-answered) question."""
     from tests.test_insights_api import seed_corpus
 
     emu = ClientEmulator("pins-p6", "pw-pins-p6")
@@ -149,7 +155,7 @@ async def test_same_day_recompute_rewrites_the_question_blob(client):
     await emu.recompute(client)
     second = (await client.get("/api/questions/today", headers=emu.headers)).json()["blob"]
 
-    assert second != first, "same-day recompute left the previous question blob in place"
+    assert second == first, "same-day recompute changed the pinned daily question"
 
 
 # --- Q1: the legacy entry-page byte budget is exactly 2 MiB (independent of
@@ -474,10 +480,12 @@ async def test_therapist_insights_read_phase_gates_the_blob(client, app):
     await therapist.register(client)
     code = await therapist.create_pairing_code(client)
     wrap = patient_wrap_for(emu, therapist.wrap_pub_key, therapist.user_id or "")
+    from app.api.consents import SHARING_DISCLOSURE_VERSION
+
     granted = await client.post(
         "/api/consents",
         headers={**emu.headers, "X-Account-Verifier": emu.auth_key_b64},
-        json={"code": code, **wrap, "disclosure": "v1"},
+        json={"code": code, **wrap, "disclosure": SHARING_DISCLOSURE_VERSION},
     )
     assert granted.status_code == 201, granted.text
 

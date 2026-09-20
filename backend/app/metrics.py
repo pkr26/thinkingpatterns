@@ -89,10 +89,23 @@ class MetricsRegistry:
 class MetricsMiddleware:
     """Pure-ASGI response-status counter (no bodies, no paths, no headers).
 
-    Sits INSIDE HardeningMiddleware, so it observes everything the
-    application produced — including handled 500s and 429s (which is the
-    rate-limit signal) — but not the pre-parse 413s Hardening itself
-    short-circuits.
+    Sits INSIDE HardeningMiddleware, so it observes every response the
+    application SENDS — including handled 500s and the dependency-issued
+    429s (which is the rate-limit signal). Two classes of response never
+    reach it:
+
+    * Responses Hardening synthesizes from exceptions the app RAISED — the
+      last-ditch 500 and the deep-nesting 400 — plus its pre-dispatch 429
+      for over-limit malformed-JSON clients (M-1): the exception or
+      short-circuit blows straight through this layer. Since 2026-09-20
+      (M-26) those are tapped into the SAME registry via
+      HardeningMiddleware's ``status_observer`` (wired in main.py), so a
+      crash loop still shows up in ``status="5xx"``.
+    * Hardening's pre-parse rejections — 413 oversize, 408 body timeout,
+      400 framing/content-length: deliberately NOT observed. Those requests
+      never entered the application; that exclusion is the long-standing
+      documented contract (an edge-proxy counter is the right place for
+      them).
     """
 
     def __init__(self, app, registry: MetricsRegistry) -> None:

@@ -6,13 +6,24 @@ import base64
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from .models import Entry
 
 USERNAME_PATTERN = r"^[a-zA-Z0-9_.-]{3,64}$"
 CLIENT_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+
+
+class StrictRequestModel(BaseModel):
+    """Base for every request body: unknown fields are a 422, not silent
+    data loss (2026-09-20 audit fix L-27). A typo like ``pattern_pid`` →
+    ``pattrn_pid`` used to save a general note while the client believed
+    it had attached a pattern; response models stay plain BaseModel —
+    additive response fields are the compatibility mechanism, and clients
+    must never be broken by a server ADDING a field."""
+
+    model_config = ConfigDict(extra="forbid")
 
 # Hard request-size ceilings (defense against memory-exhaustion DoS).
 # b64(16 bytes) = 24 chars for salts; b64(32 bytes) = 44 chars for keys;
@@ -23,7 +34,7 @@ MAX_DATA_KEY_B64 = 44  # b64(32 bytes) exactly — the endpoint enforces KEY_SIZ
 MAX_BLOB_B64 = 1_500_000  # ~1.07 MiB decoded
 
 
-class RegisterRequest(BaseModel):
+class RegisterRequest(StrictRequestModel):
     username: str = Field(pattern=USERNAME_PATTERN)
     salt: str = Field(min_length=1, max_length=MAX_SALT_B64)  # b64, exactly 16 decoded bytes
     verifier: str = Field(
@@ -31,7 +42,7 @@ class RegisterRequest(BaseModel):
     )  # b64, exactly 32 decoded bytes
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(StrictRequestModel):
     username: str = Field(pattern=USERNAME_PATTERN)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
 
@@ -45,7 +56,7 @@ class TokenResponse(BaseModel):
     role: str = "user"
 
 
-class SaltLookupRequest(BaseModel):
+class SaltLookupRequest(StrictRequestModel):
     # No username pattern here, deliberately: any probe string (including
     # hostile-looking ones) must reach the decoy path — a 422 for invalid
     # formats would itself be an existence oracle. Body-size caps bound it.
@@ -56,13 +67,13 @@ class SaltResponse(BaseModel):
     salt: str
 
 
-class EntryCreate(BaseModel):
+class EntryCreate(StrictRequestModel):
     client_entry_id: str = Field(pattern=CLIENT_ID_PATTERN)
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)  # b64 envelope
     entry_date: date
 
 
-class EntryReplace(BaseModel):
+class EntryReplace(StrictRequestModel):
     """Atomic replacement payload for an existing entry.
 
     The client entry id remains in the path (and therefore remains part of
@@ -83,7 +94,7 @@ class EntryOut(BaseModel):
     received_at: datetime
 
 
-class ProcessingSessionRequest(BaseModel):
+class ProcessingSessionRequest(StrictRequestModel):
     data_key: str = Field(min_length=1, max_length=MAX_DATA_KEY_B64)  # b64, exactly 32 bytes
 
 
@@ -111,14 +122,14 @@ class RecomputeResponse(BaseModel):
     state_seq: int = 0
 
 
-class AccountDeleteRequest(BaseModel):
+class AccountDeleteRequest(StrictRequestModel):
     """Account destruction requires the password-equivalent credential —
     a stolen bearer token alone must not be able to erase a journal."""
 
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
 
 
-class LlmConsentRequest(BaseModel):
+class LlmConsentRequest(StrictRequestModel):
     """Opting into third-party LLM analysis is explicit, per-user, and
     re-authenticated — it gates sending decrypted journal text off-server."""
 
@@ -202,6 +213,14 @@ class ExportBundle(BaseModel):
     shares: list[ShareRecord] = []
     entries: list[EntryOut]
     insights: list[InsightOut]
+    # Wellbeing measures (2026-09-20 audit fix H-3): the export bundle used
+    # to omit every Measure row, so the README's export-then-delete flow
+    # silently destroyed the patient's entire PHQ-9 history. Additive — old
+    # bundles decrypt unchanged; rows are the same MeasureOut shape the
+    # /measures endpoints serve, ciphertext bound to AAD
+    # ("measure", user_id, client_measure_id) exactly as the client
+    # encrypted it.
+    measures: list[MeasureOut] = []
 
 
 def entry_out(row: Entry) -> EntryOut:
@@ -227,10 +246,29 @@ MAX_SPKI_B64 = 128
 MAX_WRAP_B64 = 512
 # AES-GCM(PKCS8 DER P-256 private key ~=138 bytes) ~= 170 raw -> 232 b64.
 MAX_THERAPIST_KEY_BLOB_B64 = 1024
-DISPLAY_NAME_PATTERN = r"^[^\n\t]{1,120}$"
+# Display names render on consent screens, where a spoofed identity is a
+# consent decision, not cosmetics. The old pattern only excluded \n and \t;
+# every OTHER control character and — worse — the bidi/format controls
+# (RLM/LRM, directional embeddings and isolates, zero-width spaces) were
+# admitted, letting a crafted name visually re-order or invisibly pad
+# itself (2026-09-20 audit fix L-28). It is a single-line field: \n and \t
+# stay excluded (now via the \x00-\x1f control range), and the whole Cc,
+# invisible-Cf, Zl/Zp zoo is refused alongside them.
+DISPLAY_NAME_FORBIDDEN = (
+    "\x00-\x1f"  # Cc controls — includes \n and \t (single-line field)
+    "\x7f-\x9f"  # Cc controls (DEL + C1 range)
+    "\u00ad"  # soft hyphen (Cf)
+    "\u200b-\u200f"  # ZWSP, ZWNJ, LRM, RLM (Cf)
+    "\u2028\u2029"  # Zl/Zp line/paragraph separators
+    "\u202a-\u202e"  # bidi embedding/override controls (Cf)
+    "\u2060-\u206f"  # word joiner … invisible operators + bidi isolates (Cf)
+    "\ufeff"  # zero-width no-break space / BOM (Cf)
+    "\ufff9-\ufffb"  # interlinear annotation controls (Cf)
+)
+DISPLAY_NAME_PATTERN = "^[^" + DISPLAY_NAME_FORBIDDEN + "]{1,120}$"
 
 
-class TherapistRegisterRequest(BaseModel):
+class TherapistRegisterRequest(StrictRequestModel):
     username: str = Field(pattern=USERNAME_PATTERN)
     salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
@@ -254,7 +292,7 @@ class PairingCodeResponse(BaseModel):
     expires_in: int
 
 
-class PairingLookupRequest(BaseModel):
+class PairingLookupRequest(StrictRequestModel):
     # Free-form on purpose: a validation error would leak nothing here, but
     # the code alphabet is normalized in one place (security.sharing) and a
     # wrong code must simply 404.
@@ -267,7 +305,7 @@ class PairingLookupResponse(BaseModel):
     wrap_pub_key: str
 
 
-class ConsentGrantRequest(BaseModel):
+class ConsentGrantRequest(StrictRequestModel):
     code: str = Field(min_length=1, max_length=32)
     ephemeral_pub: str = Field(min_length=1, max_length=MAX_SPKI_B64)
     wrapped_key: str = Field(min_length=1, max_length=MAX_WRAP_B64)
@@ -309,7 +347,7 @@ class PatientOut(BaseModel):
     summary_updated_at: datetime | None = None
 
 
-class MeasureCreate(BaseModel):
+class MeasureCreate(StrictRequestModel):
     """One recorded questionnaire completion: an opaque blob (the client
     encrypts the score payload under the data key, AAD ("measure", user,
     client_measure_id)) plus the client's calendar day of completion."""
@@ -327,13 +365,17 @@ class MeasureOut(BaseModel):
     received_at: datetime
 
 
-class NoteCreateRequest(BaseModel):
+class NoteCreateRequest(StrictRequestModel):
     client_note_id: str = Field(pattern=CLIENT_ID_PATTERN)
-    pattern_pid: str | None = Field(default=None, max_length=200)
+    # min_length=1 (2026-09-20 audit fix L-29): an EMPTY string is not a
+    # pid, and silently coercing it to the NULL "general note" semantics
+    # let a client bug attach (or detach) a note from a pattern without
+    # any error. Explicit null remains the only way to say "no pattern".
+    pattern_pid: str | None = Field(default=None, min_length=1, max_length=200)
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
 
 
-class NoteUpdateRequest(BaseModel):
+class NoteUpdateRequest(StrictRequestModel):
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
 
 

@@ -2,9 +2,15 @@
  * Portal API client. The token lives in memory only (the portal's whole
  * key material — derived keys included — never touches localStorage).
  *
- * Server URL: same-origin by default (the dev server proxies /api to the
- * backend); an explicit base may be configured in Settings-less v1 via
- * the login form's server field.
+ * Server URL: SAME-ORIGIN ONLY, by design — there is no configurable
+ * server field and there must not be one (see LoginView: the login form
+ * renders the portal's own origin and refuses to change it). Deployment
+ * routes /api through the portal's TLS origin and development uses
+ * Vite's same-origin proxy. A maintainer "restoring" a configurable
+ * server field would reopen the verifier-collection vector: a
+ * user-typed HTTPS endpoint can be an attacker's server that chooses
+ * the salt and harvests the derived verifier (or an enrollment token)
+ * for offline guessing.
  */
 
 const API_PREFIX = "/api/v1";
@@ -350,6 +356,13 @@ export interface PortalMeasure {
   received_at: string;
 }
 
+/** One measures page request (audit L-76 / M-4, 2026-09-20): the backend
+ *  serves this many rows per request at most (deterministic order
+ *  measure_date DESC, received_at DESC, id DESC) and accepts limit/offset
+ *  continuation.  100 stays well under the server cap on every backend
+ *  generation, keeping each response small while the caller pages. */
+export const THERAPIST_MEASURE_PAGE_SIZE = 100;
+
 export interface PatientEntriesPage {
   entries: PortalEntry[];
   /** Absent means this filtered result set is complete. */
@@ -467,11 +480,31 @@ export const api = {
   patients: () => request<Patient[]>("GET", "/therapist/patients"),
   patientInsights: (userId: string) =>
     request<InsightsSummary>("GET", `/therapist/patients/${encodeURIComponent(userId)}/insights`),
-  patientMeasures: (userId: string) =>
-    request<PortalMeasure[]>(
+  patientMeasures: async (
+    userId: string,
+    params: { offset?: number; limit?: number } = {},
+  ): Promise<PortalMeasure[]> => {
+    const offset = params.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new ApiError(0, "invalid measure page offset");
+    }
+    if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || params.limit < 1)) {
+      throw new ApiError(0, "invalid measure page limit");
+    }
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    // offset=0 is the default; omitting it keeps older backends (which
+    // reject unknown query params less gracefully) on their plain path.
+    if (offset > 0) search.set("offset", String(offset));
+    const rows = await request<PortalMeasure[]>(
       "GET",
-      `/therapist/patients/${encodeURIComponent(userId)}/measures`,
-    ),
+      `/therapist/patients/${encodeURIComponent(userId)}/measures${search.size > 0 ? `?${search.toString()}` : ""}`,
+    );
+    if (!Array.isArray(rows)) {
+      throw new ApiError(0, "server returned an invalid measures page");
+    }
+    return rows;
+  },
   patientEntries: async (
     userId: string,
     params: { since?: string; until?: string; offset?: number; expectedRevision?: string } = {},

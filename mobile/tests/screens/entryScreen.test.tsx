@@ -61,6 +61,9 @@ vi.mock("../../src/store", async (importOriginal) => {
   return {
     ...actual,
     useSession: () => sessionState,
+    // Spied (real implementation preserved): the L-56 tests assert whether
+    // the unmount/finally paths stashed, while restore still works.
+    stashDraft: vi.fn(actual.stashDraft),
   };
 });
 
@@ -72,7 +75,7 @@ const { recordCrisisDialogShown } = await import("../../src/crisisDialog");
 const { takeStashedDraft, stashDraft } = await import("../../src/store");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, pressLabel, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
+const { render, flush, textOf, pressLabel, firePress, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
 
@@ -366,7 +369,13 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "keep me");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Session expired", expect.stringContaining("unlock again"));
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Session expired",
+      expect.stringContaining("unlock again"),
+      // The alert's OK can chain the throttled support dialog for
+      // crisis-flagged text (2026-09-20 audit, M-15).
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
     // The vault is locked — navigation's gate swaps to the Unlock screen —
     // and the dead session was NOT queued for a guaranteed re-failure.
     expect(vault.isUnlocked()).toBe(false);
@@ -413,7 +422,11 @@ describe("EntryScreen save pipeline", () => {
     await pressLabel(root, "Save entry");
     await flush();
     // Calm copy, no raw server detail in the dialog (audit error-copy fix).
-    expect(Alert.alert).toHaveBeenCalledWith("Entry not accepted", expect.stringContaining("still on screen"));
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Entry not accepted",
+      expect.stringContaining("still on screen"),
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
     expect(enqueue).not.toHaveBeenCalled();
   });
 
@@ -477,7 +490,11 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "any entry");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Could not save", "disk full");
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Could not save",
+      "disk full",
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
   });
 
   it("reports a locked vault instead of crashing", async () => {
@@ -486,7 +503,14 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "secret");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Could not save", "vault is locked");
+    // A lock landing mid-save (2026-09-20 audit, C-1): the keys are
+    // re-acquired AFTER the user-id await, so the save dies loudly here
+    // instead of encrypting under the zeroized key.
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Could not save",
+      "vault is locked",
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
   });
 
   it("falls back to calm copy for non-Error failures", async () => {
@@ -498,7 +522,11 @@ describe("EntryScreen save pipeline", () => {
     await pressLabel(root, "Save entry");
     await flush();
     // Was "unknown error"; the error-copy pass made the fallback a sentence.
-    expect(Alert.alert).toHaveBeenCalledWith("Could not save", "Something went wrong — try again.");
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Could not save",
+      "Something went wrong — try again.",
+      expect.arrayContaining([expect.objectContaining({ text: "OK" })]),
+    );
   });
 
   it("queues on non-ApiError upload failures (plain network error)", async () => {
@@ -815,6 +843,107 @@ describe("EntryScreen crisis-dialog throttle (once per calendar day per account)
     await pressAlertButton("OK");
     await flush();
     expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Not saved"]);
+  });
+
+  // 2026-09-20 audit M-15: the 401, 422 and unexpected-error save failures
+  // previously dropped the support pointer entirely — a crisis-flagged entry
+  // that went NOWHERE was the one case with no dialog. All three now chain
+  // the same throttled support dialog via their OK button.
+  it("chains the support dialog when a crisis-flagged entry is rejected (422)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "entry_date in the future"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I can't go on like this");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Entry not accepted"]);
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Entry not accepted", "Support is available"]);
+    await pressAlertButton("View support resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+  });
+
+  it("chains the support dialog when a crisis-flagged save dies on 401", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(401, "invalid token"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "I want to disappear forever");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Session expired"]);
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Session expired", "Support is available"]);
+  });
+
+  it("chains the support dialog when a crisis-flagged save fails unexpectedly", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(enqueue).mockRejectedValue(new Error("disk full"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "everyone would be better off without me");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Could not save"]);
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Could not save", "Support is available"]);
+  });
+
+  // 2026-09-20 audit L-56: the unmount cleanup used to stash the draft
+  // even while a save was in flight — the completed save ALSO came back as
+  // a restored draft, and re-saving it minted a fresh clientEntryId the
+  // server's dedupe could never catch. The in-flight save owns the text:
+  // success leaves no stash; failure stashes in the save flow's finally.
+  it("unmounting mid-save leaves NO draft once the save lands (no duplicate on re-save)", async () => {
+    // The suite never clears this spy (other tests legitimately stash) —
+    // start from a clean call log.
+    vi.mocked(stashDraft).mockClear();
+    // A TIMER-deferred upload keeps the save genuinely in flight across
+    // the unmount (a bare pending promise gets drained by act's microtask
+    // flush before the unmount can observe the in-flight state).
+    vi.mocked(api.createEntry).mockImplementation(
+      () => new Promise((res) => { setTimeout(() => res({}), 60); }) as Promise<never>,
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "saved while backgrounding");
+    await firePress(root, "Save entry");
+    root.unmount(); // the save is still in flight
+    expect(stashDraft).not.toHaveBeenCalled(); // the cleanup must not stash an in-flight save
+    await new Promise((r) => { setTimeout(r, 140); }); // the upload lands after the unmount
+    await flush();
+    expect(stashDraft).not.toHaveBeenCalled(); // and the landed save must not stash either
+    // Re-mount: nothing restores — the entry is already saved.
+    const again = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect((inputByPlaceholder(again, "What's going on today?").props as { value: string }).value).toBe("");
+  }, 10_000);
+
+  it("a save that dies AFTER unmount still honors the draft guarantee", async () => {
+    vi.mocked(stashDraft).mockClear();
+    vi.mocked(api.createEntry).mockImplementation(
+      () => new Promise((_res, rej) => { setTimeout(() => rej(new ApiError(0, "server unreachable")), 60); }) as Promise<never>,
+    );
+    vi.mocked(enqueue).mockRejectedValue(new QFErr()); // and the queue cannot take it either
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "words that must survive");
+    await firePress(root, "Save entry");
+    root.unmount(); // the save is still in flight
+    await new Promise((r) => { setTimeout(r, 140); }); // the upload dies after the unmount
+    await flush();
+    expect(stashDraft).toHaveBeenCalledWith("user-1", "words that must survive");
+    const again = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect((inputByPlaceholder(again, "What's going on today?").props as { value: string }).value).toBe("words that must survive");
+  }, 10_000);
+
+  it("an ORDINARY 422 save stays quiet after OK (no false support dialog)", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(422, "entry_date in the future"));
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "a perfectly ordinary day");
+    await pressLabel(root, "Save entry");
+    await flush();
+    await pressAlertButton("OK");
+    await flush();
+    expect(Alert.alert.mock.calls.map((c) => c[0])).toEqual(["Entry not accepted"]);
   });
 });
 

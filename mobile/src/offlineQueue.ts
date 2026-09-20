@@ -9,7 +9,7 @@
  * a convention.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api, ApiError, getBaseUrl, OriginPinnedError } from "./api/client";
+import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
 
 const LEGACY_QUEUE_KEY = "@mindpattern/queue";
 const LEGACY_REJECTED_KEY = "@mindpattern/queue_rejected";
@@ -19,9 +19,27 @@ const LEGACY_QUARANTINE_KEY = "@mindpattern/queue_quarantine";
 const LEGACY_RECOVERY_KEY = "@mindpattern/queue.legacy-unscoped.v1";
 const STORAGE_PREFIX = "@mindpattern/queue.v2";
 export const MAX_QUEUE_LENGTH = 200;
+/** M-13: serialized byte ceiling for one scope's queue value. Android's
+ *  AsyncStorage cursor window tops out near 2 MB PER ROW — ~15 max-size
+ *  entries (100k chars each) already exceed it, and once a row is oversize
+ *  getItem throws on every read, wedging the whole scope (the count cap
+ *  alone counts rows, never bytes). 1 MB keeps the row comfortably under
+ *  the platform limit while still holding hundreds of typical entries. */
+export const MAX_QUEUE_BYTES = 1_000_000;
 
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 30 * 60_000;
+/** L-51: the client's parseRetryAfter already clamps a server advisory to
+ *  one hour. This local clamp mirrors it as defense-in-depth for an
+ *  ApiError constructed elsewhere — advisories within the upstream ceiling
+ *  are honored in full; only values beyond it are cut. */
+const SERVER_ADVISORY_MAX_MS = 60 * 60_000;
+/** M-14: after a 401 mid-flush the items stay QUEUED (not parked in the
+ *  rejected store) with this long notBefore on the attempted row — long
+ *  enough that a dead session cannot be hammered item-by-item from every
+ *  foreground, short enough that the next healthy flush after re-auth
+ *  recovers it automatically. */
+const SESSION_EXPIRED_RETRY_MS = 15 * 60_000;
 
 /** A process-wide generation fence makes sign-out/origin switch beat every
  * in-flight storage commit without holding a mutex across network I/O. */
@@ -43,8 +61,11 @@ export interface QueuedEntry {
 }
 
 export class QueueFullError extends Error {
-  constructor() {
-    super(`offline queue is full (${MAX_QUEUE_LENGTH} entries) — sync before writing more`);
+  /** The pinned count-cap message stays byte-identical; the byte cap (M-13)
+   *  names its own reason through the same error class so every existing
+   *  caller branch (EntryScreen's queueFull path) keeps working. */
+  constructor(detail = `${MAX_QUEUE_LENGTH} entries`) {
+    super(`offline queue is full (${detail}) — sync before writing more`);
     this.name = "QueueFullError";
   }
 }
@@ -82,22 +103,12 @@ function scopeId(origin: string, userId: string): string {
 /** Localhost, 127.0.0.1 and [::1] address the same loopback interface.
  * Unify their spelling for queue scoping only (the saved server URL itself
  * is untouched): switching between aliases must not strand pending
- * ciphertext behind a different storage key with no recovery surface. */
-function canonicalOrigin(origin: string): string {
-  try {
-    const url = new URL(origin);
-    // WHATWG serializes IPv6 hosts WITH brackets ("[::1]"); accept both
-    // spellings so every loopback form maps to one canonical origin.
-    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    if (host === "localhost" || host === "::1" || host === "127.0.0.1") {
-      return `${url.protocol}//127.0.0.1${url.port ? `:${url.port}` : ""}`;
-    }
-    return origin;
-  } catch {
-    // Stryker disable next-line BlockStatement: unreachable for production inputs — canonicalOrigin only ever receives URL.origin output (always parseable); the guard exists for direct callers with arbitrary strings
-    return origin;
-  }
-}
+ * ciphertext behind a different storage key with no recovery surface.
+ * The helper is SHARED with client.ts's origin pin (H-1) — the queue passes
+ * the canonical form as `expectedOrigin`, so the send-point comparison must
+ * canonicalize identically or every pinned upload would refuse to leave the
+ * device under a differently-spelled stored base URL. */
+// (canonicalOrigin now lives in ./api/client — one implementation, both call sites.)
 
 async function currentOrigin(): Promise<string> {
   // `getBaseUrl` is always present in production. The fallback makes this
@@ -207,6 +218,12 @@ function serializeItems(items: QueuedEntry[]): string {
   return JSON.stringify({ v: 1, items });
 }
 
+/** M-13: the queue is bounded by SERIALIZED BYTES, not only row count —
+ *  this is the measurement the enqueue/requeue caps gate on. */
+function serializedBytes(items: QueuedEntry[]): number {
+  return Buffer.byteLength(serializeItems(items), "utf8");
+}
+
 async function appendQuarantine(scope: QueueScope, raw: string, generation: number): Promise<void> {
   if (wipedSince(generation)) return;
   const previous = await AsyncStorage.getItem(scope.quarantine);
@@ -224,9 +241,16 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
 }
 
 async function readItems(key: string, scope: QueueScope, generation: number): Promise<QueuedEntry[]> {
-  const raw = await AsyncStorage.getItem(key);
-  if (!raw) return [];
+  // M-13: the getItem lives INSIDE the try. Android refuses to hand an
+  // oversize AsyncStorage row through the cursor window — a throw escaping
+  // readItems would reject every enqueue/flushQueue/queueLength call on
+  // this scope forever (the "wedged scope" failure mode). The bytes are
+  // unreadable through this API, so the catch records an honest marker in
+  // quarantine and clears the key instead of wedging the scope.
+  let raw: string | null = null;
   try {
+    raw = await AsyncStorage.getItem(key);
+    if (!raw) return [];
     const parsed = parseItems(raw);
     if (parsed === null) {
       // A parseable but unrecognized shape gets the SAME custody as
@@ -238,9 +262,27 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       if (!wipedSince(generation)) await AsyncStorage.removeItem(key);
       return [];
     }
-    return parsed.filter((item) => item.userId === scope.userId);
+    const own = parsed.filter((item) => item.userId === scope.userId);
+    const foreign = parsed.filter((item) => item.userId !== scope.userId);
+    if (foreign.length > 0) {
+      // L-52: a well-formed record carrying a FOREIGN userId inside this
+      // scope key (tampering or a restored backup) must not be silently
+      // dropped by the next rewrite — quarantine it verbatim, exactly like
+      // corrupt bytes, and persist the scope-owned remainder. This scope
+      // can never upload the foreign record; preservation, not delivery,
+      // is the point.
+      for (const item of foreign) {
+        await appendQuarantine(scope, serializeItems([item]), generation);
+      }
+      if (!wipedSince(generation)) await writeItems(key, own);
+    }
+    return own;
   } catch {
-    await appendQuarantine(scope, raw, generation);
+    await appendQuarantine(
+      scope,
+      raw ?? JSON.stringify({ v: 1, unreadable: true, key }),
+      generation,
+    );
     if (!wipedSince(generation)) await AsyncStorage.removeItem(key);
     return [];
   }
@@ -299,9 +341,14 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
     if (queue.length >= MAX_QUEUE_LENGTH) throw new QueueFullError();
     // Scope owns the account id. Normalize it from the caller so a tampered
     // record cannot poison another account's queue key.
-    queue.push({ ...item, userId: scope.userId });
+    const candidate = [...queue, { ...item, userId: scope.userId }];
+    // M-13: the count cap alone let ~15 max-size entries grow the single
+    // AsyncStorage value past Android's per-row cursor-window limit, after
+    // which getItem throws and the scope is wedged. Bound the SERIALIZED
+    // bytes of the value too.
+    if (serializedBytes(candidate) > MAX_QUEUE_BYTES) throw new QueueFullError("over 1 MB of pending entries");
     if (wipedSince(generation)) throw new QueueAbandonedError();
-    await writeItems(scope.queue, queue);
+    await writeItems(scope.queue, candidate);
   });
 }
 
@@ -332,7 +379,12 @@ function classifyError(error: unknown): FlushOutcome {
   if (error.status === 422 && isFutureDateRejection(error)) return { kind: "retry", stop: false };
   if (error.status === 413) return { kind: "reject-and-stop" };
   if (error.status >= 400 && error.status < 500) return { kind: "reject" };
-  return { kind: "retry", stop: error.status === 0 };
+  // 5xx (and status 0): pass any server advisory through here too —
+  // L-54: client.request parses Retry-After on 503 maintenance responses
+  // as well as 429s, and dropping it on this branch made a 503 advisory
+  // silently fall back to the 30 s+ local exponential backoff. Status 0
+  // (local refusal/network) never carries one, so it is unaffected.
+  return { kind: "retry", retryAfterMs: error.retryAfterMs, stop: error.status === 0 };
 }
 
 /** Upload due items for exactly one origin/account scope. */
@@ -369,15 +421,29 @@ export async function flushQueue(currentUserId: string): Promise<number> {
     }
 
     if (outcome.kind === "session-expired") {
-      const rejected = await serialized(async () => {
+      // M-14: a 401 mid-flush (natural token expiry) must NOT park
+      // unattempted entries in the rejected store — after re-login
+      // flushQueueOnReconnect would see an empty queue and the only path
+      // back was the manual Settings "Recover" button. Keep EVERY item
+      // queued: the unattempted ones untouched (they retry on the first
+      // healthy flush after re-auth) and the attempted one under a long
+      // notBefore so a dead session is not hammered item-by-item.
+      const preserved = await serialized(async () => {
         const queue = await readItems(scope.queue, scope, peek.generation);
         if (wipedSince(peek.generation)) return false;
-        await appendRejected(scope, queue, peek.generation);
-        if (wipedSince(peek.generation)) return false;
-        await writeItems(scope.queue, []);
+        const index = queue.findIndex((entry) => entry.clientEntryId === item.clientEntryId);
+        if (index >= 0) {
+          queue[index] = {
+            ...item,
+            attempts: (item.attempts ?? 0) + 1,
+            notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS,
+          };
+          await writeItems(scope.queue, queue);
+          if (wipedSince(peek.generation)) return false;
+        }
         return true;
       });
-      if (!rejected) return sent; // local sign-out/origin change won
+      if (!preserved) return sent; // local sign-out/origin change won
       throw new SessionExpiredError();
     }
 
@@ -401,10 +467,20 @@ export async function flushQueue(currentUserId: string): Promise<number> {
           break;
         case "retry": {
           const attempts = item.attempts ?? 0;
+          // L-51: a server advisory (429/503 Retry-After, already clamped to
+          // one hour in parseRetryAfter) is honored IN FULL — re-clamping it
+          // to RETRY_MAX_MS guaranteed one doomed request per item per pass
+          // for every advisory above 30 minutes. Only the LOCAL exponential
+          // backoff is bounded by RETRY_MAX_MS; the advisory is bounded by
+          // the same upstream one-hour ceiling.
+          const delay =
+            outcome.retryAfterMs !== undefined
+              ? Math.min(outcome.retryAfterMs, SERVER_ADVISORY_MAX_MS)
+              : retryDelayMs(attempts);
           queue[index] = {
             ...item,
             attempts: attempts + 1,
-            notBefore: Date.now() + Math.min(outcome.retryAfterMs ?? retryDelayMs(attempts), RETRY_MAX_MS),
+            notBefore: Date.now() + delay,
           };
           await writeItems(scope.queue, queue);
           break;
@@ -444,11 +520,14 @@ export async function requeueRejected(userId?: string): Promise<number> {
     let moved = 0;
     for (const item of rejected) {
       if (ids.has(item.clientEntryId)) continue;
-      if (queue.length >= MAX_QUEUE_LENGTH) {
+      const { attempts: _attempts, notBefore: _notBefore, ...fresh } = item;
+      // M-13: recovery respects BOTH caps — count and serialized bytes —
+      // so re-filling the queue can never wedge the scope either.
+      const candidate = queue.concat(fresh);
+      if (queue.length >= MAX_QUEUE_LENGTH || serializedBytes(candidate) > MAX_QUEUE_BYTES) {
         stillRejected.push(item);
         continue;
       }
-      const { attempts: _attempts, notBefore: _notBefore, ...fresh } = item;
       queue.push(fresh);
       ids.add(item.clientEntryId);
       moved += 1;

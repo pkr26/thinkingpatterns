@@ -62,6 +62,14 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   const { touchActivity } = useSession();
   // Stryker disable next-line StringLiteral: "unknown" is never rendered or compared — only phase === "baseline" is ever tested, and "" fails that test identically
   const [phase, setPhase] = useState<"unknown" | "baseline" | "insight">("unknown");
+  /** True when the phase is ASSUMED because the server was unreachable
+   *  (status 0: offline, timeout, local refusal — audit L-57). The card
+   *  still renders the on-device generic question, but every caption says
+   *  "can't reach the server" instead of asserting the baseline program:
+   *  an insight-phase user offline must not read "after {days} days your
+   *  questions start coming from your patterns" about an account that
+   *  already unlocked them. */
+  const [phaseAssumedOffline, setPhaseAssumedOffline] = useState(false);
   const [dayProgress, setDayProgress] = useState<{ active: number; total: number } | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
   /** The pre-threshold day-one question (on-device generic pool). */
@@ -134,7 +142,15 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
         // it, instead of failing every question load from now on.
         if (err instanceof ApiError && err.code === "feedback_blob_invalid" && userId) {
           await clearFeedback(userId).catch(() => {});
-          result = await api.recompute(session.session_token);
+          // M-12: the failed feedback pre-flight already CONSUMED the
+          // single-use processing token server-side (the key is popped
+          // before the pre-flight raises) — replaying it is a guaranteed
+          // 403 processing_session_invalid and the "transparent recovery"
+          // below was dead code. Open a FRESH session — the data key ships
+          // once more under the same consent already given for this flow —
+          // so the retry can actually run.
+          const fresh = await api.openProcessingSession(vault.get().dataKey.toString("base64"));
+          result = await api.recompute(fresh.session_token);
         } else {
           throw err;
         }
@@ -169,9 +185,14 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       let summary: Awaited<ReturnType<typeof api.insights>>;
       try {
         summary = await api.insights();
+        setPhaseAssumedOffline(false); // a real answer replaces any assumption
       } catch (err) {
         if (err instanceof ApiError && err.status === 0) {
-          setPhase("baseline");
+          // Status 0 means NO RESPONSE (offline, timeout, local refusal) —
+          // the phase is unknowable, not "baseline" (audit L-57). The
+          // generic question still renders; the captions say what is true.
+          setPhase("baseline"); // display path only — see phaseAssumedOffline
+          setPhaseAssumedOffline(true);
           setDayProgress(null); // unknown offline — the card omits the day counter
           setGeneric(genericQuestionForDate());
           return;
@@ -304,7 +325,9 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={[styles.cardTitle, { color: t.colors.accent }]}>{tr("question.today")}</Text>
           <Text style={[styles.question, { color: t.colors.text }]}>{generic}</Text>
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, lineHeight: 17 }}>
-            {tr("question.baselineCaption", { days: dayProgress?.total ?? 30 })}
+            {phaseAssumedOffline
+              ? tr("question.captionOffline")
+              : tr("question.baselineCaption", { days: dayProgress?.total ?? 30 })}
           </Text>
           {dayProgress && (
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
@@ -357,7 +380,11 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           busy={busy}
         />
         <Text style={[styles.caption, { color: t.colors.muted, fontSize: t.type.meta.fontSize }]}>
-          {phase === "baseline" ? tr("question.captionBaseline") : tr("question.captionInsight")}
+          {phaseAssumedOffline
+            ? tr("question.captionOffline")
+            : phase === "baseline"
+              ? tr("question.captionBaseline")
+              : tr("question.captionInsight")}
         </Text>
       </View>
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />

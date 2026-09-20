@@ -173,12 +173,24 @@ TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
         'You\'ve written "{label}" more than once across different weeks. What usually triggers its return?',
         'When "{label}" shows up again, what would you say to it if you could?',
     ),
+    # Trend-aware (2026-09-20 audit fix M-24): the DEFAULT tuple is the
+    # rising-trend set — "taking up more space lately" is a claim only a
+    # rising share can back. A steady-presence topic renders the steady
+    # set below, mirroring Pattern.describe()'s trend branch exactly
+    # (services/patterns.py); the two neutral templates are shared so the
+    # pool size is stable either way.
     "topic": (
         "'{label}' has been taking up more space in your writing lately — what is that about for you?",
         "You keep returning to '{label}' across different days. What does it mean right now?",
         "When did '{label}' first start mattering to you in this stretch of your life?",
     ),
 }
+
+TOPIC_TEMPLATES_STEADY: tuple[str, ...] = (
+    "'{label}' is a steady presence in your writing — what is it holding for you these days?",
+    "You keep returning to '{label}' across different days. What does it mean right now?",
+    "When did '{label}' first start mattering to you in this stretch of your life?",
+)
 
 MAX_PATTERN_QUESTIONS = 5
 
@@ -192,6 +204,12 @@ def _percent(value: object) -> str:
 
 def render_pattern_questions(pattern: Pattern) -> list[str]:
     templates = TEMPLATE_BY_KIND.get(pattern.kind)
+    if pattern.kind == "topic":
+        # Steady-presence topics must not render the rising-trend claim
+        # ("taking up more space lately") — the template is selected by
+        # the pattern's own detail.trend, exactly like Pattern.describe().
+        if pattern.detail.get("trend", "steady") != "rising":
+            templates = TOPIC_TEMPLATES_STEADY
     if not templates:
         return []
     rendered = []

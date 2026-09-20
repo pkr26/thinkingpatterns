@@ -1,13 +1,13 @@
 [
   {
     "id": "E1.ts-dialog-bypass",
-    "status": "FINDING",
-    "summary": "2/35 crisis samples miss the on-device dialog tier (the pre-encryption safety net): i don't see any future for me,everyone would be happier if i was gone"
+    "status": "BLOCKED",
+    "summary": "0/79 crisis samples miss the on-device dialog tier (the pre-encryption safety net): "
   },
   {
     "id": "E1.ts-suppress-bypass",
     "status": "BLOCKED",
-    "summary": "0/35 crisis samples also miss the client-side suppress re-check used by InsightsScreen before rendering quotes"
+    "summary": "0/79 crisis samples also miss the client-side suppress re-check used by InsightsScreen before rendering quotes"
   },
   {
     "id": "E1.ts-false-positives",
@@ -16,13 +16,13 @@
   },
   {
     "id": "E1.ts-python-parity",
-    "status": "FINDING",
-    "summary": "2 samples behave differently between engines"
+    "status": "BLOCKED",
+    "summary": "client and server engines agree on every corpus sample (shared regex contract holds)"
   },
   {
     "id": "A2.offline-oracle",
     "status": "FINDING",
-    "summary": "offline dictionary attack on a stolen device recovered the password in 4 guesses (50 ms/guess at 600000 iters on ONE cpu core; no server round-trip, no throttle beyond PBKDF2 + a 500ms UI delay that an attacker's script does not honor); verifyUnlockProof('absent') also tells the attacker whether the oracle is enabled for an account"
+    "summary": "offline dictionary attack on a stolen device recovered the password in 4 guesses (49 ms/guess at 600000 iters on ONE cpu core; no server round-trip, no throttle beyond PBKDF2 + a 500ms UI delay that an attacker's script does not honor); verifyUnlockProof('absent') also tells the attacker whether the oracle is enabled for an account"
   },
   {
     "id": "A3.device-key-colocation",

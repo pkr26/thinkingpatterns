@@ -82,7 +82,13 @@ export async function deriveMasterKeyAsync(
         reject(new Error("pbkdf2 produced no key"));
         return;
       }
-      resolve(Buffer.from(derivedKey));
+      // L-47: copy the key out, then overwrite the engine's buffer. The
+      // copy is the only live reference afterwards — "overwrite as soon as
+      // no longer needed" — instead of letting the source linger to GC.
+      // Buffer.from(buffer) COPIES, so the zeroize cannot touch the copy.
+      const key = Buffer.from(derivedKey);
+      zeroize(derivedKey);
+      resolve(key);
     });
   });
 }
@@ -103,7 +109,14 @@ export function deriveDataKey(masterKey: Buffer): Buffer {
  */
 function hkdfSha256(ikm: Buffer, info: Buffer): Buffer {
   const derived = engine.hkdfSync("sha256", ikm, Buffer.alloc(32), info, 32);
-  return Buffer.from(derived as ArrayBuffer);
+  // L-47: copy the engine's bytes out, then overwrite them so the original
+  // does not linger to GC. NOTE the copy goes through a Uint8Array:
+  // Buffer.from(arrayBuffer) creates a VIEW sharing the memory, and
+  // zeroing that memory would destroy the returned key with it.
+  const bytes = new Uint8Array(derived as ArrayBuffer);
+  const copy = Buffer.from(bytes);
+  bytes.fill(0);
+  return copy;
 }
 
 /** Overwrite key material buffers as soon as they are no longer needed. */

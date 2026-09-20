@@ -24,7 +24,9 @@ BANDS = 16
 ROWS = 4  # BANDS * ROWS == NUM_PERM
 # Accepted recall: 16 bands x 4 rows proposes a candidate pair with
 # probability 1 - (1 - s^4)^16 ≈ 0.64 at the s = 0.5 confirmation
-# threshold (and ≈ 0.995 at s = 0.8). Clustering is a recall device for
+# threshold (and ≈ 0.9998 at s = 0.8 — 1 - (1 - 0.8^4)^16; corrected
+# 2026-09-20 audit L-21, the old comment understated it as ≈ 0.995).
+# Clustering is a recall device for
 # recurring-thought hints, not an exact index: a missed pair delays a
 # pattern, it never invents one — and tighter banding would cost the
 # (near-)linear runtime that keeps recompute cheap.

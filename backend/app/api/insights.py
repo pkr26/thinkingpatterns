@@ -116,13 +116,15 @@ async def _replace_insight(
     """Write the current insight of (user, kind[, for_date]) idempotently.
 
     Dated rows (the daily question) UPSERT on the
-    uq_insights_user_kind_date constraint, so a repeated same-day recompute
-    rewrites in place instead of delete+insert. Rows with for_date=None
-    (the patterns payload, the brain state) can never upsert: SQL NULLs are
-    distinct, so the unique constraint never sees a conflict for them. They
-    stay delete-then-insert under the per-user recompute lock — and the
-    delete covers the whole kind, so legacy dated rows of that kind are
-    cleaned up too.
+    uq_insights_user_kind_date constraint. The recompute flow deliberately
+    does NOT reach this upsert for a same-day question that already exists
+    (H-12, 2026-09-20: the day's question is pinned on first write), so the
+    upsert here only ever lands a day's FIRST row or maintenance writes.
+    Rows with for_date=None (the patterns payload, the brain state) can
+    never upsert: SQL NULLs are distinct, so the unique constraint never
+    sees a conflict for them. They stay delete-then-insert under the
+    per-user recompute lock — and the delete covers the whole kind, so
+    legacy dated rows of that kind are cleaned up too.
     """
     if for_date is None:
         await session.execute(
@@ -423,7 +425,15 @@ def _parse_feedback(raw: bytes) -> FeedbackEvents:
     {"feedback": [{"pid": str, "resonated": bool}],
      "muted": [pid, ...], "unmuted": [pid, ...]}.
     Hostile-shape rules like every payload: malformed input is a 400
-    (entry_payload_malformed), never a silent skip or a crash."""
+    (entry_payload_malformed), never a silent skip or a crash. That
+    includes individual items (2026-09-20 audit fix L-11): a non-dict
+    tap, a mistyped pid, or an out-of-range entry used to be dropped
+    quietly, which drifted from this docstring's "never a silent skip"
+    contract — a partially-corrupt feedback queue must be refused loudly
+    (the client quarantines it) rather than half-applied invisibly. The
+    [:100] bounds are volume caps, not validation: only the first 100
+    items of each list are examined, and each examined item must be
+    well-formed."""
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -442,17 +452,35 @@ def _parse_feedback(raw: bytes) -> FeedbackEvents:
     taps: list[tuple[str, bool]] = []
     for item in events[:100]:
         if not isinstance(item, dict):
-            continue
+            raise ApiError(
+                status_code=400,
+                detail="feedback blob is malformed",
+                code="entry_payload_malformed",
+            )
         pid = item.get("pid")
         resonated = item.get("resonated")
-        if isinstance(pid, str) and 1 <= len(pid) <= 128 and isinstance(resonated, bool):
-            taps.append((pid, resonated))
+        if not (isinstance(pid, str) and 1 <= len(pid) <= 128 and isinstance(resonated, bool)):
+            raise ApiError(
+                status_code=400,
+                detail="feedback blob is malformed",
+                code="entry_payload_malformed",
+            )
+        taps.append((pid, resonated))
 
     def _pid_list(key: str) -> list[str]:
         raw_list = payload.get(key) if isinstance(payload, dict) else None
         if not isinstance(raw_list, list):
             return []
-        return [pid for pid in raw_list[:100] if isinstance(pid, str) and 1 <= len(pid) <= 128]
+        pids: list[str] = []
+        for pid in raw_list[:100]:
+            if not (isinstance(pid, str) and 1 <= len(pid) <= 128):
+                raise ApiError(
+                    status_code=400,
+                    detail="feedback blob is malformed",
+                    code="entry_payload_malformed",
+                )
+            pids.append(pid)
+        return pids
 
     return FeedbackEvents(taps=taps, muted=_pid_list("muted"), unmuted=_pid_list("unmuted"))
 
@@ -569,6 +597,13 @@ async def recompute(
     settings = request.app.state.settings
     key_store = request.app.state.key_store
     sessionmaker = request.app.state.sessionmaker
+    # Capture the epoch this bearer authenticated under BEFORE any lock
+    # wait (2026-09-20 audit fix M-2): a logout can commit while the
+    # recompute is queued behind the lifecycle fence it must take, and the
+    # in-fence re-authorization below compares against this value — a
+    # pre-logout bearer must fail closed there, exactly like
+    # _fresh_processing_session_user does for session minting.
+    expected_epoch = user.token_epoch
 
     # Phase comes from plaintext DB dates — no decryption, no key needed.
     # Load ONLY the distinct dates here: a baseline-phase recompute must not
@@ -660,6 +695,37 @@ async def recompute(
                         detail="account no longer exists",
                         code="account_deleted",
                     )
+                if fresh_user.token_epoch != expected_epoch:
+                    # M-2 (2026-09-20): the fence's re-authorization used
+                    # to check only is_active, so a bearer retired by logout
+                    # could still complete a recompute — decrypting the
+                    # corpus and, with consent, dispatching plaintext to
+                    # the LLM — after the logout's key purge had returned.
+                    raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+                # Re-read the threshold inputs and re-evaluate the phase
+                # INSIDE the fence (2026-09-20 audit fix M-11): the phase
+                # was fixed outside the lock, so entries deleted between
+                # the pre-fence date read and here left a stale INSIGHT
+                # verdict that decrypted and stored rows while the live
+                # distinct-day count was below the threshold. The read-side
+                # gates also evaluate live, so nothing was ever SERVED, but
+                # the write side must not diverge from them either.
+                date_rows = await _entry_dates(session, user.id)
+                state = threshold.evaluate(date_rows, settings.unlock_threshold_days)
+                if state.phase is not Phase.INSIGHT:
+                    # Baseline re-established while this recompute waited:
+                    # reveal nothing, store nothing. The popped session key
+                    # is scrubbed by the finally like every other exit, and
+                    # the response mirrors the pre-fence baseline path.
+                    return RecomputeResponse(
+                        phase=state.phase.value,
+                        active_days=state.active_days,
+                        streak=state.streak,
+                        days_remaining=state.days_remaining,
+                        patterns_stored=0,
+                        question_stored=False,
+                        analyzer="none",
+                    )
                 # This is deliberately re-read under the lifecycle fence,
                 # immediately before the analysis path is constructed. A
                 # previously accepted policy becomes inert if the operator
@@ -680,6 +746,30 @@ async def recompute(
                 # out updated.
                 prior = await _latest_insight(session, user.id, "brain")
                 prior_seq = prior.state_seq if prior is not None else 0
+                # Pin-on-first-write for the daily question (2026-09-20 audit
+                # fix H-12): "one question per day, stable within the day" is
+                # a product invariant, but the question row used to be
+                # upserted from the CURRENT recompute's pool — a same-day
+                # recompute after an evening entry (new pattern qualifying, a
+                # fade, a mute, feedback taps) silently changed a question the
+                # user may already have answered. When today's row exists it
+                # is left untouched below; the recompute lock makes this
+                # read the authoritative same-day check (recomputes for one
+                # account serialize on it end to end).
+                question_pinned = (
+                    (
+                        await session.execute(
+                            select(Insight.id)
+                            .where(
+                                Insight.user_id == user.id,
+                                Insight.kind == "question",
+                                Insight.for_date == today,
+                            )
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    is not None
+                )
                 entry_items = [
                     (crypto.build_aad("entry", row.user_id, row.client_entry_id), bytes(row.blob))
                     for row in rows
@@ -726,7 +816,24 @@ async def recompute(
                             for p in enricher.extract_patterns(entries, findings=merged)
                         }
                         merged = [narrated.get((p.kind, p.label), p) for p in merged]
-                        merged = merged[: brain.MAX_SURFACED]
+                        # Cap the UNMUTED portion only (2026-09-20 audit fix
+                        # M-5): the brain appends muted cards AFTER the live
+                        # top-N, so the flat [:MAX_SURFACED] slice that used
+                        # to run only on this branch cut exactly the muted
+                        # cards — the unmute affordance disappeared whenever
+                        # enrichment ran, and the card count drifted from
+                        # brain-only recomputes. Muted cards ride along
+                        # behind the capped live cards (the brain already
+                        # capped them at its own MUTED_SURFACED_CAP).
+                        capped: list = []
+                        unmuted_seen = 0
+                        for p in merged:
+                            if not questions.pattern_is_muted(p):
+                                if unmuted_seen >= brain.MAX_SURFACED:
+                                    continue
+                                unmuted_seen += 1
+                            capped.append(p)
+                        merged = capped
                     return result, merged
 
                 return analyze_fn
@@ -772,12 +879,26 @@ async def recompute(
             # must never queue in front of login scrypt (or any other request's
             # worker) in the same FIFO pool. No DB session is open here.
             analyze_limiter = getattr(request.app.state, "analyze_limiter", None)
+
+            def run_encrypted(items, analyze_fn):
+                # Construct the processing context INSIDE the worker callable
+                # (2026-09-20 audit fix L-10): SecureProcessingContext.__init__
+                # immediately copies the key, and the context's finally can
+                # only zeroize that copy once run() has executed. Building it
+                # here in the endpoint meant a cancellation while the request
+                # sat QUEUED on the analyze limiter destroyed the endpoint's
+                # own key scrub (the finally) without the context ever
+                # running — stranding its copy until GC. As a worker-local
+                # construction, a queued-then-cancelled request never mints
+                # the copy at all.
+                return SecureProcessingContext(data_key).run(items, analyze_fn)
+
             try:
                 # Decryption + analysis is synchronous, potentially slow CPU (or an
                 # LLM round-trip); run it in a worker thread so the event loop that
                 # serves every other request never stalls behind a recompute.
                 result, merged = await anyio.to_thread.run_sync(
-                    SecureProcessingContext(data_key).run,
+                    run_encrypted,
                     encrypted,
                     make_analyze_fn(state_item is not None, feedback_item is not None),
                     limiter=analyze_limiter,
@@ -799,7 +920,7 @@ async def recompute(
                 # retry fails the same way and surfaces the real error.
                 try:
                     result, merged = await anyio.to_thread.run_sync(
-                        SecureProcessingContext(data_key).run,
+                        run_encrypted,
                         entry_items + ([state_item] if state_item else []),
                         make_analyze_fn(state_item is not None, False),
                         limiter=analyze_limiter,
@@ -810,7 +931,7 @@ async def recompute(
                     # only) distinguishes them exactly as before.
                     try:
                         result, merged = await anyio.to_thread.run_sync(
-                            SecureProcessingContext(data_key).run,
+                            run_encrypted,
                             entry_items,
                             make_analyze_fn(False, False),
                             limiter=analyze_limiter,
@@ -870,7 +991,11 @@ async def recompute(
                 crypto.build_aad("insights", user.id, "brain"),
             )
             question_blob = None
-            if merged:
+            if merged and not question_pinned:
+                # H-12 (2026-09-20): skip generation entirely when today's
+                # row already exists — recomputing the rotation over a NEW
+                # pool is exactly how an already-served (possibly already-
+                # answered) question used to change mid-day.
                 question = questions.question_for_today(user.id, merged, today)
                 question_payload = {
                     "for_date": today.isoformat(),
@@ -943,12 +1068,15 @@ async def recompute(
                     await _replace_insight(
                         session, user.id, "brain", None, state_blob, state_seq=state_seq
                     )
-                    question_stored = False
+                    question_stored = question_blob is not None or question_pinned
                     if question_blob is not None:
                         await _replace_insight(
                             session, user.id, "question", today, question_blob, state_seq=state_seq
                         )
-                        question_stored = True
+                        # H-12: on the pinned path no write happens at all —
+                        # the existing same-day row (question and rotation
+                        # index chosen by the FIRST recompute of the day)
+                        # is served unchanged for the rest of the day.
                     # Retention: age out dated question history past the
                     # window (today's upsert above is never affected).
                     await session.execute(
@@ -998,8 +1126,19 @@ async def recompute(
                 analyzer=(
                     "llm" if enricher is not None and enricher.last_error is None else "brain"
                 ),
-                patterns_new=result.patterns_new,
-                patterns_fading=result.patterns_fading,
+                # Lifecycle counters are recomputed over the FINAL STORED
+                # list (2026-09-20 audit fix M-5): the brain's own counters
+                # describe its pre-merge surfaced set, and the enricher
+                # branch used to truncate that set — the response then
+                # claimed new/fading patterns that were not in the payload
+                # the client decrypted. The per-pattern flags the brain
+                # embeds (detail.is_new / detail.pattern_state) are the same
+                # ones its own counting loop uses, so brain-only recomputes
+                # report identical numbers.
+                patterns_new=sum(1 for p in merged if p.detail.get("is_new")),
+                patterns_fading=sum(
+                    1 for p in merged if p.detail.get("pattern_state") == "fading"
+                ),
             )
     finally:
         # Scrub before any awaited cleanup. A cancellation during context

@@ -858,6 +858,47 @@ class TestSemanticFlip:
         assert store["patterns"]["temporal:work"].state == "archived"
         assert "temporal:work~2" in store["patterns"]
 
+    def test_repeated_flip_reuses_the_matching_fork(self):
+        # 2026-09-20 audit H-11: detectors always emit the base pid and the
+        # base record's semantic detail froze at the first flip, so every
+        # LATER run flipped again — minting ~3, ~4, ~11 …, each holding one
+        # qualification day, never surfacing, churning the store. A fork
+        # whose stored semantic detail matches the incoming signal IS the
+        # claim: it must be reused, not re-forked.
+        store = self._store_with_temporal("Sunday")
+        brain._merge_lifecycle(store, [self._signal_for("Wednesday", T0)], T0)
+        day2 = T0 + timedelta(days=1)
+        brain._merge_lifecycle(store, [self._signal_for("Wednesday", day2)], day2)
+        pats = store["patterns"]
+        # No ~3 was minted: exactly the retired base and the one fork.
+        assert set(pats) == {"temporal:work", "temporal:work~2"}
+        fork = pats["temporal:work~2"]
+        assert fork.detail["day"] == "Wednesday"
+        assert fork.qualification_days == [T0.isoformat(), day2.isoformat()]
+
+    def test_opposite_flip_still_mints_a_distinct_fork(self):
+        # Reuse must be SEMANTIC: a flip to a third weekday is a new claim
+        # and still earns its own fork.
+        store = self._store_with_temporal("Sunday")
+        brain._merge_lifecycle(store, [self._signal_for("Wednesday", T0)], T0)
+        day2 = T0 + timedelta(days=1)
+        brain._merge_lifecycle(store, [self._signal_for("Friday", day2)], day2)
+        pats = store["patterns"]
+        assert "temporal:work~2" in pats and "temporal:work~3" in pats
+        assert pats["temporal:work~2"].detail["day"] == "Wednesday"
+        assert pats["temporal:work~3"].detail["day"] == "Friday"
+
+    def test_stale_candidate_archives_never_fades(self):
+        # 2026-09-20 audit M-9: a candidate that never surfaced must not
+        # become a user-visible "fading" card when it stops qualifying —
+        # weak signals stay hidden and archive quietly, whatever the kind.
+        store = self._store_with_temporal("Sunday")
+        rec = store["patterns"]["temporal:work"]
+        rec.state = "candidate"
+        rec.last_qualified = (T0 - timedelta(days=30)).isoformat()
+        brain._merge_lifecycle(store, [], T0)
+        assert store["patterns"]["temporal:work"].state == "archived"
+
     def test_engine_level_weekday_flip(self):
         # Phase A: work on Sundays → temporal:work emerges. Then the journal
         # is rewritten with work on Wednesdays instead: the recompute flips.
@@ -1122,6 +1163,42 @@ class TestLinkGapLabeling:
         assert "day after '" not in link.describe()
 
 
+class TestReplicationGateCoversEveryInferenceKind:
+    """2026-09-20 audit H-9: the newer statistical kinds (and rising-topic
+    claims) were bypassing the replication gate — they surfaced on their
+    FIRST qualification, exactly the single-run-fluke surfacing the gate
+    exists to stop. These pins keep every inference kind inside the gate
+    (the seeded-noise suites above count them in their bounds now that
+    they share STATISTICAL_KINDS)."""
+
+    def test_every_inference_kind_is_gated(self):
+        for kind in (
+            "cadence",
+            "avoidance",
+            "energy_inertia",
+            "pa_inertia",
+            "na_inertia",
+            "energy_mood_coupling",
+            "sense_making",
+            "activity_diversity",
+            "temporal",
+            "mood_correlation",
+            "link",
+            "inertia",
+            "instability",
+            "mood_shift",
+        ):
+            assert kind in brain.STATISTICAL_KINDS, kind
+            assert kind in brain.EVIDENCE_DATE_KINDS | brain.WINDOW_STAT_KINDS, kind
+
+    def test_rising_topics_are_gated_steady_ones_are_not(self):
+        assert brain._is_statistical("topic", {"trend": "rising", "presence": True})
+        assert not brain._is_statistical("topic", {"trend": "steady", "presence": True})
+        # Direct-measurement phrase kinds keep first-qualification surfacing.
+        assert not brain._is_statistical("rumination", {})
+        assert not brain._is_statistical("recurring_phrase", {})
+
+
 class TestTopicDiscovery:
     """Emergent topics beyond the nine-theme lexicon (audit finding #2)."""
 
@@ -1163,10 +1240,20 @@ class TestTopicDiscovery:
     def test_rising_topic_surfaces(self):
         result = brain.update(brain.load_state(None), self._corpus(T0), T0)
         topics = [p for p in result.surfaced if p.kind == "topic" and p.label == "guitar"]
-        if not topics:  # candidate on first qualification; second day surfaces it
+        if not topics:
+            # Candidate on first qualification. Rising trends are
+            # p-value-tested INFERENCES (audit H-9), so the second run
+            # needs a genuinely NEW evidence day — one more recent guitar
+            # entry — not just a second calendar day over the same corpus.
+            corpus = self._corpus(T0) + [
+                JournalEntry(
+                    "practiced the guitar after dinner, new chord shapes",
+                    T0 + timedelta(days=1),
+                )
+            ]
             second = brain.update(
                 brain.load_state(brain.dump_state(result.new_state)),
-                self._corpus(T0),
+                corpus,
                 T0 + timedelta(days=1),
             )
             topics = [p for p in second.surfaced if p.kind == "topic" and p.label == "guitar"]
@@ -1726,11 +1813,18 @@ class TestSenseMaking:
             entries.append(JournalEntry(sensey if use_sense else plain, d))
         return entries
 
-    def _surface(self, entries):
+    def _surface(self, entries, growing_text: str):
+        # The replication gate (audit H-9) applies to sense_making: each
+        # recompute must bring a genuinely NEW high-density evidence day,
+        # so every iteration appends one fresh same-shape entry instead of
+        # re-scoring the same corpus on a later calendar day.
         state = brain.load_state(None)
         for k in range(6):
+            day = T0 + timedelta(days=k)
             result = brain.update(
-                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+                brain.load_state(brain.dump_state(state)),
+                entries + [JournalEntry(growing_text, day)],
+                day,
             )
             state = result.new_state
             found = next((p for p in result.surfaced if p.kind == "sense_making"), None)
@@ -1739,14 +1833,19 @@ class TestSenseMaking:
         return state, result, None
 
     def test_rising_sense_making_density_surfaces(self):
-        state, result, found = self._surface(self._corpus(recent_sense=True))
+        sensey = (
+            "i realize the reason i felt tense was the meeting, because i "
+            "understand now that the deadline caused it and i notice why"
+        )
+        state, result, found = self._surface(self._corpus(recent_sense=True), sensey)
         assert found is not None, "rising sense-making density must surface"
         assert found.detail.get("direction") == "higher"
         assert found.detail.get("density_recent", 0) > found.detail.get("density_earlier", 99)
         assert "sense-making words" in found.describe()
 
     def test_flat_density_stays_quiet(self):
-        state, result, found = self._surface(self._corpus(recent_sense=False))
+        plain = "we went to the market and i saw a friend there and walked home"
+        state, result, found = self._surface(self._corpus(recent_sense=False), plain)
         assert found is None, "no change in density means no claim"
 
     def test_short_entries_are_not_measured(self):
@@ -1768,11 +1867,17 @@ class TestActivityDiversity:
             entries.append(JournalEntry("ordinary day notes", d, tags=tags))
         return entries
 
-    def _surface(self, entries):
+    def _surface(self, entries, growing_tags: tuple[str, ...]):
+        # Replication gate (audit H-9): activity_diversity is an inference
+        # too — each recompute must add a genuinely NEW narrow (or spread)
+        # day, so every iteration appends one fresh same-shape entry.
         state = brain.load_state(None)
         for k in range(6):
+            day = T0 + timedelta(days=k)
             result = brain.update(
-                brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
+                brain.load_state(brain.dump_state(state)),
+                entries + [JournalEntry("ordinary day notes", day, tags=growing_tags)],
+                day,
             )
             state = result.new_state
             found = next((p for p in result.surfaced if p.kind == "activity_diversity"), None)
@@ -1781,14 +1886,16 @@ class TestActivityDiversity:
         return state, result, None
 
     def test_narrowing_variety_surfaces_with_direction(self):
-        state, result, found = self._surface(self._corpus(narrow_recent=True))
+        state, result, found = self._surface(self._corpus(narrow_recent=True), ("work",))
         assert found is not None, "narrowing activity variety must surface"
         assert found.detail.get("direction") == "narrowed"
         assert found.detail.get("entropy_recent", 9) < found.detail.get("entropy_earlier", 0)
         assert "narrowed" in found.describe()
 
     def test_steady_variety_stays_quiet(self):
-        state, result, found = self._surface(self._corpus(narrow_recent=False))
+        state, result, found = self._surface(
+            self._corpus(narrow_recent=False), ("work", "family", "exercise", "friends")
+        )
         assert found is None, "no change in variety means no claim"
 
     def test_single_tag_history_never_measures(self):

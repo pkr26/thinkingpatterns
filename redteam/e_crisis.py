@@ -12,6 +12,7 @@ This harness re-runs it live and reports any observed-vs-contract drift.
 from __future__ import annotations
 
 import json
+import re
 
 from common import RESULTS, guard, run, section, verdict
 
@@ -106,13 +107,39 @@ def e3_boundary() -> None:
          str(root / "backend/app/services/questions.py"),
          str(root / "backend/app/services/llm.py")],
         capture_output=True, text=True).stdout.strip()
-    lines = [ln for ln in out.splitlines() if "No advice, no diagnosis" not in ln]
+
+    # Canonical exclusions, matched CASE-INSENSITIVELY (2026-09-19 audit,
+    # L-43): the old filter compared the literal "No advice, no diagnosis"
+    # against `grep -i` output, but the source line itself reads
+    # "no advice, no diagnosis" — the case-sensitive test never matched,
+    # so the prompt's own instruction stood as a permanent false E3
+    # FINDING. Also excluded, on shape: comment lines and quoted
+    # single-word string literals — that is the sanitizer's own
+    # forbidden-word BLOCKLIST (llm.py), which is a defense, not
+    # diagnosis vocabulary in output-generating code.
+    defense_line = re.compile(
+        r'["\']\s*(depress\w*|bipolar|diagnos\w*|prescrib\w*|medications?)\s*["\']'
+    )
+
+    def is_defense(ln: str) -> bool:
+        # grep -n format is "<path>:<lineno>:<content>" — judge the CONTENT
+        # part, so a comment is recognized no matter how long the path is.
+        parts = ln.split(":", 2)
+        content = parts[2] if len(parts) == 3 and parts[1].isdigit() else ln
+        low = content.lower()
+        return (
+            "no advice, no diagnosis" in low
+            or low.lstrip().startswith("#")
+            or bool(defense_line.search(low))
+        )
+
+    lines = [ln for ln in out.splitlines() if ln.strip() and not is_defense(ln)]
     if lines:
         summary = "diagnosis/clinical vocabulary found: " + repr(lines[:3])
     else:
         summary = ("no diagnosis vocabulary in question templates or the LLM module "
-                   "(the only grep hit is the prompt instruction 'No advice, no "
-                   "diagnosis' itself)")
+                   "(remaining grep hits are the prompt instruction 'no advice, no "
+                   "diagnosis' itself and the sanitizer's own forbidden-word blocklist)")
     verdict("E3.diagnosis-language", "BLOCKED" if not lines else "FINDING", summary)
 
     # 2) Kinds cannot carry clinical claims

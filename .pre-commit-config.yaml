@@ -11,8 +11,15 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: 321478e58f4938179c6b86e4ddfa923d1547a49b # v0.16.6
     hooks:
+      # Scoped to backend/ (2026-09-19 audit, L-84): CI lints only
+      # backend/, and the unscoped hook fired on every other Python file in
+      # the tree (backup/backup_mac.py, redteam/ — 200+ findings under a
+      # config those files were never written against). Scope here must
+      # match CI's, or hooks and CI disagree about what "clean" means.
       - id: ruff
+        files: ^backend/
       - id: ruff-format
+        files: ^backend/
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
     hooks:

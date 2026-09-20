@@ -351,6 +351,8 @@ class TestConsentGrant:
         assert consents[0]["id"] == body["id"]
 
     async def test_grant_requires_verifier_header(self, client):
+        from app.api.consents import SHARING_DISCLOSURE_VERSION
+
         patient = ClientEmulator("noverify", "pw")
         await patient.register(client)
         th = TherapistEmulator("drnv", "pw")
@@ -363,7 +365,7 @@ class TestConsentGrant:
         response = await client.post(
             "/api/consents",
             headers=patient.headers,
-            json={"code": code, **wrap, "disclosure": "v1"},
+            json={"code": code, **wrap, "disclosure": SHARING_DISCLOSURE_VERSION},
         )
         assert response.status_code == 422
 
@@ -383,6 +385,8 @@ class TestConsentGrant:
         assert retry["status"] == 201
 
     async def test_grant_validation(self, client):
+        from app.api.consents import SHARING_DISCLOSURE_VERSION
+
         patient = ClientEmulator("grantvalid", "pw")
         await patient.register(client)
         th = TherapistEmulator("drgv", "pw")
@@ -400,7 +404,7 @@ class TestConsentGrant:
                 "code": code,
                 "ephemeral_pub": th.wrap_pub_key,
                 "wrapped_key": base64.b64encode(b"x" * 60).decode(),
-                "disclosure": "v1",
+                "disclosure": SHARING_DISCLOSURE_VERSION,
             }
             payload.update(patch)
             response = await client.post(
@@ -1282,9 +1286,16 @@ class TestEvidenceDates:
             assert isinstance(dates, list) and dates
             assert len(dates) <= 60  # EVIDENCE_DATES_CAP
             assert all(d in seeded for d in dates), "evidence must be real corpus days"
-            # The stable pattern id for note attachment.
+            # The stable pattern id for note attachment. Pids are
+            # "<kind>:..." for theme/statistical patterns; the phrase
+            # cluster family uses the kind-agnostic "phrase:<digest>"
+            # namespace (2026-09-20: the pid no longer embeds the
+            # classification kind, so a cluster whose mean negativity
+            # oscillates cannot flip its own pid).
             assert detail["pattern_pid"]
-            assert detail["pattern_pid"].startswith(pattern["kind"])
+            assert detail["pattern_pid"].startswith(
+                pattern["kind"]
+            ) or detail["pattern_pid"].startswith("phrase:")
 
     async def test_therapist_sees_evidence_dates_after_e2e_decrypt(self, client, monkeypatch):
         # Full loop: patient surfaces patterns, shares; the therapist

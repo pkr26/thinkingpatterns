@@ -30,14 +30,14 @@
 /** The dialog tier: high-signal phrases that surface support resources. */
 export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bsuicid(?:e|al)\\b",
-  "\\bkill(?:ing)?\\s+myself\\b",
+  "\\bkill(?:ed|ing)?\\s+myself\\b",
   "\\b(?:wants?|wanted|wanting)\\s+to\\s+die\\b",
   "\\bwanna\\s+(?:to\\s+)?die\\b",
   "\\bwish\\s+(?:i\\s+)?(?:was|were)\\s+dead\\b",
   "\\bwish\\s+(?:i\\s+)?could\\s+die\\b",
   "\\bfeel(?:s|ing)?\\s+like\\s+dying\\b",
   "\\bend(?:ing)?\\s+it\\s+all\\b",
-  "\\b(?:end|ending|take|taking)\\s+my\\s+(?:own\\s+)?life\\b",
+  "\\b(?:end|ended|ending|take|took|taking)\\s+my\\s+(?:own\\s+)?life\\b",
   "\\bself[-\\s]?harm(?:ing)?\\b",
   "\\bhurt(?:ing)?\\s+myself\\b",
   "\\bharm(?:ing)?\\s+myself\\b",
@@ -69,6 +69,9 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bvoglio\\s+morire\\b",
   "\\bquero\\s+morrer\\b",
   "\\bme\\s+matar\\b",
+  "\\bsuicid(?:io|ios|arme|armi)\\b",
+  "\\bno\\s+quiero\\s+vivir\\b",
+  "\\bcansad[oa]s?\\s+de\\s+vivir\\b",
   "我想死",
   "我想去死",
   "自杀",
@@ -122,4 +125,10 @@ export const CRISIS_BENIGN_COMPOUNDS: readonly string[] = [
   "suicideboys",
   "suicide prevention",
   "suicide awareness",
+  // 2026-09-20 audit L-23: prevention-campaign masking beyond English —
+  // CJK and Spanish classroom mentions. Post-fold spellings (masking runs
+  // after Latin-mark folding).
+  "自杀预防",
+  "prevencion del suicidio",
+  "prevencion de suicidio",
 ];

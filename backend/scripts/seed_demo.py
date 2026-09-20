@@ -2,18 +2,31 @@
 
 Purpose: the 30-day threshold is honest product design, but it makes the
 mini-brain unjudgeable in a demo — so this script creates an account whose
-journal already has 70 days of history with planted, realistic structure
-(Sunday work dread, a returning worry, family visits with next-day dips, a
-late rough patch), runs a real recompute through the real API, and prints
-what the brain surfaced. Judges can then sign into the app with the
-printed credentials and see the same insights the script verified.
+journal already has 84 days of history (default --days; the old docstring
+said 70) with planted, realistic structure (Sunday work dread, a returning
+worry, family visits with next-day dips, a late rough patch), runs a real
+recompute through the real API, and prints what the brain surfaced. Judges
+can then sign into the app with the printed credentials and see the same
+insights the script verified.
 
 The crypto is the real client-side stack (app.security.kdf/crypto — the
 same code the mobile app mirrors, pinned by shared/vectors.json): the
 server only ever receives opaque blobs and one single-use data key.
 
-Usage (backend running on localhost:8000):
-    ../.venv/bin/python scripts/seed_demo.py --username demo --password 'correct horse battery staple'
+Usage (backend running on localhost:8000) — --db-url is required in
+practice for a first seed: the API's +/-1-day backdating guard rejects
+every journal entry older than the account, so the {days}-day history
+needs the created_at backdate below (on a re-run against an already-aged
+account it can be omitted):
+
+    ../.venv/bin/python scripts/seed_demo.py --username demo \
+        --password 'correct horse battery staple' \
+        --db-url sqlite+aiosqlite:////absolute/path/to/dev.db
+
+The salt is DERIVED from the username (domain-separated SHA-256), not
+fresh random: a re-run must derive the SAME auth key the server stored,
+or the documented 409-then-login path can never succeed (2026-09-19
+audit, L-36). Same username + same password = same account keys.
 """
 
 from __future__ import annotations
@@ -21,8 +34,8 @@ from __future__ import annotations
 import argparse
 import base64
 import getpass
+import hashlib
 import json
-import os
 import random
 import sys
 import time
@@ -237,7 +250,13 @@ def main() -> int:
 
     client = httpx.Client(base_url=args.base_url, timeout=30)
 
-    salt = os.urandom(16)
+    # DETERMINISTIC per-username salt (2026-09-19 audit, L-36): the old
+    # os.urandom(16) minted a fresh salt every run, so the re-run path
+    # (409 -> login with the verifier derived from the NEW salt) could
+    # never authenticate against the salt the server stored. The salt is
+    # public material (it rides the register/login payloads anyway); a
+    # stable derivation keeps re-runs working with zero local state.
+    salt = hashlib.sha256(f"mindpattern-seed-demo:{args.username}".encode()).digest()[:16]
     master = keyderive.derive_master_key(args.password, salt)
     auth_key = keyderive.derive_auth_key(master)
     data_key = keyderive.derive_data_key(master)

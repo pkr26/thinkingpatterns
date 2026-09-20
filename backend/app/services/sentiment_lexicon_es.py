@@ -89,6 +89,7 @@ VADER_BASE_ES: dict[str, float] = {
     "bueno": 1.8,
     "buena": 1.8,
     "buenísima": 2.4,
+    "buenisima": 2.4,
     "bonito": 1.8,
     "bonita": 1.8,
     "hermoso": 2.4,
@@ -114,7 +115,11 @@ VADER_BASE_ES: dict[str, float] = {
     "amor": 3.2,
     "amo": 3.0,
     "amar": 2.8,
-    "quiero": 2.2,
+    # 0.3, matching EN "want" exactly (2026-09-20 audit H-8): "quiero" is
+    # the highest-frequency Spanish verb and the old +2.2 read every
+    # ideation phrase built on it ("quiero morir", "me quiero morir") as
+    # strongly positive.
+    "quiero": 0.3,
     "querido": 2.2,
     "querida": 2.2,
     "cariño": 2.6,
@@ -179,6 +184,7 @@ VADER_BASE_ES: dict[str, float] = {
     "me río": 2.6,
     "bromeando": 1.8,
     "jugué": 2.0,
+    "jugue": 2.0,
     "juge": 2.0,
     "jugando": 2.0,
     "baile": 2.2,
@@ -304,6 +310,32 @@ VADER_BASE_ES: dict[str, float] = {
     "frustrada": -2.6,
     "frustración": -2.6,
     "frustracion": -2.6,
+    # --- negative: death/self-harm ideation vocabulary (2026-09-20 audit
+    # H-8: the class was absent — "pienso en el suicidio" scored 0.0 and
+    # "quiero morir" scored POSITIVE via the old high "quiero" valence).
+    # Values anchor to the English engine's own anchors (suicidal -3.8,
+    # die/death -2.9, cut -1.1, disappear -0.9) so ES/EN ideation text
+    # lands in the same band. "vivir" is deliberately POSITIVE: it is the
+    # thing negators flip ("no quiero vivir" → mildly negative), which is
+    # how the English engine reads "live".
+    "suicidio": -3.8,
+    "suicidios": -3.6,
+    "suicida": -3.2,
+    "suicidas": -3.0,
+    "suicidarme": -3.8,
+    "suicidarse": -3.4,
+    "muerte": -2.9,
+    "muertes": -2.6,
+    "muerto": -2.6,
+    "muertos": -2.4,
+    "morir": -2.9,
+    "morirme": -3.2,
+    "matar": -2.6,
+    "matarme": -3.0,
+    "desaparecer": -0.9,
+    "cortar": -1.1,
+    "cortarme": -2.6,
+    "vivir": 0.8,
     # --- negative: anxiety/fear ---
     "ansioso": -2.8,
     "ansiosa": -2.8,
@@ -369,6 +401,7 @@ VADER_BASE_ES: dict[str, float] = {
     "irritación": -2.0,
     "irritacion": -2.0,
     "irritadísimo": -2.6,
+    "irritadisimo": -2.6,
     "cabreado": -2.6,
     "cabreada": -2.6,
     "harto": -2.6,
@@ -428,7 +461,9 @@ VADER_BASE_ES: dict[str, float] = {
     "malo": -2.0,
     "mala": -2.0,
     "malísima": -2.6,
+    "malisima": -2.6,
     "malísimo": -2.6,
+    "malisimo": -2.6,
     "horrible": -3.0,
     "horroroso": -3.2,
     "horrorosa": -3.2,

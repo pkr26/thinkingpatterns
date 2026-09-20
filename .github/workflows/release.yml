@@ -240,7 +240,8 @@ jobs:
   image:
     # A private-to-the-workflow candidate tag is pushed once, then this exact
     # manifest-list digest is pulled by production-integration. Release tags
-    # are attached in the later `release-image-tags` job without rebuilding.
+    # are attached by the tag-push steps later in THIS `image` job (there is
+    # no separate `release-image-tags` job) without rebuilding.
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 60

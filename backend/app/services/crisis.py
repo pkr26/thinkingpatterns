@@ -64,14 +64,14 @@ import unicodedata
 
 DIALOG_PATTERNS: tuple[str, ...] = (
     "\\bsuicid(?:e|al)\\b",
-    "\\bkill(?:ing)?\\s+myself\\b",
+    "\\bkill(?:ed|ing)?\\s+myself\\b",
     "\\b(?:wants?|wanted|wanting)\\s+to\\s+die\\b",
     "\\bwanna\\s+(?:to\\s+)?die\\b",
     "\\bwish\\s+(?:i\\s+)?(?:was|were)\\s+dead\\b",
     "\\bwish\\s+(?:i\\s+)?could\\s+die\\b",
     "\\bfeel(?:s|ing)?\\s+like\\s+dying\\b",
     "\\bend(?:ing)?\\s+it\\s+all\\b",
-    "\\b(?:end|ending|take|taking)\\s+my\\s+(?:own\\s+)?life\\b",
+    "\\b(?:end|ended|ending|take|took|taking)\\s+my\\s+(?:own\\s+)?life\\b",
     "\\bself[-\\s]?harm(?:ing)?\\b",
     "\\bhurt(?:ing)?\\s+myself\\b",
     "\\bharm(?:ing)?\\s+myself\\b",
@@ -105,6 +105,12 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     "\\bvoglio\\s+morire\\b",
     "\\bquero\\s+morrer\\b",
     "\\bme\\s+matar\\b",
+    # --- 2026-09-20 audit H-7: the Romance-language suicidio family
+    # (suicidio/suicidios/suicidarme/suicidarmi — German suizid fired, the
+    # cognates didn't) and Spanish hopelessness phrasing ------------------
+    "\\bsuicid(?:io|ios|arme|armi)\\b",
+    "\\bno\\s+quiero\\s+vivir\\b",
+    "\\bcansad[oa]s?\\s+de\\s+vivir\\b",
     # --- non-Latin scripts: plain substrings (\\b never fires next to
     #     CJK/Arabic/Devanagari in ECMAScript) --------------------------------
     "我想死",
@@ -168,6 +174,14 @@ BENIGN_COMPOUNDS: tuple[str, ...] = (
     "suicideboys",
     "suicide prevention",
     "suicide awareness",
+    # 2026-09-20 audit L-23: the prevention-campaign mask was English-only —
+    # "我们讨论了自杀预防" (we discussed suicide prevention) fired, and
+    # Spanish classroom mentions had no mask at all. Post-fold spellings
+    # (no diacritics): masking runs after Latin-mark folding. Other
+    # languages keep the accepted-FP posture (documented trade-off).
+    "自杀预防",
+    "prevencion del suicidio",
+    "prevencion de suicidio",
 )
 
 
@@ -204,8 +218,8 @@ _INVISIBLE = dict.fromkeys(
         ord(c)
         for c in (
             "\u00ad\u034f\u061c\u180e\u200b\u200c\u200d\u200e\u200f\u202a\u202b"
-            "\u202c\u202d\u202e\u2060\u2061\u2062\u2063\u2064\u2066\u2067\u2068"
-            "\u2069\ufeff"
+            "\u202c\u202d\u202e\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067"
+            "\u2068\u2069\ufeff"
         )
     ]
     + list(range(0xFE00, 0xFE10))
@@ -280,6 +294,12 @@ _LEET = {
 }
 _LEET_RE = re.compile(r"([a-z])([0134578@!$])([a-z])")
 _LEET_EDGE_RE = re.compile(r"(^|\s)([0134578@!$])([a-z])")
+# 2026-09-20 audit H-7: mapped digits also fold at a word's TRAILING edge
+# ("suicid3" -> "suicide"; "d13" -> "die" inside a phrase). The lookahead
+# accepts any non-letter or end-of-string so "suicid3!" folds too (punctuation
+# is folded to spaces only later). The class still lists exactly the mapped
+# characters — 2/6/9 stay digits ("grade6test" is untouched).
+_LEET_TRAIL_RE = re.compile(r"([a-z])([0134578@!$]+)(?=[^a-z]|$)")
 
 # A single-letter token run this long is a spelled-out word ("s u i c i d e"),
 # not prose — ordinary English never strings 4+ one-letter words together
@@ -300,6 +320,9 @@ def _leet_fold(text: str) -> str:
     while True:
         folded = _LEET_RE.sub(lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), text)
         folded = _LEET_EDGE_RE.sub(lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), folded)
+        folded = _LEET_TRAIL_RE.sub(
+            lambda m: m.group(1) + "".join(_LEET[c] for c in m.group(2)), folded
+        )
         if folded == text:
             return text
         text = folded
@@ -359,7 +382,11 @@ def _normalize_pre_punct(text: str) -> str:
 
 def _normalize_to_tokens(text: str) -> list[str]:
     out = _PUNCT_TO_SPACE_RE.sub(" ", _normalize_pre_punct(text))
-    return [t for t in re.split(r"[\s\-]+", out) if t]
+    tokens = [t for t in re.split(r"[\s\-]+", out) if t]
+    # 2026-09-20 audit H-7: SMS shorthand — a standalone "2" token IS "to"
+    # ("i want 2 die", "no reason 2 live"). Folded at the TOKEN level, so 2
+    # stays an unmapped leet digit everywhere else (2=z is ambiguous).
+    return ["to" if t == "2" else t for t in tokens]
 
 
 def _is_ascii_single(token: str) -> bool:
@@ -473,12 +500,21 @@ SUPPRESS_CONCAT_RE = _compile_tier(tuple(_concat_pattern(p) for p in SUPPRESS_PA
 # whole words joined by whitespace/hyphens only: punctuation between the
 # words ("suicide, silence") is not the compound, so real ideation next to
 # a masked word cannot be silenced. Longest-first so "suicide squad" can
-# never eat only half of a longer entry.
+# never eat only half of a longer entry. Non-ASCII compounds (CJK, 2026-09
+# -20 audit L-23) are masked as plain substrings: \b never fires next to
+# CJK in either engine, so the anchored form would never match at all.
+def _benign_mask(compound: str) -> re.Pattern[str]:
+    words = compound.split()
+    if all(word.isascii() for word in words):
+        return re.compile(
+            r"\b" + r"[\s\-]+".join(re.escape(word) for word in words) + r"\b",
+            re.IGNORECASE,
+        )
+    return re.compile(re.escape(" ".join(words)), re.IGNORECASE)
+
+
 _BENIGN_MASK_RES: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(
-        r"\b" + r"[\s\-]+".join(re.escape(w) for w in compound.split()) + r"\b", re.IGNORECASE
-    )
-    for compound in sorted(BENIGN_COMPOUNDS, key=len, reverse=True)
+    _benign_mask(compound) for compound in sorted(BENIGN_COMPOUNDS, key=len, reverse=True)
 )
 
 
@@ -486,6 +522,68 @@ def _mask_benign(text: str) -> str:
     for mask in _BENIGN_MASK_RES:
         text = mask.sub(" ", text)
     return text
+
+
+# --- 2026-09-20 audit H-7: letter-doubling ---------------------------------
+# "kiill myself" / "suiccide" (a letter typed twice) matched NO tier and no
+# variant: the doubled run is not a split, not leet, not a homoglyph. The
+# fix is a fourth matching channel folded on BOTH sides: the normalized
+# text with same-letter runs collapsed ("kiill myself" -> "kil myself")
+# matched against tier twins folded the same way ("kill(?:ed|ing)?
+# myself" -> "kil(?:ed|ing)? myself"). Folding both sides is what keeps
+# canonically double-lettered words working ("kill", "sleep", "cannot"
+# fold on the pattern side exactly as the text does). ASCII letters only:
+# regex metacharacters, \s/\b escapes, classes and non-Latin scripts are
+# never part of a collapsed run, so a folded pattern stays a valid
+# pattern with unchanged anchors.
+_LETTER_RUN_RE = re.compile(r"([a-z])\1+")
+
+
+def _dedup_fold(text: str) -> str:
+    return _LETTER_RUN_RE.sub(r"\1", text)
+
+
+# The one pattern exempt from the folded tier: "off(?:ing)? myself" folds
+# to "of(?:ing)? myself", which matches ordinary prose ("ashamed of
+# myself", "tired of myself"). Its unfolded form keeps matching as
+# before; doubled spellings of it ("offfing myself") stay accepted misses
+# rather than risk a dialog false positive on a benign sentence.
+_FOLD_EXEMPT: frozenset[str] = frozenset({"\\boff(?:ing)?\\s+myself\\b"})
+
+DIALOG_FOLDED_RE = _compile_tier(tuple(_dedup_fold(p) for p in DIALOG_PATTERNS if p not in _FOLD_EXEMPT))
+SUPPRESS_FOLDED_RE = _compile_tier(tuple(_dedup_fold(p) for p in SUPPRESS_PATTERNS if p not in _FOLD_EXEMPT))
+DIALOG_FOLDED_CONCAT_RE = _compile_tier(
+    tuple(_concat_pattern(_dedup_fold(p)) for p in DIALOG_PATTERNS if p not in _FOLD_EXEMPT)
+)
+SUPPRESS_FOLDED_CONCAT_RE = _compile_tier(
+    tuple(_concat_pattern(_dedup_fold(p)) for p in SUPPRESS_PATTERNS if p not in _FOLD_EXEMPT)
+)
+
+# The benign compounds re-mask on the FOLDED text with their own folded
+# spellings ("awareness" -> "awarenes"): bare "suicide" is a dialog
+# pattern, so "suicide awareness" must stay masked in the folded channel
+# — including when the doubling is what hid it ("suiciide squaad").
+_BENIGN_MASK_FOLDED_RES: tuple[re.Pattern[str], ...] = tuple(
+    _benign_mask(folded)
+    for folded in sorted((_dedup_fold(c) for c in BENIGN_COMPOUNDS), key=len, reverse=True)
+)
+
+
+def _folded_variants(text: str) -> tuple[str, ...]:
+    """The letter-run-collapsed twins of the three canonical variants
+    (audit H-7). Matched only against the FOLDED tier twins above — the
+    canonical channel is untouched, so every pre-existing verdict keeps
+    its exact form."""
+    pre = _mask_benign(_normalize_pre_punct(text))
+    folded = _dedup_fold(pre)
+    for mask in _BENIGN_MASK_FOLDED_RES:
+        folded = mask.sub(" ", folded)
+    tokens = _normalize_to_tokens(folded)
+    return (
+        _primary_join(tokens),
+        _orphan_glue(tokens),
+        _concat_join(tokens),
+    )
 
 
 def _match_variants(text: str) -> tuple[str, ...]:
@@ -503,8 +601,13 @@ def _match_variants(text: str) -> tuple[str, ...]:
 def matches_dialog(text: str) -> bool:
     """True when the (conservative) client dialog tier fires."""
     variants = _match_variants(text)
-    return any(DIALOG_RE.search(v) for v in variants[:2]) or any(
-        DIALOG_CONCAT_RE.search(v) for v in (variants[2],)
+    if any(DIALOG_RE.search(v) for v in variants[:2]) or DIALOG_CONCAT_RE.search(variants[2]):
+        return True
+    # H-7 letter-doubling channel: only reached when the canonical forms
+    # are clean, so it can only ever ADD a catch.
+    folded = _folded_variants(text)
+    return bool(
+        any(DIALOG_FOLDED_RE.search(v) for v in folded[:2]) or DIALOG_FOLDED_CONCAT_RE.search(folded[2])
     )
 
 
@@ -512,6 +615,9 @@ def matches_suppress(text: str) -> bool:
     """True when the (broader) suppression tier fires: never quote this
     back as a pattern card or reflective question."""
     variants = _match_variants(text)
-    return any(SUPPRESS_RE.search(v) for v in variants[:2]) or any(
-        SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)
+    if any(SUPPRESS_RE.search(v) for v in variants[:2]) or SUPPRESS_CONCAT_RE.search(variants[2]):
+        return True
+    folded = _folded_variants(text)
+    return bool(
+        any(SUPPRESS_FOLDED_RE.search(v) for v in folded[:2]) or SUPPRESS_FOLDED_CONCAT_RE.search(folded[2])
     )

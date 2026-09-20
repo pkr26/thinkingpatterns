@@ -377,10 +377,13 @@ async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, sett
 
         async def execute(self, stmt):
             self.executions += 1
+            # Call order follows the handler: the duplicate idempotency
+            # pre-check runs BEFORE the quota read (audit L-6, 2026-09-20 —
+            # a retry at the quota boundary must answer 409, not 413).
             if self.executions == 1:
-                return QuotaResult()
-            if self.executions == 2:
                 return PreCheckResult()
+            if self.executions == 2:
+                return QuotaResult()
             return RevisionResult()
 
         def add(self, row):

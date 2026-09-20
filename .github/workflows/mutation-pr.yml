@@ -22,6 +22,10 @@ on:
   pull_request:
     paths:
       - "backend/app/**"
+      # Tests are part of the oracle: a PR that renames/deletes a pin test
+      # must re-run the gate so the harness can report SETUP-ERROR instead
+      # of silently "killing" every mutant against a rotted suite.
+      - "backend/tests/**"
       - "backend/scripts/mutmut_runner.sh"
       - "redteam/mutation_campaign*/**"
       - "redteam/run_pr_mutation_gate.py"
@@ -73,6 +77,12 @@ jobs:
       - name: Re-run behavioral mutants targeting changed files
         run: |
           cat /tmp/pr_files.txt
+          # The round-2+ harnesses run redteam-oracle commands through
+          # ROOT_PY = ROOT/.venv/bin/python (repo ROOT, not backend/) —
+          # a venv CI runners do not have. MUTATION_PY is the explicit
+          # override seam for exactly that: point it at this runner's
+          # interpreter (same one backend/.venv/bin/python links to).
+          export MUTATION_PY="$(command -v python)"
           python redteam/run_pr_mutation_gate.py - < /tmp/pr_files.txt
 
   mutmut-diff:

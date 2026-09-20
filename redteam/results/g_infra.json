@@ -37,37 +37,37 @@
   {
     "id": "G3.prod-default-secret",
     "status": "BLOCKED",
-    "summary": "env=production refused boot as expected=True"
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
   },
   {
     "id": "G3.prod-short-secret",
     "status": "BLOCKED",
-    "summary": "env=production refused boot as expected=True"
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
   },
   {
     "id": "G3.prod-sqlite",
     "status": "BLOCKED",
-    "summary": "env=production refused boot as expected=True"
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
   },
   {
     "id": "G3.prod-http-llm-url",
     "status": "BLOCKED",
-    "summary": "env=production refused boot as expected=True"
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
   },
   {
     "id": "G3.typo-env-fails-closed",
     "status": "BLOCKED",
-    "summary": "env=staging  refused boot as expected=True"
+    "summary": "env=staging  refused boot (fail-closed RuntimeError), expected=refusal"
   },
   {
     "id": "G3.staging-valid-boots-under-prod-gates",
     "status": "BLOCKED",
-    "summary": "env=staging booted as expected=False"
+    "summary": "env=staging booted, expected=boot"
   },
   {
     "id": "G3.tracked-secrets",
     "status": "BLOCKED",
-    "summary": "git-tracked secret/db files: none (337 files tracked)"
+    "summary": "git-tracked secret/db files: none (409 files tracked)"
   },
   {
     "id": "G3.dockerignore-db",

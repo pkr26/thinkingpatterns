@@ -267,6 +267,32 @@ describe("authenticated requests", () => {
     expect(url).toContain("offset=200");
   });
 
+  it("builds bounded measures pages with limit/offset continuation (L-76)", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])));
+    await api.patientMeasures("u1", { offset: 200, limit: 100 });
+    let [url] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/therapist/patients/u1/measures?limit=100&offset=200");
+    // Offset zero and the page limit are the server's defaults: no query.
+    await api.patientMeasures("u1");
+    [url] = vi.mocked(fetch).mock.calls[1]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/therapist/patients/u1/measures");
+    // Caller-controlled paging state is validated like every continuation.
+    await expect(api.patientMeasures("u1", { offset: -1 })).rejects.toMatchObject({
+      status: 0,
+      message: "invalid measure page offset",
+    });
+    await expect(api.patientMeasures("u1", { limit: 0 })).rejects.toMatchObject({
+      status: 0,
+      message: "invalid measure page limit",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ nope: true })));
+    await expect(api.patientMeasures("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid measures page",
+    });
+  });
+
   it("returns a note page with a validated continuation header", async () => {
     setSession("tok-1", "https://api.example.com");
     const notes = [{

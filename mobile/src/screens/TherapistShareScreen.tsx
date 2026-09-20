@@ -29,11 +29,41 @@ type PendingAction =
   | { kind: "revoke"; consentId: string }
   | null;
 
+/**
+ * The sharing-disclosure version THIS app renders (audit M-25 / H-14,
+ * 2026-09-20): "v2" copy names journal entries, patterns/insights, the
+ * wellbeing measures (PHQ-9 questionnaires, readable since 2026-09-19) and
+ * the caseload summaries. The server echoes its own current version in
+ * GET /meta (sharing_disclosure_version) and rejects a grant whose reviewed
+ * disclosure is stale with 409 disclosure_outdated — the screen compares
+ * the two BEFORE offering the grant card, so the person never spends a
+ * password proof and a key wrap on a consent that cannot land.
+ *
+ * NOTE (resolved 2026-09-20): both sides now pin "v2" (client.ts
+ * SHARING_DISCLOSURE_VERSION, server consents.py), and the sanitized
+ * code allowlist carries disclosure_outdated — the 409 branch below is
+ * belt-and-braces for a server that moves first.
+ */
+const SHARING_DISCLOSURE_VERSION_V2 = "v2";
+
+/** True when the 409 is specifically the disclosure gate. The sanitized
+ *  code allowlist in client.ts carries disclosure_outdated (audit H-14);
+ *  the detail-string fallback stays as belt-and-braces for older builds. */
+function isDisclosureOutdated(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  if ((err.code as string | undefined) === "disclosure_outdated") return true;
+  return typeof err.message === "string" && err.message.toLowerCase().includes("disclosure");
+}
+
 const dayOf = (iso: string): string => iso.slice(0, 10);
 
 export function TherapistShareScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const [consents, setConsents] = useState<ListedConsent[]>([]);
+  /** L-66: a FAILED consents load is "unknown", not "not sharing" — this
+   *  screen is where a revoke gets verified, so the empty-state copy must
+   *  only ever follow a successful empty answer. */
+  const [consentsFailed, setConsentsFailed] = useState(false);
   const [code, setCode] = useState("");
   const [lookup, setLookup] = useState<PairingLookup | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
@@ -43,20 +73,42 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
    * that prevents an old/misconfigured server from presenting a pairing flow
    * which will only fail later with a confusing 404/403. */
   const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
+  /** M-25: the server's disclosure version differs from the one this app's
+   * copy represents. No new grant is offered while true; existing consents
+   * and revoking stay fully available. */
+  const [disclosureStale, setDisclosureStale] = useState(false);
 
   const refresh = useCallback(() => {
     api.meta()
       .then((meta) => {
         const enabled = meta?.sharing_available === true;
         setSharingAvailable(enabled);
-        if (enabled) api.listConsents().then(setConsents).catch(() => setConsents([]));
-        else setConsents([]);
+        // Only a server that has sharing enabled reports a disclosure
+        // version; absent (legacy server / disabled) never counts as stale.
+        const serverVersion = (meta as { sharing_disclosure_version?: unknown } | undefined)
+          ?.sharing_disclosure_version;
+        setDisclosureStale(enabled && typeof serverVersion === "string" && serverVersion !== SHARING_DISCLOSURE_VERSION_V2);
+        if (enabled) {
+          api.listConsents()
+            .then((list) => {
+              setConsents(list);
+              setConsentsFailed(false);
+            })
+            .catch(() => {
+              setConsents([]);
+              setConsentsFailed(true);
+            });
+        } else {
+          setConsents([]);
+          setConsentsFailed(false);
+        }
       })
       .catch(() => {
         // Unreachable is UNKNOWN, not a server policy decision: null keeps
         // the two situations distinct in the copy (and sends nothing).
         setSharingAvailable(null);
         setConsents([]);
+        setConsentsFailed(false);
       });
   }, []);
   useEffect(refresh, [refresh]);
@@ -148,6 +200,18 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       refresh();
       done();
     } catch (err) {
+      if (isDisclosureOutdated(err)) {
+        // M-25: the server refused the grant because the disclosure this
+        // screen reviewed is no longer current (409 disclosure_outdated).
+        // The password was RIGHT and nothing was shared — dedicated calm
+        // copy instead of a generic conflict or a wrong-password dead end.
+        Alert.alert(tr("share.grantOutdatedTitle"), tr("share.grantOutdatedBody"));
+        // Re-check the meta version so the stale-state card explains the
+        // situation from here on instead of offering another doomed grant.
+        refresh();
+        done();
+        return;
+      }
       if (isVerificationFailedError(err)) {
         Alert.alert(tr("common.passwordMismatchTitle"), tr("common.passwordMismatchBody"));
         retry();
@@ -199,8 +263,13 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       )}
 
       {sharingAvailable === true && <Text style={themed.label}>{tr("share.sharingNowLabel")}</Text>}
-      {sharingAvailable === true && consents.length === 0 && (
+      {sharingAvailable === true && consents.length === 0 && !consentsFailed && (
         <Text style={themed.footnote}>{tr("share.notSharingNote")}</Text>
+      )}
+      {/* L-66: unknown status is never dressed up as the verified empty
+          state — the note says the list could not be loaded. */}
+      {sharingAvailable === true && consentsFailed && (
+        <Text style={themed.footnote}>{tr("share.listFailedNote")}</Text>
       )}
       {sharingAvailable === true && consents.map((consent) => (
         <View
@@ -226,7 +295,18 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         </View>
       ))}
 
-      {sharingAvailable === true && !lookup && (
+      {/* M-25: the server's sharing-disclosure version differs from the one
+          this app's copy represents — show the calm "terms updated" state
+          instead of a grant card that can only 409 after a password proof
+          and a key wrap. Existing sharing stays visible and revocable. */}
+      {sharingAvailable === true && disclosureStale && (
+        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
+          <Text style={[styles.cardTitle, { color: t.colors.text }]}>{tr("share.termsUpdatedTitle")}</Text>
+          <Text style={themed.footnote}>{tr("share.termsUpdatedBody")}</Text>
+        </View>
+      )}
+
+      {sharingAvailable === true && !disclosureStale && !lookup && (
         <>
           <Text style={themed.label}>{tr("share.addLabel")}</Text>
           <Text style={themed.footnote}>{tr("share.addBody")}</Text>

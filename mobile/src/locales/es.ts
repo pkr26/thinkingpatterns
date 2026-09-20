@@ -152,6 +152,11 @@ export const es: Record<string, string> = {
   "login.signInFailedTitle": "Error al iniciar sesión",
   "login.badCredentials": "Ese usuario o contraseña no coincide.",
   "login.usernameTaken": "Ese nombre de usuario ya está en uso. Pruebe otro, o inicie sesión.",
+  // L-65: la cuenta SÍ se creó, pero un paso posterior falló en este
+  // dispositivo — la salida es iniciar sesión, no volver a registrarse.
+  "login.registerPartialTitle": "Cuenta creada",
+  "login.registerPartialBody":
+    "Su cuenta fue creada, pero este dispositivo no pudo terminar de iniciar la sesión. Cambie a iniciar sesión y use su nuevo usuario y contraseña.",
 
   // ------------------------------------------------------------- onboarding
   "onboarding.panel1Title": "Escriba cada día",
@@ -352,8 +357,9 @@ export const es: Record<string, string> = {
   "insights.kind.sense_making": "CONSTRUCCIÓN DE SENTIDO",
   "insights.kind.activity_diversity": "VARIEDAD DE ACTIVIDADES",
   "insights.kind.fallback": "PATRÓN",
-  "insights.languageTitle": "Sobre el idioma de tu diario",
-  "insights.languageBody": "El an\u00e1lisis de patrones funciona en ingl\u00e9s y espa\u00f1ol. En otro idioma, tus entradas y registros se guardan y sincronizan igual: el motor prefiere no adivinar. El soporte de idiomas crece con cada l\u00e9xico cuidadosamente construido.",
+  // M-36: registro "usted" en todo el catálogo (antes estos dos usaban "tu").
+  "insights.languageTitle": "Sobre el idioma de su diario",
+  "insights.languageBody": "El an\u00e1lisis de patrones funciona en ingl\u00e9s y espa\u00f1ol. En otro idioma, sus entradas y registros se guardan y sincronizan igual: el motor prefiere no adivinar. El soporte de idiomas crece con cada l\u00e9xico cuidadosamente construido.",
   "insights.effect.verySmall": "una diferencia muy pequeña",
   "insights.effect.small": "una diferencia pequeña",
   "insights.effect.medium": "una diferencia mediana",
@@ -367,7 +373,7 @@ export const es: Record<string, string> = {
   "insights.method.mood_correlation":
     "Dentro de la persona: días con este tema frente a su propia línea base de ánimo en las mismas semanas (t de Welch + umbral de tamaño del efecto).",
   "insights.method.link":
-    "Asociación al día siguiente frente a su propia línea base — la forma del vínculo de diario diario mejor replicado (p. ej., sueño → ánimo del día siguiente).",
+    "Asociación al día siguiente frente a su propia línea base — la forma del vínculo mejor replicada en los estudios de registro diario (p. ej., sueño → ánimo del día siguiente).",
   "insights.method.inertia":
     "Arrastre del ánimo de un día al otro (autocorrelación) comparado con su propia norma anterior — una dinámica ligada al bienestar en metaanálisis.",
   "insights.method.energy_inertia":
@@ -400,7 +406,7 @@ export const es: Record<string, string> = {
   "insights.ev.concentration": "Concentración",
   "insights.ev.concentrationValue": "{share}% de estas menciones cayeron en {day} — su línea base para {day} es {baseline}%",
   "insights.ev.moodDiff": "Diferencia de ánimo",
-  "insights.ev.moodDiffValue": "las entradas se leen {direction} en {amount} respecto a su propia norma",
+  "insights.ev.moodDiffValue": "las entradas suenan {direction} que su propia norma, por una diferencia de {amount}",
   "insights.ev.size": "Tamaño de la diferencia",
   "insights.ev.dayAfter": "Día siguiente",
   "insights.ev.dayAfterValue": "~{lag} día después — visto en {after} días así frente a {other} otros",
@@ -461,7 +467,7 @@ export const es: Record<string, string> = {
   "insights.desc.topicRising": "'{label}' ha estado ocupando más espacio en lo que escribe últimamente{share}.",
   "insights.desc.topicSteady": "'{label}' es una presencia constante en lo que escribe{share}.",
   "insights.desc.topicShare": " ({share}% de las entradas)",
-  "insights.desc.moodShift": "Sus entradas se han leído {direction} que su línea base habitual últimamente (un cambio de {shift}).",
+  "insights.desc.moodShift": "Últimamente sus entradas han sonado {direction} que su línea base habitual (un cambio de {shift}).",
   "insights.desc.sleepLink": "El día después de una noche que valoró como más difícil de lo habitual en su caso, sus entradas se leen {direction} de lo habitual.",
   "insights.desc.sleepCorrelation": "En las noches que valoró como más difíciles de lo habitual en su caso, sus entradas se leen {direction} ese mismo día.",
   "insights.desc.sleepTemporal": "Sus noches más difíciles (según sus propias valoraciones) caen más a menudo en {day}.",
@@ -503,6 +509,7 @@ export const es: Record<string, string> = {
   "question.refresh": "Actualizar",
   "question.showToday": "Mostrar la pregunta de hoy",
   "question.captionBaseline": "La pregunta de hoy viene de un pequeño conjunto integrado — nada sale de este dispositivo por ella.",
+  "question.captionOffline": "No se puede conectar con el servidor ahora mismo — aquí tiene una pregunta general para hoy.",
   "question.captionInsight": "Calcular su pregunta puede enviar su llave de cifrado al servidor una vez — se mantiene en memoria por un máximo de 5 minutos, nunca se guarda.",
   "question.accountMissingPlain": "Falta el id de la cuenta — inicie sesión de nuevo.",
 
@@ -616,19 +623,64 @@ export const es: Record<string, string> = {
   "settings.serverUrlA11y": "URL del servidor",
   "settings.saveServerUrl": "Guardar la URL del servidor",
 
+  // --------------------------------------------------------- measures (M-16)
+  "measures.intro":
+    "Un cuestionario de bienestar estándar (PHQ-9), completado por usted. MindPattern guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
+  "measures.offlineNote":
+    "Su historial registrado necesita conexión para cargarse. Completar el cuestionario también la necesita — nada aquí funciona aún sin conexión.",
+  "measures.loadFailed": "No se pudieron cargar sus cuestionarios.",
+  "measures.historyTitle": "Sus puntajes registrados",
+  "measures.emptyNote": "Aún nada registrado.",
+  "measures.stemsHeader": "Durante las últimas 2 semanas, ¿con qué frecuencia le han molestado los siguientes problemas?",
+  "measures.item9Note": " (pregunta de seguridad — el apoyo está siempre a un toque)",
+  "measures.questionA11y": "Pregunta {index}",
+  "measures.questionOptionA11y": "Pregunta {index}: {label}",
+  "measures.recordButton": "Registrar este registro",
+  "measures.backToSettings": "Volver a Ajustes",
+  "measures.sessionDamagedTitle": "La sesión está dañada",
+  "measures.sessionDamagedBody": "Falta el id de la cuenta — inicie sesión de nuevo.",
+  "measures.lockedTitle": "Bloqueado",
+  "measures.lockedBody": "Sus llaves están bloqueadas — desbloquéelas e inténtelo de nuevo.",
+  "measures.recordedStatus": "Registrado — cifrado, como siempre.",
+  "measures.alreadyRecorded": "Ya estaba registrado — actualizando.",
+  "measures.notRecordedTitle": "No se registró",
+  "measures.recordOfflineBody": "Registrar necesita conexión en este momento. Sus elecciones siguen en pantalla.",
+  "measures.recordFailedBody": "No se pudo registrar en este momento. Sus elecciones siguen en pantalla.",
+  "measures.crisisTitle": "Hay apoyo disponible",
+  "measures.crisisBody":
+    "Algo de lo que marcó suena pesado. Sea lo que esté cargando, no tiene que cargarlo en soledad — ayuda gratuita y confidencial está a un toque.",
+  "measures.viewResources": "Ver recursos de apoyo",
+  // PHQ-9: redacción estándar en español (instrumento de dominio público).
+  "measures.phq9.item1": "Poco interés o placer en hacer las cosas",
+  "measures.phq9.item2": "Sentirse desanimado/a, deprimido/a o sin esperanza",
+  "measures.phq9.item3": "Dificultad para quedarse dormido/a, mantener el sueño o dormir demasiado",
+  "measures.phq9.item4": "Sentirse cansado/a o tener poca energía",
+  "measures.phq9.item5": "Poco apetito o comer en exceso",
+  "measures.phq9.item6": "Sentirse mal consigo mismo/a — o sentir que es un fracaso o que ha decepcionado a su familia o a usted mismo/a",
+  "measures.phq9.item7": "Dificultad para concentrarse en cosas, como leer o ver televisión",
+  "measures.phq9.item8": "Moverse o hablar tan despacio que otras personas podrían notarlo — o estar tan inquieto/a que se ha estado moviendo mucho más que de costumbre",
+  "measures.phq9.item9": "Pensar que estaría mejor muerto/a o en lastimarse de alguna manera",
+  "measures.phq9.option0": "Para nada",
+  "measures.phq9.option1": "Varios días",
+  "measures.phq9.option2": "Más de la mitad de los días",
+  "measures.phq9.option3": "Casi todos los días",
+
   // -------------------------------------------------------- therapist share
   "share.codeNotFoundTitle": "Código no encontrado",
   "share.codeNotFoundBody": "Revise el código con su terapeuta — expira 15 minutos después de que lo genere.",
   "share.lookupFailedTitle": "No se pudo buscar el código",
   "share.grantTitle": "¿Compartir con {name}?",
+  // Divulgación de compartir v2 (auditoría H-14/M-25): el alcance nombra
+  // cada clase derivada del paciente — entradas, patrones, cuestionarios
+  // de bienestar (PHQ-9) y resúmenes de lista de casos.
   "share.grantBody":
-    "Esa persona podrá leer cada entrada del diario y cada patrón calculado a partir de ellas, desde su portal de terapeuta. No puede cambiar ni eliminar nada — solo leer, y escribir sus propias notas privadas.\n\nPuede dejar de compartir en cualquier momento; eso termina su acceso de inmediato, pero no puede desleer lo que ya haya leído. Se le pedirá su contraseña.",
+    "Esa persona podrá leer cada entrada del diario, cada patrón calculado a partir de ellas, sus cuestionarios de bienestar (PHQ-9) y el resumen de su cuenta que aparece en su lista de casos — desde su portal de terapeuta. No puede cambiar ni eliminar nada — solo leer, y escribir sus propias notas privadas.\n\nPuede dejar de compartir en cualquier momento; eso termina su acceso de inmediato, pero no puede desleer lo que ya haya leído. Se le pedirá su contraseña.",
   "share.revokeTitle": "¿Dejar de compartir con {name}?",
   "share.revokeBody": "Su acceso termina de inmediato. Conserva todo lo que ya haya leído. Se le pedirá su contraseña.",
   "share.stopSharing": "Dejar de compartir",
   "share.noAccount": "no hay ninguna cuenta guardada en este dispositivo",
   "share.grantDoneTitle": "Compartir iniciado",
-  "share.grantDoneBody": "{name} ya puede leer sus entradas y patrones desde su portal.",
+  "share.grantDoneBody": "{name} ya puede leer sus entradas, patrones y cuestionarios de bienestar desde su portal.",
   "share.revokeDoneTitle": "Compartir detenido",
   "share.revokeDoneBody": "El acceso de esa persona ha terminado.",
   "share.unavailableTitle": "Compartir con terapeutas no disponible",
@@ -637,6 +689,9 @@ export const es: Record<string, string> = {
   "share.unreachableBody": "No se pudo confirmar la disponibilidad del compartir — revise su conexión e inténtelo de nuevo. No se envía ningún código ni dato del diario hasta que se confirme.",
   "share.sharingNowLabel": "Compartiendo ahora",
   "share.notSharingNote": "No está compartiendo con nadie. Sus entradas siguen visibles solo para usted.",
+  // L-66: una carga FALLIDA es estado desconocido, no "no está compartiendo".
+  "share.listFailedNote":
+    "No se pudo cargar con quién está compartiendo en este momento — revise su conexión y vuelva a abrir esta pantalla antes de confiar en esta lista.",
   "share.sharingSince": "Compartiendo desde {date}",
   "share.stoppedOn": "Detenido {date}",
   "share.addLabel": "Agregue a su terapeuta",
@@ -648,8 +703,18 @@ export const es: Record<string, string> = {
   "share.fingerprintNote":
     "Huella de la llave: {fingerprint}\nLéala de vuelta a su terapeuta y compruebe que coincide con la que muestra su portal — una discrepancia significa que la llave fue sustituida en el camino.",
   "share.disclosure":
-    "Compartir le permite a esa persona leer cada entrada y patrón (nunca cambiar nada), y escribir sus propias notas privadas. Puede detenerlo en cualquier momento; lo que ya se leyó no se puede desleer.",
+    "Compartir le permite a esa persona leer sus entradas del diario, sus patrones e ideas, sus cuestionarios de bienestar (PHQ-9) y su línea de resumen en la lista de casos (nunca cambiar nada), y escribir sus propias notas privadas. Puede detenerlo en cualquier momento; lo que ya se leyó no se puede desleer.",
   "share.shareWithName": "Compartir con {name}",
   "share.reauthGrantTitle": "Escriba su contraseña para compartir con {name}",
   "share.reauthRevokeTitle": "Escriba su contraseña para dejar de compartir",
+  // M-25: el servidor reporta una versión de divulgación que esta app no
+  // conoce — estado sereno, sin ofrecer nuevos permisos hasta alinear.
+  "share.termsUpdatedTitle": "Términos de compartir actualizados",
+  "share.termsUpdatedBody":
+    "Lo que un terapeuta puede leer cambió — ahora incluye sus cuestionarios de bienestar (PHQ-9). Actualice esta app y comparta de nuevo para ver y aceptar los términos vigentes. Su compartir existente sigue funcionando, y puede detenerlo abajo cuando quiera.",
+  // M-25: el servidor rechazó el permiso porque la divulgación revisada en
+  // pantalla ya no es la vigente (409 disclosure_outdated). No se compartió nada.
+  "share.grantOutdatedTitle": "Términos de compartir actualizados",
+  "share.grantOutdatedBody":
+    "Los términos de compartir cambiaron antes de que esto se enviara, así que no se compartió nada. Nada sobre usted cambió en el servidor. Comience de nuevo para revisar los términos vigentes — ahora incluyen sus cuestionarios de bienestar (PHQ-9).",
 };

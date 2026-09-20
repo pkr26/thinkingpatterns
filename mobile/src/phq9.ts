@@ -15,31 +15,27 @@
  * response gently points at the offline crisis resources after the
  * response is safely saved (the same discipline as the entry crisis
  * dialog — never before saving, never blocking).
+ *
+ * STRUCTURE vs COPY (audit M-16, 2026-09-20): this module owns only the
+ * questionnaire's STRUCTURE — the item count and the option values the
+ * scorer clamps to. Every display string (item wording, option labels)
+ * lives in the locale catalogs (measures.phq9.itemN / optionN) so a
+ * Spanish-locale patient gets Spanish copy on the most safety-adjacent
+ * screen in the app. The instrument's semantics are language-invariant;
+ * only their rendering is not.
  */
 
-export interface Phq9Item {
-  /** The standard item wording. */
-  text: string;
-}
+/** One structural item per PHQ-9 question (nine, in instrument order).
+ *  The display copy resolves per locale at render time. */
+export const PHQ9_ITEMS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-export const PHQ9_ITEMS: readonly Phq9Item[] = [
-  { text: "Little interest or pleasure in doing things" },
-  { text: "Feeling down, depressed, or hopeless" },
-  { text: "Trouble falling or staying asleep, or sleeping too much" },
-  { text: "Feeling tired or having little energy" },
-  { text: "Poor appetite or overeating" },
-  { text: "Feeling bad about yourself — or that you are a failure or have let yourself or your family down" },
-  { text: "Trouble concentrating on things, such as reading or watching television" },
-  { text: "Moving or speaking so slowly that other people could have noticed — or being so fidgety or restless that you have been moving a lot more than usual" },
-  { text: "Thoughts that you would be better off dead, or of hurting yourself in some way" },
-];
-
-/** The standard response options, "over the last 2 weeks". */
-export const PHQ9_OPTIONS: readonly { value: number; label: string }[] = [
-  { value: 0, label: "Not at all" },
-  { value: 1, label: "Several days" },
-  { value: 2, label: "More than half the days" },
-  { value: 3, label: "Nearly every day" },
+/** The standard response option VALUES, "over the last 2 weeks" (0–3).
+ *  Labels resolve per locale (measures.phq9.optionN). */
+export const PHQ9_OPTIONS: readonly { value: number }[] = [
+  { value: 0 },
+  { value: 1 },
+  { value: 2 },
+  { value: 3 },
 ];
 
 export const PHQ9_ITEM9_INDEX = 8;

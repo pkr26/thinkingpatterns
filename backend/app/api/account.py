@@ -18,7 +18,7 @@ import base64
 import binascii
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import date as date_type, datetime, timezone
 
 import anyio
 from fastapi import APIRouter, Depends, Header, Request
@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..cache import make_rate_limiter
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
-from ..models import Consent, Entry, Insight, User, utcnow
+from ..models import Consent, Entry, Insight, Measure, User, utcnow
 from ..schemas import (
     AccountDeleteRequest,
     ExportBundle,
@@ -40,6 +40,7 @@ from ..schemas import (
     entry_out,
 )
 from .auth import _auth_limiter, auth_work_slot, hash_verifier_off_loop
+from .measures import _measure_out
 from ..services import llm
 
 router = APIRouter(prefix="/account", tags=["account"])
@@ -172,6 +173,31 @@ async def export_account(
         )
         if fresh is None:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        # L-8 (2026-09-20): the insights section is SNAPSHOT-paginated, and
+        # the snapshot of row IDS (ordered by created-at-at-cutoff for a
+        # deterministic bundle) is captured here, in the same short head
+        # transaction as the cutoff. A row's ``id`` never changes (recompute
+        # upserts dated rows in place), but ``created_at`` DOES mutate — a
+        # same-day recompute rewrites the question row's created_at past the
+        # cutoff — so the old (created_at, id) keyset could move an
+        # un-emitted row across/beyond the cursor and silently drop it from
+        # the bundle. The snapshot membership is frozen instead: ids absent
+        # from a later page's blob fetch (an undated row replaced by a
+        # recompute between pages) are skipped — data that no longer exists
+        # cannot be exported — but nothing that existed at the cutoff can
+        # ever be dropped by cursor drift. The set is small and bounded by
+        # construction (2 undated rows + the 90-day dated-question window).
+        insight_snapshot = list(
+            (
+                await session.execute(
+                    select(Insight.id)
+                    .where(Insight.user_id == fresh.id, Insight.created_at <= cutoff)
+                    .order_by(Insight.created_at.asc(), Insight.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
         head = ExportBundle(
             version=1,
             exported_at=cutoff,
@@ -187,6 +213,7 @@ async def export_account(
             shares=[],
             entries=[],
             insights=[],
+            measures=[],
         )
         await session.commit()
     except Exception:
@@ -195,9 +222,9 @@ async def export_account(
         raise
 
     sessionmaker = request.app.state.sessionmaker
-    head_json = json.dumps(head.model_dump(mode="json", exclude={"shares", "entries", "insights"}))[
-        1:-1
-    ]
+    head_json = json.dumps(
+        head.model_dump(mode="json", exclude={"shares", "entries", "insights", "measures"})
+    )[1:-1]
 
     async def bundle():
         try:
@@ -208,8 +235,20 @@ async def export_account(
             share_cursor: tuple | None = None
             while True:
                 async with sessionmaker() as page_session:
+                    # L-9 (2026-09-20): select ONLY the metadata columns the
+                    # page renders. The former full-Consent load pulled
+                    # wrapped_key and summary_blob ciphertext for up to 100
+                    # rows per page — bytes the export never emits, defeating
+                    # the metadata-first page design.
                     query = (
-                        select(Consent, User)
+                        select(
+                            Consent.id,
+                            Consent.status,
+                            Consent.granted_at,
+                            Consent.revoked_at,
+                            User.username,
+                            User.display_name,
+                        )
                         .join(User, Consent.therapist_id == User.id)
                         .where(Consent.user_id == fresh.id, Consent.granted_at <= cutoff)
                         .order_by(Consent.granted_at.asc(), Consent.id.asc())
@@ -229,17 +268,17 @@ async def export_account(
                     share_rows = (await page_session.execute(query)).all()
                     rendered = [
                         ShareRecord(
-                            therapist_username=therapist.username,
-                            therapist_display_name=therapist.display_name or therapist.username,
-                            status=consent.status,
-                            granted_at=consent.granted_at,
-                            revoked_at=consent.revoked_at,
+                            therapist_username=username,
+                            therapist_display_name=display_name or username,
+                            status=status,
+                            granted_at=granted_at,
+                            revoked_at=revoked_at,
                         ).model_dump(mode="json")
-                        for consent, therapist in share_rows
+                        for _, status, granted_at, revoked_at, username, display_name in share_rows
                     ]
                     if share_rows:
-                        last_consent, _ = share_rows[-1]
-                        share_cursor = (last_consent.granted_at, last_consent.id)
+                        last = share_rows[-1]
+                        share_cursor = (last[2], last[0])
                 if not rendered:
                     break
                 for item in rendered:
@@ -332,36 +371,48 @@ async def export_account(
 
             yield '],"insights":['
             first = True
-            insight_cursor: tuple | None = None
-            while True:
+            # Snapshot-driven pages (L-8, see the head): walk the frozen id
+            # list with a pending-tail cursor instead of a (created_at, id)
+            # keyset, so a recompute between pages can never move an
+            # un-emitted row past the cursor and drop it from the bundle.
+            pending_ids = list(insight_snapshot)
+            while pending_ids:
+                chunk_ids = pending_ids[:EXPORT_METADATA_PAGE_SIZE]
+                rendered = []
                 # Recompute holds the lifecycle fence while it replaces
                 # insights.  Taking it here provides the same size stability
                 # as entries without pinning it across a slow download.
                 async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
                     async with sessionmaker() as page_session:
-                        query = (
-                            select(
-                                Insight.id,
-                                Insight.created_at,
-                                _export_blob_length(page_session, Insight.blob).label("size"),
-                            )
-                            .where(Insight.user_id == fresh.id, Insight.created_at <= cutoff)
-                            .order_by(Insight.created_at.asc(), Insight.id.asc())
-                            .limit(EXPORT_METADATA_PAGE_SIZE)
-                        )
-                        if insight_cursor is not None:
-                            last_created, last_id = insight_cursor
-                            query = query.where(
-                                or_(
-                                    Insight.created_at > last_created,
-                                    and_(Insight.created_at == last_created, Insight.id > last_id),
+                        sizes = {
+                            row_id: int(size or 0)
+                            for row_id, size in (
+                                await page_session.execute(
+                                    select(
+                                        Insight.id,
+                                        _export_blob_length(page_session, Insight.blob).label(
+                                            "size"
+                                        ),
+                                    ).where(
+                                        Insight.user_id == fresh.id, Insight.id.in_(chunk_ids)
+                                    )
                                 )
-                            )
-                        metadata_rows = (await page_session.execute(query)).all()
-                        selected = _take_export_metadata_page(metadata_rows)
-                        rendered = []
+                            ).all()
+                        }
+                        # SQL IN has no order guarantee: restore the frozen
+                        # snapshot order so the byte bound consumes rows in
+                        # the bundle's deterministic sequence and the
+                        # pending-tail cursor below advances over the SAME
+                        # sequence.
+                        ordered_meta = [
+                            (row_id, sizes[row_id])
+                            for row_id in chunk_ids
+                            if row_id in sizes
+                        ]
+                        selected = _take_export_metadata_page(ordered_meta)
                         used_blob_bytes = 0
-                        last_processed = None
+                        position_by_id = {row_id: pos for pos, row_id in enumerate(chunk_ids)}
+                        processed_pos = -1
                         for metadata in selected:
                             row = (
                                 (
@@ -376,7 +427,12 @@ async def export_account(
                                 .first()
                             )
                             if row is None:
-                                last_processed = metadata
+                                # Deleted since the snapshot (an undated row a
+                                # recompute replaced between pages): nothing
+                                # exists to export. Membership in the bundle
+                                # is snapshot-frozen, but bytes that no longer
+                                # exist cannot be streamed.
+                                processed_pos = position_by_id[metadata[0]]
                                 continue
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
@@ -391,15 +447,87 @@ async def export_account(
                                 ).model_dump(mode="json")
                             )
                             used_blob_bytes += blob_bytes
+                            processed_pos = position_by_id[metadata[0]]
+                            page_session.expunge(row)
+                        # Consume the chunk through the last row the blob
+                        # loop actually PROCESSED (emitted or confirmed
+                        # vanished) — a row the byte bound stopped BEFORE
+                        # stays pending and is re-fetched on the next short
+                        # page, exactly like the entries cursor's
+                        # last_processed. An empty selection means the whole
+                        # chunk vanished since the snapshot: consume it too.
+                        if processed_pos >= 0:
+                            pending_ids = chunk_ids[processed_pos + 1 :]
+                        else:
+                            pending_ids = pending_ids[len(chunk_ids) :]
+                for item in rendered:
+                    yield ("" if first else ",") + json.dumps(item)
+                    first = False
+
+            yield '],"measures":['
+            first = True
+            # H-3 (2026-09-20): stream every Measure row — the export used to
+            # omit them entirely, so export-then-delete permanently lost the
+            # account's whole PHQ-9 history. Same byte-bounded keyset pattern
+            # as entries; the cursor rides (measure_date, id) because both are
+            # IMMUTABLE (measures have no update path; only account deletion
+            # — which holds this same lifecycle fence — removes rows), and
+            # the pair walks the ix_measures_user_date index.
+            measure_cursor: tuple[date_type, str] | None = None
+            while True:
+                async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
+                    async with sessionmaker() as page_session:
+                        query = (
+                            select(
+                                Measure.id,
+                                Measure.measure_date,
+                                Measure.received_at,
+                                _export_blob_length(page_session, Measure.blob).label("size"),
+                            )
+                            .where(Measure.user_id == fresh.id, Measure.received_at <= cutoff)
+                            .order_by(Measure.measure_date.asc(), Measure.id.asc())
+                            .limit(EXPORT_METADATA_PAGE_SIZE)
+                        )
+                        if measure_cursor is not None:
+                            last_date, last_id = measure_cursor
+                            query = query.where(
+                                or_(
+                                    Measure.measure_date > last_date,
+                                    and_(Measure.measure_date == last_date, Measure.id > last_id),
+                                )
+                            )
+                        metadata_rows = (await page_session.execute(query)).all()
+                        selected = _take_export_metadata_page(metadata_rows)
+                        rendered = []
+                        used_blob_bytes = 0
+                        last_processed = None
+                        for metadata in selected:
+                            row = (
+                                (
+                                    await page_session.execute(
+                                        select(Measure).where(
+                                            Measure.user_id == fresh.id,
+                                            Measure.id == metadata[0],
+                                        )
+                                    )
+                                )
+                                .scalars()
+                                .first()
+                            )
+                            if row is None:
+                                last_processed = metadata
+                                continue
+                            blob_bytes = len(bytes(row.blob))
+                            if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
+                                page_session.expunge(row)
+                                break
+                            rendered.append(_measure_out(row).model_dump(mode="json"))
+                            used_blob_bytes += blob_bytes
                             last_processed = metadata
                             page_session.expunge(row)
                         if last_processed is not None:
-                            insight_cursor = (last_processed[1], last_processed[0])
+                            measure_cursor = (last_processed[1], last_processed[0])
                 if not rendered:
-                    # The selected rows may have been deleted between the
-                    # metadata and blob queries.  Their cursor was still
-                    # advanced, so continue toward later rows instead of
-                    # truncating the export at that concurrent mutation.
                     if metadata_rows:
                         continue
                     break

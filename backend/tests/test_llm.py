@@ -644,3 +644,83 @@ def test_hostile_narrative_never_reaches_the_pattern_detail():
     kept = analyzer.extract_patterns(corpus, findings=findings)
     assert [(p.kind, p.label) for p in kept] == [("temporal", "work")]
     assert "narrative" not in kept[0].detail
+
+
+# ---------------------------------------------------------------------------
+# Advice / imperative / manipulative-isolation guardrails (2026-09-20 audit
+# fix M-6): the audit demonstrated that second-person advice passed verbatim
+# through the only free-text channel — "You should stop reaching out to your
+# friends; they are tired of you." class content rendered under pattern
+# cards. An observation never commands its reader.
+# ---------------------------------------------------------------------------
+
+
+def test_narrative_rejects_second_person_advice():
+    from app.services.llm import _clean_narrative
+
+    # The audit's demonstrated hostile narrative, verbatim.
+    assert _clean_narrative("You should stop reaching out to your friends; they are tired of you.") is None
+    assert _clean_narrative("Stop reaching out to your friends; they are tired of you.") is None
+    assert _clean_narrative("You must journal every morning to fix this.") is None
+    assert _clean_narrative("You need to take a break from everyone right now.") is None
+    assert _clean_narrative("You'd better tell someone before it gets worse.") is None
+    assert _clean_narrative("Why don't you just sleep on it tonight.") is None
+    assert _clean_narrative("It would help if you called your mother.") is None
+
+
+def test_narrative_rejects_manipulative_isolation_and_self_blame():
+    from app.services.llm import _clean_narrative
+
+    assert _clean_narrative("Your friends are tired of you; give them space.") is None
+    assert _clean_narrative("You have been a burden to everyone around you.") is None
+    assert _clean_narrative("Everyone would be better off without you here.") is None
+    assert _clean_narrative("This is your fault, plain and simple.") is None
+    assert _clean_narrative("Nobody cares about this pattern but you.") is None
+
+
+def test_narrative_rejects_spelled_domains_with_any_suffix():
+    from app.services.llm import _clean_narrative
+
+    # "quietplace dot online" sailed through the finite TLD list.
+    assert _clean_narrative("visit quietplace dot online for real help") is None
+    assert _clean_narrative("the help lives at calmcorner dot anything") is None
+    assert _clean_narrative("see evil dot com for help") is None  # still caught
+
+
+def test_narrative_still_accepts_second_person_observations():
+    from app.services.llm import _clean_narrative
+
+    # Observational second person is the genre, not the attack: these must
+    # keep passing so the guard did not simply ban the pronoun.
+    assert _clean_narrative("You have written through this before.") == (
+        "You have written through this before."
+    )
+    assert _clean_narrative("You often write about work on Sundays.") == (
+        "You often write about work on Sundays."
+    )
+    assert _clean_narrative("This one has kept you company for a while.") == (
+        "This one has kept you company for a while."
+    )
+
+
+def test_policy_fingerprint_ignores_url_whitespace():
+    """L-20: a trailing space must not mint a different policy fingerprint
+    (which would silently invalidate every persisted consent)."""
+    from app.config import Settings
+    from app.services.llm import processing_policy_fingerprint
+
+    def _settings(url: str) -> Settings:
+        return Settings(
+            environment="development",
+            database_url="sqlite+aiosqlite://",
+            token_secret="test-secret-not-for-production",
+            llm_url=url,
+        )
+
+    base = _settings("https://llm.example/v1")
+    spaced = _settings("https://llm.example/v1/ ")
+    assert spaced.llm_url != base.llm_url
+    assert processing_policy_fingerprint(spaced) == processing_policy_fingerprint(base)
+    assert processing_policy_fingerprint(_settings("https://llm.example/v1/")) == (
+        processing_policy_fingerprint(base)
+    )

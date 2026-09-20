@@ -47,13 +47,19 @@ import os
 import tempfile
 from types import TracebackType
 
+from sqlalchemy.engine import URL, make_url
+
 logger = logging.getLogger("mindpattern")
 
 LOCK_DIR_ENV = "MINDPATTERN_LOCK_DIR"
 
-# path -> lock file descriptor, so repeated create_app() in ONE process (the
-# test suite does this constantly) never conflicts with itself.
-_held: dict[str, int] = {}
+# path -> (lock file descriptor, reference count). Repeated create_app() in
+# ONE process (the test suite does this constantly, sometimes with
+# OVERLAPPING lifespans) never conflicts with itself, and — since
+# 2026-09-20 (M-27) — the flock is only dropped when the OUTERMOST scope
+# exits: re-entrancy is refcounted, so an early inner release can no longer
+# leave the outer scope serving with no lock held.
+_held: dict[str, tuple[int, int]] = {}
 
 
 class MultipleWorkersError(RuntimeError):
@@ -62,6 +68,56 @@ class MultipleWorkersError(RuntimeError):
 
 class LockPathError(RuntimeError):
     """The lock path exists but is not a safe regular file to lock."""
+
+
+def _normalized_database_url(database_url: str) -> str:
+    """Canonical spelling of the database URL for identity hashing (M-28).
+
+    The deployment identity used to be the literal (secret, URL) string, so
+    ``localhost`` vs ``127.0.0.1``, IPv6 bracket spellings, reordered query
+    parameters, or a ``./``-prefixed SQLite path each derived a DIFFERENT
+    lock path — two processes could then serve one database silently. Parsing
+    through ``sqlalchemy.make_url`` and re-rendering collapses the spelling
+    variants before hashing:
+
+    * query parameters are re-emitted in sorted order
+      (``?a=1&b=2`` == ``?b=2&a=1``),
+    * loopback host spellings (``localhost`` / ``127.0.0.1`` / ``::1``)
+      collapse to ``127.0.0.1`` when no port distinguishes them,
+    * a PostgreSQL URL with no explicit port is materialized as the driver
+      default ``:5432`` (``host/db`` == ``host:5432/db``),
+    * SQLite database paths are ``os.path.normpath``-ed
+      (``./mindpattern.db`` == ``mindpattern.db``).
+
+    Deliberately NOT collapsed: credentials (a different user/password is a
+    different deployment), non-loopback hostname aliases (DNS-level identity
+    is environment knowledge this process must not guess), and ports. A URL
+    sqlalchemy cannot parse falls back to the raw string, preserving the
+    pre-normalization behavior for exotic spellings rather than refusing to
+    boot.
+    """
+    try:
+        url = make_url(database_url)
+    except Exception:
+        return database_url
+    host = url.host
+    if host is not None and host in ("localhost", "127.0.0.1", "::1"):
+        host = "127.0.0.1"
+    port = url.port
+    if port is None and url.get_backend_name() == "postgresql":
+        port = 5432
+    database = url.database
+    if url.get_backend_name() == "sqlite" and database:
+        database = os.path.normpath(database)
+    return URL.create(
+        drivername=url.drivername,
+        username=url.username,
+        password=url.password,
+        host=host,
+        port=port,
+        database=database,
+        query=dict(sorted(url.query.items())),
+    ).render_as_string(hide_password=False)
 
 
 def _lock_dir() -> str:
@@ -90,7 +146,7 @@ def _lock_dir() -> str:
 
 def _lock_path(token_secret: str, database_url: str) -> str:
     digest = hashlib.sha256(
-        f"mindpattern:{token_secret}:{database_url}".encode("utf-8")
+        f"mindpattern:{token_secret}:{_normalized_database_url(database_url)}".encode("utf-8")
     ).hexdigest()[:24]
     return os.path.join(_lock_dir(), f"mindpattern-single-{digest}.lock")
 
@@ -98,9 +154,14 @@ def _lock_path(token_secret: str, database_url: str) -> str:
 def acquire_single_process_lock(token_secret: str, database_url: str) -> str:
     """Raise MultipleWorkersError if another process holds the deployment."""
     path = _lock_path(token_secret, database_url)
-    existing = _held.get(path)
-    if existing is not None:
-        return path  # this process already holds it (re-entrant)
+    held = _held.get(path)
+    if held is not None:
+        # This process already holds the flock: re-entrant acquire just
+        # deepens the reference count. Dropping the lock here (the
+        # pre-2026-09-20 behavior) would leave an OUTER overlapping scope
+        # serving with no flock — exactly what this guard exists to prevent.
+        _held[path] = (held[0], held[1] + 1)
+        return path
     try:
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     except OSError as exc:
@@ -141,15 +202,22 @@ def acquire_single_process_lock(token_secret: str, database_url: str) -> str:
         pass
     os.ftruncate(fd, 0)
     os.write(fd, f"pid={os.getpid()}\n".encode())
-    _held[path] = fd
+    _held[path] = (fd, 1)
     return path
 
 
 def release_single_process_lock(token_secret: str, database_url: str) -> None:
     path = _lock_path(token_secret, database_url)
-    fd = _held.pop(path, None)
-    if fd is None:
+    held = _held.get(path)
+    if held is None:
         return
+    fd, refs = held
+    if refs > 1:
+        # Inner scope of an overlapping acquisition: only drop the count.
+        # The flock must outlive every scope that entered under it.
+        _held[path] = (fd, refs - 1)
+        return
+    del _held[path]
     try:
         fcntl.flock(fd, fcntl.LOCK_UN)
     finally:

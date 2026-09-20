@@ -50,7 +50,9 @@ describe("sharing client methods", () => {
       wrapped_key: "WRAPPED",
       disclosure: SHARING_DISCLOSURE_VERSION,
     });
-    expect(SHARING_DISCLOSURE_VERSION).toBe("v1");
+    // v2 (2026-09-20 audit H-14): the disclosure names measures and
+    // caseload summaries — kept in lockstep with the server's constant.
+    expect(SHARING_DISCLOSURE_VERSION).toBe("v2");
   });
 
   it("listConsents GETs the consent list", async () => {

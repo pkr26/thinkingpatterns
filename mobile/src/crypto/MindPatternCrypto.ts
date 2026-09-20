@@ -67,6 +67,13 @@ const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
   return { blobB64: blob.toString("base64") };
 }
 
+/** The only entry payload schema versions this client understands (v2
+ *  added the structured channels). Mirrors decryptInsights' loud-fail
+ *  contract: an unknown version must throw, never be silently miscast as
+ *  today's shape — a future v3 misread is how a schema roll corrupts the
+ *  journal UI with wrong-typed fields. */
+export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2];
+
 export function decryptEntry(
   keys: Pick<Keys, "dataKey">,
   userId: string,
@@ -74,7 +81,13 @@ export function decryptEntry(
   blobB64: string,
 ): EntryPayload {
   const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("entry", userId, clientEntryId));
-  return JSON.parse(plaintext.toString("utf8")) as EntryPayload;
+  const payload = JSON.parse(plaintext.toString("utf8")) as { v?: unknown };
+  // L-48: same guard as decryptInsights — the AEAD bound the bytes to this
+  // account/entry, but nothing else vouches for the version field.
+  if (!ENTRY_PAYLOAD_VERSIONS.includes(payload.v as number)) {
+    throw new Error(`unsupported entry payload version: ${String(payload.v)}`);
+  }
+  return payload as EntryPayload;
 }
 
 /** The only insights payload schema this client understands (the backend

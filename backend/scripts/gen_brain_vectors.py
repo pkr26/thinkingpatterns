@@ -76,6 +76,20 @@ TEXT_CASES: list[str] = [
     "nunca estoy tranquilo los domingos",
     "estoy muy muy agradecido por mi familia",
     "que dia tan horrible, todo salio mal",
+    # 2026-09-20 audit H-8/H-18 pins: diacritic folding (the NFC and NFD
+    # spellings of the same word must score IDENTICALLY), iOS U+2019
+    # contraction negation, the ES death-word class, "quiero" no longer
+    # reading positive, and the prototype-chain token "constructor"
+    # scoring exactly 0.0 on-device (null-prototype lookup tables).
+    "quiero morir",
+    "me quiero morir",
+    "pienso en el suicidio",
+    "no quiero vivir",
+    "estoy muy cansado de vivir",
+    "tengo depresión y ansiedad",
+    "tengo depresio\u0301n y ansiedad",
+    "don\u2019t feel good",
+    "constructor constructor constructor",
 ]
 
 STAT_CASES = {
@@ -96,8 +110,14 @@ STAT_CASES = {
 
 def main() -> None:
     sentiment_vectors = []
+    # Tokenized EXACTLY as the engine does (2026-09-20 audit): the
+    # engine's own fold + WORD_RE, imported — not hand-copied. A hand copy
+    # silently drifts the day one side changes tokenization, and every
+    # vector would then pin the drift instead of catching it.
+    from app.services.patterns import WORD_RE  # noqa: PLC0415 — engine seam
+
     for text in TEXT_CASES:
-        tokens = [t for t in __import__("re").findall(r"[a-z']+", text.lower())]
+        tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
         tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
         pa, na = brain.sentiment_components(tokens)
         sentiment_vectors.append(

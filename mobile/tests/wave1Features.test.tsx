@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 
 
-const { Vibration } = (await import("react-native")) as unknown as {
+const { Platform, Vibration } = (await import("react-native")) as unknown as {
+  Platform: { OS: string };
   Vibration: { vibrate: (ms: number) => void };
 };
 
@@ -20,16 +21,28 @@ const storage = (await import("./helpers/storageMock")).default;
 beforeEach(() => {
   storage.__reset();
   vi.clearAllMocks();
+  Platform.OS = "ios"; // the rnMock default; haptics tests flip it per case
 });
 
 describe("haptics", () => {
-  it("vibrates 10ms by default (the lightest selection pulse)", () => {
+  it("Android: vibrates 10ms by default (the lightest selection pulse)", () => {
+    Platform.OS = "android";
     void loadHapticsSetting();
     lightHaptic();
     expect(Vibration.vibrate).toHaveBeenCalledWith(10);
   });
 
+  it("L-71: iOS stays silent — the core API's fixed ~400ms buzz is the opposite of quiet haptics", () => {
+    Platform.OS = "ios";
+    void loadHapticsSetting();
+    lightHaptic();
+    // Duration is IGNORED on iOS (always ~400ms), so the sensory-anxious
+    // direction is silence until a real haptics module is linked.
+    expect(Vibration.vibrate).not.toHaveBeenCalled();
+  });
+
   it("disabling silences every call and persists (storage receives 'off')", async () => {
+    Platform.OS = "android";
     await setHapticsEnabled(false);
     lightHaptic();
     expect(Vibration.vibrate).not.toHaveBeenCalled();
@@ -39,6 +52,7 @@ describe("haptics", () => {
   });
 
   it("a stored 'off' loads as disabled", async () => {
+    Platform.OS = "android";
     await storage.setItem("@mindpattern/haptics.enabled", "off");
     expect(await loadHapticsSetting()).toBe(false);
   });
@@ -64,18 +78,29 @@ describe("strings catalog", () => {
 });
 
 describe("prompt chips", () => {
-  it("deterministic per day: same date, same chips, in pool order", () => {
-    const a = promptChipsFor(new Date("2026-09-17T00:00:00Z"));
-    const b = promptChipsFor(new Date("2026-09-17T23:00:00Z"));
+  it("deterministic per LOCAL calendar day: same local day, same chips, in pool order (L-70)", () => {
+    // Local-calendar fields, so the assertion holds on any runner timezone.
+    const earlyMorning = new Date(2026, 8, 17, 0, 30);
+    const lateEvening = new Date(2026, 8, 17, 23, 30);
+    const a = promptChipsFor(earlyMorning);
+    const b = promptChipsFor(lateEvening);
     expect(a).toEqual(b);
     expect(a).toHaveLength(3);
     expect(PROMPT_CHIPS).toContain(a[0]);
   });
 
+  it("L-70: the chips rotate at LOCAL midnight, not UTC midnight", () => {
+    // Two instants inside the same UTC day can be different LOCAL days
+    // (the pre-fix bug: rotation happened at the UTC boundary).
+    const beforeMidnight = new Date(2026, 8, 17, 23, 59);
+    const afterMidnight = new Date(2026, 8, 18, 0, 1);
+    expect(promptChipsFor(beforeMidnight)).not.toEqual(promptChipsFor(afterMidnight));
+  });
+
   it("different days rotate through the pool", () => {
     const seen = new Set<string>();
     for (let d = 1; d <= 20; d++) {
-      for (const chip of promptChipsFor(new Date(Date.UTC(2026, 8, d)))) seen.add(chip);
+      for (const chip of promptChipsFor(new Date(2026, 8, d))) seen.add(chip);
     }
     expect(seen.size).toBeGreaterThan(6);
   });

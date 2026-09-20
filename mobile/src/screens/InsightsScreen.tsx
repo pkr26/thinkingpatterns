@@ -16,7 +16,7 @@
  * by an algorithm can read as confirmation. The card acknowledges the
  * pattern without quoting it and points at human support.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { api } from "../api/client";
 import { decryptInsights } from "../crypto/MindPatternCrypto";
@@ -29,7 +29,7 @@ import { useTheme, Theme } from "../theme";
 import { CrisisHelpButton, GhostButton } from "../components/buttons";
 import { requestFailureCopy } from "../components/errors";
 import { recordPatternMute } from "../questionFeedback";
-import { t as tr } from "../strings";
+import { t as tr, dateLocaleTag } from "../strings";
 
 interface PatternDetail {
   day?: string;
@@ -167,6 +167,29 @@ function fmt(n: number | undefined, digits = 2): string {
   return typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 }
 
+// M-36 (2026-09-20 audit): the backend's DAY_NAMES (services/patterns.py)
+// emits ENGLISH weekday words in every locale — "la mayoría de las veces en
+// Monday" was the shipped Spanish sentence. The weekday is localized at
+// RENDER time: the English word is mapped onto the app locale's weekday via
+// Intl with the strings.ts locale tag (2024-01-01 was a Monday, so the
+// array index IS the weekday). Trust-boundary safe: detail.day is
+// attacker-controllable text, and anything that is not exactly one of the
+// seven English names passes through unchanged (never crashes, never
+// invents a date).
+const ENGLISH_WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
+
+/** The locale's long weekday for a backend English weekday name. */
+export function localWeekday(day: string): string {
+  const index = ENGLISH_WEEKDAYS.indexOf(day as (typeof ENGLISH_WEEKDAYS)[number]);
+  if (index < 0) return day;
+  const anchor = new Date(Date.UTC(2024, 0, 1 + index));
+  try {
+    return anchor.toLocaleDateString(dateLocaleTag(), { weekday: "long", timeZone: "UTC" });
+  } catch {
+    return day; // an exotic locale tag degrades to the raw server word
+  }
+}
+
 /** |d| in plain words (Cohen's conventions, softened: these are observations). */
 export function effectSizeWords(d: number): string {
   const size = Math.abs(d);
@@ -191,7 +214,7 @@ function evidenceRows(p: PatternCard): [string, string][] {
       tr("insights.ev.concentration"),
       tr("insights.ev.concentrationValue", {
         share: fmt(d.day_fraction * 100, 0),
-        day: d.day,
+        day: localWeekday(d.day),
         baseline: fmt(base * 100, 0),
       }),
     ]);
@@ -329,7 +352,7 @@ function technicalRows(p: PatternCard): [string, string][] {
 
 function describe(p: PatternCard): string {
   if (p.kind === "temporal") {
-    const day = p.detail?.day ?? tr("insights.desc.sameDay");
+    const day = p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.sameDay");
     return tr("insights.desc.temporal", { label: p.label, count: p.occurrences, day });
   }
   if (p.kind === "mood_correlation") {
@@ -402,7 +425,9 @@ function describe(p: PatternCard): string {
       return tr("insights.desc.sleepCorrelation", { direction });
     }
     if (p.kind === "temporal") {
-      return tr("insights.desc.sleepTemporal", { day: p.detail?.day ?? tr("insights.desc.certainDay") });
+      return tr("insights.desc.sleepTemporal", {
+        day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
+      });
     }
   }
   if (p.kind === "avoidance") {
@@ -423,7 +448,10 @@ function describe(p: PatternCard): string {
       return tr("insights.desc.tagLink", { label: p.label, direction });
     }
     if (p.kind === "temporal") {
-      return tr("insights.desc.tagTemporal", { label: p.label, day: p.detail?.day ?? tr("insights.desc.certainDay") });
+      return tr("insights.desc.tagTemporal", {
+        label: p.label,
+        day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
+      });
     }
   }
   return tr("insights.desc.fallback", { label: p.label, count: p.occurrences });
@@ -533,7 +561,7 @@ function isSensitive(p: PatternCard): boolean {
 
 export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.Element {
   const t = useTheme();
-  const { refreshActiveDays, unlockDays, touchActivity } = useSession();
+  const { applyActiveDays, unlockDays, touchActivity } = useSession();
   const [phase, setPhase] = useState<string>("loading");
   const [remaining, setRemaining] = useState(0);
   const [patterns, setPatterns] = useState<PatternCard[]>([]);
@@ -561,6 +589,15 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
   const isMuted = (p: PatternCard): boolean =>
     p.detail?.muted === true || mutedLocal[pidOf(p)] === true;
 
+  /** A pattern renders in the main list when it is not muted — EXCEPT a
+   *  sensitive one (audit L-61): its non-quoting support card must stay up
+   *  even when the server's muted set contains it. The UI never offers a
+   *  mute on a sensitive card; if one arrives muted anyway (a mute that
+   *  predates the sensitive flag, or the LLM merge), dropping it would
+   *  remove the support pointer — the one thing this screen must never
+   *  do. Sensitive cards quote nothing, so keeping them up leaks nothing. */
+  const rendersInList = (p: PatternCard): boolean => isSensitive(p) || !isMuted(p);
+
   /** Queue mute/unmute and apply it optimistically. The vault must be
    *  unlocked (it always is on this screen — the shell swaps it out on
    *  lock), and a queue failure only costs the optimistic state: the
@@ -581,11 +618,22 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
     })();
   };
 
+  /** Request sequencing (audit L-60, 2026-09-20): pull-to-refresh and the
+   *  Retry button can overlap a slow in-flight load, and the OLDER
+   *  response used to land last and briefly replace the newer one's
+   *  patterns with stale cards. Every await point re-checks the epoch; a
+   *  superseded load stops writing state entirely (its finally must not
+   *  clear the newer load's busy flag either). Same idiom as
+   *  HistoryScreen's historyLoadEpochRef. */
+  const loadEpochRef = useRef(0);
+
   const load = useCallback(async () => {
+    const epoch = ++loadEpochRef.current;
     setBusy(true);
     setError(null);
     try {
       const summary = await api.insights();
+      if (epoch !== loadEpochRef.current) return;
       // A hostile server must not be able to drive the UI into an unknown
       // branch: only the two real phases are accepted.
       if (summary.phase !== "baseline" && summary.phase !== "insight") {
@@ -594,24 +642,38 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       setPhase(summary.phase);
       // Stryker disable next-line ConditionalExpression, LogicalOperator: Number.isFinite implies typeof number; days_remaining arrives via JSON and the non-numeric case is pinned by test.
       setRemaining(typeof summary.days_remaining === "number" && Number.isFinite(summary.days_remaining) ? summary.days_remaining : 0);
-      await refreshActiveDays();
+      // The active-days counter applies from THIS response (audit L-59):
+      // refreshActiveDays() here issued a second GET /insights per load —
+      // double latency and double rate budget for data already in hand.
+      applyActiveDays(summary.active_days);
       // Baseline-phase value is device-local: streak + mood trend, no
       // server involvement. The log is encrypted under the data key —
       // only reachable on this screen while the vault is unlocked.
       const userId = await api.getUserId();
+      if (epoch !== loadEpochRef.current) return;
       if (userId && vault.get().dataKey) {
         const dataKey = vault.get().dataKey;
-        localStreak(dataKey, userId).then(setStreak).catch(() => {});
-        recentMoods(dataKey, userId, 30).then(setMoods).catch(() => {});
+        localStreak(dataKey, userId)
+          .then((streak) => {
+            if (epoch === loadEpochRef.current) setStreak(streak);
+          })
+          .catch(() => {});
+        recentMoods(dataKey, userId, 30)
+          .then((days) => {
+            if (epoch === loadEpochRef.current) setMoods(days);
+          })
+          .catch(() => {});
       }
       if (summary.blob) {
         const userId = (await api.getUserId()) ?? "";
+        if (epoch !== loadEpochRef.current) return;
         const payload = decryptInsights(vault.get(), userId, summary.blob);
         // Rollback guard (2026-09-19): the payload's embedded analysis
         // generation must equal the plaintext echo and never move below
         // this device's pinned high-water mark — a silent replay of an
         // older valid-GCM blob otherwise renders as today's truth.
         await checkAnalysisGeneration(userId, payload.state_seq, summary.state_seq);
+        if (epoch !== loadEpochRef.current) return;
         setLanguageNote(payload.stats?.language === "other");
         const list = sanitizePatterns(payload.stats?.patterns);
         for (const p of list) {
@@ -623,12 +685,13 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       }
     } catch (err) {
       // Calm copy for server failures; our own local Error text passes.
-      setError(requestFailureCopy(err));
+      // A superseded load's failure is not the screen's failure.
+      if (epoch === loadEpochRef.current) setError(requestFailureCopy(err));
     } finally {
-      setBusy(false);
+      if (epoch === loadEpochRef.current) setBusy(false);
     }
-  }, // Stryker disable next-line ArrayDeclaration: constant deps are equivalent under the test seam (the mocked refreshActiveDays has a stable identity); in production the dependency keeps the callback honest.
-     [refreshActiveDays]);
+  }, // Stryker disable next-line ArrayDeclaration: constant deps are equivalent under the test seam (the mocked applyActiveDays has a stable identity); in production the dependency keeps the callback honest.
+     [applyActiveDays]);
 
   React.useEffect(() => {
     load();
@@ -685,7 +748,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
           <Text style={cardStyles.cardBody}>{tr("insights.languageBody")}</Text>
         </View>
       )}
-      {phase === "insight" && patterns.filter((p) => !isMuted(p)).length === 0 && !busy && (
+      {phase === "insight" && patterns.filter(rendersInList).length === 0 && !busy && (
         <View style={cardStyles.card}>
           <Text style={cardStyles.cardTitle}>{tr("insights.nothingSolidTitle")}</Text>
           <Text style={cardStyles.cardBody}>
@@ -706,7 +769,11 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
         </View>
       )}
       {muteNote && <Text style={[styles.footnote, { color: t.colors.muted }]}>{muteNote}</Text>}
-      {patterns.filter((p) => !isMuted(p)).map((p, i) => {
+      {/* L-58: the MAIN card list now carries the same phase gate every
+          sibling section enforces — "baseline" renders no pattern cards
+          even if a hostile/legacy response shipped a blob alongside the
+          baseline phase (the server-trust-boundary display rule). */}
+      {phase === "insight" && patterns.filter(rendersInList).map((p, i) => {
         const key = `${p.kind}-${p.label}-${i}`;
         if (isSensitive(p)) {
           // Non-quoting variant: no label, no counts, no stats, no expander.

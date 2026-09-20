@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import storage from "./helpers/storageMock";
 
-const { recordMood, recentMoods, localStreak, clearMoodLog, localDateISO } = await import("../src/moodLog");
+const { recordMood, recentMoods, localStreak, clearMoodLog, localDateISO, removeMoodDay } = await import("../src/moodLog");
 const { buildAad, encrypt } = await import("../src/crypto/envelope");
 
 const keyA = Buffer.alloc(32, 1);
@@ -266,5 +266,99 @@ describe("vault-lock race (zeroize mid-write)", () => {
     // empty, as any wrong key does — but the log itself is intact.
     expect(await recentMoods(liveDataKey, "u1", 30)).toEqual([]);
     expect(await recentMoods(originalBytes, "u1", 30)).toEqual([{ date: "2026-09-01", value: 0.25 }]);
+  });
+});
+
+describe("M-35: readers are serialized with writers", () => {
+  // read() can WRITE (the legacy-format migration), so a reader racing a
+  // recordMood used to run on a stale snapshot — and its own migration
+  // write could clobber a just-recorded day. The pin: gate the FIRST
+  // storage read, start a record and a reader in the same tick, and prove
+  // the reader only observes the post-write state (without serialization
+  // the reader's read races ahead and sees the empty log).
+  it("a reader issued in the same tick as a write resolves only after the write lands", async () => {
+    const originalGetItem = storage.getItem.bind(storage);
+    let gated = true;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
+      if (gated) {
+        gated = false;
+        await gate;
+      }
+      return originalGetItem(k);
+    };
+    try {
+      const write = recordMood(keyA, "u1", "2026-09-01", 0.5);
+      const read = recentMoods(keyA, "u1", 30);
+      await Promise.resolve(); // the write's gated read is now in flight
+      release();
+      await Promise.all([write, read]);
+      expect(await read).toEqual([{ date: "2026-09-01", value: 0.5 }]);
+    } finally {
+      (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
+    }
+  });
+
+  it("a reader's legacy migration cannot clobber a concurrent record (mutexed read-modify-write)", async () => {
+    // The log starts in the LEGACY plaintext format: the reader will want
+    // to migrate it (a write). A record issued in the same tick must not be
+    // overwritten by that migration.
+    await storage.setItem("mindpattern.moodlog.u1", JSON.stringify([{ date: "2026-09-01", value: 0.3 }]));
+    const originalGetItem = storage.getItem.bind(storage);
+    let gated = true;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    (storage as { getItem: typeof storage.getItem }).getItem = async (k: string) => {
+      if (gated) {
+        gated = false;
+        await gate;
+      }
+      return originalGetItem(k);
+    };
+    try {
+      const read = recentMoods(keyA, "u1", 30);
+      const write = recordMood(keyA, "u1", "2026-09-02", -0.4);
+      await Promise.resolve();
+      release();
+      await Promise.all([read, write]);
+      const days = await recentMoods(keyA, "u1", 30);
+      expect(days.map((d) => d.date)).toEqual(["2026-09-01", "2026-09-02"]);
+    } finally {
+      (storage as { getItem: typeof storage.getItem }).getItem = originalGetItem;
+    }
+  });
+});
+
+describe("L-68: removeMoodDay (entry-deletion hygiene)", () => {
+  it("removes exactly the named day, keeping siblings and their values", async () => {
+    await recordMood(keyA, "u1", "2026-09-01", 0.5);
+    await recordMood(keyA, "u1", "2026-09-02", -0.25);
+    await removeMoodDay(keyA, "u1", "2026-09-01");
+    expect(await recentMoods(keyA, "u1", 30)).toEqual([{ date: "2026-09-02", value: -0.25 }]);
+  });
+
+  it("an absent day is a quiet no-op (no error, log unchanged)", async () => {
+    await recordMood(keyA, "u1", "2026-09-01", 0.5);
+    await removeMoodDay(keyA, "u1", "2026-12-25");
+    expect(await recentMoods(keyA, "u1", 30)).toEqual([{ date: "2026-09-01", value: 0.5 }]);
+  });
+
+  it("the streak stops counting a removed day", async () => {
+    await recordMood(keyA, "u1", day(-1), 0.1);
+    await recordMood(keyA, "u1", day(0), 0.1);
+    expect(await localStreak(keyA, "u1", day(0))).toBe(2);
+    await removeMoodDay(keyA, "u1", day(-1));
+    expect(await localStreak(keyA, "u1", day(0))).toBe(1);
+  });
+
+  it("writes encrypted bytes (same at-rest contract as every other write)", async () => {
+    await recordMood(keyA, "u1", "2026-09-01", 0.5);
+    await recordMood(keyA, "u1", "2026-09-02", 0.4);
+    await removeMoodDay(keyA, "u1", "2026-09-02");
+    const raw = await storedRaw("u1");
+    expect(raw).not.toBeNull();
+    expect(raw).not.toMatch(/^\[/);
+    expect(raw).not.toContain("0.5");
   });
 });

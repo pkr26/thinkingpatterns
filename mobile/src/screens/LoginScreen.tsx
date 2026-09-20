@@ -109,6 +109,14 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     }
     setBusy(true);
     let derived: Keys | null = null;
+    // L-65 (2026-09-20 audit): once api.register resolves, the ACCOUNT
+    // EXISTS on the server no matter what happens next. A later failure
+    // (session write, unlock proof, salt cache — typically a connection
+    // drop mid-flow) used to surface as a generic "couldn't create
+    // account", stranding the user on a register form whose retry would
+    // now 409 "username taken". The failure copy says the honest next
+    // step: switch to sign-in with the credentials that just worked.
+    let accountCreated = false;
     try {
       // Stryker disable next-line StringLiteral: dead initializer — both branches assign body.user_id before the only read at vault.unlock
     let verifiedUserId = "";
@@ -119,6 +127,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // Async derivation: no 100–400ms JS-thread freeze mid-flow.
         derived = await deriveKeysAsync(password, salt);
         const body = await api.register(name, salt.toString("base64"), derived.authKey.toString("base64"));
+        accountCreated = true;
         await api.setSession(body.token, body.user_id, name);
         // The account was created on THIS device: seal the offline-unlock
         // proof under the data key right away.
@@ -153,8 +162,12 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
       vault.lock();
       Alert.alert(
-        mode === "register" ? tr("login.registerFailedTitle") : tr("login.signInFailedTitle"),
-        signInFailureCopy(err),
+        mode === "register" && accountCreated
+          ? tr("login.registerPartialTitle")
+          : mode === "register"
+            ? tr("login.registerFailedTitle")
+            : tr("login.signInFailedTitle"),
+        mode === "register" && accountCreated ? tr("login.registerPartialBody") : signInFailureCopy(err),
       );
     } finally {
       setBusy(false);

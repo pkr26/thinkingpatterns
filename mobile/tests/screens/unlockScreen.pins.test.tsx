@@ -83,6 +83,9 @@ describe("UnlockScreen pins", () => {
     await flush();
     expect(vault.isUnlocked()).toBe(true);
     expect(vault.ownerUserId()).toBe("user-1");
+    // H-2 pin: the PASSWORD path always stores a KNOWN auth key (only the
+    // biometric path passes authKeyKnown:false).
+    expect(vault.get().authKeyKnown).toBe(true);
   });
 
   it("the honest subtitle carries its themed overlay on its own node", async () => {

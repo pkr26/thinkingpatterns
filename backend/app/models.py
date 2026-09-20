@@ -89,7 +89,10 @@ class User(Base):
     # Therapist sharing (2026-09-16): one account namespace, two roles. The
     # role gates which router an authenticated token may reach — journal
     # endpoints require "user", sharing endpoints require "therapist".
-    role: Mapped[str] = mapped_column(String(16), default=ROLE_USER)
+    # server_default matches migration c41f8a92d5e7 (2026-09-20 audit fix
+    # L-33): the migration has always supplied one, so a fresh
+    # create_all schema and an upgraded schema now define the same column.
+    role: Mapped[str] = mapped_column(String(16), default=ROLE_USER, server_default=text("'user'"))
     # Therapist-only: shown to patients in the pairing flow (their consent
     # screen must name a human, not a username handle).
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -220,10 +223,13 @@ class Consent(Base):
     # "active" | "revoked". A revoked row keeps the pair's history (and the
     # therapist's notes) but wrapped_key is NULL — nothing left to decrypt
     # with, and re-granting flips the same row back to active.
-    status: Mapped[str] = mapped_column(String(16), default="active")
+    # server_defaults mirror migration c41f8a92d5e7 (2026-09-20 audit fix
+    # L-33) so fresh (create_all) and upgraded schemas define the same
+    # columns; the ORM always supplies values explicitly anyway.
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default=text("'active'"))
     # v1 scope is "full" (patterns + all entries). The column exists so a
     # future per-pattern scope is a data change, not a schema change.
-    scope: Mapped[str] = mapped_column(String(16), default="full")
+    scope: Mapped[str] = mapped_column(String(16), default="full", server_default=text("'full'"))
     granted_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # b64 SPKI DER of the EPHEMERAL P-256 key the patient's client generated
@@ -333,6 +339,11 @@ class TherapistNote(Base):
     # Pattern pid ("temporal:work", "mood_shift:", …) or NULL for a general
     # patient note. Pids survive recomputes; a semantic fork (~2) retires the
     # old pid and the note stays attached to the retired one.
+    # Privacy posture (audit L-30, documented trade-off): this is the one
+    # analysis-derived plaintext the server holds beyond the core clear-
+    # metadata set — a pid reveals that a note concerns a coarse pattern
+    # topic (never note text; text/timestamps live in the ciphertext blob).
+    # Disclosed in README "Metadata the server does hold" and the DPIA.
     pattern_pid: Mapped[str | None] = mapped_column(String(200), nullable=True)
     blob: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -362,6 +373,7 @@ class AccessLog(Base):
     actor_role: Mapped[str] = mapped_column(String(16))
     user_id: Mapped[str] = mapped_column(String(32))  # the patient whose data it concerns
     # "grant" | "revoke" | "read_insights" | "read_entries" | "read_notes" |
-    # "write_note" | "update_note" | "delete_note"
+    # "write_note" | "update_note" | "delete_note" | "read_measures" |
+    # "list_patients" (one row per listed patient, audit fix H-14)
     action: Mapped[str] = mapped_column(String(32))
     at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

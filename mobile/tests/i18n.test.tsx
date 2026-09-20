@@ -198,3 +198,85 @@ describe("screens render under es", () => {
     expect(inputByPlaceholder(root, "¿Qué hay hoy?")).toBeTruthy(); // es placeholder
   });
 });
+
+describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
+  it("L-72: the 'certain day' fallback pluralizes cleanly in {day}s templates", () => {
+    // "certain" + "s" used to render "certains" on evidence rows.
+    expect(t("insights.desc.certainDay")).toBe("certain day");
+    expect(t("insights.desc.sleepTemporal", { day: t("insights.desc.certainDay") })).toContain(
+      "fall most often on certain days.",
+    );
+    expect(t("insights.desc.tagTemporal", { label: "x", day: t("insights.desc.certainDay") })).not.toContain(
+      "certains",
+    );
+  });
+
+  it("L-72: the energy carryover sentence is grammatical (has, not have)", () => {
+    expect(t("insights.ev.carryoverEnergy")).toContain("your energy has been carrying over");
+  });
+
+  it("M-36: the Spanish insights copy holds the usted register and no stutter", () => {
+    __setLocaleForTests("es");
+    try {
+      // 355-356: these two keys used "tu/tus" in a 100%-usted catalog.
+      expect(t("insights.languageTitle")).toBe("Sobre el idioma de su diario");
+      expect(t("insights.languageBody")).toContain("sus entradas y registros");
+      expect(t("insights.languageBody")).not.toMatch(/\btu\b|\btus\b/);
+      // 370: the "diario diario" stutter is gone.
+      expect(t("insights.method.link")).not.toContain("diario diario");
+      expect(t("insights.method.link")).toContain("estudios de registro diario");
+      // 403 / 464: natural comparatives, no anglicized "read higher by X".
+      expect(t("insights.ev.moodDiffValue")).toBe(
+        "las entradas suenan {direction} que su propia norma, por una diferencia de {amount}",
+      );
+      expect(t("insights.desc.moodShift")).toContain("han sonado {direction} que su línea base habitual");
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
+  it("M-25: the v2 sharing disclosure names every readable class in BOTH locales", () => {
+    for (const key of ["share.grantBody", "share.disclosure"] as const) {
+      const en = t(key);
+      expect(en).toContain("measures (PHQ-9 questionnaires)");
+      expect(en.toLowerCase()).toContain("summary");
+      __setLocaleForTests("es");
+      try {
+        const es = t(key);
+        expect(es).toContain("cuestionarios de bienestar (PHQ-9)");
+        expect(es).toContain("resumen");
+      } finally {
+        __setLocaleForTests("en");
+      }
+    }
+    // The stale-state and 409 copy exists and stays calm.
+    expect(t("share.termsUpdatedTitle")).toBe("Sharing terms updated");
+    expect(t("share.grantOutdatedBody")).toContain("nothing was shared");
+    expect(t("share.listFailedNote")).toContain("Couldn’t load who you are sharing with");
+  });
+
+  it("L-65: the partial-registration copy exists in both locales", () => {
+    expect(t("login.registerPartialTitle")).toBe("Account created");
+    expect(t("login.registerPartialBody")).toContain("Switch to sign-in");
+    __setLocaleForTests("es");
+    try {
+      expect(t("login.registerPartialTitle")).toBe("Cuenta creada");
+      expect(t("login.registerPartialBody")).toContain("iniciar sesión");
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
+  it("M-16: every measures key resolves in both locales", () => {
+    const keys = [
+      "measures.intro", "measures.offlineNote", "measures.historyTitle", "measures.stemsHeader",
+      "measures.recordButton", "measures.crisisTitle", "measures.crisisBody",
+      ...Array.from({ length: 9 }, (_, i) => `measures.phq9.item${i + 1}`),
+      ...[0, 1, 2, 3].map((v) => `measures.phq9.option${v}`),
+    ];
+    for (const key of keys) {
+      expect(t(key)).not.toBe(key);
+      expect(t(key).length).toBeGreaterThan(2);
+    }
+  });
+});

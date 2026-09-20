@@ -38,11 +38,27 @@ afterAll(() => {
 
 describe("E1-TS: crisis corpus vs the client engine", () => {
   it("replays the bypass corpus against dialog and suppress tiers", () => {
-    const rows = JSON.parse(readFileSync(new URL("crisis_corpus.json", ROOT), "utf8")) as
-      Array<{ technique: string; sample: string; intent: string }>;
+    const rows = JSON.parse(readFileSync(new URL("crisis_corpus.json", ROOT), "utf8")) as Array<{
+      technique: string;
+      sample: string;
+      intent: string;
+      want_dialog?: boolean;
+      want_suppress?: boolean;
+    }>;
     const crisis = rows.filter((r) => r.intent === "crisis");
-    const dialogMiss = crisis.filter((r) => !detectCrisisLanguage(r.sample));
-    const suppressMiss = crisis.filter((r) => !matchesCrisisSuppress(r.sample));
+    // A "miss" is measured against the row's REQUIRED contract
+    // (want_dialog/want_suppress), not against "every crisis sample must
+    // fire the dialog tier" — the corpus deliberately contains
+    // suppress-only rows ("i don't see any future for me") whose
+    // conservative dialog:false is the contract itself. Counting those as
+    // dialog misses manufactured a standing false FINDING (2026-09-20
+    // audit M-17) readers learned to ignore.
+    const dialogMiss = crisis.filter(
+      (r) => (r.want_dialog ?? true) && !detectCrisisLanguage(r.sample),
+    );
+    const suppressMiss = crisis.filter(
+      (r) => (r.want_suppress ?? true) && !matchesCrisisSuppress(r.sample),
+    );
     const benignHit = rows.filter((r) => r.intent === "benign" && detectCrisisLanguage(r.sample));
     verdict(
       "E1.ts-dialog-bypass",

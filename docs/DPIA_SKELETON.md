@@ -9,8 +9,9 @@ the operator, processor roles, and hosting choices are yours.
 ## 1. System description
 
 - **Data processed**: journal entries (encrypted client-side, AES-256-GCM),
-  mood check-ins, derived pattern observations, therapist notes, account
-  metadata (usernames, entry dates/timestamps, ciphertext sizes).
+  mood check-ins, derived pattern observations, therapist notes (ciphertext
+  plus the note's analysis-derived `pattern_pid` when anchored to a pattern),
+  account metadata (usernames, entry dates/timestamps, ciphertext sizes).
 - **The e2e claim, honestly**: content is encrypted client-side; the
   server decrypts ONLY within the single-use processing session
   (≤5 min TTL, memory-only) that computes the pattern analysis. A DB leak
@@ -26,7 +27,8 @@ the operator, processor roles, and hosting choices are yours.
   no profiling beyond the user's own data; no automated decisions about
   people; no diagnosis/advice/prediction (product-level constraints).
 - Minimisation already built in: no email/phone; no third-party SDKs; no
-  analytics; metadata limited to dates/sizes; export/deletion paths; the
+  analytics; metadata limited to dates/sizes (plus therapist-note pattern
+  pids — coarse topic ids, no note content); export/deletion paths; the
   30-day threshold suppresses premature processing.
 - Operator decisions to document: log retention at the reverse proxy,
   backup retention (`BACKUP_RETENTION_DAYS` = the deletion promise),
@@ -41,12 +43,17 @@ the operator, processor roles, and hosting choices are yours.
 | Username enumeration | salt decoys, rate limits | reverse-proxy rate limits; the longitudinal transition residual is documented |
 | Therapist over-read | consent records, revoke, full access audit log | BAAs where the therapist is HIPAA-covered |
 | LLM egress | per-user re-auth consent, off by default, output sanitization | provider DPA; consider keeping it off |
-| Lawful access to metadata | dates/sizes only in cleartext | jurisdiction analysis |
+| Lawful access to metadata | dates/sizes only in cleartext (plus coarse therapist-note pattern pids) | jurisdiction analysis |
 
 ## 4. Data-subject rights mapping
 
-- **Access/portability**: in-app encrypted export + readable Markdown
-  export (both decrypt on-device).
+- **Access/portability**: server-side streamed ciphertext export API
+  (`GET /api/account/export` — the user's own blobs, still encrypted at
+  rest in transit) decrypted OFF the server by an offline CLI tool
+  (`mobile/tools/decrypt_export.mjs`, run against the downloaded bundle);
+  a readable Markdown rendering is produced by that same CLI. There is no
+  in-app export in this build: the in-app path fails closed pending a
+  reviewed native streaming-to-file implementation.
 - **Erasure**: `DELETE /api/account` (password proof) cascades live data;
   backups age out per `BACKUP_RETENTION_DAYS` — this delay must be
   disclosed to the user; LLM provider copies per provider terms.

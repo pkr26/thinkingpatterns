@@ -90,12 +90,26 @@ class _PageFactory:
 
 
 class _FreshExportSession:
-    def __init__(self, fresh):
+    """Head-transaction double: serves the fresh-user row first, then the
+    insight snapshot ids (L-8, 2026-09-20 — the export head now captures the
+    frozen insight id list alongside the cutoff), then nothing further."""
+
+    def __init__(self, fresh, snapshot_ids=()):
         self._fresh = fresh
+        self._snapshot_ids = list(snapshot_ids)
+        self._served_user = False
         self.commits = 0
 
     async def execute(self, statement):
-        return _Result(scalar_rows=[] if self._fresh is None else [self._fresh])
+        if not self._served_user:
+            self._served_user = True
+            return _Result(scalar_rows=[] if self._fresh is None else [self._fresh])
+        if self._snapshot_ids:
+            # The head issues exactly ONE snapshot query (.scalars().all()):
+            # serve the whole frozen id list, once.
+            ids, self._snapshot_ids = self._snapshot_ids, []
+            return _Result(scalar_rows=ids)
+        return _Result(scalar_rows=[])
 
     async def commit(self):
         self.commits += 1
@@ -295,14 +309,16 @@ async def test_export_releases_admission_slot_when_account_disappears_before_sna
     assert limiter.acquired == limiter.released
 
 
-async def _collect_export(account_api, *, fresh: User, pages: list[_PageSession]) -> dict:
+async def _collect_export(
+    account_api, *, fresh: User, pages: list[_PageSession], snapshot_ids=()
+) -> dict:
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(export_limiter=None, sessionmaker=_PageFactory(pages))
         )
     )
     response = await account_api.export_account(
-        request, user=fresh, session=_FreshExportSession(fresh)
+        request, user=fresh, session=_FreshExportSession(fresh, snapshot_ids=snapshot_ids)
     )
     chunks = [chunk async for chunk in response.body_iterator]
     return json.loads("".join(chunks))
@@ -322,30 +338,37 @@ async def test_export_skips_disappeared_entry_metadata_and_keeps_scanning():
             _PageSession([_Result(rows=[])]),  # shares
             _PageSession([_Result(rows=metadata), _Result(scalar_rows=[])]),
             _PageSession([_Result(rows=[])]),  # later entry page
-            _PageSession([_Result(rows=[])]),  # insights
+            # Empty insight snapshot (head served no ids): no insight page.
+            _PageSession([_Result(rows=[])]),  # measures
         ],
     )
     assert bundle["entries"] == []
     assert bundle["insights"] == []
+    assert bundle["measures"] == []
 
 
 async def test_export_skips_disappeared_insight_metadata_and_keeps_scanning():
+    """A row deleted after the snapshot is skipped, never a crash/truncation."""
     from app.api import account as account_api
 
     fresh = _race_user("export-insight-disappeared")
-    metadata = [("gone-insight", datetime.now(timezone.utc), 32)]
     bundle = await _collect_export(
         account_api,
         fresh=fresh,
+        snapshot_ids=["gone-insight"],
         pages=[
             _PageSession([_Result(rows=[])]),  # shares
             _PageSession([_Result(rows=[])]),  # entries
-            _PageSession([_Result(rows=metadata), _Result(scalar_rows=[])]),
-            _PageSession([_Result(rows=[])]),  # later insight page
+            # Insight page: sizes for the snapshot id, then the blob fetch
+            # finds the row deleted since the snapshot — consumed as
+            # "nothing to export", the walk continues past it.
+            _PageSession([_Result(rows=[("gone-insight", 32)]), _Result(scalar_rows=[])]),
+            _PageSession([_Result(rows=[])]),  # measures
         ],
     )
     assert bundle["entries"] == []
     assert bundle["insights"] == []
+    assert bundle["measures"] == []
 
 
 async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch):
@@ -391,6 +414,7 @@ async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch)
             _PageSession([_Result(rows=second_metadata), _Result(scalar_rows=[second])]),
             _PageSession([_Result(rows=[])]),
             _PageSession([_Result(rows=[])]),
+            _PageSession([_Result(rows=[])]),  # measures terminator
         ],
     )
     assert [row["client_entry_id"] for row in bundle["entries"]] == ["entry-first", "entry-second"]
@@ -418,11 +442,12 @@ async def test_export_repages_insights_when_blob_grew_after_metadata(monkeypatch
         blob=b"b" * 8,
         created_at=now,
     )
-    first_metadata = [(first.id, first.created_at, 1), (second.id, second.created_at, 1)]
-    second_metadata = [(second.id, second.created_at, 1)]
+    first_metadata = [(first.id, 1), (second.id, 1)]  # (id, size) — 2026-09-20 shape
+    second_metadata = [(second.id, 1)]
     bundle = await _collect_export(
         account_api,
         fresh=fresh,
+        snapshot_ids=[first.id, second.id],
         pages=[
             _PageSession([_Result(rows=[])]),
             _PageSession([_Result(rows=[])]),
@@ -434,7 +459,7 @@ async def test_export_repages_insights_when_blob_grew_after_metadata(monkeypatch
                 ]
             ),
             _PageSession([_Result(rows=second_metadata), _Result(scalar_rows=[second])]),
-            _PageSession([_Result(rows=[])]),
+            _PageSession([_Result(rows=[])]),  # measures
         ],
     )
     assert [row["kind"] for row in bundle["insights"]] == ["first", "second"]
@@ -685,10 +710,13 @@ async def test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict(sett
 
         async def execute(self, statement):
             self.executions += 1
+            # Call order follows the handler: the duplicate idempotency
+            # check runs BEFORE the quota read (audit L-6, 2026-09-20 — a
+            # retry at the quota boundary must answer 409, not 413).
             if self.executions == 1:
-                return SimpleNamespace(one=lambda: (0, 0))
-            if self.executions == 2:
                 return SimpleNamespace(scalar_one_or_none=lambda: None)
+            if self.executions == 2:
+                return SimpleNamespace(one=lambda: (0, 0))
             return SimpleNamespace(rowcount=1)
 
         async def refresh(self, user, attribute_names=None):

@@ -107,6 +107,52 @@ describe("async PBKDF2 (JS-thread-friendly derivation)", () => {
       engine.pbkdf2 = original;
     }
   });
+
+  it("overwrites the engine's PBKDF2 buffer; the returned copy survives (L-47)", async () => {
+    const { engine } = await import("./helpers/nodeEngine");
+    const original = engine.pbkdf2.bind(engine);
+    let handedBack: Buffer | null = null;
+    try {
+      engine.pbkdf2 = ((
+        p: string | Buffer, s: Buffer, i: number, k: number, d: string,
+        cb: (e: Error | null, key?: Buffer) => void,
+      ) =>
+        original(p, s, i, k, d, (err, key) => {
+          handedBack = key ?? null;
+          cb(err, key);
+        })) as typeof engine.pbkdf2;
+      const master = await deriveMasterKeyAsync("pw", SALT, MIN_ITERATIONS);
+      expect(handedBack).not.toBeNull();
+      expect(handedBack!.equals(Buffer.alloc(32))).toBe(true); // the source was zeroized
+      expect(master.equals(Buffer.alloc(32))).toBe(false); // the copy is intact
+      expect(master.length).toBe(32);
+    } finally {
+      engine.pbkdf2 = original;
+    }
+  });
+
+  it("overwrites the engine's HKDF ArrayBuffer; the returned copy survives (L-47)", async () => {
+    const { engine } = await import("./helpers/nodeEngine");
+    const original = engine.hkdfSync.bind(engine);
+    let raw: ArrayBuffer | null = null;
+    try {
+      engine.hkdfSync = ((digest: string, ikm: Buffer, salt: Buffer, info: Buffer, length: number) => {
+        const out = original(digest, ikm, salt, info, length);
+        raw = out;
+        return out;
+      }) as typeof engine.hkdfSync;
+      const ikm = deriveMasterKey("pw", SALT, MIN_ITERATIONS);
+      const auth = deriveAuthKey(ikm);
+      expect(raw).not.toBeNull();
+      expect(Buffer.from(new Uint8Array(raw!)).equals(Buffer.alloc(32))).toBe(true); // source zeroized
+      expect(auth.equals(Buffer.alloc(32))).toBe(false); // the copy is intact
+      // And the copy is real bytes, not a view of zeroed memory: it still
+      // matches the pinned HKDF vector for this ikm via determinism.
+      expect(auth.equals(deriveAuthKey(deriveMasterKey("pw", SALT, MIN_ITERATIONS)))).toBe(true);
+    } finally {
+      engine.hkdfSync = original;
+    }
+  });
 });
 
 describe("AAD canonicalization pins (ensure_ascii contract)", () => {
@@ -222,6 +268,24 @@ describe("MindPatternCrypto payload helpers", () => {
     const { blobB64 } = encryptEntry(keys(), "user-9", "e-1", "text", "2026-09-01", 0);
     expect(() => decryptEntry(keys(), "user-OTHER", "e-1", blobB64)).toThrow(TamperError);
     expect(() => decryptEntry(keys(), "user-9", "e-OTHER", blobB64)).toThrow(TamperError);
+  });
+
+  it("rejects entry payloads whose version this client does not understand (L-48)", () => {
+    const k = keys();
+    const blobOf = (payload: unknown) =>
+      encrypt(k.dataKey, Buffer.from(JSON.stringify(payload)), buildAad("entry", "user-9", "e-f")).toString("base64");
+    // A future schema roll must fail LOUDLY, not be silently miscast as a
+    // v1/v2 shape (the same loud-fail contract decryptInsights carries).
+    expect(() =>
+      decryptEntry(k, "user-9", "e-f", blobOf({ v: 3, text: "x", sentiment: null, created_at: "2026-09-01" })),
+    ).toThrow(/unsupported entry payload version: 3/);
+    // A pre-versioning (or hostile) payload without v is unknown too.
+    expect(() => decryptEntry(k, "user-9", "e-f", blobOf({ text: "no version" }))).toThrow(
+      /unsupported entry payload version: undefined/,
+    );
+    // Both accepted versions round-trip.
+    expect(decryptEntry(k, "user-9", "e-f", blobOf({ v: 1, text: "a", sentiment: 0, created_at: "2026-09-01" })).v).toBe(1);
+    expect(decryptEntry(k, "user-9", "e-f", blobOf({ v: 2, text: "b", sentiment: 0, created_at: "2026-09-01", energy: 3 })).v).toBe(2);
   });
 
   it("round-trips insight and question payloads with their AAD contracts", () => {

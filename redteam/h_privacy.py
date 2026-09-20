@@ -87,11 +87,16 @@ async def h2_export() -> None:
         has_salt = base64.b64encode(u["salt"]).decode() in body
         has_cleartext = "text" in body.replace("client_entry_id", "").replace(
             "entry_date", "") and '"text"' in body
-        verdict("H2.export-cleartext-fields", "BLOCKED" if not has_username else "FINDING",
+        # Both computed conditions gate the verdict (2026-09-19 audit,
+        # M-34): an export carrying entry PLAINTEXT is a FINDING even when
+        # the username fix holds — the old gate ignored has_cleartext
+        # entirely, so it could never fire.
+        clean = not has_username and not has_cleartext
+        verdict("H2.export-cleartext-fields", "BLOCKED" if clean else "FINDING",
                 f"export bundle: username-in-cleartext={has_username} (dropped in the "
-                f"2026-09-16 fix), kdf-salt-present={has_salt} (required for any future "
-                f"re-import — a random 16-byte value, not an identifier), "
-                f"entry-plaintext={'NO' if not has_cleartext else 'YES'}")
+                f"2026-09-16 fix), entry-plaintext={'YES' if has_cleartext else 'NO'}, "
+                f"kdf-salt-present={has_salt} (required for any future "
+                f"re-import — a random 16-byte value, not an identifier)")
         # Cross-account enumeration: export is token-scoped
         r2 = await client.get("/api/v1/account/export")
         verdict("H2.export-auth-scoped", "BLOCKED" if r2.status_code == 401 else "FINDING",
@@ -123,8 +128,13 @@ async def h3_erasure() -> None:
             insights = (await s.execute(select(Insight).where(
                 Insight.user_id == u["user_id"]))).scalars().all()
         keys_held = len(getattr(app.state.key_store, "_keys", {}))
+        # keys_held gates the verdict too (2026-09-19 audit, M-34): a
+        # keystore still holding the deleted user's data key after 204 is
+        # a FINDING even when every DB row is gone — the old gate printed
+        # the count but never let it affect the verdict.
+        rows_remain = bool(users or entries or insights)
         verdict("H3.erasure-live-db",
-                "BLOCKED" if not (users or entries or insights) else "FINDING",
+                "BLOCKED" if not (rows_remain or keys_held) else "FINDING",
                 f"after DELETE /account: users={len(users)}, entries={len(entries)}, "
                 f"insights={len(insights)} rows remain; in-memory keystore holds "
                 f"{keys_held} keys — live-data erasure is complete and immediate "

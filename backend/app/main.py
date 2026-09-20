@@ -18,11 +18,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, config, singleprocess
 from .api import api_router, api_v1_router
-from .cache import FixedWindowCounter
+from .cache import FixedWindowCounter, RateLimitCheck
 from .db import SCHEMA_HEAD, build_engine, build_sessionmaker, init_models
 from .deps import DEFAULT_ERROR_CODES
 from .metrics import MetricsMiddleware, MetricsRegistry
-from .middleware import HardeningMiddleware
+from .middleware import HardeningMiddleware, RateLimitRule
 from .security.enclave import InMemoryKeyStore
 
 # Distinct from alembic/env.py's migration lock (727272): this one is held
@@ -156,6 +156,70 @@ def _error_envelope(status_code: int, detail, code: str | None = None) -> dict:
     return {"detail": detail, "code": code or DEFAULT_ERROR_CODES.get(status_code, "error")}
 
 
+def _limiter_checks(dependant) -> list[RateLimitCheck]:
+    """Collect every RateLimitCheck reachable from a dependant tree.
+
+    Route-level ``dependencies=[Depends(make_rate_limiter(...))]`` and
+    signature-level ``Depends(make_rate_limiter(...))`` both land in the
+    dependant's dependency list (the latter one recursion level down), so a
+    recursive walk finds both wirings without either style being privileged.
+    """
+    checks: list[RateLimitCheck] = []
+    for dep in dependant.dependencies:
+        if isinstance(dep.call, RateLimitCheck):
+            checks.append(dep.call)
+        checks.extend(_limiter_checks(dep))
+    return checks
+
+
+def _resolve_api_routes(routes):
+    """Yield every API route with its FINAL (mounted) path information.
+
+    FastAPI >= 0.141 mounts included routers lazily as a TREE of
+    ``_IncludedRouter`` wrappers that only materialize their prefixed,
+    route-shaped ``_EffectiveRouteContext`` leaves through
+    ``effective_candidates()``; older versions flattened eagerly and the
+    iterable already held plain APIRoutes. Recursing while the branch is
+    explorable handles both shapes, and yields whatever else it finds (docs
+    routes, healthz) unchanged — callers filter by the attributes they
+    need.
+    """
+    for route in routes:
+        candidates = getattr(route, "effective_candidates", None)
+        if callable(candidates):
+            yield from _resolve_api_routes(candidates())
+        else:
+            yield route
+
+
+def _rate_limit_rules(app: FastAPI) -> tuple[RateLimitRule, ...]:
+    """(methods, compiled path, limiter checks) for every rate-limited route.
+
+    M-1 (2026-09-20): HardeningMiddleware counts malformed-JSON 422s into
+    the SAME buckets the route dependencies use, so it needs the exact
+    route→bucket mapping. Walking the LIVE router (after both mounts are
+    included) instead of a hand-maintained table means the edge counter and
+    the dependencies can never disagree about which bucket a path belongs
+    to — a new route with a limiter is covered the moment it is registered.
+    Buckets are de-duplicated per route so a request that matched several
+    rules carrying the same bucket name still counts exactly once.
+    """
+    rules: list[RateLimitRule] = []
+    for route in _resolve_api_routes(app.routes):
+        dependant = getattr(route, "dependant", None)
+        if dependant is None:
+            continue  # plain Starlette route (docs, static) — no limiter
+        unique: list[RateLimitCheck] = []
+        seen: set[str] = set()
+        for check in _limiter_checks(dependant):
+            if check.bucket not in seen:
+                seen.add(check.bucket)
+                unique.append(check)
+        if unique:
+            rules.append((frozenset(route.methods or ()), route.path_regex, tuple(unique)))
+    return tuple(rules)
+
+
 def create_app(settings: config.Settings | None = None) -> FastAPI:
     settings = settings or config.settings
     is_development = settings.environment == "development"
@@ -258,6 +322,12 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         max(1, min(2, settings.db_pool_size + settings.db_max_overflow - 1))
     )
 
+    # Offset-paginated clients must read both the opaque next-page cursor
+    # and the collection snapshot marker that makes a continuation safe
+    # across independent requests. Hoisted so HardeningMiddleware can
+    # mirror the same expose list onto its own short-circuit responses
+    # (L-4) — one list, no drift between the two CORS surfaces.
+    cors_expose_headers = ["X-Next-Offset", "X-Entries-Revision", "X-Notes-Revision"]
     app.add_middleware(
         CORSMiddleware,
         # Empty by default — the mobile app is a native client and needs no
@@ -275,24 +345,12 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             "X-Account-Verifier",
             "X-Therapist-Enrollment-Token",
         ],
-        # Offset-paginated clients must read both the opaque next-page cursor
-        # and the collection snapshot marker that makes a continuation safe
-        # across independent requests.
-        expose_headers=["X-Next-Offset", "X-Entries-Revision", "X-Notes-Revision"],
+        expose_headers=cors_expose_headers,
     )
     # Inside the hardening layer: aggregate status counters (no paths, no
     # user data — see app/metrics.py). Added BEFORE HardeningMiddleware so
     # Hardening stays outermost (security headers on every response).
     app.add_middleware(MetricsMiddleware, registry=app.state.metrics)
-    # Outermost: body-size cap + security headers on EVERY response (413s,
-    # 500s included) + last-ditch exception handling.
-    app.add_middleware(
-        HardeningMiddleware,
-        max_body_bytes=settings.max_body_bytes,
-        body_read_timeout_seconds=settings.body_read_timeout_seconds,
-        trust_proxy_headers=settings.trust_proxy_headers,
-        trusted_proxy_ips=settings.trusted_proxy_ips,
-    )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error_envelope(request: Request, exc: StarletteHTTPException):
@@ -311,6 +369,15 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # oversized blob field that is a 2x-bandwidth amplification vector.
         # Report only WHICH fields failed and why (locations + pydantic's
         # messages carry no user input), as one human string.
+        # M-1 (2026-09-20): a body the JSON parser could not read fails
+        # HERE, before any route dependency — including the rate limiters —
+        # has run. Mark such requests so HardeningMiddleware (the one layer
+        # positioned both before the app and around this handler) can count
+        # the failure into the route's own bucket. Strictly json_invalid:
+        # schema failures mean the body parsed and the route's dependencies
+        # already counted the request themselves.
+        if any(e.get("type") == "json_invalid" for e in exc.errors()):
+            request.scope.setdefault("state", {})["mindpattern_body_parse_failed"] = True
         parts = []
         for e in exc.errors():
             loc = ".".join(str(part) for part in e.get("loc", ()) if part != "body")
@@ -327,6 +394,29 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # reports api_version so clients can discover the canonical base).
     app.include_router(api_v1_router)
     app.include_router(api_router)
+
+    # Outermost: body-size cap + security headers on EVERY response (413s,
+    # 500s included) + last-ditch exception handling. Registered AFTER the
+    # routers are included only because its malformed-body rate rules are
+    # built from the final route table; add_middleware still stacks it as
+    # the outermost user middleware (each call prepends).
+    app.add_middleware(
+        HardeningMiddleware,
+        max_body_bytes=settings.max_body_bytes,
+        body_read_timeout_seconds=settings.body_read_timeout_seconds,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_ips=settings.trusted_proxy_ips,
+        rate_limit_rules=_rate_limit_rules(app),
+        rate_counter=app.state.rate_counter,
+        rate_limit_settings=settings,
+        cors_origins=tuple(settings.cors_origins),
+        cors_expose_headers=tuple(cors_expose_headers),
+        # M-26: responses this outer layer synthesizes from exceptions the
+        # app raised (last-ditch 500, deep-nesting 400) and its pre-dispatch
+        # flood 429s never pass the inner MetricsMiddleware — tap them into
+        # the same registry so status families stay complete.
+        status_observer=app.state.metrics.observe_request,
+    )
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict:

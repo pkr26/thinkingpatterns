@@ -35,18 +35,22 @@ vi.mock("../src/store", async (importOriginal) => {
 
 const { AppNavigator } = await import("../src/navigation");
 const { api } = await import("../src/api/client");
-const { takePendingOnboarding } = await import("../src/onboarding");
+const { takePendingOnboarding, recordOnboardingSeen, clearOnboardingSeen } = await import("../src/onboarding");
 const { render, flush, textOf, screenNames, screenOptions } = await import("./helpers/rtr");
 const { resetApi } = await import("./helpers/apiMock");
 const { vault } = await import("../src/vault");
 const { navigationStub } = await import("./helpers/navigationStackMock");
 
-beforeEach(() => {
+beforeEach(async () => {
   resetApi(api as never);
   navigationStub.navigate.mockClear();
   navigationStub.popToTop.mockClear();
   navigationStub.replace.mockClear();
   takePendingOnboarding(); // drain any leftover so tests cannot leak into each other
+  // M-18: the navigator's onboarding gate is derived from the persisted
+  // per-account flag — every test starts from a clean, unseen account and
+  // seeds "seen" explicitly where it simulates a settled one.
+  await clearOnboardingSeen("user-1");
   vault.lock();
   sessionState = { authStatus: "loading", unlocked: false };
 });
@@ -115,6 +119,7 @@ describe("AppNavigator", () => {
   });
 
   it("unlocked: all app screens are reachable", async () => {
+    await recordOnboardingSeen("user-1"); // a settled account: no onboarding
     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
     sessionState = { authStatus: "loggedIn", unlocked: true };
     const root = await render(<AppNavigator />);
@@ -179,7 +184,8 @@ describe("AppNavigator", () => {
     expect(textOf(root)).toContain("Write each day");
   });
 
-  it("a plain login or unlock never sees onboarding (the pending flag is one-shot)", async () => {
+  it("a plain login or unlock never sees onboarding for an account that completed it", async () => {
+    await recordOnboardingSeen("user-1"); // onboarding done on a previous run
     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
     sessionState = { authStatus: "loggedIn", unlocked: true };
     const root = await render(<AppNavigator />);
@@ -187,10 +193,73 @@ describe("AppNavigator", () => {
     expect(screenNames(root)).not.toContain("Onboarding");
     // Even after a previous registration queued it, the flag was consumed
     // by that first transition — re-entering the main flow shows the
-    // journal directly.
+    // journal directly (the persisted flag agrees).
+  });
+
+  // M-18 regression: backgrounding mid-onboarding locks the vault and
+  // consumes the one-shot pending flag — the gate used to re-enter main on
+  // the journal with the privacy/13+ panels never shown or completed. The
+  // fix re-derives the gate from the persisted hasSeenOnboarding flag.
+  it("re-entering main mid-onboarding RESTORES the panels (persisted-flag re-derivation)", async () => {
+    const { queueOnboarding } = await import("../src/onboarding");
+    queueOnboarding(); // registration queued the panels
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    const root = await render(<AppNavigator />);
+    await flush();
+    expect(screenNames(root)[0]).toBe("Onboarding");
+
+    // The app goes to the background mid-onboarding: the vault locks, the
+    // main flow unmounts, the one-shot flag is consumed.
+    vault.lock();
+    sessionState = { authStatus: "loggedIn", unlocked: false };
+    const { act } = await import("./helpers/rtr");
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    await flush();
+    expect(screenNames(root)).toEqual(["Unlock", "Crisis"]);
+
+    // Re-unlock: the panels come back — not the journal.
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    await flush();
+    expect(screenNames(root)[0]).toBe("Onboarding");
+    expect(textOf(root)).toContain("Write each day");
+
+    // Completing onboarding persists the flag; the NEXT re-entry lands on
+    // the journal for good.
+    await recordOnboardingSeen("user-1");
+    vault.lock();
+    sessionState = { authStatus: "loggedIn", unlocked: false };
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    await act(async () => {
+      root.update(<AppNavigator />);
+    });
+    await flush();
+    expect(screenNames(root)).not.toContain("Onboarding");
+  });
+
+  it("a fresh login of an account that never completed onboarding shows it (restart edge)", async () => {
+    // No pending flag at all (fresh process): the persisted flag alone
+    // decides — the old memory-only gate landed these users on the journal.
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    const root = await render(<AppNavigator />);
+    await flush();
+    expect(screenNames(root)[0]).toBe("Onboarding");
+    expect(textOf(root)).toContain("Write each day");
   });
 
   it("leaving the main flow resets the onboarding gate (a LATER registration can show it again)", async () => {
+    await recordOnboardingSeen("user-1"); // the earlier account completed onboarding
     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
     sessionState = { authStatus: "loggedIn", unlocked: true };
     const root = await render(<AppNavigator />);

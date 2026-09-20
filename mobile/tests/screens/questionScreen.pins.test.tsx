@@ -164,10 +164,13 @@ describe("QuestionScreen pins: card presence guards", () => {
     expect(textOf(root)).toContain("Day 4 of 30");
     await pressLabel(root, "Refresh");
     await flush();
-    // Offline the day counter is unknowable: the default threshold wording,
-    // never the previous load's "Day 4 of 30".
+    // Offline the day counter is unknowable AND the phase is only assumed
+    // (audit L-57): the counter from the previous load is gone and the
+    // honest "can't reach the server" caption replaces the baseline
+    // program copy entirely.
     expect(textOf(root)).not.toContain("Day 4 of");
-    expect(textOf(root)).toContain("After 30 days of writing");
+    expect(textOf(root)).not.toContain("After 30 days of writing");
+    expect(textOf(root)).toContain("Can't reach the server right now");
   });
 
   it("a null days_remaining degrades to the default threshold — never 'Day 4 of 4'", async () => {

@@ -23,19 +23,28 @@ function notify(): void {
 
 /** What an unlocked session actually holds. The master key is NOT retained:
  *  unlock() zeroizes it immediately, and keeping the (zeroed) field on the
- *  stored state only invited a future caller to read dead bytes silently. */
-export type SessionKeys = Pick<Keys, "authKey" | "dataKey">;
+ *  stored state only invited a future caller to read dead bytes silently.
+ *
+ *  authKeyKnown (H-2) is false ONLY for a biometric unlock: that path
+ *  restores the data key but stores PLACEHOLDER ZEROS in the authKey slot
+ *  (the auth key exists to log in with the password and is never stored
+ *  under biometrics). Nothing may compare a derived key against an unknown
+ *  slot and report a verdict — reauth.ts verifies ONLINE in that case.
+ *  Unknown never counts as a match anywhere: fail closed. */
+export type SessionKeys = Pick<Keys, "authKey" | "dataKey"> & { authKeyKnown: boolean };
 
 let current: SessionKeys | null = null;
 let ownerUserId: string | null = null;
 
 export const vault = {
   /** Unlock with the account these keys were derived for. The id is what
-   *  lets key-shipping operations prove the keys match the session. */
-  unlock(keys: Keys, userId?: string): void {
+   *  lets key-shipping operations prove the keys match the session.
+   *  opts.authKeyKnown defaults to true; UnlockScreen's biometric path is
+   *  the one caller that passes false (placeholder-zero auth key). */
+  unlock(keys: Keys, userId?: string, opts: { authKeyKnown?: boolean } = {}): void {
     if (current) zeroize(current.authKey, current.dataKey);
     zeroize(keys.masterKey); // only auth/data keys are useful from here on
-    current = { authKey: keys.authKey, dataKey: keys.dataKey };
+    current = { authKey: keys.authKey, dataKey: keys.dataKey, authKeyKnown: opts.authKeyKnown ?? true };
     ownerUserId = userId ?? null;
     notify();
   },
@@ -44,7 +53,7 @@ export const vault = {
     // A fresh object per call: callers cannot mutate the vault's own
     // reference or swap its keys. The buffers are shared on purpose —
     // zeroize-on-lock must still reach every copy.
-    return { authKey: current.authKey, dataKey: current.dataKey };
+    return { authKey: current.authKey, dataKey: current.dataKey, authKeyKnown: current.authKeyKnown };
   },
   isUnlocked(): boolean {
     return current !== null;
@@ -53,6 +62,18 @@ export const vault = {
    *  (legacy callers) — key-shipping code must treat null as unverified. */
   ownerUserId(): string | null {
     return ownerUserId;
+  },
+  /** H-2: hand the REAL auth key to a session whose slot held placeholder
+   *  zeros, after the typed password was verified ONLINE (the derived auth
+   *  key IS the login verifier — see reauth.ts). The replaced placeholder
+   *  is zeroized like every key hand-off, and later re-auths compare
+   *  locally again. Throws when locked; keeps the session's owner and data
+   *  key untouched. The buffer becomes vault-owned (zeroized on lock). */
+  adoptAuthKey(authKey: Buffer): void {
+    if (!current) throw new Error("vault is locked");
+    zeroize(current.authKey); // placeholder zeros — no real material lost
+    current = { authKey, dataKey: current.dataKey, authKeyKnown: true };
+    notify();
   },
   lock(): void {
     if (current) zeroize(current.authKey, current.dataKey);

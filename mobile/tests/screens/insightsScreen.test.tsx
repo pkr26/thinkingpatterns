@@ -13,10 +13,12 @@ vi.mock("../../src/api/client", async () => {
 });
 
 const refreshActiveDays = vi.fn(async () => {});
+// L-59: the screen adopts the already-fetched count instead of re-fetching.
+const applyActiveDays = vi.fn();
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ refreshActiveDays, unlockDays: 30, touchActivity }) };
+  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, unlockDays: 30, touchActivity }) };
 });
 
 const { api } = await import("../../src/api/client");
@@ -47,6 +49,7 @@ const pattern = (over: Record<string, unknown>) => ({
 beforeEach(() => {
   resetApi(api as never);
   refreshActiveDays.mockClear();
+  applyActiveDays.mockClear();
   touchActivity.mockClear();
   AlertlessReset();
   vault.lock();
@@ -165,7 +168,11 @@ describe("InsightsScreen phases", () => {
     // Baseline shows neither the empty-insight state nor the insight footnote.
     expect(text).not.toContain("Nothing solid yet");
     expect(text).not.toContain("not advice or diagnosis");
-    expect(refreshActiveDays).toHaveBeenCalledTimes(1);
+    // L-59 pin: ONE /insights request per load — the counter applies from
+    // the response this screen already holds, not a second fetch.
+    expect(vi.mocked(api.insights)).toHaveBeenCalledTimes(1);
+    expect(refreshActiveDays).not.toHaveBeenCalled();
+    expect(applyActiveDays).toHaveBeenCalledWith(12);
     // Layout container contract.
     const scroll = root.root.findByType(ScrollView);
     expect(scroll.props.contentContainerStyle).toEqual({ padding: 20, gap: 14 });
@@ -1206,5 +1213,210 @@ describe("InsightsScreen per-pattern mute (2026-09-19)", () => {
     await pressLabel(root, "Not about me anymore — mute");
     await flush();
     expect(textOf(root)).toContain("Every current pattern is muted — unmute one below, or keep writing.");
+  });
+});
+
+describe("L-58: the main pattern-card list respects the phase gate", () => {
+  it("a baseline response that ships a blob anyway renders NO pattern cards", async () => {
+    // Server-trust boundary: only the two real phases are accepted, and
+    // each section gates on its own phase — the main list was the one
+    // section that did not.
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "baseline",
+      active_days: 3,
+      days_remaining: 27,
+      blob: insightsBlob({ stats: { patterns: [pattern({ label: "work" })] } }),
+    } as never);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    expect(textOf(root)).toContain("Keep writing");
+    expect(textOf(root)).not.toContain("You've mentioned 'work'");
+    expect(textOf(root)).not.toContain("TIMING");
+    // The insight-phase empty state belongs to the insight phase alone.
+    expect(textOf(root)).not.toContain("Nothing solid yet");
+  });
+});
+
+describe("L-61: a server-muted sensitive pattern keeps its support card", () => {
+  it("muted + sensitive renders the non-quoting card, quotes nothing, offers no mute", async () => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 45,
+      days_remaining: 0,
+      blob: insightsBlob({
+        stats: {
+          patterns: [
+            pattern({
+              kind: "rumination",
+              label: "a heavy returning thought",
+              occurrences: 9,
+              detail: { sensitive: true, muted: true, pattern_pid: "rumination:heavy" },
+            }),
+          ],
+        },
+      }),
+    } as never);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    const text = textOf(root);
+    // The support pointer stays up…
+    expect(text).toContain("A difficult thought has been returning across different days.");
+    expect(text).toContain("Talking to a professional is never a wrong move.");
+    // …nothing quoting or quantifying the thought leaks…
+    expect(text).not.toContain("a heavy returning thought");
+    expect(text).not.toContain("9 mentions");
+    // …and the muted section does NOT absorb it (sensitive cards never
+    // travel there — their support pointer must stay put).
+    expect(text).not.toContain("Show muted");
+    expect(text).not.toContain("Not about me anymore — mute");
+  });
+
+  it("an ALL-muted list with one muted sensitive card is not a false 'nothing solid'", async () => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 45,
+      days_remaining: 0,
+      blob: insightsBlob({
+        stats: {
+          patterns: [
+            pattern({ kind: "topic", label: "guitar", detail: { pattern_pid: "topic:guitar", muted: true } }),
+            pattern({
+              kind: "rumination",
+              label: "hidden heavy thought",
+              detail: { sensitive: true, muted: true, pattern_pid: "rumination:x" },
+            }),
+          ],
+        },
+      }),
+    } as never);
+    const root = await render(<InsightsScreen />);
+    await flush();
+    const text = textOf(root);
+    // The sensitive support card is the one visible card — the empty state
+    // (which would claim there is nothing here) must not fire over it.
+    expect(text).toContain("A difficult thought has been returning across different days.");
+    expect(text).not.toContain("Nothing solid yet");
+    expect(text).toContain("Show muted (1)"); // the ordinary mute is listed
+  });
+});
+
+describe("L-60: overlapping loads are sequenced (older cannot replace newer)", () => {
+  it("a stale response landing after a newer one never overwrites its patterns", async () => {
+    let resolveOld!: (v: unknown) => void;
+    let resolveNew!: (v: unknown) => void;
+    vi.mocked(api.insights)
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveOld = resolve)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveNew = resolve)));
+    const root = await render(<InsightsScreen />);
+    const scroll = root.root.findByType(ScrollView);
+    const onRefresh = (scroll.props.refreshControl.props as { onRefresh: () => unknown }).onRefresh;
+    await act(async () => {
+      void Promise.resolve(onRefresh()); // the newer load starts while the old is in flight
+    });
+    // The newer load answers FIRST with the current truth…
+    await act(async () => {
+      resolveNew?.({
+        phase: "insight",
+        active_days: 45,
+        days_remaining: 0,
+        blob: insightsBlob({ stats: { patterns: [pattern({ label: "fresh-card" })] } }),
+      });
+    });
+    await flush();
+    expect(textOf(root)).toContain("fresh-card");
+    // …then the older response finally lands: it must be discarded, not
+    // rendered over the newer snapshot.
+    await act(async () => {
+      resolveOld?.({
+        phase: "insight",
+        active_days: 31,
+        days_remaining: 0,
+        blob: insightsBlob({ stats: { patterns: [pattern({ label: "stale-card" })] } }),
+      });
+    });
+    await flush();
+    expect(textOf(root)).toContain("fresh-card");
+    expect(textOf(root)).not.toContain("stale-card");
+    await act(async () => root.unmount());
+  });
+
+  it("a superseded load's failure does not poison the screen with a stale error", async () => {
+    let rejectOld!: (e: unknown) => void;
+    let resolveNew!: (v: unknown) => void;
+    vi.mocked(api.insights)
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectOld = reject)))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveNew = resolve)));
+    const root = await render(<InsightsScreen />);
+    const scroll = root.root.findByType(ScrollView);
+    const onRefresh = (scroll.props.refreshControl.props as { onRefresh: () => unknown }).onRefresh;
+    await act(async () => {
+      void Promise.resolve(onRefresh());
+    });
+    await act(async () => {
+      resolveNew?.({ phase: "baseline", active_days: 1, days_remaining: 29 });
+    });
+    await flush();
+    expect(textOf(root)).toContain("Keep writing");
+    // The older request now FAILS — its error belongs to a superseded load.
+    await act(async () => {
+      rejectOld?.(new Error("stale failure"));
+    });
+    await flush();
+    expect(textOf(root)).toContain("Keep writing");
+    expect(textOf(root)).not.toContain("Something went wrong");
+    await act(async () => root.unmount());
+  });
+});
+
+describe("M-36: weekday words localize at render time", () => {
+  it("localWeekday maps the backend's English DAY_NAMES onto the locale", async () => {
+    const { localWeekday } = await import("../../src/screens/InsightsScreen");
+    const { __setLocaleForTests } = await import("../../src/strings");
+    // English passes through unchanged (tests pin the en baseline).
+    __setLocaleForTests("en");
+    try {
+      expect(localWeekday("Monday")).toBe("Monday");
+      expect(localWeekday("Sunday")).toBe("Sunday");
+      // Unknown/attacker text passes through untouched — never crashes,
+      // never invents a date.
+      expect(localWeekday(" Fry-day ")).toBe(" Fry-day ");
+      expect(localWeekday("")).toBe("");
+      expect(localWeekday("constructor")).toBe("constructor");
+    } finally {
+      __setLocaleForTests("en");
+    }
+    // Spanish renders Spanish weekdays — "la mayoría de las veces en
+    // Monday" was the shipped sentence before this fix.
+    __setLocaleForTests("es");
+    try {
+      expect(localWeekday("Monday")).toBe("lunes");
+      expect(localWeekday("Tuesday")).toBe("martes");
+      expect(localWeekday("Sunday")).toBe("domingo");
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
+  it("the temporal card renders the Spanish weekday inside Spanish copy", async () => {
+    const { __setLocaleForTests } = await import("../../src/strings");
+    __setLocaleForTests("es");
+    try {
+      vi.mocked(api.insights).mockResolvedValue({
+        phase: "insight",
+        active_days: 40,
+        days_remaining: 0,
+        blob: insightsBlob({
+          stats: { patterns: [pattern({ kind: "temporal", label: "trabajo", detail: { day: "Monday" } })] },
+        }),
+      } as never);
+      const root = await render(<InsightsScreen />);
+      await flush();
+      const text = textOf(root);
+      expect(text).toContain("Ha mencionado 'trabajo' 7 veces, la mayoría de las veces en lunes.");
+      expect(text).not.toContain("Monday");
+      await act(async () => root.unmount());
+    } finally {
+      __setLocaleForTests("en");
+    }
   });
 });

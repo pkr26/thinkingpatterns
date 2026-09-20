@@ -183,9 +183,46 @@ def main() -> None:
 
     out = REPO_ROOT / "shared" / "vectors.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"vectors": vectors, "encrypt_vectors": encrypt_vectors}
-    out.write_text(json.dumps(payload, indent=2) + "\n")
-    print(f"wrote {len(vectors)} vectors + {len(encrypt_vectors)} encrypt vectors -> {out}")
+    # MERGE, never overwrite: shared/vectors.json also carries hand-maintained
+    # sections (wrap_vectors, aad_edge_cases) that have no generator. A
+    # wholesale rewrite would silently delete half the cross-platform crypto
+    # contract, and the mobile verifier (mobile/tools/verify_vectors.mjs)
+    # fails closed when those sections are missing. Only the sections this
+    # script actually generates are replaced; every other key is preserved
+    # as-is (value AND position) from the existing file.
+    GENERATED_SECTIONS = ("vectors", "encrypt_vectors")
+    existing_text = out.read_text() if out.exists() else ""
+    try:
+        existing = json.loads(existing_text) if existing_text else {}
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"refusing to regenerate: {out} exists but is not valid JSON ({exc}); "
+            "fix or remove the file by hand so hand-maintained sections are not lost"
+        ) from exc
+    if not isinstance(existing, dict):
+        raise SystemExit(
+            f"refusing to regenerate: {out} has a top-level {type(existing).__name__}, "
+            "expected a JSON object; fix the file by hand so hand-maintained "
+            "sections are not lost"
+        )
+    # Keep the preserved sections byte-stable: reuse the existing file's
+    # exact serialization (the committed file is indent=1; a fresh file
+    # defaults to indent=2). Anything that already round-trips is canonical.
+    indent = 2
+    for candidate in (1, 2, 3, 4, "\t"):
+        if existing_text and json.dumps(existing, indent=candidate) + "\n" == existing_text:
+            indent = candidate
+            break
+    preserved = {k: v for k, v in existing.items() if k not in GENERATED_SECTIONS}
+    payload = dict(existing)
+    payload.update({"vectors": vectors, "encrypt_vectors": encrypt_vectors})
+    out.write_text(json.dumps(payload, indent=indent) + "\n")
+    preserved_names = ", ".join(f"{k} ({len(v) if isinstance(v, (list, dict)) else 1})"
+                                for k, v in preserved.items()) or "none"
+    print(
+        f"wrote {len(vectors)} vectors + {len(encrypt_vectors)} encrypt vectors -> {out}\n"
+        f"preserved hand-maintained sections: {preserved_names}"
+    )
 
 
 if __name__ == "__main__":
