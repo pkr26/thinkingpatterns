@@ -31,14 +31,14 @@ describe("API-origin changes", () => {
   });
 
   it("enforces the HTTPS boundary again at send time if persisted settings are tampered", async () => {
-    await api.setSession("live-token", "user-1", "alice");
+    await api.setSession("live-token", "abababababababababababababababab", "alice");
     await storage.setItem("@mindpattern/base_url", "http://remote.example.test:8000");
     await expect(api.meta()).rejects.toMatchObject({ status: 0 });
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("erases session material and locks the app hook before a new origin is persisted", async () => {
-    await api.setSession("live-token", "user-1", "alice");
+    await api.setSession("live-token", "abababababababababababababababab", "alice");
     const transitions: string[] = [];
     setOriginChangeHandler(() => transitions.push("locked"));
 
@@ -55,7 +55,7 @@ describe("API-origin changes", () => {
 
   it("retains a session for a path-only change on the same origin", async () => {
     await setBaseUrl("https://same.example.test");
-    await api.setSession("live-token", "user-1");
+    await api.setSession("live-token", "abababababababababababababababab");
     expect(await setBaseUrl("https://same.example.test/base-path")).toBeNull();
     expect(await api.isLoggedIn()).toBe(true);
   });

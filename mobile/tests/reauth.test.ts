@@ -7,7 +7,7 @@ import storage from "./helpers/storageMock";
 
 vi.mock("../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("./helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 import { deriveKeys } from "../src/crypto/MindPatternCrypto";

@@ -6,6 +6,89 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### 2026-09-20 (fourth pass) — Full remediation of the 2026-09-20 source audit
+
+A fourth adversarial audit (backend deep-read + mobile/portal/infra agents)
+found 1 architectural High, 5 Medium, 8 Low. All code-fixable findings are
+fixed and tested; the architectural residual is documented below.
+
+- **H-1/M-3 — credential & key rotation (the missing recovery path)**: the
+  derived auth key was a forever-credential — a phished verifier or one
+  captured data-key upload meant permanent compromise. New backend flow:
+  `POST /api/v1/processing/rekey` (server re-encrypts every entry, insight
+  and measure blob old→new data key inside one transaction, password-proven,
+  all-or-nothing; legacy v1-AAD entries upgrade to the version-bound v2
+  AAD on the way through), `PUT /api/v1/consents/{id}/rewrap` (re-wrap
+  live grants to the same therapist; `ConsentOut` now carries the
+  therapist's public wrap key), and `PUT /api/v1/account/credential`
+  (retire the login credential; epoch bump + processing-key purge).
+  Mobile `src/rotation.ts` orchestrates the flow (wrong-old-key retries
+  verify the new key can read the journal before continuing), with a
+  Settings "Change password" card that rotates keys and re-signs-in.
+- **M-2 — entry rollback binding**: entries gained a monotonic
+  `content_version` (migration `d7c1f4a8e2b9`) and a four-part v2 AAD
+  ("entry", user, id, version); create pins version 1, replace enforces
+  client-declared version == stored+1 (retryable 409 `version_conflict`),
+  the server's recompute accepts both AAD generations, and the mobile app
+  keeps an encrypted per-entry high-water store (`entryVersions.ts`) that
+  makes any both-copies rollback render-loud. Legacy blobs decrypt
+  unchanged through the v2→v1 ladder.
+- **M-5 — hostile-409 data loss**: the offline queue now verifies every
+  409 with the new single-entry `GET /api/v1/entries/{id}` before
+  discarding its only local copy; an unproven duplicate parks in the
+  rejected store for user-visible recovery instead of silent deletion.
+- **M-4 — biometric gate**: enabling biometric unlock now requires the
+  typed password (the same reauth card as delete/grant) — a foregrounded
+  unlocked phone can no longer persist the data key in the Keychain
+  forever.
+- **M-1 — rollback guard fail-closed**: `stateSeqGuard` treats absent
+  `state_seq` as a protocol downgrade once any high-water mark exists,
+  keeps a process-lifetime in-memory mirror that survives on-device
+  storage tampering, and self-heals a persisted mark read below the
+  mirror.
+- **M-3 — first-origin pin (mobile)**: the first origin a device
+  authenticates against is pinned; LoginScreen renders the selected
+  server and a prominent warning when it differs (with an explicit
+  "I trust this server" confirmation). Origin-bound local wipes now
+  include both rollback-guard stores.
+- **L-1 — UTC calendar consistency**: question pinning/rotation and the
+  streak use the same server-UTC anchor as the entry/measure date bounds
+  (`_utc_today()`), closing the host-local-midnight drift the 2026-09-20
+  L-5 fix left in `insights.py`/`threshold.py`.
+- **L-2 — ops rate bucket**: `/healthz` + `/readyz` share one generous
+  fixed-window bucket (240/min default, env-tunable) — they were the only
+  DB-touching endpoints with no limiter.
+- **L-3/L-4 — repo hygiene**: `.gitignore` now covers SQLite WAL/SHM
+  sidecars (which `*.db` never matched), and `backend/sim60.db` (synthetic
+  accounts with password verifiers) moved to the ignored
+  `backend/.artifacts/`.
+- **L-5 — therapist key fingerprint widened 8→16 bytes** on BOTH platforms
+  (grinding a colliding P-256 key cost ~2^32), and the mobile grant-confirm
+  alert now repeats the fingerprint instead of only the lookup card.
+- **L-6 — client-side password policy hardened**: common-word, repeated-
+  character and keyboard-row rejections (a zero-knowledge server can never
+  see the password; the on-device unlock oracle made these families
+  minutes-cheap). Documented as the enforcement boundary.
+- **L-7 — server-controlled identity values**: `setSession` adopts only
+  the backend's exact 32-hex account-id shape; salts stay origin-bound.
+- **L-8/P-1 — portal key strings**: the wrap private key's base64 and the
+  auth verifier are now derived at the moment of use (seal/send) and never
+  ride long-lived object fields; registration returns only public +
+  already-sealed material.
+- **I-1 — monotonic rate clock**: the fixed-window counter measures
+  windows in monotonic time (an NTP step-back can no longer re-open
+  closed windows).
+- Accepted residuals, re-documented: the data-key escrow during consented
+  recomputes (H-1's design core — now RECOVERABLE via rotation), CSP
+  `style-src 'unsafe-inline'` (no injection path exists; verified), the
+  plaintext draft surviving vault lock (pinned trade-off), operator
+  tooling mutable tags (flagged in-repo to pin before production).
+
+Gates: backend pytest **all pass** (incl. 14 new rotation/versioning tests
++ migration head bump), mobile vitest **1546/1546** (18 new tests for the
+guards/rotation/origin pin), portal vitest **169/169**, tsc clean on both
+TS stacks, ruff clean.
+
 ### 2026-09-20 (second pass) — Audit-verification close-out: the 7 stragglers
 
 An independent verification pass (`AUDIT_VERIFICATION_2026-09-20.md`, 11

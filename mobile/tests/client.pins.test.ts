@@ -48,7 +48,7 @@ afterEach(() => {
 
 describe("client pins: session storage key names", () => {
   it("user id and username land under their exact AsyncStorage keys (encrypted wrappers)", async () => {
-    await api.setSession("tok", "u-1", "kim");
+    await api.setSession("tok", "abababababababababababababababab", "kim");
     // secureStore wraps the values, but they must exist under the canonical
     // keys — an emptied key constant would store them under "" instead.
     expect(await storage.getItem("@mindpattern/user_id")).not.toBeNull();
@@ -87,7 +87,7 @@ describe("client pins: origin-bound local state on server switch", () => {
 
 describe("client pins: first URL save", () => {
   it("treats the implicit localhost default as a real origin and wipes its session before a first remote URL save", async () => {
-    await api.setSession("tok-keep", "u-1", "alice");
+    await api.setSession("tok-keep", "abababababababababababababababab", "alice");
     expect(await api.isLoggedIn()).toBe(true);
     // `previous === null` means the active origin was DEFAULT_BASE_URL. A
     // first save to a remote host is therefore a real origin change; keeping
@@ -154,7 +154,7 @@ describe("client pins: 401 hook gating", () => {
   it("a non-401 error that carried a token does NOT fire the session-death hook", async () => {
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
-    await api.setSession("tok-1", "u-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "boom" }, 500));
     await expect(api.insights()).rejects.toMatchObject({ status: 500 });
     expect(handler).not.toHaveBeenCalled();

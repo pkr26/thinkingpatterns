@@ -55,6 +55,22 @@ const ENTRY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
  *  as entry ids (backend/app/models.py new_id). */
 const CONSENT_ID_PATTERN = /^[0-9a-f]{32}$/;
 
+/** L-7 (2026-09-20): server-provided account ids are the backend's 32-hex
+ *  new_id(). A login response carrying any other shape is a hostile or
+ *  broken server relabeling the account — adopting it verbatim would bind
+ *  every future blob's AAD to an id the real server does not know, making
+ *  the journal silently undecryptable there. Refuse before persisting. */
+const USER_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/** First-seen origin pin (M-3, 2026-09-20): the login credential is the
+ *  derived auth key — there is no reset path — so a user socially
+ *  engineered into typing their password at an attacker origin hands over
+ *  the account forever. The pin is the device's memory of the FIRST origin
+ *  a successful login happened against; LoginScreen renders a prominent
+ *  warning whenever the selected origin differs from it, so a phished
+ *  "support server" URL is visible BEFORE the password is typed. */
+const PINNED_ORIGIN_KEY = "@mindpattern/pinned_origin";
+
 /** Which sharing-disclosure copy the grant flow showed; recorded on the
  *  consent row server-side (GDPR Art. 7 parity with the LLM consent).
  *  Keep in sync with backend/app/api/consents.py SHARING_DISCLOSURE_VERSION
@@ -76,6 +92,9 @@ export interface ListedConsent {
   status: string;
   granted_at: string;
   revoked_at: string | null;
+  /** The therapist's public wrap key (rotation flow, 2026-09-20): a client
+   *  that just rekeyed its data key re-wraps it to the same therapist. */
+  therapist_wrap_pub_key?: string;
 }
 
 /** The pairing-lookup answer: who the code belongs to, before any data
@@ -181,7 +200,8 @@ export function setOriginChangeHandler(handler: (() => void | Promise<void>) | n
 
 /** Every per-account and per-origin local value: salts, unlock proofs,
  *  recompute stamps, mood logs, pending question feedback, queue
- *  quarantine. All of it belongs to the origin it was created against. */
+ *  quarantine, analysis-generation marks, entry-version marks. All of it
+ *  belongs to the origin it was created against. */
 function isOriginBoundKey(key: string): boolean {
   return (
     key.startsWith("@mindpattern/salt_") ||
@@ -191,7 +211,12 @@ function isOriginBoundKey(key: string): boolean {
     // constant to import, so the literal is duplicated here on purpose.
     key.startsWith("@mindpattern/question_feedback.") ||
     key.startsWith("mindpattern.moodlog.") ||
-    key.startsWith("@mindpattern/crisis_dialog_")
+    key.startsWith("@mindpattern/crisis_dialog_") ||
+    // M-1/M-2 (2026-09-20): both rollback guards fail closed once a mark
+    // exists — a mark remembered against origin A must never judge origin
+    // B's (perfectly honest, lower) generations.
+    key.startsWith("mindpattern.stateSeq.") ||
+    key.startsWith("mindpattern.entryVersions.")
   );
 }
 
@@ -334,6 +359,12 @@ export const API_ERROR_CODES = [
   "entry_blob_invalid",
   "entry_payload_malformed",
   "feedback_blob_invalid",
+  // M-2 (2026-09-20): the replacement's content_version lost a race with
+  // another device's edit — retryable after refetching the row.
+  "version_conflict",
+  // H-1 (2026-09-20): the rotation endpoints' specific failures.
+  "rekey_key_mismatch",
+  "processing_session_invalid",
   // 2026-09-20 audit H-14: the server returns this 409 when a legacy v1
   // sharing consent cannot cover a measures read; TherapistShareScreen
   // branches on it to show the calm "sharing terms updated" state.
@@ -557,6 +588,10 @@ export interface ListedEntry {
   blob: string;
   entry_date: string;
   received_at: string;
+  /** Content generation (audit fix M-2, 2026-09-20): 1 on the server's
+   *  first store of the id, +1 per replacement. Absent on pre-2026-09-20
+   *  servers — callers treat absence as legacy (version-unverified). */
+  content_version?: number;
 }
 
 /** Strict wire representation for an owner-journal snapshot revision. Keep
@@ -633,11 +668,50 @@ function entryRevision(header: string | null): EntriesRevision | null {
 
 export const api = {
   setSession: async (token: string, userId: string, username?: string) => {
+    // L-7 (2026-09-20): a server-controlled account id becomes the vault's
+    // owner binding and the AAD owner part of every stored blob — only the
+    // backend's exact id shape may be adopted. A mismatched shape is a
+    // hostile server relabeling the account; refusing here fails the login
+    // visibly instead of corrupting all future ciphertext silently.
+    if (!USER_ID_PATTERN.test(userId)) {
+      throw new ApiError(0, "the server returned an invalid account id — refusing to trust this server");
+    }
     // All three values are session material and live encrypted at rest
     // (see secureStore): a device backup must not contain a usable token.
     await secureStore.setItem(TOKEN_KEY, token);
     await secureStore.setItem(USER_ID_KEY, userId);
     if (username !== undefined) await secureStore.setItem(USERNAME_KEY, username);
+    // M-3: pin the origin on first successful authentication. Later logins
+    // at a different origin render the warning (see originPinStatus).
+    try {
+      const pinned = await secureStore.getItem(PINNED_ORIGIN_KEY);
+      if (pinned === null) await secureStore.setItem(PINNED_ORIGIN_KEY, canonicalOrigin(await originOf(await getBaseUrl())));
+    } catch {
+      // best effort: the warning surface degrades to "unpinned" silently
+    }
+  },
+  /** M-3: the first origin this device ever authenticated against (null
+   *  before the first login, or if the pin could not be stored). */
+  pinnedOrigin: async (): Promise<string | null> => {
+    try {
+      return await secureStore.getItem(PINNED_ORIGIN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  /** M-3: whether the currently selected server differs from the pinned
+   *  origin — the LoginScreen warning state. Canonicalized comparison so
+   *  loopback alias spellings do not false-alarm. */
+  originPinChanged: async (): Promise<boolean> => {
+    const pinned = await secureStore.getItem(PINNED_ORIGIN_KEY).catch(() => null);
+    if (pinned === null) return false;
+    const current = canonicalOrigin(await originOf(await getBaseUrl()));
+    return current !== pinned;
+  },
+  /** M-3: explicitly trust the currently selected origin (called from the
+   *  warning's confirm action after the user has verified the URL). */
+  confirmCurrentOrigin: async (): Promise<void> => {
+    await secureStore.setItem(PINNED_ORIGIN_KEY, canonicalOrigin(await originOf(await getBaseUrl())));
   },
   getUserId: async () => secureStore.getItem(USER_ID_KEY),
   getUsername: async () => secureStore.getItem(USERNAME_KEY),
@@ -701,8 +775,13 @@ export const api = {
   /** Server-side kill switch: invalidates every bearer token for the account. */
   logout: () => request("POST", `${API_PREFIX}/auth/logout`),
 
-  createEntry: (clientEntryId: string, blobB64: string, entryDate: string) =>
-    request("POST", `${API_PREFIX}/entries`, { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate }),
+  createEntry: (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number) =>
+    request("POST", `${API_PREFIX}/entries`, {
+      client_entry_id: clientEntryId,
+      blob: blobB64,
+      entry_date: entryDate,
+      ...(contentVersion !== undefined ? { content_version: contentVersion } : {}),
+    }),
   /** MBC measures (2026-09-19): opaque encrypted questionnaire records. */
   createMeasure: (clientMeasureId: string, blobB64: string, measureDate: string) =>
     request(
@@ -746,26 +825,51 @@ export const api = {
   /** Offline-queue upload. Identical to createEntry but pinned to the origin
    *  the queue is scoped to: the request refuses to ship (OriginPinnedError,
    *  nothing sent) if the selected server moved, so queued ciphertext can
-   *  never ride a different origin's credentials. */
+   *  never ride a different origin's credentials. The queue always sends
+   *  content_version 1 (an upload is the first generation of its id). */
   createQueuedEntry: (clientEntryId: string, blobB64: string, entryDate: string, expectedOrigin: string) =>
     request(
       "POST",
       `${API_PREFIX}/entries`,
-      { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate },
+      { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate, content_version: 1 },
       {},
       { expectedOrigin },
     ),
+  /** One entry by its stable client id (audit fix M-5, 2026-09-20): the
+   *  idempotivity-verification primitive. The offline queue proves a 409
+   *  "already exists" answer is REAL before discarding its only local copy
+   *  — a hostile/flaky server that 409s without persisting surfaces as a
+   *  404 here. Optionally origin-pinned like the queue upload. */
+  getEntry: async (clientEntryId: string, expectedOrigin?: string) => {
+    if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
+      throw new ApiError(0, "invalid entry id — refusing the request");
+    }
+    return request(
+      "GET",
+      `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`,
+      undefined,
+      {},
+      expectedOrigin !== undefined ? { expectedOrigin } : {},
+    ) as Promise<ListedEntry>;
+  },
   /** Atomically replace an existing encrypted entry. The client id stays
-   * stable, so the encrypted blob remains AAD-bound to the same account and
-   * record. This deliberately avoids delete-then-create data loss. */
-  updateEntry: async (clientEntryId: string, blobB64: string, entryDate: string) => {
+   *  stable, so the encrypted blob remains AAD-bound to the same account and
+   *  record. This deliberately avoids delete-then-create data loss.
+   *  contentVersion (M-2): the version bound into the replacement blob's
+   *  v2 AAD — must be stored+1; a 409 version_conflict means another device
+   *  edited first (refetch, re-encrypt, retry). */
+  updateEntry: async (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number) => {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
     return request(
       "PUT",
       `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`,
-      { blob: blobB64, entry_date: entryDate },
+      {
+        blob: blobB64,
+        entry_date: entryDate,
+        ...(contentVersion !== undefined ? { content_version: contentVersion } : {}),
+      },
     );
   },
   /** One bounded ciphertext page. Screens use this rather than materializing
@@ -928,6 +1032,52 @@ export const api = {
   getLlmConsent: () => request("GET", `${API_PREFIX}/account/llm-consent`),
   setLlmConsent: (enabled: boolean, verifierB64: string) =>
     request("PUT", `${API_PREFIX}/account/llm-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
+
+  // --- credential & key rotation (audit fix H-1/M-3, 2026-09-20) -----------
+  // The recovery path for a captured key or phished verifier: rekey the
+  // stored blobs (old data key -> new), re-wrap live therapist grants, then
+  // rotate the login credential. See src/rotation.ts for the orchestration
+  // and the required ordering (rekey FIRST; the credential rotation kills
+  // every bearer at the end).
+  /** Server-side re-encryption of every stored blob under a new data key.
+   *  Both keys arrive as single-use processing-session tokens; the OLD
+   *  password proof gates the operation. All-or-nothing. */
+  rekeyStoredData: (oldProcessingToken: string, newProcessingToken: string, verifierB64: string) =>
+    request(
+      "POST",
+      `${API_PREFIX}/processing/rekey`,
+      undefined,
+      {
+        "X-Processing-Token": oldProcessingToken,
+        "X-New-Processing-Token": newProcessingToken,
+        "X-Account-Verifier": verifierB64,
+      },
+      { sensitive: true },
+    ),
+  /** Retire the current login credential (salt + verifier) for a new one.
+   *  Old-password proof required; bumps the server-side epoch, so every
+   *  bearer (including this device's) dies with it. */
+  rotateCredential: (oldVerifierB64: string, newSaltB64: string, newVerifierB64: string) =>
+    request(
+      "PUT",
+      `${API_PREFIX}/account/credential`,
+      { verifier: oldVerifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64 },
+      {},
+      { sensitive: true },
+    ),
+  /** Swap the wrapped data key of one ACTIVE grant after a rekey. */
+  rewrapConsent: (consentId: string, ephemeralPubB64: string, wrappedKeyB64: string, verifierB64: string) => {
+    if (!CONSENT_ID_PATTERN.test(consentId)) {
+      throw new ApiError(0, "invalid consent id — refusing the request");
+    }
+    return request(
+      "PUT",
+      `${API_PREFIX}/consents/${consentId}/rewrap`,
+      { ephemeral_pub: ephemeralPubB64, wrapped_key: wrappedKeyB64 },
+      { "X-Account-Verifier": verifierB64 },
+      { sensitive: true },
+    );
+  },
 
   // --- therapist sharing (2026-09-16) ---------------------------------------
   /** Resolve a pairing code to WHO it belongs to. No data moves yet — the

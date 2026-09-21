@@ -18,12 +18,13 @@ import base64
 import binascii
 import hmac
 import json
+import os
 from datetime import date as date_type, datetime, timezone
 
 import anyio
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
@@ -32,6 +33,7 @@ from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
 from ..models import Consent, Entry, Insight, Measure, User, utcnow
 from ..schemas import (
     AccountDeleteRequest,
+    CredentialRotateRequest,
     ExportBundle,
     InsightOut,
     LlmConsentRequest,
@@ -39,7 +41,13 @@ from ..schemas import (
     ShareRecord,
     entry_out,
 )
-from .auth import _auth_limiter, auth_work_slot, hash_verifier_off_loop
+from .auth import (
+    AUTH_KEY_SIZE,
+    SALT_BYTES,
+    _auth_limiter,
+    auth_work_slot,
+    hash_verifier_off_loop,
+)
 from .measures import _measure_out
 from ..services import llm
 
@@ -551,6 +559,95 @@ def _consent_response(user: User, settings) -> LlmConsentResponse:
         llm_consent_disclosure=user.llm_consent_disclosure,
         llm_consent_policy=user.llm_consent_policy,
     )
+
+
+@router.put(
+    "/credential",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-credential", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def rotate_credential(
+    body: CredentialRotateRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Rotate the LOGIN credential (2026-09-20, audit fix H-1/M-3).
+
+    The recovery path for a phished verifier or any credential exposure: the
+    standing login credential is the derived auth key, and until now NOTHING
+    could ever retire a captured one. Requires the CURRENT verifier (a
+    stolen bearer must not swap the credential and lock the real user out),
+    stores a fresh client KDF salt + scrypt-verifier for the NEW password,
+    bumps the token epoch (every bearer dies), and purges in-memory
+    processing keys (nothing may outlive the credential it authenticated
+    under).
+
+    Ordering contract with POST /processing/rekey: a client changing its
+    password rekeys the stored blobs FIRST (both keys still derivable),
+    THEN rotates the credential here. This endpoint alone never touches the
+    data key or any stored ciphertext.
+    """
+    # Old-password proof first: nothing else may run on a bearer alone.
+    await _require_verifier(user, body.verifier, request)
+    try:
+        new_salt_bytes = base64.b64decode(body.new_salt, validate=True)
+        new_verifier_bytes = base64.b64decode(body.new_verifier, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(
+            status_code=422,
+            detail="new_salt and new_verifier must be base64",
+            code="validation_error",
+        ) from None
+    if len(new_salt_bytes) != SALT_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"new_salt must be exactly {SALT_BYTES} bytes",
+            code="validation_error",
+        )
+    if len(new_verifier_bytes) != AUTH_KEY_SIZE:
+        raise ApiError(
+            status_code=422,
+            detail=f"new_verifier must be {AUTH_KEY_SIZE} bytes",
+            code="validation_error",
+        )
+
+    scrypt_server_salt = os.urandom(16)
+    async with auth_work_slot(request):
+        new_verifier_hash = await hash_verifier_off_loop(
+            new_verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
+        )
+
+    expected_epoch = user.token_epoch
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        await session.execute(
+            update(User)
+            .where(User.id == fresh.id)
+            .values(
+                salt=body.new_salt,
+                verifier=new_verifier_hash,
+                scrypt_salt=scrypt_server_salt,
+                token_epoch=User.token_epoch + 1,
+            )
+        )
+        await session.commit()
+        # The credential every live bearer authenticated under is gone: kill
+        # the sessions and any resident processing keys in the same lifecycle
+        # event, exactly like logout.
+        request.app.state.key_store.destroy_all_for_owner(fresh.id)
 
 
 @router.get(

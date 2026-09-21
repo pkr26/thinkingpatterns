@@ -41,17 +41,17 @@ vi.mock("../src/crypto", async (importOriginal) => {
   return {
     ...actual,
     deriveMasterKey: vi.fn(async () => new Uint8Array(32)),
+    // Audit fix P-1 (2026-09-20): the verifier is raw bytes (base64 derived
+    // only at the send); key generation returns the sealed blob directly.
     derivePortalKeys: vi.fn(async () => ({
-      authKeyB64: "AUTHKEY==",
+      authKey: new Uint8Array(32),
       wrapKek: new Uint8Array(32),
       noteKey: new Uint8Array(32),
     })),
     generateTherapistKeyPair: vi.fn(async () => ({
       publicKeySpkiB64: "P".repeat(124),
-      privateKeyPkcs8B64: "PRIV==",
-      privateKey: {},
+      wrapKeyBlobB64: "SEALED==",
     })),
-    sealPrivateKeyForUpload: vi.fn(async () => "SEALED=="),
     unlockWrapPrivateKey: vi.fn(async () => ({ algorithm: { name: "ECDH" } })),
     unwrapPatientDataKey: vi.fn(async () => new Uint8Array(32)),
     decryptInsights: vi.fn(async () => ({ stats: { patterns: [] } })),
@@ -137,7 +137,7 @@ describe("App", () => {
     const crypto = vi.mocked(await import("../src/crypto"));
     const wrapKek = new Uint8Array(32).fill(7);
     const noteKey = new Uint8Array(32).fill(9);
-    crypto.derivePortalKeys.mockResolvedValueOnce({ authKeyB64: "AUTHKEY==", wrapKek, noteKey });
+    crypto.derivePortalKeys.mockResolvedValueOnce({ authKey: new Uint8Array(32), wrapKek, noteKey });
     vi.mocked(api.patients).mockResolvedValueOnce([
       {
         user_id: "user-1", username: "patienta", status: "active",
@@ -217,13 +217,17 @@ describe("App", () => {
     const crypto = vi.mocked(await import("../src/crypto"));
     const wrapKek = new Uint8Array(32).fill(7);
     const noteKey = new Uint8Array(32).fill(9);
-    crypto.derivePortalKeys.mockResolvedValueOnce({ authKeyB64: "AUTHKEY==", wrapKek, noteKey });
+    const authKey = new Uint8Array(32).fill(5);
+    crypto.derivePortalKeys.mockResolvedValueOnce({ authKey, wrapKek, noteKey });
     crypto.unlockWrapPrivateKey.mockRejectedValueOnce(new Error("network down"));
     const root = await login();
     await flush();
     expect(textOf(root)).toContain("network down");
     expect([...wrapKek]).toEqual(new Array(32).fill(0));
     expect([...noteKey]).toEqual(new Array(32).fill(0));
+    // P-1 (2026-09-20): the password-equivalent verifier bytes do not survive
+    // the flow either — wiped at the login send, before the unlock failure.
+    expect([...authKey]).toEqual(new Array(32).fill(0));
   });
 
   it("2026-09-19: a bfcache restore (persisted pageshow) locks the app down", async () => {

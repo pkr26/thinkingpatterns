@@ -10,7 +10,7 @@ import { Alert } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -608,7 +608,12 @@ describe("passwordPolicyError (mirrors the portal's policy)", () => {
   it("exempts 16+ character passphrases from the class rule", async () => {
     const { passwordPolicyError } = await import("../../src/screens/LoginScreen");
     expect(passwordPolicyError("abcdefghijklmnop")).toBe(""); // 16, one class
-    expect(passwordPolicyError("aaaaaaaaaaaaaaaaaaaaaaaa")).toBe(""); // 25, one class
+    // L-6 (2026-09-20): the input used to be 25 literal "a"s — a repeated
+    // single character is in every dictionary and the offline unlock oracle
+    // would crack it in minutes, so it is now REJECTED; a varied one-class
+    // passphrase keeps the exemption's intent.
+    expect(passwordPolicyError("quietriverstonecloudspine")).toBe(""); // 25, one class
+    expect(passwordPolicyError("aaaaaaaaaaaaaaaaaaaaaaaa")).toContain("too easy"); // repeated char
   });
 
   it("keeps unicode and long passwords usable", async () => {
@@ -617,8 +622,20 @@ describe("passwordPolicyError (mirrors the portal's policy)", () => {
     expect(passwordPolicyError("mötivátiön jöurnal çafé")).toBe("");
     // Below 16, non-ASCII characters count as the symbol class.
     expect(passwordPolicyError("Cafébrûlée123")).toBe("");
-    // A password-manager-length string is fine (no maximum).
-    expect(passwordPolicyError("a".repeat(100))).toBe("");
+    // A password-manager-length string is fine (no maximum) — varied, not
+    // one repeated character (L-6).
+    expect(passwordPolicyError("quietriverstonecloudspine".repeat(4))).toBe("");
+  });
+
+  it("rejects trivially guessable families (L-6: client-only policy)", async () => {
+    const { passwordPolicyError } = await import("../../src/screens/LoginScreen");
+    // Common words embedded anywhere.
+    expect(passwordPolicyError("Xy9!myPassword2026qz")).toContain("too easy");
+    expect(passwordPolicyError("qwertyRoamingLakes!7")).toContain("too easy");
+    // A single repeated character, however long.
+    expect(passwordPolicyError("z".repeat(40))).toContain("too easy");
+    // Keyboard-row prefixes.
+    expect(passwordPolicyError("asdfQuietRivers99!")).toContain("too easy");
   });
 });
 

@@ -103,7 +103,10 @@ describe("key schedule vectors", () => {
     it(`vector ${i}: master -> auth key matches the backend`, async () => {
       const master = await deriveMasterKey(v.password, unb64(v.salt));
       const keys = await derivePortalKeys(master);
-      expect(keys.authKeyB64).toBe(v.auth_key);
+      // Audit fix P-1 (2026-09-20): the verifier is returned as raw bytes;
+      // its base64 is derived only at the network send, so the pin encodes
+      // that derivation instead of reading a string field.
+      expect(toB64(keys.authKey)).toBe(v.auth_key);
     });
   }
 });
@@ -250,12 +253,33 @@ describe("therapist key custody", () => {
   it("seals the private key for upload and unlocks it after login", async () => {
     const master = await deriveMasterKey("portal-pass-1", crypto.getRandomValues(new Uint8Array(16)));
     const keys = await derivePortalKeys(master);
-    const pair = await generateTherapistKeyPair();
+    // Audit fix P-1 (2026-09-20): generation and upload-sealing are one call;
+    // the returned object carries public material and the sealed blob only —
+    // no base64 string of the raw private key ever exists.
+    const pair = await generateTherapistKeyPair(keys.wrapKek, "drportal");
     expect(pair.publicKeySpkiB64).toHaveLength(124);
-    const sealed = await sealPrivateKeyForUpload(keys.wrapKek, pair.privateKeyPkcs8B64, "drportal");
+    expect(Object.keys(pair).sort()).toEqual(["publicKeySpkiB64", "wrapKeyBlobB64"]);
     // What the server sees is opaque; what the right password yields is a
     // usable ECDH key.
-    await expect(unlockWrapPrivateKey(keys.wrapKek, sealed, "other-name")).rejects.toThrow(TamperError);
+    await expect(unlockWrapPrivateKey(keys.wrapKek, pair.wrapKeyBlobB64, "other-name")).rejects.toThrow(TamperError);
+    const unlocked = await unlockWrapPrivateKey(keys.wrapKek, pair.wrapKeyBlobB64, "drportal");
+    expect(unlocked.algorithm.name).toBe("ECDH");
+  });
+
+  it("P-1 (2026-09-20): the verifier comes back as zeroizable bytes, never a string field", async () => {
+    const master = await deriveMasterKey("portal-pass-4", crypto.getRandomValues(new Uint8Array(16)));
+    const keys = await derivePortalKeys(master);
+    expect(keys.authKey).toBeInstanceOf(Uint8Array);
+    expect("authKeyB64" in keys).toBe(false);
+  });
+
+  it("P-1 (2026-09-20): sealPrivateKeyForUpload consumes raw DER bytes and zeroizes them", async () => {
+    const master = await deriveMasterKey("portal-pass-1", crypto.getRandomValues(new Uint8Array(16)));
+    const keys = await derivePortalKeys(master);
+    const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+    const sealed = await sealPrivateKeyForUpload(keys.wrapKek, pkcs8, "drportal");
+    expectWiped(pkcs8);
     const unlocked = await unlockWrapPrivateKey(keys.wrapKek, sealed, "drportal");
     expect(unlocked.algorithm.name).toBe("ECDH");
   });
@@ -263,8 +287,8 @@ describe("therapist key custody", () => {
   it("zeroizes decrypted PKCS#8 bytes after both import outcomes", async () => {
     const master = await deriveMasterKey("portal-pass-3", crypto.getRandomValues(new Uint8Array(16)));
     const keys = await derivePortalKeys(master);
-    const pair = await generateTherapistKeyPair();
-    const sealed = await sealPrivateKeyForUpload(keys.wrapKek, pair.privateKeyPkcs8B64, "drportal");
+    const pair = await generateTherapistKeyPair(keys.wrapKek, "drportal");
+    const sealed = pair.wrapKeyBlobB64;
 
     const successInput = captureImportedKey("pkcs8");
     try {
@@ -444,7 +468,7 @@ describe("pairing key fingerprint", () => {
   };
   const firstWrap = wrapVectors.wrap_vectors[0];
   const FIXED_SPKI_B64 = firstWrap ? firstWrap.therapist_pub_spki : "";
-  const EXPECTED = "CB54 DE22 C976 DF43"; // sha256(spk)[0:8], hex groups — mobile-pinned
+  const EXPECTED = "CB54 DE22 C976 DF43 08B6 7F8F 112B D4D7"; // sha256(spk)[0:8], hex groups — mobile-pinned
 
   it("formats the shared-vector key identically to the mobile app", async () => {
     const { keyFingerprint } = await import("../src/crypto");

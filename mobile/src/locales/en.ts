@@ -140,6 +140,13 @@ export const en: Record<string, string> = {
   "login.policyVarietyTitle": "Password needs more variety",
   "login.policyMin": "Use at least 12 characters — this password derives your encryption keys.",
   "login.policyVariety": "Use a 16-character passphrase, or 12+ characters from at least three character types.",
+  "login.policyCommon": "That password is too easy to guess. Avoid common words, repeated characters, and keyboard sequences.",
+  "login.serverLabel": "Server: {server}",
+  "login.serverA11y": "Selected server address",
+  "login.serverChangedWarning":
+    "This server is different from the one you usually sign in to. Check the address before typing your password — your password is your encryption key and there is no reset.",
+  "login.serverChangedA11y": "Warning: server address changed",
+  "login.trustThisServer": "I trust this server",
   "login.policyHint":
     "Choose a password of at least 12 characters — a 16-character passphrase, or 12–15 characters from at least three character types.",
   "login.noReset":
@@ -577,6 +584,23 @@ export const en: Record<string, string> = {
   "settings.llmBody": "Allow sending your (decrypted) entries to an external AI service for pattern analysis. Off by default; needs your password to change.",
   "settings.llmA11y": "Allow third-party AI analysis",
   "settings.reauthDeleteTitle": "Enter your password to delete everything",
+  "settings.reauthBioTitle": "Enter your password to enable biometric unlock",
+  "settings.changePasswordLabel": "Change password",
+  "settings.changePasswordCancel": "Close change password",
+  "settings.changePasswordTitle": "Change your password",
+  "settings.changePasswordBody":
+    "This rotates your sign-in credential AND re-encrypts your journal under a new encryption key — the recovery step if your password or key was ever exposed. Every device signs out afterwards; active sharing grants are re-wrapped automatically.",
+  "settings.newPasswordPlaceholder": "New password (12+ characters)",
+  "settings.newPasswordA11y": "New password",
+  "settings.changePasswordButton": "Rotate keys and sign in again",
+  "settings.rotateWorking": "Rotating…",
+  "settings.rotateSuccessTitle": "Password changed",
+  "settings.rotateSuccessBody":
+    "Your journal is now encrypted under your new password. Sign in again on this device and on any other device you use.",
+  "settings.rotateFailedTitle": "Could not change password",
+  "settings.rotateWrongOld": "The current password was not accepted. Nothing was changed.",
+  "settings.rotateRewrapFailed":
+    "These sharing grants could not be re-wrapped and must be re-paired from the therapist's pairing code: {names}",
   "settings.reauthLlmTitle": "Enter your password to {action} third-party AI analysis",
   "settings.enableWord": "enable",
   "settings.disableWord": "disable",

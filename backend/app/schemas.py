@@ -71,6 +71,10 @@ class EntryCreate(StrictRequestModel):
     client_entry_id: str = Field(pattern=CLIENT_ID_PATTERN)
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)  # b64 envelope
     entry_date: date
+    # v2 AAD contract (2026-09-20 audit fix M-2): a create is ALWAYS the
+    # first content generation — the server rejects any other value so the
+    # version the client bound into its AAD is the version the row stores.
+    content_version: int = Field(default=1, ge=1, le=2**63 - 1)
 
 
 class EntryReplace(StrictRequestModel):
@@ -80,10 +84,17 @@ class EntryReplace(StrictRequestModel):
     the ciphertext AAD); allowing it to change would turn an edit into a
     delete/create sequence with the same data-loss failure mode this route
     exists to remove.
+
+    ``content_version`` (2026-09-20 audit fix M-2): modern clients send the
+    version they bound into the new blob's v2 AAD; it must equal the stored
+    version + 1 (409 ``version_conflict`` otherwise, so the client can
+    refetch and retry). Legacy clients omit it; the stored version still
+    advances so v2 clients observe a monotonic sequence.
     """
 
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
     entry_date: date
+    content_version: int | None = Field(default=None, ge=1, le=2**63 - 1)
 
 
 class EntryOut(BaseModel):
@@ -92,6 +103,9 @@ class EntryOut(BaseModel):
     blob: str
     entry_date: date
     received_at: datetime
+    # Additive (2026-09-20): the row's monotonic content generation — v2
+    # clients bind it into the entry AAD and keep a per-id high-water mark.
+    content_version: int = 1
 
 
 class ProcessingSessionRequest(StrictRequestModel):
@@ -101,6 +115,19 @@ class ProcessingSessionRequest(StrictRequestModel):
 class ProcessingSessionResponse(BaseModel):
     session_token: str
     expires_in: int
+
+
+class RekeyResponse(BaseModel):
+    """Result of POST /processing/rekey (2026-09-20, audit fix H-1).
+
+    Counts of rows re-encrypted from the old data key to the new one, so the
+    client can verify nothing was silently skipped (each count must equal the
+    collection sizes it knows from its own sync state).
+    """
+
+    entries: int
+    insights: int
+    measures: int
 
 
 class RecomputeResponse(BaseModel):
@@ -127,6 +154,26 @@ class AccountDeleteRequest(StrictRequestModel):
     a stolen bearer token alone must not be able to erase a journal."""
 
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+
+
+class CredentialRotateRequest(StrictRequestModel):
+    """Rotate the LOGIN credential (2026-09-20, audit fix H-1/M-3).
+
+    Re-authenticated with the CURRENT verifier: a stolen bearer alone must
+    not be able to swap the credential (which would lock the real user out)
+    and a phished verifier alone cannot survive the user rotating it. The
+    new salt/verifier are exactly the register payload's shape (16-byte and
+    32-byte values, base64). Rotation also bumps the token epoch and purges
+    every processing session: all devices re-login under the new credential.
+
+    Deliberately login-credential-only: the journal's data key is untouched,
+    so no stored ciphertext changes meaning. A data-key change is the separate
+    POST /processing/rekey flow (run BEFORE this endpoint with both keys).
+    """
+
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
+    new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
 
 
 class LlmConsentRequest(StrictRequestModel):
@@ -225,13 +272,19 @@ class ExportBundle(BaseModel):
 
 def entry_out(row: Entry) -> EntryOut:
     """Entry row -> wire shape; the one construction shared by the entries
-    router and the account export."""
+    router and the account export.
+
+    ``content_version`` coalesces to 1: the column default applies at flush
+    time, so an unflushed ORM instance (test doubles, in-memory constructs)
+    still renders — and no stored row can legitimately be below 1.
+    """
     return EntryOut(
         id=row.id,
         client_entry_id=row.client_entry_id,
         blob=base64.b64encode(bytes(row.blob)).decode("ascii"),
         entry_date=row.entry_date,
         received_at=row.received_at,
+        content_version=row.content_version if row.content_version is not None else 1,
     )
 
 
@@ -324,6 +377,26 @@ class ConsentOut(BaseModel):
     status: str
     granted_at: datetime
     revoked_at: datetime | None = None
+    # Additive (2026-09-20, rotation flow): the therapist's public wrap key,
+    # so a client that just rotated its data key can re-wrap it to the same
+    # therapist (PUT /consents/{id}/rewrap) without a new pairing round-trip.
+    # Absent on legacy rows is impossible (registration requires the key);
+    # the None default keeps the field additive for older serialized copies.
+    therapist_wrap_pub_key: str | None = None
+
+
+class ConsentRewrapRequest(StrictRequestModel):
+    """Re-wrap the data key of an ACTIVE consent to the same therapist.
+
+    Sent by the client after POST /processing/rekey rotated the account's
+    data key: the old wrapped_key opened the PREVIOUS key and is now dead
+    weight. Same shape/validation as the grant payload's key fields, and the
+    same password re-auth (X-Account-Verifier): a stolen bearer must not be
+    able to substitute key material inside a live share.
+    """
+
+    ephemeral_pub: str = Field(min_length=1, max_length=MAX_SPKI_B64)
+    wrapped_key: str = Field(min_length=1, max_length=MAX_WRAP_B64)
 
 
 class PatientOut(BaseModel):

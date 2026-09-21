@@ -28,6 +28,7 @@ export function makeApiMock() {
   const listEntries = vi.fn(async () => []);
   return {
     meta: vi.fn(async () => ({ unlock_days: 30, llm_available: false, sharing_available: true })),
+    getBaseUrl: vi.fn(async () => "http://localhost:8000"),
     isLoggedIn: vi.fn(async () => false),
     getUserId: vi.fn(async () => "user-1"),
     getUsername: vi.fn(async () => "alice"),
@@ -48,6 +49,19 @@ export function makeApiMock() {
     listEntriesPage: vi.fn(async () => ({ entries: await listEntries(), nextOffset: null, revision: null })),
     listEntries,
     deleteEntry: vi.fn(async () => ({})),
+    // Single-entry fetch (audit fix M-5, 2026-09-20): default 404 shape —
+    // tests exercising the queue's 409-verification override it.
+    getEntry: vi.fn(async () => {
+      throw new ApiError(404, "entry not found", "not_found");
+    }),
+    // Origin pin (M-3): no warning by default; tests flip it to true.
+    originPinChanged: vi.fn(async () => false),
+    pinnedOrigin: vi.fn(async () => null),
+    confirmCurrentOrigin: vi.fn(async () => {}),
+    // Rotation flow (H-1, 2026-09-20)
+    rekeyStoredData: vi.fn(async () => ({ entries: 0, insights: 0, measures: 0 })),
+    rotateCredential: vi.fn(async () => ({})),
+    rewrapConsent: vi.fn(async () => ({})),
     // MBC measures (2026-09-19)
     createMeasure: vi.fn(async () => ({})),
     listMeasures: vi.fn(async () => []),

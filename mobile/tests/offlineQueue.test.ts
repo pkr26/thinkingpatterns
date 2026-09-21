@@ -28,6 +28,11 @@ vi.mock("../src/api/client", async (importOriginal) => {
       createEntry: vi.fn(async () => ({})),
       createQueuedEntry: vi.fn(async () => ({})),
       getUserId: vi.fn(async () => "alice"),
+      // M-5 (2026-09-20): the 409-verification primitive. Default 404 —
+      // an unverified 409 parks the item (per-test overrides flip it).
+      getEntry: vi.fn(async () => {
+        throw new ApiError(404, "entry not found", "not_found");
+      }),
     },
   };
 });
@@ -499,12 +504,38 @@ describe("flush retry semantics (restored 2026-09-18)", () => {
     expect((await rejectedEntries("alice")).map((i: any) => i.clientEntryId)).toEqual(["a-too-big", "a-bad"]);
   });
 
-  it("drops the item on a 409 duplicate without recovery", async () => {
+  it("drops the item on a VERIFIED 409 duplicate (single-entry GET proves the row exists)", async () => {
     await enqueue(entry("alice", "a-dup"));
     vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(409, "already exists"));
+    // M-5 (2026-09-20): the 409 is only believed once the idempotency GET
+    // confirms the server really holds the row.
+    vi.mocked(api.getEntry).mockResolvedValueOnce({ id: "x", client_entry_id: "a-dup", blob: "b", entry_date: "2026-09-20", received_at: "2026-09-20T00:00:00Z", content_version: 1 } as never);
+
+    expect(await flushQueue("alice")).toBe(0);
+    expect(vi.mocked(api.getEntry)).toHaveBeenCalledWith("a-dup", expect.any(String));
+    expect(await queueLength("alice")).toBe(0);
+    expect(await rejectedEntries("alice")).toEqual([]);
+  });
+
+  it("parks the item in the rejected store when a 409 lies (M-5: no silent data loss)", async () => {
+    await enqueue(entry("alice", "a-lied"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(409, "already exists"));
+    // The verification GET answers 404: the server never stored the row —
+    // the only copy is the queued ciphertext, and it must NOT be deleted.
+    vi.mocked(api.getEntry).mockRejectedValueOnce(new ApiError(404, "entry not found", "not_found"));
 
     expect(await flushQueue("alice")).toBe(0);
     expect(await queueLength("alice")).toBe(0);
+    expect((await rejectedEntries("alice")).map((i: any) => i.clientEntryId)).toEqual(["a-lied"]);
+  });
+
+  it("keeps the item queued when the 409 verification itself cannot run", async () => {
+    await enqueue(entry("alice", "a-unverified"));
+    vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(409, "already exists"));
+    vi.mocked(api.getEntry).mockRejectedValueOnce(new ApiError(0, "network unreachable"));
+
+    expect(await flushQueue("alice")).toBe(0);
+    expect(await queueLength("alice")).toBe(1);
     expect(await rejectedEntries("alice")).toEqual([]);
   });
 

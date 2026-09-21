@@ -75,12 +75,12 @@ async def test_brain_state_row_exists_and_is_encrypted(client, monkeypatch):
     assert temporal["state"] == "candidate"
     assert temporal["first_qualified"] == TODAY.isoformat()
 
-    class _NextDay(date):
-        @classmethod
-        def today(cls) -> date:
-            return date.today() + timedelta(days=1)
-
-    monkeypatch.setattr("app.api.insights.date_type", _NextDay)
+    # 2026-09-20 (L-1): the recompute day moved from date_type.today()
+    # (host-local) to the shared UTC anchor, so the "next day" seam moved
+    # with it — patch _utc_today itself.
+    monkeypatch.setattr(
+        "app.api.insights._utc_today", lambda: date.today() + timedelta(days=1)
+    )
     # The second observation needs NEW evidence: a work entry on a day the
     # fixture wrote CALM text for (never a Sunday). A next-day recompute of
     # the unchanged corpus no longer promotes statistical kinds — that was

@@ -97,6 +97,42 @@ def build_aad(*parts: str) -> bytes:
     return json.dumps(list(parts), separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
 
+# --- entry AAD versions (2026-09-20 audit fix M-2) -----------------------------
+#
+# v1 bound only ("entry", user_id, client_entry_id): a malicious server could
+# replay a previously stored, cryptographically valid ciphertext for the same
+# id (e.g. the pre-edit version) because GCM authenticates WHO/WHAT a blob
+# belongs to, never WHICH VERSION. v2 adds the entry's monotonic
+# content_version as a fourth AAD part, so a version-echo lie and the
+# ciphertext can no longer travel together: the client (and the server's own
+# recompute) also keeps a per-id high-water mark.
+#
+# Legacy v1 blobs remain decryptable (both platforms try v2 then v1); every
+# new write and every server-side rekey encrypts under v2.
+
+ENTRY_CONTEXT = "entry"
+
+
+def entry_aad_v1(user_id: str, client_entry_id: str) -> bytes:
+    """Legacy three-part entry AAD (pre-2026-09-20 blobs)."""
+    return build_aad(ENTRY_CONTEXT, user_id, client_entry_id)
+
+
+def entry_aad_v2(user_id: str, client_entry_id: str, content_version: int) -> bytes:
+    """Four-part entry AAD binding the row's monotonic content version."""
+    return build_aad(ENTRY_CONTEXT, user_id, client_entry_id, str(content_version))
+
+
+def entry_aad_candidates(
+    user_id: str, client_entry_id: str, content_version: int
+) -> tuple[bytes, bytes]:
+    """AADs to try when decrypting an entry of unknown generation (v2 first)."""
+    return (
+        entry_aad_v2(user_id, client_entry_id, content_version),
+        entry_aad_v1(user_id, client_entry_id),
+    )
+
+
 class SecureBuffer:
     """Best-effort zeroizable container for plaintext inside the enclave.
 

@@ -34,7 +34,7 @@ from .models import Base
 
 # Keep readiness independent of Alembic's CLI/runtime import path. Update
 # this with the newest single Alembic head whenever a revision is added.
-SCHEMA_HEAD = "b1c7f2e9a4d6"
+SCHEMA_HEAD = "d7c1f4a8e2b9"
 
 
 def rowcount(result: Any) -> int:

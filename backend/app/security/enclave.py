@@ -25,12 +25,39 @@ from collections.abc import Callable, Sequence
 
 from .crypto import KEY_SIZE, SecureBuffer, TamperError, decrypt
 
-EncryptedItem = tuple[bytes | None, bytes]  # (aad, blob)
+# The AAD of one encrypted item: a single binding, or an ordered tuple of
+# candidate bindings tried in sequence (entry blobs migrate from the v1
+# three-part AAD to the v2 four-part AAD that pins content_version — a legacy
+# row decrypts under its v1 binding, a fresh one under v2; a wrong-generation
+# binding raises TamperError and the next candidate is tried).
+EncryptedItem = tuple[bytes | None | tuple[bytes, ...], bytes]
 
 
 def zeroize(key: bytearray) -> None:
     for i in range(len(key)):
         key[i] = 0
+
+
+def _decrypt_with_candidates(
+    key: bytearray, blob: bytes, aad: bytes | None | tuple[bytes, ...]
+) -> bytes:
+    """Decrypt one envelope under a single AAD or an ordered candidate tuple.
+
+    A tuple is the entry-blob generation ladder (v2 AAD first, v1 legacy
+    fallback): the first binding that authenticates wins, and only when EVERY
+    candidate fails does the TamperError propagate — identical to the
+    single-AAD contract for genuinely tampered ciphertext.
+    """
+    if aad is None or isinstance(aad, (bytes, bytearray)):
+        return decrypt(key, blob, aad)
+    failure: TamperError | None = None
+    for candidate in aad:
+        try:
+            return decrypt(key, blob, candidate)
+        except TamperError as exc:
+            failure = exc
+    assert failure is not None  # a non-empty tuple reached its end
+    raise failure
 
 
 class KeyNotFound(Exception):
@@ -248,7 +275,7 @@ class SecureProcessingContext:
         key_material = bytearray(self._key)
         try:
             for aad, blob in encrypted:
-                plaintext = decrypt(key_material, blob, aad)
+                plaintext = _decrypt_with_candidates(key_material, blob, aad)
                 buffers.append(SecureBuffer(plaintext))
             return analyze([buf.data for buf in buffers])
         finally:

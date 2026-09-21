@@ -28,7 +28,7 @@ import {
   TextInput,
 } from "react-native";
 import qcrypto from "react-native-quick-crypto";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, getBaseUrl } from "../api/client";
 import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
 import { zeroize } from "../crypto/kdf";
@@ -77,6 +77,23 @@ export function passwordPolicyError(password: string): string {
   if (password.length < 16 && classes < 3) {
     return tr("login.policyVariety");
   }
+  // L-6 (2026-09-20): shape rules the server can never enforce — a
+  // zero-knowledge design leaves it only the derived verifier, so the
+  // password POLICY is entirely client-side. These reject the trivially
+  // guessable families the on-device unlock oracle (unlockProof) would
+  // otherwise crack in minutes on a stolen phone.
+  const lowered = password.toLowerCase();
+  const commonWords = [
+    "password", "qwerty", "123456", "12345678", "123456789", "letmein",
+    "iloveyou", "welcome", "admin", "monkey", "dragon", "sunshine",
+    "princess", "football", "baseball", "master", "abc123", "111111",
+    "mindpattern", "journal",
+  ];
+  if (commonWords.some((word) => lowered.includes(word))) return tr("login.policyCommon");
+  if (/^(.)\1+$/.test(password)) return tr("login.policyCommon"); // one repeated character
+  if (/^(0123|1234|2345|3456|4567|5678|6789|qwer|asdf|zxcv)/i.test(password)) {
+    return tr("login.policyCommon");
+  }
   return "";
 }
 
@@ -89,6 +106,18 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   // Stryker disable next-line StringLiteral: dead initializer — register mode is reachable only through the toggle (which clears confirm in the same batch) and login mode never reads confirm
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
+  // M-3 (2026-09-20): the first origin this device ever authenticated
+  // against is pinned; a DIFFERENT selected server renders a prominent
+  // warning BEFORE the password is typed — the login credential is the
+  // derived auth key with no reset path, so typing it at a phished
+  // "support server" must be a visibly deliberate act.
+  const [serverChanged, setServerChanged] = useState(false);
+  const [serverUrl, setServerUrl] = useState("");
+
+  React.useEffect(() => {
+    void api.originPinChanged().then(setServerChanged).catch(() => setServerChanged(false));
+    void getBaseUrl().then((url) => setServerUrl(url ?? "")).catch(() => {});
+  }, []);
 
   const submit = async () => {
     const name = username.trim();
@@ -193,6 +222,25 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
         {tr("login.subtitle")}
       </Text>
+      {serverUrl !== "" && (
+        <Text style={{ color: t.colors.muted, fontSize: 12 }} accessibilityLabel={tr("login.serverA11y")}>
+          {tr("login.serverLabel", { server: serverUrl })}
+        </Text>
+      )}
+      {serverChanged && (
+        <Text style={{ color: "#b3261e", fontSize: 13 }} accessibilityLabel={tr("login.serverChangedA11y")}>
+          {tr("login.serverChangedWarning")}
+          {"\n"}
+          <Text
+            onPress={() => {
+              void api.confirmCurrentOrigin().then(() => setServerChanged(false)).catch(() => {});
+            }}
+            style={{ fontWeight: "600", textDecorationLine: "underline" }}
+          >
+            {tr("login.trustThisServer")}
+          </Text>
+        </Text>
+      )}
       <TextInput
         style={inputTheme(t)}
         placeholder={tr("login.usernamePlaceholder")}

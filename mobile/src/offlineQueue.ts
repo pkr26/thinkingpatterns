@@ -373,7 +373,6 @@ function isFutureDateRejection(error: ApiError): boolean {
 
 function classifyError(error: unknown): FlushOutcome {
   if (!(error instanceof ApiError)) return { kind: "retry", stop: true };
-  if (error.status === 409) return { kind: "duplicate" };
   if (error.status === 401) return { kind: "session-expired" };
   if (error.status === 429) return { kind: "retry", retryAfterMs: error.retryAfterMs, stop: true };
   if (error.status === 422 && isFutureDateRejection(error)) return { kind: "retry", stop: false };
@@ -385,6 +384,36 @@ function classifyError(error: unknown): FlushOutcome {
   // silently fall back to the 30 s+ local exponential backoff. Status 0
   // (local refusal/network) never carries one, so it is unaffected.
   return { kind: "retry", retryAfterMs: error.retryAfterMs, stop: error.status === 0 };
+}
+
+/** M-5 (2026-09-20): a 409 on a queued upload means "the server already has
+ *  this entry" ONLY if the server can PROVE it. The old classifyError
+ *  mapped any 409 to duplicate and the commit step deleted the queue item —
+ *  the only copy in existence — so a hostile or flaky server answering 409
+ *  without persisting silently destroyed queued journals while the UI showed
+ *  "synced". Now every 409 is verified with the single-entry GET:
+ *    * 200  -> genuine duplicate (the row exists): safe to discard.
+ *    * 404  -> the 409 lied: park the item in the REJECTED store for
+ *              user-visible recovery instead of deleting it.
+ *    * anything else (network, 429, 401) -> retry later; the item stays
+ *              queued and the verification happens again on that attempt.
+ */
+async function verifyDuplicateOutcome(clientEntryId: string, scope: QueueScope): Promise<FlushOutcome> {
+  try {
+    await api.getEntry(clientEntryId, scope.origin);
+    return { kind: "duplicate" };
+  } catch (verifyError) {
+    if (verifyError instanceof ApiError && verifyError.status === 404) {
+      return { kind: "reject" };
+    }
+    if (verifyError instanceof ApiError && verifyError.status === 401) {
+      return { kind: "session-expired" };
+    }
+    if (verifyError instanceof OriginPinnedError) {
+      return { kind: "retry", stop: true };
+    }
+    return { kind: "retry", stop: false };
+  }
 }
 
 /** Upload due items for exactly one origin/account scope. */
@@ -417,7 +446,13 @@ export async function flushQueue(currentUserId: string): Promise<number> {
       // Refused locally: the origin moved under us between the check above
       // and the send. Nothing reached the network; leave the queue untouched.
       if (error instanceof OriginPinnedError) return sent;
-      outcome = classifyError(error);
+      // M-5: a 409 is only a duplicate once the single-entry GET proves the
+      // row exists — see verifyDuplicateOutcome. Every other error keeps its
+      // established classification.
+      outcome =
+        error instanceof ApiError && error.status === 409
+          ? await verifyDuplicateOutcome(item.clientEntryId, scope)
+          : classifyError(error);
     }
 
     if (outcome.kind === "session-expired") {

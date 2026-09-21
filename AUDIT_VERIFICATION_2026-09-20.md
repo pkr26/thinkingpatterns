@@ -1,5 +1,37 @@
 # MindPattern — Independent Audit-Fix Verification
 
+## Addendum (2026-09-20, fourth pass): remediation of the source-audit findings
+
+A fourth adversarial source audit (lead backend deep-read + three
+specialized agents over mobile, portal and infrastructure) produced 16
+findings; all code-fixable items were remediated and tested in the same
+session. Full narrative in CHANGELOG.md under "2026-09-20 (fourth pass)".
+
+| Finding | Severity | Status | Fix |
+|---|---|---|---|
+| H-1 data-key escrow + no rotation path | High (architectural) | **MITIGATED** | Rotation machinery: `POST /processing/rekey`, `PUT /consents/{id}/rewrap`, `PUT /account/credential` + mobile `rotation.ts` + Settings change-password UI. The escrow window itself remains the disclosed, consent-gated design trade-off — now recoverable instead of permanent. |
+| M-1 stateSeqGuard fail-open | Medium | FIXED | Fail-closed once a mark exists; in-memory mirror + storage self-heal. |
+| M-2 entry/measure blob replay | Medium | FIXED | `content_version` column + v2 AAD + server enforcement + encrypted client high-water store; legacy ladder preserves old blobs. |
+| M-3 server-URL phishing → permanent takeover | Medium | FIXED | First-origin pin + login warning + credential rotation (recovery). |
+| M-4 biometric enable without re-auth | Medium | FIXED | Typed-password card gates Keychain wrap. |
+| M-5 hostile-409 deletes queued entries | Medium | FIXED | Single-entry GET verification; unproven duplicates park in the rejected store. |
+| L-1 host-local "today" in insights/threshold | Low | FIXED | Shared `_utc_today()` anchor. |
+| L-2 unthrottled /healthz+/readyz | Low | FIXED | Shared ops bucket (240/min default). |
+| L-3 WAL/SHM gitignore gap | Low | FIXED | `*.db-wal/-shm/-journal` ignored. |
+| L-4 sim DB with verifiers in checkout | Low | FIXED | Moved to ignored `backend/.artifacts/`. |
+| L-5 32-bit therapist fingerprint | Low | FIXED | 16 bytes on BOTH platforms; confirm alert repeats it. |
+| L-6 client-only password policy | Low | HARDENED | Common-word/repeat/keyboard-row rejection; documented as the enforcement boundary (server never sees the password). |
+| L-7 unvalidated user_id/salt | Low | FIXED | 32-hex account-id shape enforced at `setSession`. |
+| L-8 portal non-zeroizable key strings | Low | FIXED | Derived at point of use (seal/send), never retained in objects. |
+| I-1 wall-clock rate windows | Info | FIXED | Monotonic clock. |
+| P-2 CSP style unsafe-inline / other infos | Info/Low | ACCEPTED | No injection path exists (verified); static-stylesheet migration noted as future work. |
+
+Gates re-run after remediation: backend pytest all pass, mobile vitest
+1546/1546, portal vitest 169/169, `tsc --noEmit` clean (both TS stacks),
+ruff clean.
+
+---
+
 **Date:** 2026-09-20
 **Scope:** Every numbered finding in `AUDIT_FINDINGS.md` (2026-09-19): 1 Critical, 20 High, 36 Medium, 97 numbered Low, 33 numbered Info observations.
 **Method:** 11 independent verifier agents + lead spot-checks, each reading the current working-tree fix code (not test names or CHANGELOG claims), running the engines on the audit's original repro inputs where applicable, and running targeted test files. Global gates re-run by the lead: backend pytest **exit 0 (all pass)**, mobile vitest **1501/1501**, portal vitest **166/166**.

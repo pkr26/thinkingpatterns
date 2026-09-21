@@ -60,7 +60,10 @@ class FixedWindowCounter:
         """Record one hit; return the window count and a usable Retry-After."""
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
-        current = now if now is not None else time.time()
+        # Monotonic clock (2026-09-20, informational hardening): a wall-clock
+        # step backwards (NTP correction) used to re-open closed windows and
+        # stretch Retry-After; elapsed time is what a window measures.
+        current = now if now is not None else time.monotonic()
         with self._lock:
             count, start, _ = self._hits.get(key, (0, 0.0, window_seconds))
             if current - start >= window_seconds:
@@ -85,7 +88,7 @@ class FixedWindowCounter:
         """
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
-        current = now if now is not None else time.time()
+        current = now if now is not None else time.monotonic()
         with self._lock:
             count, start, _ = self._hits.get(key, (0, 0.0, window_seconds))
             if current - start >= window_seconds:

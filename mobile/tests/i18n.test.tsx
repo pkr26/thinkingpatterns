@@ -39,7 +39,7 @@ vi.mock("react-native", async (importOriginal) => {
 // exactly as they do in production where strings.ts initializes first.
 vi.mock("../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("./helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../src/crypto/MindPatternCrypto", async (importOriginal) => {

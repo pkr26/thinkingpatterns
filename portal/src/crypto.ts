@@ -76,19 +76,18 @@ export async function deriveMasterKey(password: string, salt: Bytes): Promise<By
 
 export async function derivePortalKeys(
   master: Bytes,
-): Promise<{ authKeyB64: string; wrapKek: Bytes; noteKey: Bytes }> {
-  const [auth, wrapKek, noteKey] = await Promise.all([
+): Promise<{ authKey: Bytes; wrapKek: Bytes; noteKey: Bytes }> {
+  const [authKey, wrapKek, noteKey] = await Promise.all([
     hkdf(master, ZERO_SALT, AUTH_INFO, KEY_SIZE),
     hkdf(master, ZERO_SALT, PORTAL_WRAP_INFO, KEY_SIZE),
     hkdf(master, ZERO_SALT, PORTAL_NOTES_INFO, KEY_SIZE),
   ]);
-  try {
-    return { authKeyB64: b64(auth), wrapKek, noteKey };
-  } finally {
-    // The string form is needed for the authentication request, but the
-    // raw derived verifier has no reason to survive alongside it.
-    zeroize(auth);
-  }
+  // Audit fix P-1 (2026-09-20): the auth verifier is password-equivalent, so
+  // it must not persist as an immutable base64 string on an object that
+  // outlives the flow. It is returned as zeroizable raw bytes; callers derive
+  // the base64 form only at the moment of the network send and wipe the raw
+  // bytes right after.
+  return { authKey, wrapKek, noteKey };
 }
 
 // --- AES-256-GCM envelope: nonce(12) || ct || tag — backend crypto.py ------
@@ -481,38 +480,20 @@ export interface PatternPayload {
 
 // --- registration keypair ---------------------------------------------------------
 
-export async function generateTherapistKeyPair(): Promise<{
-  publicKeySpkiB64: string;
-  privateKeyPkcs8B64: string;
-  privateKey: CryptoKey;
-}> {
-  const pair = await subtle().generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
-    "deriveBits",
-  ]);
-  const spki = new Uint8Array(await subtle().exportKey("spki", pair.publicKey));
-  const pkcs8 = new Uint8Array(await subtle().exportKey("pkcs8", pair.privateKey));
-  try {
-    return {
-      publicKeySpkiB64: b64(spki),
-      // Sealed for upload by sealPrivateKeyForUpload once the password-derived
-      // KEK exists (the raw private key never leaves the browser unencrypted).
-      privateKeyPkcs8B64: b64(pkcs8),
-      privateKey: pair.privateKey,
-    };
-  } finally {
-    zeroize(spki, pkcs8);
-  }
-}
-
+/** Seal the RAW PKCS#8 private-key bytes for upload under the wrap KEK.
+ * Takes bytes, never a base64 string (audit fix P-1, 2026-09-20): the base64
+ * form of the raw private key must not exist as an immutable string at any
+ * point, so this consumes the DER directly and zeroizes it before returning.
+ * The envelope is unchanged: nonce||ct||tag AES-256-GCM under AAD
+ * ("therapist-key", username) — byte-identical uploads to the previous
+ * string-round-tripping flow. */
 export async function sealPrivateKeyForUpload(
   wrapKek: Bytes,
-  privateKeyPkcs8B64: string,
+  pkcs8: Bytes,
   username: string,
 ): Promise<string> {
   const { buildAad } = await import("./aad");
-  let pkcs8: Bytes | null = null;
   try {
-    pkcs8 = unb64(privateKeyPkcs8B64);
     const blob = await encrypt(
       wrapKek,
       pkcs8,
@@ -524,16 +505,50 @@ export async function sealPrivateKeyForUpload(
   }
 }
 
+/** Generate this therapist's P-256 wrap keypair AND seal the private half
+ * for upload in the same call (audit fix P-1, 2026-09-20). The raw PKCS#8
+ * exists only as a zeroized byte buffer inside this function — its base64
+ * form is never materialized, and no long-lived object field carries
+ * extractable private material. The returned object holds public material
+ * (the SPKI b64 — public, safe as a string) and the sealed blob only; the
+ * bytes uploaded are exactly what the previous generate-then-seal flow
+ * produced (same KEK, same AAD, same envelope). */
+export async function generateTherapistKeyPair(
+  wrapKek: Bytes,
+  username: string,
+): Promise<{ publicKeySpkiB64: string; wrapKeyBlobB64: string }> {
+  const pair = await subtle().generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+    "deriveBits",
+  ]);
+  const spki = new Uint8Array(await subtle().exportKey("spki", pair.publicKey));
+  let pkcs8: Bytes | null = null;
+  try {
+    pkcs8 = new Uint8Array(await subtle().exportKey("pkcs8", pair.privateKey));
+    return {
+      publicKeySpkiB64: b64(spki),
+      wrapKeyBlobB64: await sealPrivateKeyForUpload(wrapKek, pkcs8, username),
+    };
+  } finally {
+    // sealPrivateKeyForUpload already consumed the DER; this double wipe
+    // also covers the exportKey rejection path.
+    zeroize(spki, pkcs8);
+  }
+}
+
 /** Human-verifiable fingerprint of a P-256 SPKI public key: SHA-256 over
- * the DER, first 8 bytes as four spaced hex groups ("A1B2 C3D4 E5F6
- * 0718"). The patient's app derives the SAME string from the key the
+ * the DER, first 16 bytes as eight spaced hex groups ("A1B2 C3D4 E5F6
+ * 0718 …"). The patient's app derives the SAME string from the key the
  * pairing lookup returned, so the two humans can read it to each other
  * and notice a substituted key (the 2026-09-17 audit's out-of-band
- * check). Formatting is pinned identical to the mobile implementation. */
+ * check). Formatting is pinned identical to the mobile implementation.
+ *
+ * L-5 (2026-09-20): widened from 8 to 16 bytes — the old 32-bit prefix let
+ * a determined attacker grind a colliding P-256 key (~2^32) and defeat the
+ * read-back. Both platforms changed together (cross-platform contract). */
 export async function keyFingerprint(spkiB64: string): Promise<string> {
   const digest = new Uint8Array(await subtle().digest("SHA-256", unb64(spkiB64)));
   let hex = "";
-  for (const byte of digest.subarray(0, 8)) hex += byte.toString(16).padStart(2, "0");
+  for (const byte of digest.subarray(0, 16)) hex += byte.toString(16).padStart(2, "0");
   hex = hex.toUpperCase();
   return hex.match(/.{4}/g)?.join(" ") ?? hex;
 }

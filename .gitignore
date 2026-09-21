@@ -25,6 +25,17 @@ coverage/
 *.sqlite3
 .env
 
+# SQLite sidecar files (L-3, 2026-09-20): *.db does NOT match the WAL/SHM
+# journals — they hold committed-but-uncheckpointed row images (salts,
+# verifiers, ciphertext) and were one `git add -A` away from a commit.
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Local simulation/dev database artifacts (L-4): contains password
+# verifiers for synthetic accounts — kept out of the checkout root.
+backend/.artifacts/
+
 # dev artifacts — never commit real databases
 backend/mindpattern.db
 backend/demo.db

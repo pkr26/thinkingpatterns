@@ -8,7 +8,7 @@ import { Alert } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -315,8 +315,15 @@ describe("EntryScreen save pipeline", () => {
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       null,  // v3: no client sentiment — the server engine re-scores at analysis time
       { energy: null, sleep: null, tags: [] },
+      1,     // M-2 (2026-09-20): first content generation, v2 version-bound AAD
     );
     expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(api.createEntry).toHaveBeenCalledWith(
+      expect.stringMatching(/^e-\d{4}-\d{2}-\d{2}-/),
+      expect.any(String),
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      1,
+    );
     expect(Alert.alert).not.toHaveBeenCalled();
     // Editor cleared and disabled again; success is a quiet inline line,
     // not a modal (the save-feedback inversion fix).

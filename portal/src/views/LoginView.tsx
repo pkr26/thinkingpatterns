@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import { auth, ApiError, clearSession, normalizeApiBaseUrl, setSession, type TokenResponse } from "../api";
-import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, sealPrivateKeyForUpload } from "../crypto";
+import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, toBase64 } from "../crypto";
 import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
 import { currentOrigin } from "../platform";
 
@@ -37,9 +37,14 @@ export function normalizeBaseUrl(candidate: string): string {
   return normalizeApiBaseUrl(candidate);
 }
 
-function wipeKeys(keys: Pick<PortalKeys, "wrapKek" | "noteKey"> | undefined): void {
+function wipeKeys(
+  keys: (Pick<PortalKeys, "wrapKek" | "noteKey"> & { authKey?: Uint8Array<ArrayBuffer> }) | undefined,
+): void {
   keys?.wrapKek.fill(0);
   keys?.noteKey.fill(0);
+  // Audit fix P-1 (2026-09-20): the verifier bytes are wiped eagerly at the
+  // network send; this covers the failure paths that throw before it.
+  keys?.authKey?.fill(0);
 }
 
 export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenResponse, baseUrl: string) => void | Promise<void> }): React.JSX.Element {
@@ -108,7 +113,12 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       } finally {
         master.fill(0);
       }
-      const token = await auth.login(baseUrl, username, derivedKeys.authKeyB64);
+      // Audit fix P-1 (2026-09-20): the verifier's base64 string exists only
+      // for this request — derived here at the send from the raw bytes, which
+      // are wiped the moment the request is built (the success path below
+      // transfers the other keys without the final wipe).
+      const token = await auth.login(baseUrl, username, toBase64(derivedKeys.authKey));
+      derivedKeys.authKey.fill(0);
       if (token.role !== "therapist") {
         throw new ApiError(403, "this is a patient account — the portal is for therapist accounts");
       }
@@ -164,16 +174,21 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
         master.fill(0);
         saltBytes.fill(0);
       }
-      const pair = await generateTherapistKeyPair();
-      const sealed = await sealPrivateKeyForUpload(derivedKeys.wrapKek, pair.privateKeyPkcs8B64, username);
+      // Audit fix P-1 (2026-09-20): key generation and upload-sealing are one
+      // call — the raw private key never exists as a base64 string, and this
+      // flow only ever holds the sealed blob.
+      const pair = await generateTherapistKeyPair(derivedKeys.wrapKek, username);
       const registration = {
         username,
         salt,
-        verifier: derivedKeys.authKeyB64,
+        // P-1 (2026-09-20): the verifier string is derived here, at the
+        // network send, never stored on a long-lived object field.
+        verifier: toBase64(derivedKeys.authKey),
         display_name: displayName || username,
         wrap_pub_key: pair.publicKeySpkiB64,
-        wrap_key_blob: sealed,
+        wrap_key_blob: pair.wrapKeyBlobB64,
       };
+      derivedKeys.authKey.fill(0);
       const token = enrollmentToken.trim()
         ? await auth.registerTherapist(baseUrl, registration, enrollmentToken)
         : await auth.registerTherapist(baseUrl, registration);

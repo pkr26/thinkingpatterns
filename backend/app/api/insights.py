@@ -40,7 +40,7 @@ import json
 import math
 import time
 from dataclasses import replace
-from datetime import date as date_type, timedelta
+from datetime import date as date_type, datetime, timedelta, timezone
 from typing import NamedTuple
 
 import anyio.to_thread
@@ -52,13 +52,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..cache import make_rate_limiter
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
-from ..models import Consent, Entry, Insight, User, new_id, utcnow
+from ..models import Consent, Entry, Insight, Measure, User, new_id, utcnow
 from ..schemas import (
     InsightsResponse,
     ProcessingSessionRequest,
     ProcessingSessionResponse,
     QuestionResponse,
     RecomputeResponse,
+    RekeyResponse,
 )
 from ..security import crypto, sharing
 from ..security.crypto import TamperError
@@ -67,6 +68,7 @@ from ..services import brain, llm, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
 from .entries import _blob_length as _entry_blob_length
+from .entries import _user_locks as _entry_locks
 
 router = APIRouter(tags=["insights"])
 
@@ -81,6 +83,18 @@ _recompute_locks = UserLocks()
 # inside the recompute write transaction (they are encrypted day-questions,
 # not data the user asked to keep forever).
 QUESTION_RETENTION_DAYS = 90
+
+
+def _utc_today() -> date_type:
+    """Server-UTC calendar day (2026-09-20 audit fix L-1).
+
+    The recompute/question paths used ``date_type.today()``, which answers
+    in the HOST's local timezone — the exact drift the L-5 fix removed from
+    entries/measures. Question pinning, rotation, and retention must flip on
+    the same UTC midnight the entry-date bounds use, or a non-UTC host pins
+    a question under a local "today" the rest of the calendar disagrees with.
+    """
+    return datetime.now(timezone.utc).date()
 
 
 def _decode_b64(value: str, what: str) -> bytes:
@@ -252,6 +266,304 @@ async def create_processing_session(
     return ProcessingSessionResponse(
         session_token=token, expires_in=settings.processing_session_ttl
     )
+
+
+# --- data-key rotation (2026-09-20, audit fix H-1) -----------------------------
+#
+# POST /processing/rekey re-encrypts every stored blob of the account from
+# the OLD data key to a NEW one, server-side, inside the same trust envelope
+# as a recompute: the client opens one processing session per key (each
+# owner-bound, single-use) and proves the OLD password (X-Account-Verifier).
+# This is the recovery path that makes a captured key or phished verifier a
+# RECOVERABLE event instead of a permanent compromise: rotate the credential
+# (PUT /account/credential), rotate the data key (here), then re-wrap each
+# live therapist grant (PUT /consents/{id}/rewrap).
+#
+# Baseline-phase note: unlike /insights/recompute, rekey is allowed in any
+# phase. It is user-initiated key maintenance with a password proof, not
+# pattern revelation — no analyzer runs and nothing about the content is
+# surfaced; the "baseline decrypts nothing" contract governs the ANALYSIS
+# path, which still gates on the threshold.
+
+REKEY_BATCH_ROWS = 100
+
+
+async def _rekey_fresh_user(session: AsyncSession, user_id: str, expected_epoch: int) -> User:
+    """Re-authorize a rekey inside the lifecycle fence (recompute's M-2 rule):
+    a bearer retired by logout/credential-rotation while this request waited
+    must fail closed before any key material is consumed."""
+    fresh = await session.get(User, user_id, populate_existing=True)
+    if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+        raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    return fresh
+
+
+def _rekey_decrypt(
+    key: bytearray, blob: bytes, candidates: tuple[bytes, ...] | bytes | None
+) -> bytes:
+    """Decrypt with a single AAD or the ordered candidate ladder (enclave
+    semantics, local copy: the rekey path works on plain values in a worker
+    thread, outside SecureProcessingContext)."""
+    if candidates is None or isinstance(candidates, (bytes, bytearray)):
+        return crypto.decrypt(key, blob, candidates)
+    failure: TamperError | None = None
+    for candidate in candidates:
+        try:
+            return crypto.decrypt(key, blob, candidate)
+        except TamperError as exc:
+            failure = exc
+    assert failure is not None
+    raise failure
+
+
+class _RekeyMismatch(Exception):
+    """The old key did not authenticate a blob: nothing may be committed."""
+
+
+def _rekey_entry_batch(
+    old_key: bytearray, new_key: bytearray, rows: list[tuple[str, str, int, bytes]], user_id: str
+) -> list[tuple[str, bytes]]:
+    """Re-encrypt one batch of entry rows in a worker thread (pure values)."""
+    out: list[tuple[str, bytes]] = []
+    for row_id, client_entry_id, version, blob in rows:
+        try:
+            plaintext = _rekey_decrypt(
+                old_key,
+                blob,
+                crypto.entry_aad_candidates(user_id, client_entry_id, version),
+            )
+        except TamperError as exc:
+            raise _RekeyMismatch() from exc
+        # Every rekeyed entry is upgraded to the v2 (version-bound) AAD.
+        out.append(
+            (row_id, crypto.encrypt(new_key, plaintext, crypto.entry_aad_v2(user_id, client_entry_id, version)))
+        )
+    return out
+
+
+def _rekey_blob_batch(
+    old_key: bytearray, new_key: bytearray, rows: list[tuple[str, bytes]], aad_for
+) -> list[tuple[str, bytes]]:
+    """Re-encrypt insight/measure rows under their ORIGINAL AAD (pure values)."""
+    out: list[tuple[str, bytes]] = []
+    for row_id, blob in rows:
+        try:
+            plaintext = _rekey_decrypt(old_key, blob, aad_for(row_id))
+        except TamperError as exc:
+            raise _RekeyMismatch() from exc
+        out.append((row_id, crypto.encrypt(new_key, plaintext, aad_for(row_id))))
+    return out
+
+
+@router.post(
+    "/processing/rekey",
+    response_model=RekeyResponse,
+    dependencies=[
+        Depends(
+            make_rate_limiter("processing-rekey", "processing_rate_limit", "processing_rate_window")
+        )
+    ],
+)
+async def rekey(
+    request: Request,
+    user: User = Depends(require_regular_user),
+    x_processing_token: str | None = Header(default=None),
+    x_new_processing_token: str | None = Header(default=None),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Re-encrypt the account's stored ciphertext under a new data key.
+
+    Body-less by design: the two processing-session tokens carry the keys
+    (each opened via POST /processing/sessions and owner-bound), and the
+    OLD password proof gates the operation — a stolen bearer must not be
+    able to re-encrypt a victim's journal under attacker-chosen keys (an
+    availability/integrity attack), and an attacker holding only a phished
+    verifier has no bearer to spend here.
+
+    All-or-nothing: every entry, insight, and measure row is decrypted and
+    re-encrypted inside ONE transaction; a wrong old key aborts with 400
+    ``rekey_key_mismatch`` and nothing is committed. Caseload summaries are
+    untouched (they are wrapped to therapists' PUBLIC keys, not the data
+    key); consent wrapped keys are the client's to re-wrap afterwards.
+    """
+    from .account import _require_verifier
+
+    key_store = request.app.state.key_store
+    sessionmaker = request.app.state.sessionmaker
+
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    # Old-password proof BEFORE consuming the session tokens: a failed proof
+    # must not burn the client's uploaded keys.
+    await _require_verifier(user, verifier, request)
+
+    if not x_processing_token or not x_new_processing_token:
+        raise ApiError(
+            status_code=422,
+            detail="two processing session tokens required (X-Processing-Token, X-New-Processing-Token)",
+            code="validation_error",
+        )
+    try:
+        new_key = key_store.pop(x_new_processing_token, owner=user.id)
+    except KeyNotFound:
+        raise ApiError(
+            status_code=403,
+            detail="new-key processing session missing or expired",
+            code="processing_session_invalid",
+        ) from None
+    try:
+        old_key = key_store.pop(x_processing_token, owner=user.id)
+    except KeyNotFound:
+        zeroize(new_key)
+        raise ApiError(
+            status_code=403,
+            detail="processing session missing or expired",
+            code="processing_session_invalid",
+        ) from None
+
+    expected_epoch = user.token_epoch
+    entries_done = 0
+    insights_done = 0
+    measures_done = 0
+    lifecycle_guard = lifecycle_locks.hold(f"llm-lifecycle:{user.id}")
+    lifecycle_entered = False
+    try:
+        await lifecycle_guard.__aenter__()
+        lifecycle_entered = True
+        # Entry writes take (lifecycle, entries); recomputes take (lifecycle,
+        # recompute). Rekey takes all three so a rotation linearizes against
+        # every path that could observe either key generation.
+        async with _entry_locks.hold(f"entries:{user.id}"):
+            async with _recompute_locks.hold(f"insights:{user.id}"):
+                async with sessionmaker() as session:
+                    fresh_user = await _rekey_fresh_user(session, user.id, expected_epoch)
+
+                    # --- entries: id-keyset batches, CPU in a worker thread ---
+                    cursor: str | None = None
+                    while True:
+                        query = (
+                            select(
+                                Entry.id,
+                                Entry.client_entry_id,
+                                Entry.content_version,
+                                Entry.blob,
+                            )
+                            .where(Entry.user_id == fresh_user.id)
+                            .order_by(Entry.id.asc())
+                            .limit(REKEY_BATCH_ROWS)
+                        )
+                        if cursor is not None:
+                            query = query.where(Entry.id > cursor)
+                        rows = [
+                            (row_id, cid, int(version), bytes(blob))
+                            for row_id, cid, version, blob in (
+                                await session.execute(query)
+                            ).all()
+                        ]
+                        if not rows:
+                            break
+                        cursor = rows[-1][0]
+                        reencrypted = await anyio.to_thread.run_sync(
+                            lambda batch=rows: _rekey_entry_batch(
+                                old_key, new_key, batch, fresh_user.id
+                            )
+                        )
+                        for row_id, new_blob in reencrypted:
+                            await session.execute(
+                                update(Entry).where(Entry.id == row_id).values(blob=new_blob)
+                            )
+                        entries_done += len(reencrypted)
+
+                    # --- insights: bounded (patterns + brain + ≤90d questions) ---
+                    insight_rows = (
+                        await session.execute(
+                            select(Insight.id, Insight.kind, Insight.for_date, Insight.blob).where(
+                                Insight.user_id == fresh_user.id
+                            )
+                        )
+                    ).all()
+                    aad_by_id = {
+                        row_id: (
+                            crypto.build_aad("question", fresh_user.id, for_date.isoformat())
+                            if kind == "question" and for_date is not None
+                            else crypto.build_aad("insights", fresh_user.id, kind)
+                        )
+                        for row_id, kind, for_date, _blob in insight_rows
+                    }
+                    plain_rows = [(row_id, bytes(blob)) for row_id, _k, _d, blob in insight_rows]
+                    if plain_rows:
+                        reencrypted = await anyio.to_thread.run_sync(
+                            lambda: _rekey_blob_batch(
+                                old_key,
+                                new_key,
+                                plain_rows,
+                                lambda row_id: aad_by_id[row_id],
+                            )
+                        )
+                        for row_id, new_blob in reencrypted:
+                            await session.execute(
+                                update(Insight).where(Insight.id == row_id).values(blob=new_blob)
+                            )
+                        insights_done = len(reencrypted)
+
+                    # --- measures: same shape, ("measure", user, client id) AAD ---
+                    measure_rows = (
+                        await session.execute(
+                            select(Measure.id, Measure.client_measure_id, Measure.blob).where(
+                                Measure.user_id == fresh_user.id
+                            )
+                        )
+                    ).all()
+                    measure_aad_by_id = {
+                        row_id: crypto.build_aad("measure", fresh_user.id, client_measure_id)
+                        for row_id, client_measure_id, _blob in measure_rows
+                    }
+                    plain_rows = [(row_id, bytes(blob)) for row_id, _c, blob in measure_rows]
+                    if plain_rows:
+                        reencrypted = await anyio.to_thread.run_sync(
+                            lambda: _rekey_blob_batch(
+                                old_key,
+                                new_key,
+                                plain_rows,
+                                lambda row_id: measure_aad_by_id[row_id],
+                            )
+                        )
+                        for row_id, new_blob in reencrypted:
+                            await session.execute(
+                                update(Measure).where(Measure.id == row_id).values(blob=new_blob)
+                            )
+                        measures_done = len(reencrypted)
+
+                    try:
+                        await session.commit()
+                    except IntegrityError as exc:
+                        if _is_fk_violation(exc):
+                            raise ApiError(
+                                status_code=410,
+                                detail="account no longer exists",
+                                code="account_deleted",
+                            ) from None
+                        raise
+        return RekeyResponse(entries=entries_done, insights=insights_done, measures=measures_done)
+    except _RekeyMismatch:
+        raise ApiError(
+            status_code=400,
+            detail=(
+                "old key did not authenticate every blob; nothing was changed. "
+                "Verify the account's current data key and retry."
+            ),
+            code="rekey_key_mismatch",
+        ) from None
+    finally:
+        zeroize(old_key)
+        zeroize(new_key)
+        if lifecycle_entered:
+            await lifecycle_guard.__aexit__(None, None, None)
 
 
 # The analysis cost of an entry scales with its *text bytes* (MinHash signs
@@ -615,7 +927,7 @@ async def recompute(
         raise ApiError(status_code=400, detail="no entries to analyze", code="bad_request")
 
     state = threshold.evaluate(date_rows, settings.unlock_threshold_days)
-    today = date_type.today()
+    today = _utc_today()
 
     if state.phase is not Phase.INSIGHT:
         # BASELINE: reveal nothing, decrypt nothing, analyze nothing. Any
@@ -771,7 +1083,16 @@ async def recompute(
                     is not None
                 )
                 entry_items = [
-                    (crypto.build_aad("entry", row.user_id, row.client_entry_id), bytes(row.blob))
+                    (
+                        # M-2: fresh blobs bind content_version in their AAD
+                        # (v2); legacy rows keep the three-part binding. The
+                        # enclave tries v2 first and falls back to v1, so a
+                        # corpus of mixed generations decrypts unchanged.
+                        crypto.entry_aad_candidates(
+                            row.user_id, row.client_entry_id, row.content_version
+                        ),
+                        bytes(row.blob),
+                    )
                     for row in rows
                 ]
                 state_item = (
@@ -1205,7 +1526,7 @@ async def get_question_today(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
-    today = date_type.today()
+    today = _utc_today()
     # Phase-gated like GET /insights (2026-09-19 round): a question stored
     # while the account was in the insight phase is not served after entry
     # deletions drop it back to baseline — the threshold's "reveal nothing

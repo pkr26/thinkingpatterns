@@ -153,6 +153,13 @@ class Entry(Base):
     blob: Mapped[bytes] = mapped_column(LargeBinary)  # opaque: nonce||ct||tag
     entry_date: Mapped[date] = mapped_column(Date)  # calendar day of the entry
     received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # Monotonic per-row content generation (2026-09-20 audit fix M-2): 1 on
+    # create, +1 on every replaced blob. Clients bind it into the v2 entry
+    # AAD so a compromised server cannot pair a stale-but-valid ciphertext
+    # with a truthful version echo, and keep a per-id high-water mark.
+    content_version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=1, server_default=text("1")
+    )
 
 
 class Insight(Base):

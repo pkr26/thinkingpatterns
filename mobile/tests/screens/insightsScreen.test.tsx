@@ -9,7 +9,7 @@ import { ScrollView, ActivityIndicator } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock() };
+  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 const refreshActiveDays = vi.fn(async () => {});

@@ -49,6 +49,7 @@ from ..models import (
 from ..schemas import (
     ConsentGrantRequest,
     ConsentOut,
+    ConsentRewrapRequest,
     PairingLookupRequest,
     PairingLookupResponse,
 )
@@ -183,6 +184,10 @@ def _consent_out(consent: Consent, therapist: User) -> ConsentOut:
         status=consent.status,
         granted_at=consent.granted_at,
         revoked_at=consent.revoked_at,
+        # Rotation flow (2026-09-20): the therapist's public wrap key rides
+        # the list so a client that just rekeyed its data key can re-wrap it
+        # to the same therapist without a new pairing round-trip.
+        therapist_wrap_pub_key=therapist.wrap_pub_key,
     )
 
 
@@ -409,6 +414,91 @@ async def grant_consent(
             await session.refresh(consent)
             response = _consent_out(consent, therapist)
     return response
+
+
+@router.put(
+    "/{consent_id}/rewrap",
+    response_model=ConsentOut,
+    dependencies=[
+        Depends(make_rate_limiter("consents-rewrap", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def rewrap_consent(
+    body: ConsentRewrapRequest,
+    consent_id: str,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Re-wrap the data key of an ACTIVE grant after a key rotation.
+
+    The wrapped_key stored on a consent opens ONE data-key generation. After
+    POST /processing/rekey the old wrap is dead ciphertext; this endpoint
+    swaps in the client's fresh wrap of the NEW key to the SAME therapist,
+    under the same password re-auth as the grant itself (a stolen bearer
+    must not be able to substitute key material inside a live share) and
+    the same key-shape validation.
+    """
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    await _require_verifier(user, verifier, request)
+    try:
+        sharing.validate_public_key_b64(body.ephemeral_pub)
+    except sharing.SharingError:
+        raise ApiError(
+            status_code=422,
+            detail="ephemeral_pub must be a P-256 SPKI key",
+            code="validation_error",
+        ) from None
+    wrapped = _decode_b64(body.wrapped_key, "wrapped_key")
+    if not MIN_BLOB_SIZE <= len(wrapped) <= MAX_WRAPPED_KEY_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrapped_key must be {MIN_BLOB_SIZE}-{MAX_WRAPPED_KEY_BYTES} bytes",
+            code="validation_error",
+        )
+
+    async with sharing_locks.hold(sharing_patient_lock_key(user.id)):
+        fresh_user = await session.get(User, user.id, populate_existing=True)
+        if fresh_user is None or not fresh_user.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        row = (
+            (
+                await session.execute(
+                    select(Consent, User)
+                    .join(User, Consent.therapist_id == User.id)
+                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .first()
+        )
+        if row is None:
+            raise ApiError(status_code=404, detail="consent not found", code="not_found")
+        consent, therapist = row
+        if consent.status != "active":
+            # Nothing is being served under a revoked grant; there is no key
+            # material to refresh. Flat 404 mirrors the revoke-read posture.
+            raise ApiError(status_code=404, detail="consent not found", code="not_found")
+        consent.ephemeral_pub = body.ephemeral_pub
+        consent.wrapped_key = wrapped
+        session.add(
+            AccessLog(
+                actor_id=fresh_user.id,
+                actor_role=fresh_user.role,
+                user_id=fresh_user.id,
+                action="rewrap",
+            )
+        )
+        await session.commit()
+        await session.refresh(consent)
+        return _consent_out(consent, therapist)
 
 
 @router.delete(

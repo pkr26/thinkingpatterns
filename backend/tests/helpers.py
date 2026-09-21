@@ -55,17 +55,42 @@ class ClientEmulator:
     # ---- envelope helpers (identical contract to the mobile app) ----------------
 
     def encrypt_entry(
-        self, text: str, entry_date: date, client_entry_id: str, sentiment: float | None = None
+        self,
+        text: str,
+        entry_date: date,
+        client_entry_id: str,
+        sentiment: float | None = None,
+        content_version: int | None = None,
     ) -> str:
+        """Encrypt an entry payload. ``content_version=None`` reproduces the
+        LEGACY v1 three-part AAD (pre-2026-09-20 blobs, and the shape every
+        pre-existing test pins); an int produces the v2 version-bound AAD a
+        current client sends — mirroring the mobile app's migration ladder."""
         payload = {
             "v": 1,
             "text": text,
             "sentiment": sentiment,
             "created_at": entry_date.isoformat(),
         }
-        aad = crypto.build_aad("entry", self.user_id or "", client_entry_id)
+        if content_version is None:
+            aad = crypto.entry_aad_v1(self.user_id or "", client_entry_id)
+        else:
+            aad = crypto.entry_aad_v2(self.user_id or "", client_entry_id, content_version)
         blob = crypto.encrypt(self.data_key, json.dumps(payload).encode("utf-8"), aad)
         return base64.b64encode(blob).decode("ascii")
+
+    def decrypt_entry(self, blob_b64: str, client_entry_id: str, content_version: int) -> dict:
+        """Decrypt an entry with the v2-then-v1 candidate ladder (the same
+        acceptance rule the server's recompute and rekey paths use)."""
+        blob = base64.b64decode(blob_b64)
+        failure: Exception | None = None
+        for aad in crypto.entry_aad_candidates(self.user_id or "", client_entry_id, content_version):
+            try:
+                return json.loads(crypto.decrypt(self.data_key, blob, aad).decode("utf-8"))
+            except crypto.TamperError as exc:
+                failure = exc
+        assert failure is not None
+        raise failure
 
     def decrypt_blob(self, blob_b64: str, aad: bytes) -> dict:
         blob = base64.b64decode(blob_b64)
@@ -149,19 +174,51 @@ class ClientEmulator:
         entry_date: date,
         client_entry_id: str | None = None,
         sentiment: float | None = None,
+        content_version: int | None = None,
     ) -> dict:
+        """POST an entry. ``content_version`` selects the v2 AAD generation
+        (None = legacy v1 bytes, the pre-2026-09-20 contract older tests and
+        older deployed clients produce) and rides the JSON body when set."""
         client_entry_id = client_entry_id or f"e-{entry_date.isoformat()}-{os.urandom(4).hex()}"
-        blob = self.encrypt_entry(text, entry_date, client_entry_id, sentiment)
-        response = await client.post(
-            "/api/entries",
-            headers=self.headers,
-            json={
-                "client_entry_id": client_entry_id,
-                "blob": blob,
-                "entry_date": entry_date.isoformat(),
-            },
+        blob = self.encrypt_entry(
+            text, entry_date, client_entry_id, sentiment, content_version=content_version
         )
+        body = {
+            "client_entry_id": client_entry_id,
+            "blob": blob,
+            "entry_date": entry_date.isoformat(),
+        }
+        if content_version is not None:
+            body["content_version"] = content_version
+        response = await client.post("/api/entries", headers=self.headers, json=body)
         assert response.status_code == 201, response.text
+        return response.json()
+
+    async def get_entry(self, client: AsyncClient, client_entry_id: str) -> dict:
+        """GET /entries/{id} — the idempotency-verification primitive."""
+        response = await client.get(f"/api/entries/{client_entry_id}", headers=self.headers)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def replace_entry(
+        self,
+        client: AsyncClient,
+        client_entry_id: str,
+        text: str,
+        entry_date: date,
+        content_version: int | None = None,
+    ) -> dict:
+        """PUT /entries/{id} — the atomic replacement path."""
+        blob = self.encrypt_entry(
+            text, entry_date, client_entry_id, content_version=content_version
+        )
+        body: dict = {"blob": blob, "entry_date": entry_date.isoformat()}
+        if content_version is not None:
+            body["content_version"] = content_version
+        response = await client.put(
+            f"/api/entries/{client_entry_id}", headers=self.headers, json=body
+        )
+        assert response.status_code == 200, response.text
         return response.json()
 
     async def open_processing_session(self, client: AsyncClient) -> str:
@@ -170,6 +227,92 @@ class ClientEmulator:
         )
         assert response.status_code == 201, response.text
         return response.json()["session_token"]
+
+    # ---- rotation flow (2026-09-20, audit fix H-1/M-3) ---------------------
+
+    def derive_new_generation(self, password: str, salt: bytes | None = None) -> None:
+        """Derive the NEXT key generation in place (new salt by default).
+
+        Mirrors the client's change-password derivation: a fresh random salt,
+        a new master key from the NEW password, and the same HKDF labels.
+        The previous generation's keys must be captured by the caller BEFORE
+        this call (old_data_key) — rekey needs both.
+        """
+        self.password = password
+        self.salt = salt or os.urandom(16)
+        self.master_key = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), self.salt, FAST_ITERATIONS
+        )
+        self.auth_key = kdf.derive_auth_key(self.master_key)
+        self.data_key = kdf.derive_data_key(self.master_key)
+
+    async def open_processing_session_for(self, client: AsyncClient, key: bytes) -> str:
+        response = await client.post(
+            "/api/processing/sessions",
+            headers=self.headers,
+            json={"data_key": base64.b64encode(key).decode("ascii")},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["session_token"]
+
+    async def rekey(
+        self,
+        client: AsyncClient,
+        old_key: bytes,
+        new_key: bytes,
+        verifier: str | None = None,
+    ) -> dict:
+        """POST /processing/rekey — re-encrypt every stored blob old→new."""
+        old_token = await self.open_processing_session_for(client, old_key)
+        new_token = await self.open_processing_session_for(client, new_key)
+        response = await client.post(
+            "/api/processing/rekey",
+            headers={
+                **self.headers,
+                "X-Processing-Token": old_token,
+                "X-New-Processing-Token": new_token,
+                "X-Account-Verifier": verifier or self.auth_key_b64,
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def rotate_credential(
+        self,
+        client: AsyncClient,
+        old_verifier_b64: str,
+        new_salt: bytes,
+        new_verifier_b64: str,
+    ) -> int:
+        """PUT /account/credential — retire the phishable login credential."""
+        response = await client.put(
+            "/api/account/credential",
+            headers=self.headers,
+            json={
+                "verifier": old_verifier_b64,
+                "new_salt": base64.b64encode(new_salt).decode("ascii"),
+                "new_verifier": new_verifier_b64,
+            },
+        )
+        return response.status_code
+
+    async def rewrap_consent(
+        self,
+        client: AsyncClient,
+        consent_id: str,
+        therapist_pub_b64: str,
+        therapist_id: str,
+        verifier: str | None = None,
+    ) -> dict:
+        """PUT /consents/{id}/rewrap — wrap the CURRENT data key to the same
+        therapist (the client's post-rekey step for every active grant)."""
+        wrap = patient_wrap_for(self, therapist_pub_b64, therapist_id)
+        response = await client.put(
+            f"/api/consents/{consent_id}/rewrap",
+            headers={**self.headers, "X-Account-Verifier": verifier or self.auth_key_b64},
+            json=wrap,
+        )
+        return {"status": response.status_code, "body": response.json() if response.content else None}
 
     async def recompute(self, client: AsyncClient) -> dict:
         """Open a fresh (single-use) processing session and recompute."""

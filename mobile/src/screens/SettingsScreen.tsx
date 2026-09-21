@@ -45,6 +45,8 @@ import {
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
+import { rotatePassword } from "../rotation";
+import { passwordPolicyError } from "./LoginScreen";
 import {
   rejectedEntryCount,
   requeueRejected,
@@ -75,7 +77,14 @@ const REMINDER_PRESETS: readonly { label: string; hour: number; minute: number }
   { label: tr("settings.reminderEvening"), hour: 20, minute: 0 },
 ];
 
-type PendingAction = { kind: "llm"; enabled: boolean } | { kind: "delete" } | null;
+type PendingAction =
+  | { kind: "llm"; enabled: boolean }
+  | { kind: "delete" }
+  // M-4 (2026-09-20): enabling the biometric wrap persists the data key in
+  // the Keychain indefinitely — the same standing as grant/delete, so it
+  // takes the same typed-password card instead of one confirm tap.
+  | { kind: "bio" }
+  | null;
 
 export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -94,6 +103,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [legacyQueueRecovery, setLegacyQueueRecovery] = useState(false);
   const [pending, setPending] = useState<PendingAction>(null);
   const [password, setPassword] = useState("");
+  // H-1/M-3 (2026-09-20): the change-password (rotation) card. Two fields —
+  // the CURRENT password (the card's usual reauth field) and the new one.
+  const [showRotate, setShowRotate] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
 
   React.useEffect(() => {
     getBaseUrl().then(setUrl);
@@ -209,6 +222,17 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       if (pending.kind === "llm") {
         const result = await api.setLlmConsent(pending.enabled, reauth.verifierB64);
         setLlmEnabled(result.enabled);
+      } else if (pending.kind === "bio") {
+        // The password proof just ran: enabling the biometric wrap now
+        // proves the enabler knows the password, not merely that they hold
+        // the foregrounded unlocked session (M-4).
+        const userId = await api.getUserId().catch(() => null);
+        if (!userId) {
+          Alert.alert(tr("common.reauthNoAccount"));
+          retry();
+          return;
+        }
+        await enableBiometricWrap(userId);
       } else {
         await deleteAccountOnServer(reauth.verifierB64);
       }
@@ -369,7 +393,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }
     Alert.alert(tr("settings.bioTitle"), tr("settings.bioBody"), [
       { text: tr("common.cancel"), style: "cancel" },
-      { text: tr("settings.bioEnable"), onPress: () => void enableBiometricWrap(userId) },
+      {
+        text: tr("settings.bioEnable"),
+        // M-4: the explainer is step one; the password card is the gate —
+        // a foregrounded unlocked phone must not be enough to persist the
+        // data key in the Keychain forever.
+        onPress: () => setPending({ kind: "bio" }),
+      },
     ]);
   };
 
@@ -382,6 +412,53 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       setBioEnabled(true);
     } catch {
       Alert.alert(tr("settings.bioOnFailedTitle"), tr("settings.bioOnFailedBody"));
+    }
+  };
+
+  /** H-1/M-3: rotate the credential AND the data key. Runs the full server
+   *  flow (rekey -> re-wrap grants -> retire old credential -> re-login);
+   *  on success the vault is locked so the next unlock uses the new
+   *  password, and the user is signed out to re-verify on this device. */
+  const runRotate = async () => {
+    if (busy || !password || !newPassword) return;
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) {
+      Alert.alert(tr("login.policyVarietyTitle"), policyError);
+      return;
+    }
+    setBusy(true);
+    try {
+      const userId = await api.getUserId().catch(() => null);
+      const username = await api.getUsername().catch(() => null);
+      if (!userId || !username) {
+        Alert.alert(tr("common.reauthNoAccount"));
+        return;
+      }
+      const outcome = await rotatePassword({ username, userId, oldPassword: password, newPassword });
+      if (outcome.ok) {
+        const rewrapNote =
+          outcome.rewrapFailures.length > 0
+            ? `\n\n${tr("settings.rotateRewrapFailed", { names: outcome.rewrapFailures.join(", ") })}`
+            : "";
+        Alert.alert(
+          tr("settings.rotateSuccessTitle"),
+          `${tr("settings.rotateSuccessBody")}${rewrapNote}`,
+          [{ text: tr("common.ok"), onPress: () => void signOut() }],
+        );
+      } else if (outcome.reason === "wrong-password") {
+        Alert.alert(tr("settings.rotateFailedTitle"), tr("settings.rotateWrongOld"));
+      } else if (outcome.reason === "offline") {
+        Alert.alert(tr("settings.rotateFailedTitle"), tr("common.reauthOffline"));
+      } else {
+        Alert.alert(
+          tr("settings.rotateFailedTitle"),
+          outcome.detail ?? tr("errors.generic"),
+        );
+      }
+    } finally {
+      setPassword("");
+      setNewPassword("");
+      setBusy(false);
     }
   };
 
@@ -521,9 +598,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
             {pending.kind === "delete"
               ? tr("settings.reauthDeleteTitle")
-              : tr("settings.reauthLlmTitle", {
-                  action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
-                })}
+              : pending.kind === "bio"
+                ? tr("settings.reauthBioTitle")
+                : tr("settings.reauthLlmTitle", {
+                    action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
+                  })}
           </Text>
           <TextInput
             style={themed.input}
@@ -732,6 +811,48 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         onPress={explainExportUnavailable}
         accessibilityLabel={tr("settings.whyExportA11y")}
       />
+      <GhostButton
+        label={showRotate ? tr("settings.changePasswordCancel") : tr("settings.changePasswordLabel")}
+        disabled={busy}
+        onPress={() => { touchActivity(); setShowRotate((open) => !open); setNewPassword(""); }}
+      />
+      {showRotate && (
+        <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
+          <Text style={[styles.reauthTitle, { color: t.colors.text }]}>{tr("settings.changePasswordTitle")}</Text>
+          <Text style={themed.footnote}>{tr("settings.changePasswordBody")}</Text>
+          <TextInput
+            style={themed.input}
+            placeholder={tr("common.passwordPlaceholder")}
+            placeholderTextColor={t.colors.placeholder}
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+            accessibilityLabel={tr("common.passwordConfirmA11y")}
+            textContentType="password"
+          />
+          <TextInput
+            style={themed.input}
+            placeholder={tr("settings.newPasswordPlaceholder")}
+            placeholderTextColor={t.colors.placeholder}
+            secureTextEntry
+            value={newPassword}
+            onChangeText={setNewPassword}
+            accessibilityLabel={tr("settings.newPasswordA11y")}
+            textContentType="newPassword"
+          />
+          <PrimaryButton
+            label={busy ? tr("settings.rotateWorking") : tr("settings.changePasswordButton")}
+            onPress={() => void runRotate()}
+            disabled={busy || !password || !newPassword}
+            accessibilityLabel={tr("settings.changePasswordButton")}
+          />
+          <GhostButton
+            label={tr("common.cancel")}
+            disabled={busy}
+            onPress={() => { setShowRotate(false); setPassword(""); setNewPassword(""); }}
+          />
+        </View>
+      )}
       <PrimaryButton label={tr("settings.deleteAccount")} onPress={deleteEverything} disabled={busy} danger />
       <GhostButton
         label={tr("settings.signOut")}

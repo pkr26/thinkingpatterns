@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { Alert, Share, Switch } from "react-native";
+import { Alert, Share, Switch, TextInput } from "react-native";
 import * as Keychain from "react-native-keychain";
 
 vi.mock("../../src/api/client", async (importOriginal) => {
@@ -1207,7 +1207,20 @@ describe("biometric unlock toggle", () => {
     expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
     await pressAlertButton("Enable");
     await flush();
-    // The wrap stored the vault's own data key for this account.
+    // M-4 (2026-09-20): the explainer is only step one — the password card
+    // appears and NOTHING is stored until the typed password verifies.
+    expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
+    expect(textOf(root)).toContain("Enter your password to enable biometric unlock");
+    const passwordField = root.root
+      .findAllByType(TextInput)
+      .find((n) => n.props.accessibilityLabel === "Password confirmation")!;
+    await act(async () => {
+      (passwordField.props as { onChangeText: (t: string) => void }).onChangeText("correct horse battery staple");
+    });
+    await pressLabel(root, "Confirm with password");
+    await flush();
+    // The wrap stored the vault's own data key for this account — after the
+    // password proof, not before.
     expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toEqual({
       username: "user-1",
       password: keys.dataKey.toString("base64"),

@@ -43,17 +43,17 @@ vi.mock("../src/crypto", async (importOriginal) => {
   return {
     ...actual,
     deriveMasterKey: vi.fn(async () => new Uint8Array(32)),
+    // Audit fix P-1 (2026-09-20): the verifier is raw bytes (base64 derived
+    // only at the send); key generation returns the sealed blob directly.
     derivePortalKeys: vi.fn(async () => ({
-      authKeyB64: "AUTHKEY==",
+      authKey: new Uint8Array(32),
       wrapKek: new Uint8Array(32),
       noteKey: new Uint8Array(32),
     })),
     generateTherapistKeyPair: vi.fn(async () => ({
       publicKeySpkiB64: "P".repeat(124),
-      privateKeyPkcs8B64: "PRIV==",
-      privateKey: {},
+      wrapKeyBlobB64: "SEALED==",
     })),
-    sealPrivateKeyForUpload: vi.fn(async () => "SEALED=="),
     unlockWrapPrivateKey: vi.fn(async () => ({ algorithm: { name: "ECDH" } })),
     unwrapPatientDataKey: vi.fn(async () => new Uint8Array(32)),
     decryptCaseloadSummary: vi.fn(async () => null),
@@ -154,13 +154,19 @@ describe("LoginView", () => {
 
   it("signs in: salt -> derive -> login -> onReady", async () => {
     const onReady = vi.fn();
+    // P-1 (2026-09-20): the verifier is derived as raw bytes and its base64
+    // exists only inside the login request; the bytes are wiped right after.
+    const authKey = new Uint8Array(32).map((_, i) => i + 1);
+    const expectedVerifier = mockedCrypto.toBase64(authKey);
+    mockedCrypto.derivePortalKeys.mockResolvedValueOnce({ authKey, wrapKek: new Uint8Array(32), noteKey: new Uint8Array(32) });
     const root = await render(<LoginView onReady={onReady} />);
     await typeInto(root, "Username", "drportal");
     await typeInto(root, "Password", "right-password");
     await press(root, "Sign in");
     await flush();
     expect(mockedAuth.saltFor).toHaveBeenCalled();
-    expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", "AUTHKEY==");
+    expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", expectedVerifier);
+    expect([...authKey]).toEqual(new Array(32).fill(0));
     expect(onReady).toHaveBeenCalledWith(
       expect.objectContaining({ username: "drportal", userId: "therapist-1" }),
       expect.objectContaining({ token: "tok" }),
@@ -248,12 +254,35 @@ describe("LoginView", () => {
     await typeInto(root, "Repeat password", "Strong!pass123");
     await press(root, "Create account");
     await flush();
-    expect(mockedCrypto.sealPrivateKeyForUpload).toHaveBeenCalled();
+    // P-1 (2026-09-20): sealing happens inside generateTherapistKeyPair now —
+    // the flow hands the registration only the sealed blob.
+    expect(mockedCrypto.generateTherapistKeyPair).toHaveBeenCalledWith(expect.any(Uint8Array), "drnew");
     expect(mockedAuth.registerTherapist).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ username: "drnew", display_name: "Dr. New", wrap_pub_key: "P".repeat(124) }),
+      expect.objectContaining({ username: "drnew", display_name: "Dr. New", wrap_pub_key: "P".repeat(124), wrap_key_blob: "SEALED==" }),
     );
     expect(onReady).toHaveBeenCalled();
+  });
+
+  it("P-1 (2026-09-20): registration derives the verifier at the send and wipes the raw bytes", async () => {
+    const authKey = new Uint8Array(32).fill(9);
+    const expectedVerifier = mockedCrypto.toBase64(authKey);
+    mockedCrypto.derivePortalKeys.mockResolvedValueOnce({ authKey, wrapKek: new Uint8Array(32), noteKey: new Uint8Array(32) });
+    const root = await render(<LoginView onReady={vi.fn()} />);
+    await press(root, "Create a therapist account instead");
+    await flush();
+    await typeInto(root, "Username", "drnew");
+    await typeInto(root, "Password", "Strong!pass123");
+    await typeInto(root, "Repeat password", "Strong!pass123");
+    await press(root, "Create account");
+    await flush();
+    expect(mockedAuth.registerTherapist).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ verifier: expectedVerifier }),
+    );
+    // The password-equivalent verifier bytes do not outlive the flow — the
+    // success path transfers the other keys, so this wipe must be eager.
+    expect([...authKey]).toEqual(new Array(32).fill(0));
   });
 
   it("forwards an organization-issued enrollment token only during registration", async () => {

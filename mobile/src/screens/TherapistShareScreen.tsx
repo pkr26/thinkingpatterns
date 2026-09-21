@@ -136,14 +136,23 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
 
   const confirmGrant = () => {
     if (!lookup) return;
-    Alert.alert(tr("share.grantTitle", { name: lookup.display_name }), tr("share.grantBody"), [
-      { text: tr("common.cancel"), style: "cancel" },
-      {
-        text: tr("settings.continueToPassword"),
-        style: "destructive",
-        onPress: () => setPending({ kind: "grant", code: code.trim(), lookup }),
-      },
-    ]);
+    // L-5 (2026-09-20): the key fingerprint rides the CONFIRMATION too —
+    // it used to appear only on the lookup card, so the one dialog that
+    // matters for the out-of-band check never repeated it.
+    Alert.alert(
+      tr("share.grantTitle", { name: lookup.display_name }),
+      `${tr("share.grantBody")}\n\n${tr("share.fingerprintNote", {
+        fingerprint: therapistKeyFingerprint(lookup.wrap_pub_key),
+      })}`,
+      [
+        { text: tr("common.cancel"), style: "cancel" },
+        {
+          text: tr("settings.continueToPassword"),
+          style: "destructive",
+          onPress: () => setPending({ kind: "grant", code: code.trim(), lookup }),
+        },
+      ],
+    );
   };
 
   const askRevoke = (consent: ListedConsent) => {

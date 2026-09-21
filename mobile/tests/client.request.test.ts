@@ -95,7 +95,7 @@ describe("stored base URL policy", () => {
   // M1: a live session token must never travel to a newly configured origin.
   it("clears the stored session when the base URL changes origin", async () => {
     await setBaseUrl("https://old.example.com");
-    await api.setSession("tok-secret", "user-1", "alice");
+    await api.setSession("tok-secret", "abababababababababababababababab", "alice");
     await api.cacheSalt("alice", "c2FsdA==");
     await storage.setItem("@mindpattern/last_recompute_user-1", "2026-09-04");
     await storage.setItem("@mindpattern/unlockproof_user-1", "cHJvb2Y=");
@@ -122,14 +122,14 @@ describe("stored base URL policy", () => {
 
   it("keeps the session when the saved URL is unchanged", async () => {
     await setBaseUrl("https://same.example.com");
-    await api.setSession("tok-secret", "user-1", "alice");
+    await api.setSession("tok-secret", "abababababababababababababababab", "alice");
     expect(await setBaseUrl("https://same.example.com")).toBeNull();
     expect(await api.isLoggedIn()).toBe(true);
   });
 
   it("still switches origin when key enumeration is unavailable", async () => {
     await setBaseUrl("https://old.example.com");
-    await api.setSession("tok-secret", "user-1", "alice");
+    await api.setSession("tok-secret", "abababababababababababababababab", "alice");
     const originalGetAllKeys = storage.getAllKeys.bind(storage);
     (storage as { getAllKeys: typeof storage.getAllKeys }).getAllKeys = async () => {
       throw new Error("getAllKeys unsupported on this platform");
@@ -147,7 +147,7 @@ describe("stored base URL policy", () => {
 
 describe("request plumbing", () => {
   it("sends JSON with the bearer token when a session exists", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     await api.meta();
     const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/meta`);
@@ -273,7 +273,7 @@ describe("401 session-death hook", () => {
   });
 
   it("invokes the handler on an authenticated 401 BEFORE throwing, for every endpoint", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     const calls: string[] = [];
     // The handler observes the vault state at invocation time; here we just
     // record the call order relative to the thrown ApiError.
@@ -298,7 +298,7 @@ describe("401 session-death hook", () => {
     // A biometric-unlocked session holds a live token while reauth verifies
     // a password online. A wrong password answers 401 — that must stay
     // "wrong password", not fire the vault-lock hook under the alert.
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "bad verifier" }, 401));
@@ -311,7 +311,7 @@ describe("401 session-death hook", () => {
   });
 
   it("a throwing handler never masks the 401 ApiError", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     setUnauthorizedHandler(() => {
       throw new Error("hook exploded");
     });
@@ -320,7 +320,7 @@ describe("401 session-death hook", () => {
   });
 
   it("works with no handler registered (hook is optional)", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     setUnauthorizedHandler(null);
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "invalid token" }, 401));
     await expect(api.insights()).rejects.toMatchObject({ status: 401 });
@@ -330,11 +330,11 @@ describe("401 session-death hook", () => {
 describe("session storage helpers", () => {
   it("stores and clears token, user id and username", async () => {
     expect(await api.isLoggedIn()).toBe(false);
-    await api.setSession("tok", "u1");
-    expect(await api.getUserId()).toBe("u1");
+    await api.setSession("tok", "abababababababababababababababab");
+    expect(await api.getUserId()).toBe("abababababababababababababababab");
     expect(await api.getUsername()).toBeNull();
 
-    await api.setSession("tok", "u1", "alice");
+    await api.setSession("tok", "abababababababababababababababab", "alice");
     expect(await api.getUsername()).toBe("alice");
     expect(await api.isLoggedIn()).toBe(true);
 
@@ -594,13 +594,13 @@ describe("persisted storage keys", () => {
   // H3: session material must be ENCRYPTED at rest — a device backup must
   // not contain a greppable bearer token.
   it("never stores the token, user id or username in plaintext", async () => {
-    await api.setSession("tok-2", "u-2", "bob");
+    await api.setSession("tok-2", "abababababababababababababababab", "bob");
     expect(await storage.getItem("@mindpattern/token")).not.toBe("tok-2");
     expect(await storage.getItem("@mindpattern/token")).not.toContain("tok-2");
-    expect(await storage.getItem("@mindpattern/user_id")).not.toBe("u-2");
+    expect(await storage.getItem("@mindpattern/user_id")).not.toBe("abababababababababababababababab");
     expect(await storage.getItem("@mindpattern/username")).not.toBe("bob");
     // But the session still round-trips through the encrypted wrapper.
-    expect(await api.getUserId()).toBe("u-2");
+    expect(await api.getUserId()).toBe("abababababababababababababababab");
     expect(await api.getUsername()).toBe("bob");
     expect(await api.isLoggedIn()).toBe(true);
 
@@ -1019,7 +1019,7 @@ describe("measures paging (M-4/L-55)", () => {
   const pageOf = (n: number, start: number) => Array.from({ length: n }, (_, i) => row(`m-${start + i}`));
 
   it("walks offset pages until a short page and returns the whole history", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse(pageOf(500, 0), 200))
       .mockResolvedValueOnce(jsonResponse(pageOf(37, 500), 200));
@@ -1035,7 +1035,7 @@ describe("measures paging (M-4/L-55)", () => {
   });
 
   it("a single short first page makes exactly one request", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     vi.mocked(fetch).mockResolvedValue(jsonResponse(pageOf(3, 0), 200));
     const rows = (await api.listMeasures()) as { id: string }[];
     expect(rows).toHaveLength(3);
@@ -1043,7 +1043,7 @@ describe("measures paging (M-4/L-55)", () => {
   });
 
   it("dedups rows that a concurrent insert shifted into two pages", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     // Full page, then a short page whose first row is the SAME id (a
     // newer measure inserted mid-walk shifts every offset window down).
     vi.mocked(fetch)
@@ -1056,7 +1056,7 @@ describe("measures paging (M-4/L-55)", () => {
   });
 
   it("stops at the quota bound even if a lying server always answers full pages", async () => {
-    await api.setSession("tok-1", "user-1", "alice");
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
     vi.mocked(fetch).mockImplementation(
       (async (input: unknown) => {
         const url = String(input);

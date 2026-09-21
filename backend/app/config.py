@@ -184,6 +184,13 @@ class Settings:
     # bucket instead of riding the 300/min read bucket.
     export_rate_limit: int = 5
     export_rate_window: int = 60
+    # Ops endpoints (2026-09-20 audit fix L-2): /readyz opens a pooled DB
+    # session and runs two queries per hit. Unthrottled, an unauthenticated
+    # flood bypasses every API bucket and competes for the same pool as real
+    # traffic — one shared, generous bucket for /healthz + /readyz keeps
+    # load-balancer probes comfortable while bounding the flood.
+    ops_rate_limit: int = 240
+    ops_rate_window: int = 60
     # Therapist/patient access-audit metadata retention. This is metadata,
     # not journal plaintext, but it remains sensitive and must be explicit.
     access_log_retention_days: int = 730
@@ -334,6 +341,8 @@ class Settings:
             "read_rate_window",
             "export_rate_limit",
             "export_rate_window",
+            "ops_rate_limit",
+            "ops_rate_window",
             "body_read_timeout_seconds",
             "max_entries_per_user",
             "recompute_entry_limit",
@@ -369,6 +378,7 @@ class Settings:
             "processing_rate_window",
             "read_rate_window",
             "export_rate_window",
+            "ops_rate_window",
         ):
             if getattr(self, name) > MAX_RATE_WINDOW_SECONDS:
                 raise RuntimeError(f"{name} must be <= {MAX_RATE_WINDOW_SECONDS}")
@@ -378,6 +388,7 @@ class Settings:
             "processing_rate_limit",
             "read_rate_limit",
             "export_rate_limit",
+            "ops_rate_limit",
         ):
             if getattr(self, name) > MAX_RATE_LIMIT:
                 raise RuntimeError(f"{name} must be <= {MAX_RATE_LIMIT}")
@@ -506,6 +517,8 @@ class Settings:
             db_pool_timeout=_int_env("MINDPATTERN_DB_POOL_TIMEOUT", 30),
             export_rate_limit=_int_env("MINDPATTERN_EXPORT_RATE_LIMIT", 5),
             export_rate_window=_int_env("MINDPATTERN_EXPORT_RATE_WINDOW", 60),
+            ops_rate_limit=_int_env("MINDPATTERN_OPS_RATE_LIMIT", 240),
+            ops_rate_window=_int_env("MINDPATTERN_OPS_RATE_WINDOW", 60),
             access_log_retention_days=_int_env("MINDPATTERN_ACCESS_LOG_RETENTION_DAYS", 730),
             llm_url=os.getenv("MINDPATTERN_LLM_URL", ""),
             llm_api_key=os.getenv("MINDPATTERN_LLM_API_KEY", ""),

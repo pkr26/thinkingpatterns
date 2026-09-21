@@ -43,6 +43,12 @@ export function encryptEntry(
   createdAt: string,
   sentiment: number | null,
   structured?: { energy?: number | null; sleep?: number | null; tags?: string[] },
+  /** Content generation for the version-bound v2 AAD (audit fix M-2,
+   *  2026-09-20): binds ("entry", userId, id, version) so a compromised
+   *  server cannot pair a stale-but-valid ciphertext with a truthful
+   *  version echo. Omitted → the legacy three-part AAD (pre-2026-09-20
+   *  blobs and cross-platform vectors keep decrypting unchanged). */
+  contentVersion?: number,
 ): { blobB64: string } {
   // Payload v2 (2026-09-17): optional structured channels ride alongside
   // the text. A caller passing none emits the v1 shape byte-for-byte, so
@@ -62,7 +68,10 @@ export function encryptEntry(
   // Stryker disable StringLiteral
 const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
   // Stryker restore StringLiteral
-  const aad = buildAad("entry", userId, clientEntryId);
+  const aad =
+    contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1
+      ? buildAad("entry", userId, clientEntryId, String(contentVersion))
+      : buildAad("entry", userId, clientEntryId);
   const blob = encrypt(keys.dataKey, plaintext, aad);
   return { blobB64: blob.toString("base64") };
 }
@@ -79,8 +88,25 @@ export function decryptEntry(
   userId: string,
   clientEntryId: string,
   blobB64: string,
+  /** The server-declared content generation of this row. When present the
+   *  version-bound v2 AAD is tried first and the legacy three-part AAD is
+   *  the fallback (audit fix M-2: pre-2026-09-20 rows carry a v1 binding
+   *  while the row metadata still declares version 1); omitted → legacy
+   *  binding only. A blob that fails BOTH bindings is genuinely tampered
+   *  and throws. */
+  contentVersion?: number,
 ): EntryPayload {
-  const plaintext = decrypt(keys.dataKey, Buffer.from(blobB64, "base64"), buildAad("entry", userId, clientEntryId));
+  const blob = Buffer.from(blobB64, "base64");
+  let plaintext: Buffer;
+  if (contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1) {
+    try {
+      plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId, String(contentVersion)));
+    } catch {
+      plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
+    }
+  } else {
+    plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
+  }
   const payload = JSON.parse(plaintext.toString("utf8")) as { v?: unknown };
   // L-48: same guard as decryptInsights — the AEAD bound the bytes to this
   // account/entry, but nothing else vouches for the version field.

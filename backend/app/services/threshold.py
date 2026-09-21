@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import Iterable
 
 DEFAULT_UNLOCK_DAYS = 30
+
+
+def _utc_today() -> date:
+    """Server-UTC calendar day (2026-09-20 audit fix L-1).
+
+    The streak's "today" anchor must be the same UTC calendar the entry-date
+    bounds use; ``date.today()`` answers in the host's local timezone and let
+    the streak flip at local midnight on non-UTC hosts.
+    """
+    return datetime.now(timezone.utc).date()
 
 
 class Phase(str, Enum):
@@ -33,7 +43,7 @@ def current_streak(dates: Iterable[date], today: date | None = None) -> int:
     distinct = sorted({d for d in dates if d is not None})
     if not distinct:
         return 0
-    today = today or date.today()
+    today = today or _utc_today()
     day = distinct[-1]
     if day not in (today, today - timedelta(days=1)):
         return 0

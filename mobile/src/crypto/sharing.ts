@@ -94,15 +94,20 @@ export function wrapDataKeyForTherapist(
 }
 
 /** Human-verifiable fingerprint of a therapist's public wrap key:
- * SHA-256 over the SPKI DER, first 8 bytes as four spaced hex groups
- * ("A1B2 C3D4 E5F6 0718"). The portal shows the SAME string next to its
+ * SHA-256 over the SPKI DER, first 16 bytes as eight spaced hex groups
+ * ("A1B2 C3D4 E5F6 0718 …"). The portal shows the SAME string next to its
  * pairing code, so a patient can read it back to the therapist (or vice
  * versa) and notice a substituted key — the out-of-band check the
  * 2026-09-17 audit asked for: the server relays the key at pairing
  * lookup, and without a fingerprint nothing binds that key to the human.
- * Both platforms format identically (pinned by tests). */
+ * Both platforms format identically (pinned by tests).
+ *
+ * L-5 (2026-09-20): widened from 8 to 16 bytes. The old 32-bit prefix let a
+ * determined attacker grind a colliding P-256 key (~2^32 work) and defeat
+ * the read-back; 128 bits of digest makes grinding infeasible while the
+ * spaced-hex form stays readable over a phone call. */
 export function therapistKeyFingerprint(therapistPubSpkiB64: string): string {
   const digest = engine.createHash("sha256").update(Buffer.from(therapistPubSpkiB64, "base64")).digest();
-  const hex = digest.subarray(0, 8).toString("hex").toUpperCase();
+  const hex = digest.subarray(0, 16).toString("hex").toUpperCase();
   return hex.match(/.{4}/g)?.join(" ") ?? hex;
 }

@@ -62,12 +62,12 @@ async def test_full_pipeline_unlocks_at_threshold(client, monkeypatch):
     # promotes: consecutive recomputes share ~179/180 window days, so that
     # was the same data scored twice.
 
-    class _NextDay(date):
-        @classmethod
-        def today(cls) -> date:
-            return date.today() + timedelta(days=1)
-
-    monkeypatch.setattr("app.api.insights.date_type", _NextDay)
+    # 2026-09-20 (L-1): the recompute day moved from date_type.today()
+    # (host-local) to the shared UTC anchor, so the "next day" seam moved
+    # with it — patch _utc_today itself.
+    monkeypatch.setattr(
+        "app.api.insights._utc_today", lambda: date.today() + timedelta(days=1)
+    )
     # The fresh evidence: a work entry on a day the fixture wrote CALM text
     # for (never a Sunday, so the day is new work evidence every run).
     fresh_day = TODAY if TODAY.weekday() != 6 else TODAY - timedelta(days=1)

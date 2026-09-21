@@ -319,6 +319,15 @@ async def create_entry(
             )
             if existing.scalar_one_or_none() is not None:
                 raise ApiError(status_code=409, detail="entry already exists", code="conflict")
+            # A create is always the FIRST content generation (M-2): the
+            # client bound this version into its v2 AAD, so any other value
+            # would store a row whose ciphertext and version echo disagree.
+            if body.content_version != 1:
+                raise ApiError(
+                    status_code=422,
+                    detail="content_version must be 1 on create",
+                    code="validation_error",
+                )
             await _assert_within_quota(session, fresh_user, len(blob), request.app.state.settings)
 
             row = Entry(
@@ -326,6 +335,7 @@ async def create_entry(
                 client_entry_id=body.client_entry_id,
                 blob=blob,
                 entry_date=body.entry_date,
+                content_version=1,
             )
             session.add(row)
             try:
@@ -397,6 +407,19 @@ async def replace_entry(
             )
             if row is None:
                 raise ApiError(status_code=404, detail="entry not found", code="not_found")
+            # Version binding (M-2): a modern client sends the version it
+            # bound into the replacement blob's v2 AAD; it must be exactly
+            # the successor of the stored version. A mismatch is a retryable
+            # 409 (another device edited first — refetch and retry), never a
+            # silent overwrite of the AAD/version contract. Legacy clients
+            # omit the field; the stored version still advances monotonically.
+            if body.content_version is not None and body.content_version != row.content_version + 1:
+                raise ApiError(
+                    status_code=409,
+                    detail="entry was modified by another device; refetch and retry",
+                    code="version_conflict",
+                    headers={"Retry-After": "1"},
+                )
             await _assert_replacement_within_quota(
                 session, fresh_user, len(bytes(row.blob)), len(blob), request.app.state.settings
             )
@@ -404,6 +427,7 @@ async def replace_entry(
             if changed:
                 row.blob = blob
                 row.entry_date = body.entry_date
+                row.content_version = body.content_version or row.content_version + 1
                 await _increment_entries_revision(session, fresh_user)
             await session.commit()
             await session.refresh(row)
@@ -555,6 +579,45 @@ async def list_entries(
                 # or malformed continuation headers.
                 response.headers["X-Next-Offset"] = str(offset + len(result))
     return result
+
+
+@router.get(
+    "/{client_entry_id}",
+    response_model=EntryOut,
+    dependencies=[
+        Depends(make_rate_limiter("entries-read-one", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def get_entry(
+    client_entry_id: str,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """One entry by its stable client id (2026-09-20, audit fix M-5).
+
+    The idempotency-verification primitive: an offline queue that receives
+    409 "already exists" on a replayed upload can prove the server really
+    holds the row before discarding its only local copy — a hostile or flaky
+    server answering 409 without persisting is exposed as a 404 here, and
+    the queue parks the item for user-visible recovery instead of silently
+    deleting the sole ciphertext.
+    """
+    if _CLIENT_ENTRY_ID_RE.fullmatch(client_entry_id) is None:
+        raise ApiError(status_code=404, detail="entry not found", code="not_found")
+    row = (
+        (
+            await session.execute(
+                select(Entry).where(
+                    Entry.user_id == user.id, Entry.client_entry_id == client_entry_id
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        raise ApiError(status_code=404, detail="entry not found", code="not_found")
+    return entry_out(row)
 
 
 @router.delete(

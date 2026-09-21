@@ -136,6 +136,9 @@ def test_settings_defaults_are_pinned(clean_env):
         # Added 2026-09-07: dedicated export bucket + env-sized PG pool.
         "export_rate_limit": 5,
         "export_rate_window": 60,
+        # Added 2026-09-20 (L-2): the shared ops bucket for /healthz+/readyz.
+        "ops_rate_limit": 240,
+        "ops_rate_window": 60,
         "access_log_retention_days": 730,
         "db_pool_size": 5,
         "db_max_overflow": 10,
@@ -516,12 +519,16 @@ async def test_unlimited_endpoints_create_no_rate_buckets(settings):
                 r1 = await c.get("/healthz")
                 r2 = await c.get("/healthz")
                 sent.append((r1.status_code, r2.status_code))
-        # healthz is unlimited; the limiter shape is asserted via the counter.
+        # L-2 (2026-09-20) reversed the old contract: /healthz and /readyz
+        # now share ONE generous ops bucket ("ops-health") — they used to be
+        # the only DB-touching endpoints with no limiter at all. The limiter
+        # shape is still asserted via the counter: exactly that one bucket,
+        # per-client keys, nothing else.
         counter: FixedWindowCounter = application.state.rate_counter
         assert sent == [(200, 200)] * 2
-        # The shared counter holds per-bucket keys with the client appended.
         buckets = {k.split(":", 1)[0] for k in counter._hits}
-        assert buckets == set()
+        assert buckets == {"ops-health"}
+        assert {k.rsplit(":", 1)[1] for k in counter._hits} == {"1.1.1.1", "2.2.2.2"}
 
 
 async def test_keyed_limit_429_shape(settings):

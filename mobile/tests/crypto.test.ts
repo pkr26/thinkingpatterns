@@ -332,7 +332,7 @@ describe("therapist key fingerprint", () => {
     readFileSync(join(here, "..", "..", "shared", "vectors.json"), "utf8"),
   ).wrap_vectors as { therapist_pub_spki: string }[];
   const FIXED_SPKI_B64 = wrapVectors[0].therapist_pub_spki;
-  const EXPECTED = "CB54 DE22 C976 DF43"; // sha256(spk)[0:8], hex groups — portal-pinned
+  const EXPECTED = "CB54 DE22 C976 DF43 08B6 7F8F 112B D4D7"; // sha256(spk)[0:16] hex groups — portal-pinned (L-5, 2026-09-20)
 
   it("formats the shared-vector key identically to the portal", async () => {
     const { therapistKeyFingerprint } = await import("../src/crypto/sharing");

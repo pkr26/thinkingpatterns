@@ -60,10 +60,13 @@ describe("portal-only HKDF subkeys (mutation pins)", () => {
 
   it("auth, wrap, and notes are three DISTINCT subkeys of one master", async () => {
     const master = await deriveMasterKey(VECTOR.password, unb64(VECTOR.salt));
-    const { authKeyB64, wrapKek, noteKey } = await derivePortalKeys(master);
+    // Audit fix P-1 (2026-09-20): the auth verifier is returned as raw bytes
+    // (its base64 is derived only at the network send), so this pin encodes
+    // the derivation instead of reading a string field.
+    const { authKey, wrapKek, noteKey } = await derivePortalKeys(master);
     const b64 = (b: Bytes) => btoa(String.fromCharCode(...b));
-    expect(authKeyB64).not.toBe(b64(wrapKek));
-    expect(authKeyB64).not.toBe(b64(noteKey));
+    expect(b64(authKey)).not.toBe(b64(wrapKek));
+    expect(b64(authKey)).not.toBe(b64(noteKey));
     expect(b64(wrapKek)).not.toBe(b64(noteKey));
   });
 });
@@ -75,8 +78,10 @@ describe("identity cross-binding (mutation pins)", () => {
     const sealed = await sealPrivateKeyForUpload(
       wrapKek,
       // Any PKCS#8-shaped bytes suffice — the failure must happen at the
-      // GCM authentication layer, before key parsing.
-      "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQGGdG0=",
+      // GCM authentication layer, before key parsing. Audit fix P-1
+      // (2026-09-20): the DER is passed as raw bytes; a base64 string of a
+      // private key no longer exists anywhere in the flow.
+      unb64("MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQGGdG0="),
       "alice",
     );
     await expect(unlockWrapPrivateKey(wrapKek, sealed, "mallory")).rejects.toThrow(

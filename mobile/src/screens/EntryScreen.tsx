@@ -314,11 +314,14 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // payload when the user made one. Without a pick it stays null — the
       // server's graded engine re-scores the text at recompute time either
       // way; the quick score below never rides in the payload.
+      // M-2 (2026-09-20): a new entry is the FIRST content generation of
+      // its id — encrypt under the version-bound v2 AAD and declare the
+      // version to the server, which pins the AAD contract at the row.
       const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, today, selectedMood, {
         energy: selectedEnergy,
         sleep: sleepQuality,
         tags: selectedTags,
-      });
+      }, 1);
       // The local mood log powers the baseline-phase trend view; it is
       // device-only metadata, encrypted under the data key, and never
       // leaves the phone. The explicit check-in wins when there is one;
@@ -337,7 +340,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         .finally(() => zeroize(dataKeyCopy));
       let queuedOffline = false;
       try {
-        await api.createEntry(clientEntryId, blobB64, today);
+        await api.createEntry(clientEntryId, blobB64, today, 1);
         landed = true;
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {

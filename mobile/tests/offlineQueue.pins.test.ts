@@ -26,6 +26,10 @@ vi.mock("../src/api/client", async (importOriginal) => {
       createEntry: vi.fn(async () => ({})),
       createQueuedEntry: vi.fn(async () => ({})),
       getUserId: vi.fn(async () => "alice"),
+      // M-5 (2026-09-20): default 404; the verified-duplicate pin overrides.
+      getEntry: vi.fn(async () => {
+        throw new ApiError(404, "entry not found", "not_found");
+      }),
     },
   };
 });
@@ -47,9 +51,10 @@ beforeEach(() => {
 });
 
 describe("queue regression pins", () => {
-  it("does not make a 409 duplicate into a rejected recovery item", async () => {
+  it("does not make a VERIFIED 409 duplicate into a rejected recovery item (M-5)", async () => {
     await enqueue(item("duplicate"));
     vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(409, "already exists"));
+    vi.mocked(api.getEntry).mockResolvedValue({ id: "x", client_entry_id: "duplicate", blob: "b", entry_date: "2026-09-20", received_at: "2026-09-20T00:00:00Z", content_version: 1 } as never);
     expect(await flushQueue("alice")).toBe(0);
     expect(await queueLength("alice")).toBe(0);
     expect(await rejectedEntries("alice")).toEqual([]);

@@ -626,10 +626,13 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     expect(api.deleteEntry).not.toHaveBeenCalled();
     expect(api.createEntry).not.toHaveBeenCalled();
     expect(api.updateEntry).toHaveBeenCalledTimes(1);
-    const [updatedId, blob, date] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
+    const [updatedId, blob, date, version] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string, number];
     expect(updatedId).toBe("e-2026-09-03-bbb");
     expect(date).toBe("2026-09-03");
-    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    // M-2 (2026-09-20): the replacement declares and AAD-binds its content
+    // version (1 for a version-less legacy row).
+    expect(version).toBe(1);
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob, version);
     expect(payload.text).toBe("revised words");
     expect(payload.sentiment).toBe(-1); // the day's explicit pick survived the edit
     // Detail shows the update; the device-local log kept the chosen value.
@@ -673,7 +676,7 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     await flush();
     expect(api.updateEntry).toHaveBeenCalledTimes(1);
     const [updatedId, blob] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
-    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob, 1);
     // The typo fix must not have erased the day's check-ins.
     expect(payload.v).toBe(2);
     expect(payload.text).toBe("structured day, revised");
@@ -700,7 +703,7 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     await pressLabel(root, "Save changes");
     await flush();
     const [updatedId, blob] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
-    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob, 1);
     // Nothing structured survived sanitization: the re-encrypt emits the v1
     // shape (empty structured), which the server accepts everywhere.
     expect(payload.v).toBe(1);
@@ -725,7 +728,7 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     await pressLabel(root, "Save changes");
     await flush();
     const [updatedId, blob] = vi.mocked(api.updateEntry).mock.calls[0] as unknown as [string, string, string];
-    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob);
+    const payload = decryptEntry({ dataKey }, "user-1", updatedId, blob, 1);
     expect(payload.tags).toEqual(["work", "a-very-long-tag-name-ove", "family"]);
     await act(async () => root.unmount());
   });

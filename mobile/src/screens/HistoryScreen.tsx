@@ -35,6 +35,7 @@ import {
 } from "react-native";
 import { api, ApiError, ENTRY_PAGE_BYTES } from "../api/client";
 import { decryptEntry, encryptEntry } from "../crypto/MindPatternCrypto";
+import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { MoodCalendar } from "../components/MoodCalendar";
 import { filterEntries } from "../historyFind";
 import { vault } from "../vault";
@@ -67,6 +68,9 @@ interface HistoryEntry {
   clientEntryId: string;
   entryDate: string;
   receivedAt: string;
+  /** Server-declared content generation (M-2, 2026-09-20); null on legacy
+   *  servers that do not send content_version. */
+  contentVersion: number | null;
   text: string;
   /** The day's explicit check-in pick, when one was made (else null). */
   sentiment: number | null;
@@ -80,6 +84,64 @@ type Mode =
   | { kind: "list" }
   | { kind: "detail"; entry: HistoryEntry }
   | { kind: "edit"; entry: HistoryEntry };
+
+/** Decrypt one server page with the M-2 version ladder: the v2
+ *  (version-bound) AAD first, the legacy binding as fallback, then the
+ *  per-entry high-water check — a row whose declared generation moved
+ *  BACKWARDS is treated exactly like a tampered blob (skipped, counted),
+ *  never rendered as today's truth. */
+async function decryptRowsWithVersions(
+  userId: string,
+  dataKey: Buffer,
+  rows: ReadonlyArray<{
+    client_entry_id: string;
+    blob: string;
+    entry_date?: unknown;
+    received_at?: unknown;
+    content_version?: number;
+  }>,
+): Promise<{ decrypted: HistoryEntry[]; failed: number }> {
+  const decrypted: HistoryEntry[] = [];
+  let failed = 0;
+  const versioned: { clientEntryId: string; contentVersion: number }[] = [];
+  for (const row of rows) {
+    try {
+      const payload = decryptEntry(
+        { dataKey },
+        userId,
+        row.client_entry_id,
+        row.blob,
+        typeof row.content_version === "number" ? row.content_version : undefined,
+      );
+      decrypted.push({
+        clientEntryId: row.client_entry_id,
+        entryDate: typeof row.entry_date === "string" ? row.entry_date : "",
+        receivedAt: typeof row.received_at === "string" ? row.received_at : "",
+        contentVersion: typeof row.content_version === "number" ? row.content_version : null,
+        text: typeof payload.text === "string" ? payload.text : "",
+        sentiment: sanitizeSentiment(payload.sentiment),
+        energy: sanitizeEnergy(payload.energy),
+        sleep: sanitizeSleep(payload.sleep),
+        tags: sanitizeTags(payload.tags),
+      });
+      if (typeof row.content_version === "number") {
+        versioned.push({ clientEntryId: row.client_entry_id, contentVersion: row.content_version });
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+  if (versioned.length > 0) {
+    const { rolledBack } = await observeEntryVersions(userId, dataKey, versioned);
+    if (rolledBack.length > 0) {
+      const rolled = new Set(rolledBack);
+      const kept = decrypted.filter((entry) => !rolled.has(entry.clientEntryId));
+      failed += decrypted.length - kept.length;
+      return { decrypted: kept, failed };
+    }
+  }
+  return { decrypted, failed };
+}
 
 /** "2026-09-03" → "Thursday, September 3, 2026" (es: "jueves, 3 de
  *  septiembre de 2026") per the app locale; a garbage date falls back to
@@ -230,27 +292,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       });
       if (loadEpoch !== historyLoadEpochRef.current) return;
       const rows = page.entries;
-      const decrypted: HistoryEntry[] = [];
-      let failed = 0;
-      for (const row of rows) {
-        try {
-          const payload = decryptEntry(vault.get(), userId, row.client_entry_id, row.blob);
-          decrypted.push({
-            clientEntryId: row.client_entry_id,
-            entryDate: typeof row.entry_date === "string" ? row.entry_date : "",
-            receivedAt: typeof row.received_at === "string" ? row.received_at : "",
-            text: typeof payload.text === "string" ? payload.text : "",
-            sentiment: sanitizeSentiment(payload.sentiment),
-            energy: sanitizeEnergy(payload.energy),
-            sleep: sanitizeSleep(payload.sleep),
-            tags: sanitizeTags(payload.tags),
-          });
-        } catch {
-          // Tampered or wrong-key blob: skipped (never rendered raw), and
-          // counted so the user knows the list is short by exactly that many.
-          failed += 1;
-        }
-      }
+      // Tampered, wrong-key and rolled-back blobs are skipped (never
+      // rendered raw) and counted so the user knows the list is short by
+      // exactly that many.
+      const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
       // Newest day first; same-day entries order by server arrival.
       decrypted.sort((a, b) => b.entryDate.localeCompare(a.entryDate) || b.receivedAt.localeCompare(a.receivedAt));
       setEntries(decrypted);
@@ -412,25 +457,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         return;
       }
       const rows = page.entries;
-      const incoming: HistoryEntry[] = [];
-      let failed = 0;
-      for (const row of rows) {
-        try {
-          const payload = decryptEntry(vault.get(), userId, row.client_entry_id, row.blob);
-          incoming.push({
-            clientEntryId: row.client_entry_id,
-            entryDate: typeof row.entry_date === "string" ? row.entry_date : "",
-            receivedAt: typeof row.received_at === "string" ? row.received_at : "",
-            text: typeof payload.text === "string" ? payload.text : "",
-            sentiment: sanitizeSentiment(payload.sentiment),
-            energy: sanitizeEnergy(payload.energy),
-            sleep: sanitizeSleep(payload.sleep),
-            tags: sanitizeTags(payload.tags),
-          });
-        } catch {
-          failed += 1;
-        }
-      }
+      const { decrypted: incoming, failed } = await decryptRowsWithVersions(
+        userId,
+        vault.get().dataKey,
+        rows,
+      );
       setEntries((previous) => {
         const byId = new Map(previous.map((entry) => [entry.clientEntryId, entry]));
         for (const entry of incoming) byId.set(entry.clientEntryId, entry);
@@ -512,6 +543,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     setBusy(true);
     try {
       await api.deleteEntry(entry.clientEntryId);
+      // M-2: the row is gone; forget its version mark so a later recreate
+      // of the same id (legitimately version 1 again) does not false-alarm.
+      await forgetEntryVersion(
+        (await api.getUserId()) ?? "",
+        vault.get().dataKey,
+        entry.clientEntryId,
+      ).catch(() => {});
       // L-67: this device just moved the collection revision; the walk's
       // token must be re-acquired or the next "Load older" 409-restarts
       // and wipes the filters.
@@ -598,17 +636,39 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // structured channels (energy/sleep/tags) ride along unchanged — an
       // edit fixes WORDS, it must not silently erase the day's check-ins
       // (the pre-2026-09-19 bug this line closes).
-      const { blobB64 } = encryptEntry(
-        vault.get(),
-        userId,
-        entry.clientEntryId,
-        trimmed,
-        entry.entryDate,
-        entry.sentiment,
-        { energy: entry.energy, sleep: entry.sleep, tags: entry.tags },
-      );
+      // M-2 (2026-09-20): the replacement is encrypted under the NEXT
+      // content generation's version-bound AAD. Another device's concurrent
+      // edit answers 409 version_conflict; one refetch-and-retry recovers
+      // the race, a second conflict is surfaced honestly.
+      const encryptFor = (version: number): string =>
+        encryptEntry(
+          vault.get(),
+          userId,
+          entry.clientEntryId,
+          trimmed,
+          entry.entryDate,
+          entry.sentiment,
+          { energy: entry.energy, sleep: entry.sleep, tags: entry.tags },
+          version,
+        ).blobB64;
+      let nextVersion = (entry.contentVersion ?? 0) + 1;
+      // The first encryption stays OUTSIDE the network try: a local vault
+      // failure keeps its own honest message (the pre-M-2 contract).
+      let blobB64 = encryptFor(nextVersion);
       try {
-        await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate);
+        try {
+          await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
+        } catch (err) {
+          if (err instanceof ApiError && err.code === "version_conflict") {
+            const current = await api.getEntry(entry.clientEntryId);
+            const serverVersion = typeof current.content_version === "number" ? current.content_version : 0;
+            nextVersion = serverVersion + 1;
+            blobB64 = encryptFor(nextVersion);
+            await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
+          } else {
+            throw err;
+          }
+        }
       } catch (err) {
         if (err instanceof ApiError && err.status === 0) {
           Alert.alert(tr("history.needsConnectionTitle"), tr("history.updateOfflineBody"));
@@ -620,6 +680,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         }
         return;
       }
+      entry.contentVersion = nextVersion;
+      await observeEntryVersions(userId, vault.get().dataKey, [
+        { clientEntryId: entry.clientEntryId, contentVersion: nextVersion },
+      ]).catch(() => {});
       // L-67: the replacement moved the collection revision on the server;
       // drop the walk's token so the next "Load older" re-acquires it
       // instead of 409-restarting (which would wipe the filters).

@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import anyio
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, config, singleprocess
 from .api import api_router, api_v1_router
-from .cache import FixedWindowCounter, RateLimitCheck
+from .cache import FixedWindowCounter, RateLimitCheck, make_rate_limiter
 from .db import SCHEMA_HEAD, build_engine, build_sessionmaker, init_models
 from .deps import DEFAULT_ERROR_CODES
 from .metrics import MetricsMiddleware, MetricsRegistry
@@ -418,7 +418,14 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         status_observer=app.state.metrics.observe_request,
     )
 
-    @app.get("/healthz", tags=["ops"])
+    @app.get(
+        "/healthz",
+        tags=["ops"],
+        # L-2 (2026-09-20): one shared generous bucket for the ops pair —
+        # unthrottled, /healthz+/readyz were the only DB-touching endpoints
+        # with no limiter, a free pool-pressure flood for anyone unauthenticated.
+        dependencies=[Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))],
+    )
     async def healthz() -> dict:
         # Liveness only: no DB touch, so a wedged pool still reports the
         # process as alive (that's what /readyz is for).
@@ -450,7 +457,11 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             media_type="text/plain; version=0.0.4; charset=utf-8",
         )
 
-    @app.get("/readyz", tags=["ops"])
+    @app.get(
+        "/readyz",
+        tags=["ops"],
+        dependencies=[Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))],
+    )
     async def readyz(request: Request):
         try:
             async with request.app.state.sessionmaker() as session:
