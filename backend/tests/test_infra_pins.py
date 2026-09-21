@@ -472,6 +472,7 @@ class TestSettingsReprHidesSecrets:
         assert hidden == {
             "database_url",
             "token_secret",
+            "decoy_secret",
             "metrics_token",
             "llm_api_key",
             "therapist_enrollment_token",

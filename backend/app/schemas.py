@@ -341,6 +341,40 @@ class TherapistMeResponse(BaseModel):
     wrap_key_blob: str
 
 
+class WrapKeyRotateRequest(StrictRequestModel):
+    """A fresh therapist wrap keypair (2026-09-21 audit C-2): the new
+    public half patients re-wrap their data keys to, and the private half
+    as a blob under the (current or new) password-derived KEK — same
+    shape and validation as registration."""
+
+    wrap_pub_key: str = Field(min_length=1, max_length=MAX_SPKI_B64)
+    wrap_key_blob: str = Field(min_length=1, max_length=MAX_THERAPIST_KEY_BLOB_B64)
+
+
+class PatientAccessLogOut(BaseModel):
+    """One row of WHO-ACCESSED-MY-DATA (2026-09-21 audit B-4): the
+    patient's consent-scoped view of their own audit trail. `actor` is
+    "self" for the patient's own lifecycle actions (grant, revoke,
+    rewrap) and "therapist" for portal reads; `actor_name` is the
+    therapist's display name (the patient chose to share with them)."""
+
+    at: datetime
+    action: str
+    actor: str
+    actor_name: str | None = None
+
+
+class TherapistAccessLogOut(BaseModel):
+    """The therapist's own action history (accountability view): every
+    read/write the portal performed, newest first. `patient_name` is the
+    acted-on patient's display name (None for self-lifecycle rows such
+    as wrap_key_rotate)."""
+
+    at: datetime
+    action: str
+    patient_name: str | None = None
+
+
 class PairingCodeResponse(BaseModel):
     code: str
     expires_in: int

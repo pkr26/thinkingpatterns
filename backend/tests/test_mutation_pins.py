@@ -136,6 +136,7 @@ def test_settings_defaults_are_pinned(clean_env):
         "environment": "development",
         "database_url": "sqlite+aiosqlite:///./mindpattern.db",
         "token_secret": "dev-insecure-secret-change-me",
+        "decoy_secret": "",
         "token_ttl_seconds": 86_400,
         "processing_session_ttl": 300,
         "unlock_threshold_days": 30,
@@ -164,6 +165,9 @@ def test_settings_defaults_are_pinned(clean_env):
         "db_pool_size": 5,
         "db_max_overflow": 10,
         "db_pool_timeout": 30,
+        # Phase 2 (2026-09-21, B-3): asyncpg server-side timeouts.
+        "db_statement_timeout_ms": 30_000,
+        "db_idle_in_transaction_timeout_ms": 300_000,
         "llm_url": "",
         "llm_api_key": "",
         "llm_model": "gpt-4o-mini",
@@ -2724,10 +2728,11 @@ async def test_legacy_entry_page_budget_is_two_mebibytes(client, app):
 
 
 async def test_grant_rejects_when_the_therapist_caseload_is_full(client, app):
-    """100 existing consent rows (any status) cap the therapist's caseload;
-    the 101st pair must 413 without burning the pairing code. The filler
-    count is an independent literal: reading MAX_PATIENTS_PER_THERAPIST
-    here would scale the pin with the mutant. (Kills mutant Q9.)"""
+    """100 existing ACTIVE consents cap the therapist's caseload; the 101st
+    pair must 413 without burning the pairing code (revoked history stopped
+    counting 2026-09-21, audit B-5). The filler count is an independent
+    literal: reading MAX_PATIENTS_PER_THERAPIST here would scale the pin
+    with the mutant. (Kills mutant Q9.)"""
     from app.models import Consent, User, new_id
 
     therapist = TherapistEmulator("pins-q9-th", "pw")
@@ -2753,7 +2758,7 @@ async def test_grant_rejects_when_the_therapist_caseload_is_full(client, app):
             Consent(
                 user_id=row.id,
                 therapist_id=therapist.user_id,
-                status="revoked",
+                status="active",
             )
             for row in filler
         )

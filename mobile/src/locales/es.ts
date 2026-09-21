@@ -759,6 +759,13 @@ export const es: Record<string, string> = {
   "share.findTherapist": "Encontrar a mi terapeuta",
   "share.fingerprintNote":
     "Huella de la llave: {fingerprint}\nLéala de vuelta a su terapeuta y compruebe que coincide con la que muestra su portal — una discrepancia significa que la llave fue sustituida en el camino.",
+  // C-7 (2026-09-21): la comprobación de la huella es una ACCIÓN — el
+  // consentimiento solo continúa tras pulsar «las huellas coinciden».
+  "share.fingerprintsMatch": "Las huellas coinciden — continuar",
+  "share.fingerprintsDontMatch": "No coinciden",
+  "share.mismatchTitle": "No continúe",
+  "share.mismatchBody":
+    "Si las huellas no coinciden, el emparejamiento podría haber sido interceptado. Contacte a su terapeuta por un canal de confianza antes de compartir nada.",
   "share.disclosure":
     "Compartir le permite a esa persona leer sus entradas del diario, sus patrones e ideas, sus cuestionarios de bienestar (PHQ-9) y su línea de resumen en la lista de casos (nunca cambiar nada), y escribir sus propias notas privadas. Puede detenerlo en cualquier momento; lo que ya se leyó no se puede desleer.",
   "share.shareWithName": "Compartir con {name}",

@@ -26,7 +26,7 @@ describe("questionFeedback", () => {
     const plain = envelope.decrypt(
       DATA_KEY,
       Buffer.from(blob!, "base64"),
-      envelope.buildAad("feedback", USER),
+      envelope.buildAad("feedback", USER, new Date().toISOString().slice(0, 10)),
     );
     const parsed = JSON.parse(plain.toString("utf8"));
     expect(parsed.feedback).toEqual([
@@ -63,7 +63,7 @@ describe("pattern mutes riding the feedback channel (2026-09-19)", () => {
     const plain = envelope.decrypt(
       DATA_KEY,
       Buffer.from(blob!, "base64"),
-      envelope.buildAad("feedback", USER),
+      envelope.buildAad("feedback", USER, new Date().toISOString().slice(0, 10)),
     );
     const parsed = JSON.parse(plain.toString("utf8"));
     expect(parsed.feedback).toEqual([{ pid: "temporal:work", resonated: true }]);
@@ -79,7 +79,7 @@ describe("pattern mutes riding the feedback channel (2026-09-19)", () => {
     const plain = envelope.decrypt(
       DATA_KEY,
       Buffer.from(blob!, "base64"),
-      envelope.buildAad("feedback", USER),
+      envelope.buildAad("feedback", USER, new Date().toISOString().slice(0, 10)),
     );
     const parsed = JSON.parse(plain.toString("utf8"));
     expect(parsed.feedback).toEqual([]);
@@ -121,7 +121,7 @@ describe("M-35: serialized appends (same-frame taps cannot lose events)", () => 
     const plain = envelope.decrypt(
       DATA_KEY,
       Buffer.from(blob!, "base64"),
-      envelope.buildAad("feedback", USER),
+      envelope.buildAad("feedback", USER, new Date().toISOString().slice(0, 10)),
     );
     const parsed = JSON.parse(plain.toString("utf8"));
     // Without the mutex, the second append read the same (empty) pending

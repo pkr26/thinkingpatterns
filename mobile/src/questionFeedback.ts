@@ -133,7 +133,11 @@ export async function buildFeedbackBlob(
         }),
         "utf8",
       ),
-      buildAad("feedback", userId),
+      // C-5 (2026-09-21): the AAD carries the seal DATE (UTC), so a blob
+      // captured by a hostile server cannot be replayed across recomputes.
+      // The server accepts today or yesterday to tolerate clocks that
+      // straddle UTC midnight between seal and verify.
+      buildAad("feedback", userId, new Date().toISOString().slice(0, 10)),
     );
     return blob.toString("base64");
   } finally {

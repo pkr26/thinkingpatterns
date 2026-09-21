@@ -22,15 +22,15 @@ import os
 from datetime import date as date_type, datetime, timezone
 
 import anyio
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_regular_user
+from ..deps import ApiError, get_session, require_regular_user, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
-from ..models import Consent, Entry, Insight, Measure, User, utcnow
+from ..models import AccessLog, Consent, Entry, Insight, Measure, User, utcnow
 from ..schemas import (
     AccountDeleteRequest,
     CredentialRotateRequest,
@@ -38,6 +38,7 @@ from ..schemas import (
     InsightOut,
     LlmConsentRequest,
     LlmConsentResponse,
+    PatientAccessLogOut,
     ShareRecord,
     entry_out,
 )
@@ -581,10 +582,13 @@ def _consent_response(user: User, settings) -> LlmConsentResponse:
 async def rotate_credential(
     body: CredentialRotateRequest,
     request: Request,
-    user: User = Depends(require_regular_user),
+    user: User = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Rotate the LOGIN credential (2026-09-20, audit fix H-1/M-3).
+    """Rotate the LOGIN credential (2026-09-20, audit fix H-1/M-3; opened to
+    BOTH roles 2026-09-21, audit C-2/F-4 — a therapist's forgotten or
+    phished verifier used to be fixable only by deleting the account and
+    orphaning every consent's wrapped key).
 
     The recovery path for a phished verifier or any credential exposure: the
     standing login credential is the derived auth key, and until now NOTHING
@@ -598,7 +602,10 @@ async def rotate_credential(
     Ordering contract with POST /processing/rekey: a client changing its
     password rekeys the stored blobs FIRST (both keys still derivable),
     THEN rotates the credential here. This endpoint alone never touches the
-    data key or any stored ciphertext.
+    data key or any stored ciphertext. A THERAPIST additionally re-wraps
+    the wrap-key blob under the new password-derived KEK FIRST via
+    PUT /therapist/wrap-key (same both-keys-derivable window), then
+    rotates here.
     """
     # Old-password proof first: nothing else may run on a bearer alone.
     await _require_verifier(user, body.verifier, request)
@@ -665,7 +672,7 @@ async def rotate_credential(
     response_model=LlmConsentResponse,
     dependencies=[
         Depends(make_rate_limiter("account-consent-read", "read_rate_limit", "read_rate_window"))
-    ],
+    ]
 )
 async def get_llm_consent(
     request: Request,
@@ -673,6 +680,84 @@ async def get_llm_consent(
 ) -> LlmConsentResponse:
     """Current consent state, so the client toggle reflects the account."""
     return _consent_response(user, request.app.state.settings)
+
+
+ACCESS_LOG_PAGE_MAX = 200
+
+
+@router.get(
+    "/access-log",
+    response_model=list[PatientAccessLogOut],
+    dependencies=[
+        Depends(make_rate_limiter("account-access-log", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def read_own_access_log(
+    request: Request,
+    response: Response,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=ACCESS_LOG_PAGE_MAX),
+    cursor: str | None = Query(default=None),
+):
+    """WHO ACCESSED MY DATA (2026-09-21 audit B-4): the patient's view of
+    every audit row against their account — their own lifecycle actions
+    (grant/revoke/rewrap) and every therapist read/write, newest first.
+
+    GDPR Art. 15 parity: the access trail used to be write-only, readable
+    only by manual SQL. Rows survive account deletion for the full
+    retention window (that property is the trail's compliance value), so
+    a deleted account's trail answers "who had access before erasure" to
+    the operator, while a live account answers it to the SUBJECT here.
+
+    Cursor-paginated (append-only DESC list): each response carries
+    X-Next-Cursor while older rows remain.
+    """
+    from datetime import datetime as _dt
+
+    from sqlalchemy import or_
+
+    query = (
+        select(AccessLog, User)
+        .join(User, AccessLog.actor_id == User.id, isouter=True)
+        .where(AccessLog.user_id == user.id)
+        .order_by(AccessLog.at.desc(), AccessLog.id.desc())
+    )
+    if cursor:
+        parts = cursor.split("|", 1)
+        if len(parts) != 2:
+            raise ApiError(
+                status_code=422, detail="malformed cursor", code="validation_error"
+            )
+        try:
+            cursor_at = _dt.fromisoformat(parts[0])
+        except ValueError:
+            raise ApiError(
+                status_code=422, detail="malformed cursor", code="validation_error"
+            ) from None
+        query = query.where(
+            or_(
+                AccessLog.at < cursor_at,
+                (AccessLog.at == cursor_at) & (AccessLog.id < parts[1]),
+            )
+        )
+    rows = (await session.execute(query.limit(limit + 1))).all()
+    if len(rows) > limit:
+        response.headers["X-Next-Cursor"] = f"{rows[limit - 1][0].at.isoformat()}|{rows[limit - 1][0].id}"
+        rows = rows[:limit]
+    return [
+        PatientAccessLogOut(
+            at=row.AccessLog.at,
+            action=row.AccessLog.action,
+            actor="self" if row.AccessLog.actor_id == user.id else "therapist",
+            actor_name=(
+                None
+                if row.User is None or row.AccessLog.actor_id == user.id
+                else (row.User.display_name or row.User.username)
+            ),
+        )
+        for row in rows
+    ]
 
 
 @router.put(

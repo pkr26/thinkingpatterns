@@ -6,6 +6,38 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Deep-audit Phase 2, waves 1–3 (2026-09-21)
+
+- **Therapist lifecycle (C-2/F-4).** `PUT /api/v1/account/credential` now
+  accepts therapist tokens (a forgotten/phished therapist verifier was
+  fixable only by deleting the account), and a new verifier-gated
+  `PUT /api/v1/therapist/wrap-key` replaces the sharing keypair — the
+  same route serves password changes (re-wrap the blob under the new KEK
+  first) and wrap-key compromise. Patients see the new public half in
+  `ConsentOut` and re-wrap via the existing `PUT /consents/{id}/rewrap`
+  without re-pairing; rotations are audit-logged (`wrap_key_rotate`).
+  Five lifecycle tests including an end-to-end rotation + patient
+  re-wrap + successor-key unwrap.
+- **DB hardening (B-3/B-5/B-6/B-7).** asyncpg pool connections now carry
+  `statement_timeout` (30s default) and `idle_in_transaction_session_timeout`
+  (5min default) via `MINDPATTERN_DB_STATEMENT_TIMEOUT_MS` /
+  `MINDPATTERN_DB_IDLE_IN_TX_TIMEOUT_MS` — a leaked transaction can no
+  longer pin xmin indefinitely; the rekey's per-row UPDATE loops became
+  one executemany round-trip per batch; consent caps count ACTIVE grants
+  only (100 grant/revoke cycles no longer lock a patient out of sharing
+  forever); the redundant `ix_notes_therapist_patient` prefix index is
+  dropped (migration a3e7c9d5f1b2); dead pairing codes are pruned by the
+  daily sweep, not only opportunistically inside code mint.
+- **Crypto residuals (C-5/C-6/C-7).** The feedback-blob AAD now carries
+  the seal date (client seals under its local UTC date; the server
+  accepts today-or-yesterday), so a blob captured by a hostile server
+  cannot be replayed across recomputes. `MINDPATTERN_DECOY_SECRET`
+  decouples unknown-username decoy salts from token-secret rotation.
+  The therapist-pairing fingerprint check is now an action: the grant
+  dialog proceeds only through an explicit "fingerprints match" tap;
+  a mismatch opens do-not-continue guidance instead of the password
+  step.
+
 ### Deep-audit gap closure (2026-09-21, follow-up to AUDIT_2026-09-21.md)
 
 The seven findings the Phase 1 plan left unscheduled (verified open during

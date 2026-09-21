@@ -27,6 +27,8 @@ import logging
 import warnings
 from datetime import date, timedelta
 
+from app.api.insights import _utc_today
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -218,7 +220,7 @@ class TestFeedbackPreflight:
         spy = _BrainSpy(monkeypatch)
         # Valid GCM under the real data key and AAD — but not JSON.
         blob = crypto.encrypt(
-            emu.data_key, b"definitely not json", crypto.build_aad("feedback", emu.user_id)
+            emu.data_key, b"definitely not json", crypto.build_aad("feedback", emu.user_id, _utc_today().isoformat())
         )
         token = await emu.open_processing_session(client)
         response = await client.post(
@@ -234,7 +236,7 @@ class TestFeedbackPreflight:
         emu = await _insight_phase_user(client, settings, "fb-valid")
         spy = _BrainSpy(monkeypatch)
         payload = b'{"feedback": [{"pid": "some-pid", "resonated": true}]}'
-        blob = crypto.encrypt(emu.data_key, payload, crypto.build_aad("feedback", emu.user_id))
+        blob = crypto.encrypt(emu.data_key, payload, crypto.build_aad("feedback", emu.user_id, _utc_today().isoformat()))
         token = await emu.open_processing_session(client)
         response = await client.post(
             "/api/insights/recompute",

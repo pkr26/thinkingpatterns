@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.api.insights import _chosen_pattern_pid
+from app.api.insights import _chosen_pattern_pid, _utc_today
 from app.security import crypto
 from tests.helpers import ClientEmulator, daterange
 
@@ -32,11 +32,44 @@ async def _mature_account(client, emu, days: int = 35) -> None:
         await emu.create_entry(client, FILLER, day, client_entry_id=f"f-{day.isoformat()}")
 
 
-def _feedback_blob(emu: ClientEmulator, payload: dict | None = None) -> str:
+def _feedback_blob(
+    emu: ClientEmulator, payload: dict | None = None, *, days_ago: int = 0
+) -> str:
     payload = payload or {"feedback": []}
-    aad = crypto.build_aad("feedback", emu.user_id or "")
+    seal_day = (_utc_today() - timedelta(days=days_ago)).isoformat()
+    aad = crypto.build_aad("feedback", emu.user_id or "", seal_day)
     blob = crypto.encrypt(emu.data_key, json.dumps(payload).encode("utf-8"), aad)
     return base64.b64encode(blob).decode("ascii")
+
+
+async def test_feedback_blob_is_not_replayable_across_days(client):
+    # 2026-09-21 audit C-5: the AAD carries the seal date. A blob captured
+    # by a hostile server used to authenticate FOREVER; anything older than
+    # the today-or-yesterday tolerance window must now be refused before
+    # any corpus work happens.
+    emu = ClientEmulator("fb-replay", "deep-password")
+    await emu.register(client)
+    await _mature_account(client, emu)
+    stale = _feedback_blob(emu, {"feedback": [{"pid": "p", "resonated": True}]}, days_ago=3)
+    token = await emu.open_processing_session(client)
+    response = await client.post(
+        "/api/insights/recompute",
+        headers={**emu.headers, "X-Processing-Token": token},
+        json={"feedback_blob": stale},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "feedback_blob_invalid"
+
+    # Yesterday still passes: an honest client sealed just before UTC
+    # midnight must not lose its feedback to the tolerance window.
+    recent = _feedback_blob(emu, {"feedback": []}, days_ago=1)
+    token = await emu.open_processing_session(client)
+    response = await client.post(
+        "/api/insights/recompute",
+        headers={**emu.headers, "X-Processing-Token": token},
+        json={"feedback_blob": recent},
+    )
+    assert response.status_code == 200, response.text
 
 
 async def test_feedback_blob_object_body_shape_is_accepted(client):

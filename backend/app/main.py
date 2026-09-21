@@ -107,15 +107,25 @@ PROCESSING_KEY_PURGE_INTERVAL_SECONDS = 1
 
 
 async def _prune_access_log_once(app: FastAPI) -> None:
-    """One access_log retention pass: the SAME statement the pairing-code
-    path issues (api.therapist.access_log_prune_statement — imported at
-    call time so both call sites provably share one definition)."""
-    from .api.therapist import access_log_prune_statement
-    from .models import utcnow
+    """One daily housekeeping pass: access_log retention (the SAME
+    statement the pairing-code path issues — api.therapist
+    .access_log_prune_statement, imported at call time so both call sites
+    provably share one definition) plus dead pairing codes (2026-09-21
+    audit B-7: codes were pruned only opportunistically inside
+    create_pairing_code — an idle therapist meant dead rows accumulated
+    forever; the steady-state sweep now owns it too)."""
+    from sqlalchemy import delete as sa_delete
 
+    from .api.therapist import PAIRING_RETENTION, access_log_prune_statement
+    from .models import PairingCode, utcnow
+
+    now = utcnow()
     async with app.state.sessionmaker() as session:
         await session.execute(
-            access_log_prune_statement(utcnow(), app.state.settings.access_log_retention_days)
+            access_log_prune_statement(now, app.state.settings.access_log_retention_days)
+        )
+        await session.execute(
+            sa_delete(PairingCode).where(PairingCode.expires_at < now - PAIRING_RETENTION)
         )
         await session.commit()
 
@@ -297,6 +307,8 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_timeout=settings.db_pool_timeout,
+        statement_timeout_ms=settings.db_statement_timeout_ms,
+        idle_in_transaction_timeout_ms=settings.db_idle_in_transaction_timeout_ms,
     )
     app.state.sessionmaker = build_sessionmaker(app.state.engine)
     app.state.key_store = InMemoryKeyStore()

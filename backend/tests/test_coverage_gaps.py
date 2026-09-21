@@ -453,19 +453,38 @@ def test_build_engine_selects_pooling_by_database_kind(monkeypatch):
     db_module.build_engine("postgresql+asyncpg://u:p@host:5432/db")
     # Pool sizing is explicit and env-fed (MINDPATTERN_DB_POOL_*) — the
     # deployment tunes it instead of inheriting SQLAlchemy's defaults.
+    # server_settings timeouts (2026-09-21 audit B-3): asyncpg wants
+    # STRING milliseconds; statement_timeout bounds each query and
+    # idle_in_transaction_session_timeout is the vacuum guard.
     assert calls[0][1] == {
         "echo": False,
         "pool_pre_ping": True,
         "pool_size": 5,
         "max_overflow": 10,
         "pool_timeout": 30,
+        "connect_args": {
+            "server_settings": {
+                "statement_timeout": "30000",
+                "idle_in_transaction_session_timeout": "300000",
+            }
+        },
     }
     db_module.build_engine(
-        "postgresql+asyncpg://u:p@host:5432/db", pool_size=9, max_overflow=2, pool_timeout=7
+        "postgresql+asyncpg://u:p@host:5432/db",
+        pool_size=9,
+        max_overflow=2,
+        pool_timeout=7,
+        statement_timeout_ms=1234,
+        idle_in_transaction_timeout_ms=5678,
     )
     assert calls[1][1]["pool_size"] == 9
     assert calls[1][1]["max_overflow"] == 2
     assert calls[1][1]["pool_timeout"] == 7
+    assert calls[1][1]["connect_args"]["server_settings"]["statement_timeout"] == "1234"
+    assert (
+        calls[1][1]["connect_args"]["server_settings"]["idle_in_transaction_session_timeout"]
+        == "5678"
+    )
     db_module.build_engine("sqlite+aiosqlite://")
     # SQLite: StaticPool, and NO pool sizing args (they'd break/mislead the
     # single shared in-memory connection).

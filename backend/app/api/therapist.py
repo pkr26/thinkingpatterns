@@ -70,6 +70,8 @@ from ..schemas import (
     TherapistMeResponse,
     TherapistRegisterRequest,
     TokenResponse,
+    TherapistAccessLogOut,
+    WrapKeyRotateRequest,
     entry_out,
 )
 from ..security import sharing
@@ -381,6 +383,150 @@ async def therapist_me(
         wrap_pub_key=user.wrap_pub_key or "",
         wrap_key_blob=base64.b64encode(bytes(user.wrap_key_blob or b"")).decode("ascii"),
     )
+
+
+@router.put(
+    "/wrap-key",
+    status_code=204,
+    dependencies=[
+        Depends(require_sharing_enabled),
+        Depends(
+            make_rate_limiter("therapist-wrap-rotate", "auth_rate_limit", "auth_rate_window")
+        ),
+    ],
+)
+async def rotate_wrap_key(
+    body: WrapKeyRotateRequest,
+    request: Request,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Rotate the therapist's sharing (wrap) keypair (2026-09-21, audit
+    C-2: wrap keys were write-once at registration — a compromised wrap
+    private key was unrecoverable without deleting the account).
+
+    Verifier-gated like every key-material swap: a stolen bearer must not
+    be able to publish its OWN public half and receive every future
+    patient re-wrap. The new blob is typically the same private key
+    re-wrapped under a NEW password-derived KEK (password-change
+    ordering: this FIRST, then PUT /account/credential), or a genuinely
+    fresh keypair after wrap-key compromise.
+
+    Compromise-rotation trade-off, stated plainly: existing grants hold
+    data keys wrapped to the OLD public half. Patients see the new
+    therapist_wrap_pub_key in ConsentOut and re-wrap via the existing
+    PUT /consents/{id}/rewrap — no re-pairing needed. Until a patient
+    re-wraps, their grant is openable only with the OLD private key, so
+    the client keeps the previous key material locally until every
+    active grant has rotated (grants that never re-wrap after a
+    compromise rotation are intentionally lost to the therapist — that
+    is the point of retiring the compromised key).
+    """
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    await _require_verifier(user, verifier, request)
+    try:
+        sharing.validate_public_key_b64(body.wrap_pub_key)
+    except sharing.SharingError as exc:
+        raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
+    key_blob = _decode_b64(body.wrap_key_blob, "wrap_key_blob")
+    if not MIN_BLOB_SIZE <= len(key_blob) <= MAX_WRAP_KEY_BLOB_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrap_key_blob must be {MIN_BLOB_SIZE}-{MAX_WRAP_KEY_BLOB_BYTES} bytes",
+            code="validation_error",
+        )
+    # Grants and content reads take this lock first, so no patient flow
+    # can read the old public half mid-swap.
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        fresh.wrap_pub_key = body.wrap_pub_key
+        fresh.wrap_key_blob = key_blob
+        _audit(session, fresh, fresh.id, "wrap_key_rotate")
+        await session.commit()
+
+
+@router.get(
+    "/access-log",
+    response_model=list[TherapistAccessLogOut],
+    dependencies=[
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-access-log", "read_rate_limit", "read_rate_window")),
+    ],
+)
+async def read_own_access_log(
+    response: Response,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+):
+    """The therapist's own action history (2026-09-21 audit B-4): every
+    portal read and write they performed, newest first — the
+    accountability counterpart of the patient's who-accessed-my-data
+    view. `patient_name` is the acted-on account's display name; None on
+    self-lifecycle rows (wrap_key_rotate). Cursor-paginated like the
+    patient view (X-Next-Cursor while older rows remain)."""
+    from datetime import datetime as _dt
+
+    from sqlalchemy import or_
+
+    query = (
+        select(AccessLog, User)
+        .join(User, AccessLog.user_id == User.id, isouter=True)
+        .where(AccessLog.actor_id == user.id)
+        .order_by(AccessLog.at.desc(), AccessLog.id.desc())
+    )
+    if cursor:
+        parts = cursor.split("|", 1)
+        if len(parts) != 2:
+            raise ApiError(status_code=422, detail="malformed cursor", code="validation_error")
+        try:
+            cursor_at = _dt.fromisoformat(parts[0])
+        except ValueError:
+            raise ApiError(
+                status_code=422, detail="malformed cursor", code="validation_error"
+            ) from None
+        query = query.where(
+            or_(
+                AccessLog.at < cursor_at,
+                (AccessLog.at == cursor_at) & (AccessLog.id < parts[1]),
+            )
+        )
+    rows = (await session.execute(query.limit(limit + 1))).all()
+    if len(rows) > limit:
+        response.headers["X-Next-Cursor"] = (
+            f"{rows[limit - 1][0].at.isoformat()}|{rows[limit - 1][0].id}"
+        )
+        rows = rows[:limit]
+    return [
+        TherapistAccessLogOut(
+            at=row.AccessLog.at,
+            action=row.AccessLog.action,
+            patient_name=(
+                None
+                if row.User is None or row.AccessLog.user_id == user.id
+                else (row.User.display_name or row.User.username)
+            ),
+        )
+        for row in rows
+    ]
 
 
 @router.delete(

@@ -478,9 +478,18 @@ async def rekey(
                             return _rekey_entry_batch(old_key, new_key, batch, fresh_user.id)
 
                         reencrypted = await anyio.to_thread.run_sync(_reencrypt)
-                        for row_id, new_blob in reencrypted:
+                        if reencrypted:
+                            # 2026-09-21 audit B-3: one executemany
+                            # round-trip per batch instead of a per-row
+                            # UPDATE await — a 10k-entry rekey used to be
+                            # 10k sequential round-trips inside one open
+                            # transaction.
                             await session.execute(
-                                update(Entry).where(Entry.id == row_id).values(blob=new_blob)
+                                update(Entry),
+                                [
+                                    {"id": row_id, "blob": new_blob}
+                                    for row_id, new_blob in reencrypted
+                                ],
                             )
                         entries_done += len(reencrypted)
 
@@ -510,9 +519,13 @@ async def rekey(
                                 lambda row_id: aad_by_id[row_id],
                             )
                         )
-                        for row_id, new_blob in reencrypted:
+                        if reencrypted:
                             await session.execute(
-                                update(Insight).where(Insight.id == row_id).values(blob=new_blob)
+                                update(Insight),
+                                [
+                                    {"id": row_id, "blob": new_blob}
+                                    for row_id, new_blob in reencrypted
+                                ],
                             )
                         insights_done = len(reencrypted)
 
@@ -538,9 +551,13 @@ async def rekey(
                                 lambda row_id: measure_aad_by_id[row_id],
                             )
                         )
-                        for row_id, new_blob in reencrypted:
+                        if reencrypted:
                             await session.execute(
-                                update(Measure).where(Measure.id == row_id).values(blob=new_blob)
+                                update(Measure),
+                                [
+                                    {"id": row_id, "blob": new_blob}
+                                    for row_id, new_blob in reencrypted
+                                ],
                             )
                         measures_done = len(reencrypted)
 
@@ -1204,36 +1221,40 @@ async def recompute(
 
                 return analyze_fn
 
-            feedback_item = (
-                # Same 4xx discipline as every other payload: bad base64 is
-                # a client bug, not a 500, and must not echo payload bytes.
-                (crypto.build_aad("feedback", user.id), _decode_b64(feedback_blob, "feedback_blob"))
-                if feedback_blob
-                else None
-            )
-            if feedback_item is not None:
-                # Pre-flight the client-controlled tail BEFORE any corpus
-                # work. The feedback blob is the last item in the encrypted
-                # list, so a tampered one used to fail GCM only after the
-                # full corpus had been decrypted and analyzed — and the
-                # tamper-retry ladder then repeated that analysis just to
-                # discard it with a 400 (~1.5x free CPU per request, the
-                # processing session burned for nothing). Authenticated-
-                # but-malformed feedback had the same shape. One standalone
-                # decrypt + shape check of this one blob (bounded by the
-                # 2 MiB body cap) rejects both for the price of a small
-                # decrypt; the in-run decrypt then cannot fail and the
-                # ladder below remains as a backstop, not the gate.
-                try:
-                    feedback_plain = crypto.decrypt(data_key, feedback_item[1], feedback_item[0])
-                except TamperError:
+            feedback_item = None
+            if feedback_blob:
+                # 2026-09-21 audit C-5: the AAD carries the seal DATE, so a
+                # blob captured by a hostile server cannot be replayed
+                # across recomputes — an old tap set can no longer re-rank
+                # questions forever. The client seals under its LOCAL date;
+                # today-or-yesterday tolerance (UTC) keeps an honest blob
+                # sealed near midnight from failing its recompute.
+                blob_bytes = _decode_b64(feedback_blob, "feedback_blob")
+                matching_aad = None
+                for candidate_day in (today, today - timedelta(days=1)):
+                    candidate = crypto.build_aad("feedback", user.id, candidate_day.isoformat())
+                    try:
+                        crypto.decrypt(data_key, blob_bytes, candidate)
+                    except TamperError:
+                        continue
+                    matching_aad = candidate
+                    break
+                if matching_aad is None:
                     raise ApiError(
                         status_code=400,
                         detail="feedback blob failed authentication",
                         code="feedback_blob_invalid",
-                    ) from None
-                # Shape-check with the same parser the analysis path uses;
-                # its ApiError (400, entry_payload_malformed) propagates.
+                    )
+                feedback_item = (matching_aad, blob_bytes)
+            if feedback_item is not None:
+                # Pre-flight shape check BEFORE any corpus work: the blob's
+                # authentication already succeeded above (the AAD scan had
+                # to decrypt it), so only the authenticated-but-malformed
+                # case remains — rejected here for the price of one parse,
+                # before the corpus is touched, with the same parser the
+                # analysis path uses (its ApiError, 400
+                # entry_payload_malformed, propagates).
+                feedback_plain = crypto.decrypt(data_key, feedback_item[1], feedback_item[0])
                 _parse_feedback(feedback_plain)
             encrypted = (
                 entry_items

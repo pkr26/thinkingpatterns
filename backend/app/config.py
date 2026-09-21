@@ -174,6 +174,13 @@ class Settings:
     database_url: str = field(default="sqlite+aiosqlite:///./mindpattern.db", repr=False)
 
     token_secret: str = field(default=DEFAULT_INSECURE_SECRET, repr=False)
+    # 2026-09-21 audit C-6: decoy salts for unknown usernames derive from
+    # the token secret by default, so rotating MINDPATTERN_TOKEN_SECRET
+    # changes every decoy salt — a longitudinal observer could distinguish
+    # "unknown user" responses across the rotation boundary. Set a
+    # dedicated secret to decouple the two lifecycles. Empty = derive from
+    # token_secret (the pre-existing behavior).
+    decoy_secret: str = field(default="", repr=False)
     token_ttl_seconds: int = 86_400
 
     processing_session_ttl: int = 300
@@ -235,6 +242,15 @@ class Settings:
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_pool_timeout: int = 30
+    # Server-side timeouts on every pooled asyncpg connection (2026-09-21
+    # audit B-3): statement_timeout bounds any single query; the
+    # idle-in-transaction timeout is the important one — a transaction
+    # leaked open (bug or crash between statements) used to pin xmin and
+    # block vacuum until an operator noticed. Generous defaults: the
+    # longest legitimate transaction (rekey) pauses between statements
+    # only for per-batch crypto (milliseconds), never minutes.
+    db_statement_timeout_ms: int = 30_000
+    db_idle_in_transaction_timeout_ms: int = 300_000
 
     llm_url: str = ""
     llm_api_key: str = field(default="", repr=False)
@@ -374,6 +390,10 @@ class Settings:
             )
         if self.token_ttl_seconds > MAX_TOKEN_TTL_SECONDS:
             raise RuntimeError(f"token_ttl_seconds must be <= {MAX_TOKEN_TTL_SECONDS}")
+        # C-6 (2026-09-21): a set decoy secret must meet the same bar as
+        # the token secret — it feeds a password-derivation decoy path.
+        if self.decoy_secret.strip() and len(self.decoy_secret.strip()) < 32:
+            raise RuntimeError("MINDPATTERN_DECOY_SECRET must be at least 32 characters")
         if self.processing_session_ttl > MAX_PROCESSING_SESSION_TTL:
             raise RuntimeError(f"processing_session_ttl must be <= {MAX_PROCESSING_SESSION_TTL}")
         if self.body_read_timeout_seconds > MAX_BODY_READ_TIMEOUT_SECONDS:
@@ -430,6 +450,16 @@ class Settings:
             raise RuntimeError("max_user_blob_bytes must be <= 8 GiB")
         if self.db_pool_timeout > MAX_DB_POOL_TIMEOUT:
             raise RuntimeError(f"db_pool_timeout must be <= {MAX_DB_POOL_TIMEOUT}")
+        # 2026-09-21 audit B-3: sub-second server timeouts are a self-DoS
+        # (every ordinary query would race its own clock); the ceilings
+        # keep a typo from disabling them outright.
+        for name, ceiling in (
+            ("db_statement_timeout_ms", 600_000),
+            ("db_idle_in_transaction_timeout_ms", 3_600_000),
+        ):
+            value = getattr(self, name)
+            if not 1_000 <= value <= ceiling:
+                raise RuntimeError(f"{name} must be between 1000 and {ceiling}")
         # Retention gets an explicit two-sided bound (M-29, 2026-09-20):
         # 0 or negative would prune the ENTIRE therapist access-audit table
         # on the first startup sweep — the audit trail is a compliance
@@ -524,6 +554,7 @@ class Settings:
             environment=os.getenv("MINDPATTERN_ENV", "production"),
             database_url=os.getenv("MINDPATTERN_DB_URL", "sqlite+aiosqlite:///./mindpattern.db"),
             token_secret=os.getenv("MINDPATTERN_TOKEN_SECRET", DEFAULT_INSECURE_SECRET),
+            decoy_secret=os.getenv("MINDPATTERN_DECOY_SECRET", ""),
             token_ttl_seconds=_int_env("MINDPATTERN_TOKEN_TTL", 86_400),
             processing_session_ttl=_int_env("MINDPATTERN_PROCESSING_TTL", 300),
             unlock_threshold_days=_int_env("MINDPATTERN_UNLOCK_DAYS", 30),
@@ -545,6 +576,10 @@ class Settings:
             db_pool_size=_int_env("MINDPATTERN_DB_POOL_SIZE", 5),
             db_max_overflow=_int_env("MINDPATTERN_DB_MAX_OVERFLOW", 10),
             db_pool_timeout=_int_env("MINDPATTERN_DB_POOL_TIMEOUT", 30),
+            db_statement_timeout_ms=_int_env("MINDPATTERN_DB_STATEMENT_TIMEOUT_MS", 30_000),
+            db_idle_in_transaction_timeout_ms=_int_env(
+                "MINDPATTERN_DB_IDLE_IN_TX_TIMEOUT_MS", 300_000
+            ),
             export_rate_limit=_int_env("MINDPATTERN_EXPORT_RATE_LIMIT", 5),
             export_rate_window=_int_env("MINDPATTERN_EXPORT_RATE_WINDOW", 60),
             ops_rate_limit=_int_env("MINDPATTERN_OPS_RATE_LIMIT", 240),

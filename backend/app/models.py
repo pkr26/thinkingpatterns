@@ -334,7 +334,10 @@ class TherapistNote(Base):
     __tablename__ = "therapist_notes"
     __table_args__ = (
         UniqueConstraint("therapist_id", "client_note_id", name="uq_notes_therapist_client"),
-        Index("ix_notes_therapist_patient", "therapist_id", "user_id"),
+        # 2026-09-21 audit B-6: the (therapist_id, user_id) index was a
+        # strict prefix of ix_notes_therapist_patient_created and served
+        # zero queries — every notes read orders by created_at. Dropped;
+        # only the covering index remains.
         Index(
             "ix_notes_therapist_patient_created",
             "therapist_id",

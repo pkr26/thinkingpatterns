@@ -247,7 +247,12 @@ async def get_salt(
         return SaltResponse(salt=user.salt)
     # Unknown OR deactivated account: deterministic decoy (never reveal
     # account existence, never hand out a real salt for a suspended account).
-    return SaltResponse(salt=decoy_salt(body.username, request.app.state.settings.token_secret))
+    # C-6 (2026-09-21): a dedicated MINDPATTERN_DECOY_SECRET, when set,
+    # decouples decoy-salt stability from token-secret rotation.
+    settings = request.app.state.settings
+    return SaltResponse(
+        salt=decoy_salt(body.username, settings.decoy_secret.strip() or settings.token_secret)
+    )
 
 
 @router.post(

@@ -91,11 +91,13 @@ MAX_WRAPPED_KEY_BYTES = 256
 # current mobile and portal clients.  Bound both sides of the relationship so
 # a compromised account cannot manufacture an unbounded list/DB scan, while a
 # normal clinician still has room for a practical caseload.  Revoked rows are
-# included: they carry disclosure history and therapist-note continuity, so
-# counting only active rows would leave the retained-list response unbounded.
+# included in the RETAINED LIST: they carry disclosure history and
+# therapist-note continuity. The CAPS below count ACTIVE grants only
+# (2026-09-21 audit B-5): revoked rows impose no ongoing load, and an
+# all-rows cap locked a patient out of sharing forever after 100
+# grant/revoke cycles with ONE therapist.
 MAX_CONSENTS_PER_PATIENT = 100
 MAX_PATIENTS_PER_THERAPIST = 100
-
 _b64_error = (binascii.Error, ValueError)
 
 
@@ -326,10 +328,15 @@ async def grant_consent(
                 # Check before consuming the single-use code: after revoking
                 # an old relationship, the patient can retry the same still-
                 # live code rather than asking the clinician for a new one.
+                # ACTIVE only (2026-09-21 audit B-5) — revoked history must
+                # not consume grant capacity.
                 patient_count = int(
                     (
                         await session.execute(
-                            select(func.count(Consent.id)).where(Consent.user_id == fresh_user.id)
+                            select(func.count(Consent.id)).where(
+                                Consent.user_id == fresh_user.id,
+                                Consent.status == "active",
+                            )
                         )
                     ).scalar_one()
                 )
@@ -343,7 +350,8 @@ async def grant_consent(
                     (
                         await session.execute(
                             select(func.count(Consent.id)).where(
-                                Consent.therapist_id == therapist.id
+                                Consent.therapist_id == therapist.id,
+                                Consent.status == "active",
                             )
                         )
                     ).scalar_one()

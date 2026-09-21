@@ -184,9 +184,27 @@ describe("grant", () => {
     await pressLabel(root, "Share with Dr. Real");
     await flush();
     expect(lastAlert()[0]).toBe("Share with Dr. Real?");
-    await pressAlertButton("Continue to password");
+    // C-7 (2026-09-21): the password card unlocks only through the
+    // explicit fingerprint attestation tap.
+    await pressAlertButton("Fingerprints match — continue");
     await flush();
   }
+
+  it("C-7: a fingerprint mismatch never opens the grant path", async () => {
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    await pressLabel(root, "Share with Dr. Real");
+    await flush();
+    await pressAlertButton("They don’t match");
+    await flush();
+    // Guidance, not the password card: the grant cannot proceed.
+    expect(lastAlert()[0]).toBe("Do not continue");
+    expect(textOf(root)).not.toContain("Confirm with password");
+    expect(vi.mocked(api.grantConsent)).not.toHaveBeenCalled();
+  });
 
   it("wraps the vault data key and grants after password re-auth", async () => {
     const root = await render(<TherapistShareScreen navigation={nav} />);
@@ -337,7 +355,7 @@ describe("guard rails", () => {
     await flush();
     await pressLabel(root, "Share with Dr. Real");
     await flush();
-    await pressAlertButton("Continue to password");
+    await pressAlertButton("Fingerprints match — continue");
     await flush();
     await typeInto(root, "password", "correct horse");
     await firePress(root, "Confirm with password");
@@ -428,7 +446,7 @@ describe("M-25: sharing-disclosure version gate (v2)", () => {
     await flush();
     await pressLabel(root, "Share with Dr. Real");
     await flush();
-    await pressAlertButton("Continue to password");
+    await pressAlertButton("Fingerprints match — continue");
     await flush();
   }
 

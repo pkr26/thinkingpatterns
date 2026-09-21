@@ -472,8 +472,7 @@ class TestConsentGrant:
                     Consent(
                         user_id=patient.user_id,
                         therapist_id=therapist_id,
-                        status="revoked",
-                        revoked_at=utcnow(),
+                        status="active",
                     )
                 )
                 await session.commit()
@@ -604,8 +603,7 @@ class TestTherapistReads:
                     Consent(
                         user_id=prior_id,
                         therapist_id=th.user_id,
-                        status="revoked",
-                        revoked_at=utcnow(),
+                        status="active",
                     )
                 )
                 await session.commit()

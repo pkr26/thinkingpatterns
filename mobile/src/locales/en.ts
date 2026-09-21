@@ -772,6 +772,13 @@ export const en: Record<string, string> = {
   "share.findTherapist": "Find my therapist",
   "share.fingerprintNote":
     "Key fingerprint: {fingerprint}\nRead it back to your therapist and check it matches the one their portal shows — a mismatch means the key was substituted in transit.",
+  // C-7 (2026-09-21): the out-of-band fingerprint check is an ACTION —
+  // the grant proceeds only through an explicit "fingerprints match" tap.
+  "share.fingerprintsMatch": "Fingerprints match — continue",
+  "share.fingerprintsDontMatch": "They don’t match",
+  "share.mismatchTitle": "Do not continue",
+  "share.mismatchBody":
+    "If the fingerprints do not match, the pairing may have been intercepted. Contact your therapist on a channel you already trust before sharing anything.",
   "share.disclosure":
     "Sharing lets them read your journal entries, your patterns and insights, your wellbeing measures (PHQ-9 questionnaires), and your caseload-summary line (never change anything), and write their own private notes. You can stop at any time; what they already read cannot be unread.",
   "share.shareWithName": "Share with {name}",

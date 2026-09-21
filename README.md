@@ -457,6 +457,7 @@ limiting/concurrency (46 killed + 14 new pins + 2 documented residuals).
 | `MINDPATTERN_ENV` | `production` | Fails closed: only the literal `development` may use the dev secret, SQLite, or /docs; every other value (including unset) takes the production gates |
 | `MINDPATTERN_DB_URL` | local SQLite | SQLAlchemy async URL (use `postgresql+asyncpg://…` in prod) |
 | `MINDPATTERN_TOKEN_SECRET` | dev default | HMAC secret for session tokens — must be set outside development (≥ 32 chars, or the app refuses to boot) |
+| `MINDPATTERN_DECOY_SECRET` | *(empty → token secret)* | Dedicated secret for unknown-username decoy salts (2026-09-21 audit C-6) — set it to decouple decoy-salt stability from token-secret rotation (a longitudinal observer could otherwise distinguish "unknown user" responses across a rotation); ≥ 32 chars when set |
 | `MINDPATTERN_TOKEN_TTL` | `86400` | Session-token lifetime in seconds (≤ 30 days; logout revokes immediately via token-epoch bump, so this is only the idle-expiry ceiling) |
 | `MINDPATTERN_UNLOCK_DAYS` | `30` | Pattern-revelation threshold |
 | `MINDPATTERN_PROCESSING_TTL` | `300` | Processing-session key lifetime (seconds); sessions are single-use |
@@ -551,10 +552,24 @@ turn it back into readable files offline.
   vault then re-locks and the biometric wrap resets — the next unlock
   happens under the new password. A leaked token still dies at logout
   (epoch bump) or expiry.
-- Mobile repo contains JS/TS source only; `ios/`/`android/` projects are
-  generated with the React Native toolchain when building. TLS certificate
-  pinning and native hardening (`FLAG_SECURE`, `allowBackup=false`) are
-  native-project work items — the checklist lives in `mobile/README.md`.
+- **Therapists have the same recovery path** (2026-09-21, audit C-2):
+  `PUT /api/v1/account/credential` accepts therapist tokens, and
+  `PUT /api/v1/therapist/wrap-key` (verifier-gated) replaces the sharing
+  keypair. Password change: re-wrap the wrap-key blob under the new
+  password-derived KEK via `/therapist/wrap-key` FIRST, then rotate the
+  credential. Wrap-key compromise: mint a fresh keypair — patients see
+  the new `therapist_wrap_pub_key` in `ConsentOut` and re-wrap through
+  the existing `PUT /consents/{id}/rewrap` without re-pairing; grants
+  not yet re-wrapped stay openable only with the OLD private key, which
+  the client keeps until every active grant has rotated (intentionally
+  lost after a compromise rotation — that is the point of retiring the
+  key). Rotations are audit-logged (`wrap_key_rotate`).
+- Mobile native projects ship in-tree (`ios/`, `android/`, generated
+  2026-09-21) with the hardening checklist applied — `FLAG_SECURE`,
+  `allowBackup=false`, `adjustResize`, Health usage strings; the
+  `native-release-preflight` CI job enforces it via
+  `mobile/tools/verify_native_release.mjs`. TLS certificate pinning
+  remains native-project work; the checklist lives in `mobile/README.md`.
 - Time-of-day analysis (the "Sunday **evening**" refinement) requires a
   client payload extension — the entry contract (`v:1`, date-only) is
   versioned for exactly this.

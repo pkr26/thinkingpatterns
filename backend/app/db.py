@@ -34,7 +34,7 @@ from .models import Base
 
 # Keep readiness independent of Alembic's CLI/runtime import path. Update
 # this with the newest single Alembic head whenever a revision is added.
-SCHEMA_HEAD = "c8d2f6b1a9e4"
+SCHEMA_HEAD = "a3e7c9d5f1b2"
 
 
 def rowcount(result: Any) -> int:
@@ -54,6 +54,8 @@ def build_engine(
     pool_size: int = 5,
     max_overflow: int = 10,
     pool_timeout: int = 30,
+    statement_timeout_ms: int = 30_000,
+    idle_in_transaction_timeout_ms: int = 300_000,
 ) -> AsyncEngine:
     if database_url.startswith("sqlite"):
         # Two SQLite topologies, deliberately different pools:
@@ -103,6 +105,10 @@ def build_engine(
     # Production (asyncpg): bounded, env-tuned pool (MINDPATTERN_DB_POOL_*) —
     # the defaults otherwise come from SQLAlchemy and can't be sized for the
     # deployment. pool_pre_ping drops connections the server already closed.
+    # server_settings timeouts (2026-09-21 audit B-3): statement_timeout
+    # bounds each query; idle_in_transaction_session_timeout is the vacuum
+    # guard — a transaction leaked open used to pin xmin until an operator
+    # noticed. asyncpg takes these as STRING milliseconds.
     return create_async_engine(
         database_url,
         echo=False,
@@ -110,6 +116,12 @@ def build_engine(
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_timeout=pool_timeout,
+        connect_args={
+            "server_settings": {
+                "statement_timeout": str(statement_timeout_ms),
+                "idle_in_transaction_session_timeout": str(idle_in_transaction_timeout_ms),
+            }
+        },
     )
 
 

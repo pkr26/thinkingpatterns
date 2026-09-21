@@ -139,6 +139,9 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
     // L-5 (2026-09-20): the key fingerprint rides the CONFIRMATION too —
     // it used to appear only on the lookup card, so the one dialog that
     // matters for the out-of-band check never repeated it.
+    // C-7 (2026-09-21): the check is now an ACTION, not a display — the
+    // password step unlocks only through an explicit "fingerprints match"
+    // attestation tap; a mismatch opens guidance and never the grant.
     Alert.alert(
       tr("share.grantTitle", { name: lookup.display_name }),
       `${tr("share.grantBody")}\n\n${tr("share.fingerprintNote", {
@@ -147,8 +150,12 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       [
         { text: tr("common.cancel"), style: "cancel" },
         {
-          text: tr("settings.continueToPassword"),
+          text: tr("share.fingerprintsDontMatch"),
           style: "destructive",
+          onPress: () => Alert.alert(tr("share.mismatchTitle"), tr("share.mismatchBody")),
+        },
+        {
+          text: tr("share.fingerprintsMatch"),
           onPress: () => setPending({ kind: "grant", code: code.trim(), lookup }),
         },
       ],

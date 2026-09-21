@@ -500,7 +500,7 @@ async def test_enricher_branch_keeps_muted_cards_behind_the_cap(client, monkeypa
     feedback = crypto.encrypt(
         emu.data_key,
         json.dumps({"feedback": [], "muted": [pid]}).encode("utf-8"),
-        crypto.build_aad("feedback", emu.user_id or ""),
+        crypto.build_aad("feedback", emu.user_id or "", insights_api._utc_today().isoformat()),
     )
     monkeypatch.setattr(insights_api.llm, "get_enricher", lambda *_a, **_k: _EchoEnricher())
     monkeypatch.setattr(brain, "MAX_SURFACED", 1)
