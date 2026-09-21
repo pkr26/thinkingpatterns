@@ -48,6 +48,14 @@ MAX_RATE_LIMIT = 100_000  # hits per window
 # complete read too: otherwise a chunked slowloris can keep a request task
 # alive forever one byte at a time.
 MAX_BODY_READ_TIMEOUT_SECONDS = 120
+# 2026-09-21 audit A-8: upper bounds for the knobs whose misconfiguration
+# is visible only as resource exhaustion (a typo or unit mistake must not
+# boot). Each ceiling is far above the default (30x+) so real deployments
+# keep every headroom they could legitimately want.
+MAX_UNLOCK_THRESHOLD_DAYS = 3_650  # 10 years max baseline (default 30)
+MAX_ENTRIES_PER_USER = 1_000_000  # 100x the 10k default storage quota
+MAX_USER_BLOB_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB (32x the 256 MiB quota)
+MAX_DB_POOL_TIMEOUT = 600  # seconds waiting for a pooled connection
 
 
 def _int_env(name: str, default: int) -> int:
@@ -400,6 +408,28 @@ class Settings:
         # ciphertext is already 8x the 2M-char text analysis budget.
         if self.analysis_blob_budget > 64 * 1024 * 1024:
             raise RuntimeError("analysis_blob_budget must be <= 64 MiB")
+        # 2026-09-21 audit A-8: a budget smaller than one request body can
+        # never load even the newest entry — the analysis would run on an
+        # empty corpus and silently overwrite stored patterns (the
+        # recompute path now refuses that at runtime with 413, but the
+        # config should fail fast at boot). No stored blob can exceed
+        # max_body_bytes (an entry body carries the blob's own base64), so
+        # this floor guarantees the budget always fits at least one entry.
+        if self.analysis_blob_budget < self.max_body_bytes:
+            raise RuntimeError(
+                "analysis_blob_budget must be >= max_body_bytes "
+                "(the budget must fit at least one max-size entry)"
+            )
+        # 2026-09-21 audit A-8: upper bounds — see the MAX_* constants
+        # above for the per-knob rationale.
+        if self.unlock_threshold_days > MAX_UNLOCK_THRESHOLD_DAYS:
+            raise RuntimeError(f"unlock_threshold_days must be <= {MAX_UNLOCK_THRESHOLD_DAYS}")
+        if self.max_entries_per_user > MAX_ENTRIES_PER_USER:
+            raise RuntimeError(f"max_entries_per_user must be <= {MAX_ENTRIES_PER_USER}")
+        if self.max_user_blob_bytes > MAX_USER_BLOB_BYTES:
+            raise RuntimeError("max_user_blob_bytes must be <= 8 GiB")
+        if self.db_pool_timeout > MAX_DB_POOL_TIMEOUT:
+            raise RuntimeError(f"db_pool_timeout must be <= {MAX_DB_POOL_TIMEOUT}")
         # Retention gets an explicit two-sided bound (M-29, 2026-09-20):
         # 0 or negative would prune the ENTIRE therapist access-audit table
         # on the first startup sweep — the audit trail is a compliance

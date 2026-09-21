@@ -55,9 +55,10 @@ vi.mock("../../src/offlineQueue", () => ({
 }));
 
 const signOut = vi.fn(async () => {});
+const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ signOut }) };
+  return { ...actual, useSession: () => ({ signOut, touchActivity }) };
 });
 
 const { api, getBaseUrl, getInsecureConsentUrl, setBaseUrl } = await import("../../src/api/client");
@@ -488,5 +489,39 @@ describe("SettingsScreen pins: node-exact style contracts", () => {
       false,
       { minHeight: 44 },
     ]);
+  });
+});
+
+describe("SettingsScreen pins: 44pt touch contract (audit fix 23, 2026-09-21)", () => {
+  it("theme radios meet t.minTouch (40pt before)", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const dark = root.root.findAll((n) => n.props.accessibilityLabel === "Theme: Dark")[0];
+    expect(dark).toBeTruthy();
+    expect((dark.props.style as unknown[])[1]).toMatchObject({ minHeight: 44 });
+    // The selected variant keeps the contract too.
+    await pressLabel(root, "Dark");
+    const selected = root.root.findAll(
+      (n) => n.props.accessibilityLabel === "Theme: Dark" && n.props.accessibilityState?.selected === true,
+    )[0];
+    expect((selected.props.style as unknown[])[1]).toMatchObject({ minHeight: 44 });
+  });
+
+  it("reminder time chips meet t.minTouch (40pt before)", async () => {
+    const { act } = await import("../helpers/rtr");
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    // Turn the reminder preference on so the time chips render (the Switch
+    // is disabled in this module-absent build, but the handler still runs).
+    const reminderSwitch = root.root.findAll((n) => n.props.accessibilityLabel === "Daily reminder")[0];
+    await act(async () => {
+      (reminderSwitch.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    const evening = root.root.findAll(
+      (n) => n.props.accessibilityLabel === "Reminder time: Evening 20:00",
+    )[0];
+    expect(evening).toBeTruthy();
+    expect((evening.props.style as unknown[])[1]).toMatchObject({ minHeight: 44 });
   });
 });

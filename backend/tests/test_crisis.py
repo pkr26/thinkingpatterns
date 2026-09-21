@@ -228,7 +228,11 @@ class TestLetterDoublingFold:
         # the folded twins are consulted only when those are clean, so a
         # pre-existing verdict can never flip from True to False.
         assert crisis._folded_variants("kiill myself")[0] == "kil myself"
-        assert crisis._match_variants("kiill myself") == ("kiill myself", "kiill myself", "kiillmyself")
+        assert crisis._match_variants("kiill myself") == (
+            "kiill myself",
+            "kiill myself",
+            "kiillmyself",
+        )
 
 
 class TestAuditRemediation2026_09_17:

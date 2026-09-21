@@ -84,7 +84,9 @@ class ClientEmulator:
         acceptance rule the server's recompute and rekey paths use)."""
         blob = base64.b64decode(blob_b64)
         failure: Exception | None = None
-        for aad in crypto.entry_aad_candidates(self.user_id or "", client_entry_id, content_version):
+        for aad in crypto.entry_aad_candidates(
+            self.user_id or "", client_entry_id, content_version
+        ):
             try:
                 return json.loads(crypto.decrypt(self.data_key, blob, aad).decode("utf-8"))
             except crypto.TamperError as exc:
@@ -312,7 +314,10 @@ class ClientEmulator:
             headers={**self.headers, "X-Account-Verifier": verifier or self.auth_key_b64},
             json=wrap,
         )
-        return {"status": response.status_code, "body": response.json() if response.content else None}
+        return {
+            "status": response.status_code,
+            "body": response.json() if response.content else None,
+        }
 
     async def recompute(self, client: AsyncClient) -> dict:
         """Open a fresh (single-use) processing session and recompute."""

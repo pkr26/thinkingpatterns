@@ -53,7 +53,15 @@ import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
 import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
 import { mirrorMoodCheckIn } from "../healthkit";
-import { ACTIVITY_TAGS, ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, localSentiment } from "../mood";
+import {
+  ACTIVITY_TAGS,
+  ENERGY_OPTIONS,
+  MOOD_OPTIONS,
+  SLEEP_OPTIONS,
+  activityTagLabel,
+  localSentiment,
+  optionLabel,
+} from "../mood";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { lightHaptic } from "../haptics";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
@@ -527,7 +535,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             {chips.map((chip) => (
               <TouchableOpacity
                 key={chip}
-                style={[styles.chip, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.md }]}
+                // Fix 23 (2026-09-21): chips meet the app's own 44pt touch
+                // contract (t.minTouch) — they measured ~33pt before.
+                style={[styles.chip, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.md, minHeight: t.minTouch, justifyContent: "center" }]}
                 onPress={() => {
                   touchActivity();
                   setText(`${chip} `);
@@ -643,7 +653,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={tr("entry.moodOptionA11y", { label: option.label })}
+                  accessibilityLabel={tr("entry.moodOptionA11y", { label: optionLabel(option) })}
                 >
                   <Text
                     maxFontSizeMultiplier={1.3}
@@ -652,7 +662,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                       fontSize: t.type.bodySmall.fontSize,
                     }}
                   >
-                    {option.label}
+                    {optionLabel(option)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -683,7 +693,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={tr("entry.energyOptionA11y", { label: option.label })}
+                  accessibilityLabel={tr("entry.energyOptionA11y", { label: optionLabel(option) })}
                 >
                   <Text
                     style={{
@@ -691,7 +701,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                       fontSize: t.type.bodySmall.fontSize,
                     }}
                   >
-                    {option.label}
+                    {optionLabel(option)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -713,7 +723,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                     {
                       backgroundColor: selected ? t.colors.primary : t.colors.card,
                       borderRadius: t.radius.md,
-                      minHeight: 40,
+                      // Fix 23 (2026-09-21): sleep options met the 44pt
+                      // touch contract like their mood/energy siblings
+                      // (they measured 40pt before).
+                      minHeight: t.minTouch,
                     },
                   ]}
                   onPress={() => {
@@ -723,7 +736,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   }}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
-                  accessibilityLabel={tr("entry.sleepOptionA11y", { label: option.label })}
+                  accessibilityLabel={tr("entry.sleepOptionA11y", { label: optionLabel(option) })}
                 >
                   <Text
                     maxFontSizeMultiplier={1.3}
@@ -732,7 +745,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                       fontSize: t.type.bodySmall.fontSize,
                     }}
                   >
-                    {option.label}
+                    {optionLabel(option)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -749,20 +762,20 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
               return (
                 <TouchableOpacity
                   key={tag}
-                  style={[styles.chip, { backgroundColor: selected ? t.colors.primary : t.colors.cardDeep, borderRadius: t.radius.md }]}
+                  style={[styles.chip, { backgroundColor: selected ? t.colors.primary : t.colors.cardDeep, borderRadius: t.radius.md, minHeight: t.minTouch, justifyContent: "center" }]}
                   onPress={() => {
                     touchActivity();
                     setSelectedTags(selected ? selectedTags.filter((x) => x !== tag) : [...selectedTags, tag]);
                   }}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: selected }}
-                  accessibilityLabel={tr("entry.tagA11y", { tag })}
+                  accessibilityLabel={tr("entry.tagA11y", { tag: activityTagLabel(tag) })}
                 >
                   <Text
                     maxFontSizeMultiplier={1.3}
                     style={{ color: selected ? t.colors.onPrimary : t.colors.body, fontSize: t.type.bodySmall.fontSize }}
                   >
-                    {tag}
+                    {activityTagLabel(tag)}
                   </Text>
                 </TouchableOpacity>
               );

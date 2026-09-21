@@ -259,6 +259,40 @@ export const en: Record<string, string> = {
     "The offline queue was cleared while saving (were you signed out?). Your entry is still on screen.",
   "entry.couldNotSaveTitle": "Could not save",
 
+  // ------------------------------------- check-in vocabulary (audit fix 21)
+  // Display labels keyed by option VALUE; the wire values themselves —
+  // the numbers and the English tag tokens in src/mood.ts — never
+  // localize (the server's engine reads them).
+  "mood.option.heavy": "Heavy",
+  "mood.option.low": "Low",
+  "mood.option.okay": "Okay",
+  "mood.option.good": "Good",
+  "mood.option.light": "Light",
+  "energy.option.drained": "Drained",
+  "energy.option.steady": "Steady",
+  "energy.option.energized": "Energized",
+  "sleep.option.1": "Rough",
+  "sleep.option.2": "Poor",
+  "sleep.option.3": "Okay",
+  "sleep.option.4": "Good",
+  "sleep.option.5": "Rested",
+  "activityTag.work": "work",
+  "activityTag.family": "family",
+  "activityTag.friends": "friends",
+  "activityTag.exercise": "exercise",
+  "activityTag.outdoors": "outdoors",
+  "activityTag.rest": "rest",
+  "activityTag.creative": "creative",
+  "activityTag.health": "health",
+  "activityTag.money": "money",
+  "activityTag.travel": "travel",
+
+  // -------------------------------------- reminder notifications (fix 22)
+  // The OS-level copy (notification body, Android channel name) resolves
+  // through the catalog so a Spanish device reads a Spanish nudge.
+  "notify.reminderBody": "A quiet moment to write, whenever it suits you.",
+  "notify.channelName": "Journal reminders",
+
   // ---------------------------------------------------------------- history
   "history.snapshotReload": "Your journal changed while older entries were loading. Reloading the latest history from the start.",
   "history.revisionConflict": "Your journal changed while it was loading. Try again to reload the latest history.",

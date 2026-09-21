@@ -559,6 +559,10 @@ function isSensitive(p: PatternCard): boolean {
   return p.detail?.sensitive === true || matchesCrisisSuppress(p.label);
 }
 
+/** How long the transient mute/unmute status note stays on screen — the
+ *  same lifetime EntryScreen gives its save confirmations. */
+const MUTE_NOTE_MS = 2_600;
+
 export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.Element {
   const t = useTheme();
   const { applyActiveDays, unlockDays, touchActivity } = useSession();
@@ -589,6 +593,23 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
   const isMuted = (p: PatternCard): boolean =>
     p.detail?.muted === true || mutedLocal[pidOf(p)] === true;
 
+  /** Audit fix 24 (2026-09-21): the mute status note is transient like
+   *  every other inline confirmation — EntryScreen's showStatus idiom
+   *  (clear-on-replace, clear-on-unmount) instead of staying on screen
+   *  for the rest of the session. */
+  const muteNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showMuteNote = (message: string) => {
+    if (muteNoteTimer.current) clearTimeout(muteNoteTimer.current);
+    setMuteNote(message);
+    muteNoteTimer.current = setTimeout(() => setMuteNote(null), MUTE_NOTE_MS);
+  };
+  useEffect(
+    () => () => {
+      if (muteNoteTimer.current) clearTimeout(muteNoteTimer.current);
+    },
+    [],
+  );
+
   /** A pattern renders in the main list when it is not muted — EXCEPT a
    *  sensitive one (audit L-61): its non-quoting support card must stay up
    *  even when the server's muted set contains it. The UI never offers a
@@ -607,7 +628,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
     if (!pid) return;
     touchActivity();
     setMutedLocal((prev) => ({ ...prev, [pid]: mute }));
-    setMuteNote(mute ? tr("insights.mutedNote") : tr("insights.unmutedNote"));
+    showMuteNote(mute ? tr("insights.mutedNote") : tr("insights.unmutedNote"));
     void (async () => {
       try {
         const userId = await api.getUserId();

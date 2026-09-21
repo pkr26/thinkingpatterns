@@ -335,10 +335,12 @@ async def test_export_skips_disappeared_entry_metadata_and_keeps_scanning():
         account_api,
         fresh=fresh,
         pages=[
-            _PageSession([_Result(rows=[])]),  # shares
             _PageSession([_Result(rows=metadata), _Result(scalar_rows=[])]),
             _PageSession([_Result(rows=[])]),  # later entry page
             # Empty insight snapshot (head served no ids): no insight page.
+            # Empty share snapshot (A-6, 2026-09-21): no share page either —
+            # the shares walk the frozen head id list, so no shares means no
+            # page session consumed.
             _PageSession([_Result(rows=[])]),  # measures
         ],
     )
@@ -357,7 +359,7 @@ async def test_export_skips_disappeared_insight_metadata_and_keeps_scanning():
         fresh=fresh,
         snapshot_ids=["gone-insight"],
         pages=[
-            _PageSession([_Result(rows=[])]),  # shares
+            # No shares (empty share snapshot): no share page consumed.
             _PageSession([_Result(rows=[])]),  # entries
             # Insight page: sizes for the snapshot id, then the blob fetch
             # finds the row deleted since the snapshot — consumed as
@@ -403,7 +405,7 @@ async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch)
         account_api,
         fresh=fresh,
         pages=[
-            _PageSession([_Result(rows=[])]),
+            # No shares (empty share snapshot): no share page consumed.
             _PageSession(
                 [
                     _Result(rows=first_metadata),
@@ -449,7 +451,7 @@ async def test_export_repages_insights_when_blob_grew_after_metadata(monkeypatch
         fresh=fresh,
         snapshot_ids=[first.id, second.id],
         pages=[
-            _PageSession([_Result(rows=[])]),
+            # No shares (empty share snapshot): no share page consumed.
             _PageSession([_Result(rows=[])]),
             _PageSession(
                 [

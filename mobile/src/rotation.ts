@@ -34,6 +34,8 @@ import { clearMoodLog } from "./moodLog";
 import { clearFeedback } from "./questionFeedback";
 import { clearUnlockProof } from "./unlockProof";
 import { verifyPasswordForVault } from "./reauth";
+import { vault } from "./vault";
+import { disableBiometricUnlock } from "./biometricUnlock";
 
 /** 16 random bytes — the KDF salt size shared with registration. */
 function freshSalt(): Buffer {
@@ -217,6 +219,16 @@ export async function rotatePassword(input: {
     await clearMoodLog(userId).catch(() => {});
     await clearFeedback(userId).catch(() => {});
     await clearUnlockProof(userId).catch(() => {});
+
+    // Audit fix 7 (2026-09-21): the rotation must SELF-COMPLETE. Locking the
+    // vault and dropping the biometric wrap happen HERE, inside the flow —
+    // they used to hang off the success alert's OK button, which Android
+    // can dismiss without firing; in that window the vault kept the OLD
+    // data key and new entries were encrypted under it, permanently
+    // undecryptable. Best-effort wrap removal: the rotation itself already
+    // succeeded server-side.
+    vault.lock();
+    await disableBiometricUnlock(userId).catch(() => {});
 
     return { ok: true, counts, rewrapped, rewrapFailures };
   } finally {

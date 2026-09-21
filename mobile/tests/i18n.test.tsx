@@ -197,6 +197,52 @@ describe("screens render under es", () => {
     expect(text).not.toContain("Save entry"); // en button gone
     expect(inputByPlaceholder(root, "¿Qué hay hoy?")).toBeTruthy(); // es placeholder
   });
+
+  // Audit fix 21 (2026-09-21): the check-in vocabulary renders LOCALIZED
+  // display labels (keyed by option value) while the WIRE values — the
+  // numeric picks and the English tag tokens — stay locale-independent.
+  it("EntryScreen check-in labels localize by value; the saved payload keeps English wire values", async () => {
+    __setLocaleForTests("es");
+    const { EntryScreen } = await import("../src/screens/EntryScreen");
+    const { vault } = await import("../src/vault");
+    const { encryptEntry } = await import("../src/crypto/MindPatternCrypto");
+    const { render, textOf, pressLabel, typeInto } = await import("./helpers/rtr");
+    vault.lock();
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { activeDays: 0, unlockDays: 30, touchActivity: vi.fn() };
+    const root = await render(<EntryScreen navigation={{ navigate: vi.fn() }} />);
+    await pressLabel(root, "Agregar detalles (opcional)");
+    const text = textOf(root);
+    // Display labels localized by VALUE (mood/energy/sleep scale ends + a tag).
+    expect(text).toContain("Pesado");
+    expect(text).toContain("Ligero");
+    expect(text).toContain("Baja");
+    expect(text).toContain("Reparadora");
+    expect(text).toContain("Trabajo");
+    // The English labels are gone from the rendered vocabulary…
+    expect(text).not.toContain("Heavy");
+    expect(text).not.toContain("Drained");
+    expect(text).not.toContain("Rested");
+    // …and the es a11y strings interpolate the SPANISH labels, not the
+    // English words the audit found spliced into Spanish strings.
+    expect(root.root.findAll((n) => n.props.accessibilityLabel === "Ánimo: Pesado")).toHaveLength(1);
+    expect(root.root.findAll((n) => n.props.accessibilityLabel === "Etiqueta: Trabajo")).toHaveLength(1);
+
+    // Wire-value parity: pick the es-rendered options, save, and pin that
+    // the encrypted payload still carries the ENGLISH contract (numeric
+    // picks + English tag tokens) regardless of locale.
+    vi.mocked(encryptEntry).mockClear();
+    await typeInto(root, "¿Qué hay hoy?", "un día con mucho trabajo");
+    await pressLabel(root, "Pesado");
+    await pressLabel(root, "Baja");
+    await pressLabel(root, "Reparadora");
+    await pressLabel(root, "Trabajo");
+    await pressLabel(root, "Guardar entrada");
+    await vi.waitFor(() => expect(vi.mocked(encryptEntry)).toHaveBeenCalled());
+    const call = vi.mocked(encryptEntry).mock.calls[0]!;
+    expect(call[5]).toBe(-1); // mood value, not a label
+    expect(call[6]).toMatchObject({ energy: -1, sleep: 5, tags: ["work"] }); // English wire tag
+  });
 });
 
 describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {

@@ -659,7 +659,10 @@ def test_narrative_rejects_second_person_advice():
     from app.services.llm import _clean_narrative
 
     # The audit's demonstrated hostile narrative, verbatim.
-    assert _clean_narrative("You should stop reaching out to your friends; they are tired of you.") is None
+    assert (
+        _clean_narrative("You should stop reaching out to your friends; they are tired of you.")
+        is None
+    )
     assert _clean_narrative("Stop reaching out to your friends; they are tired of you.") is None
     assert _clean_narrative("You must journal every morning to fix this.") is None
     assert _clean_narrative("You need to take a break from everyone right now.") is None

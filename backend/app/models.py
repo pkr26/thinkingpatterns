@@ -110,7 +110,9 @@ class User(Base):
     # Optimistic snapshot markers for offset-paginated opaque collections.
     # Every successful entry mutation atomically advances entries_revision;
     # a therapist's successful note mutation atomically advances
-    # notes_revision.  They deliberately live on the owning account rather
+    # notes_revision; every successful measure create and the corpus-wide
+    # rekey advance measures_revision (2026-09-21 audit A-3).  They
+    # deliberately live on the owning account rather
     # than on each row so a continuation can cheaply prove its collection did
     # not move between requests.  BigInteger keeps the canonical wire token
     # safely within a signed 64-bit decimal on both supported databases.
@@ -118,6 +120,9 @@ class User(Base):
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
     notes_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    measures_revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
     # Per-user explicit opt-in before any journal text is sent to the
@@ -233,7 +238,9 @@ class Consent(Base):
     # server_defaults mirror migration c41f8a92d5e7 (2026-09-20 audit fix
     # L-33) so fresh (create_all) and upgraded schemas define the same
     # columns; the ORM always supplies values explicitly anyway.
-    status: Mapped[str] = mapped_column(String(16), default="active", server_default=text("'active'"))
+    status: Mapped[str] = mapped_column(
+        String(16), default="active", server_default=text("'active'")
+    )
     # v1 scope is "full" (patterns + all entries). The column exists so a
     # future per-pattern scope is a data change, not a schema change.
     scope: Mapped[str] = mapped_column(String(16), default="full", server_default=text("'full'"))

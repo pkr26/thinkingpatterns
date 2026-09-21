@@ -208,3 +208,18 @@ describe("secureStore", () => {
     expect(await secureStore.getItem("bare-short")).toBeNull();
   });
 });
+
+describe("secureStore Keychain accessibility class (audit fix 9, 2026-09-21)", () => {
+  it("the device key demands a passcode, matching the biometric wrap's class", async () => {
+    // WHEN_PASSCODE_SET_THIS_DEVICE_ONLY, not the weaker WHEN_UNLOCKED
+    // variant that left the bearer token OS-sandbox-only on a passcode-less
+    // device.
+    await secureStore.setItem("k", "v");
+    const lastSet = (Keychain as unknown as {
+      __lastSetCall(): { username: string; options?: Record<string, unknown> } | undefined;
+    }).__lastSetCall();
+    expect(lastSet?.username).toBe("mindpattern-device-key");
+    expect(lastSet?.options?.accessible).toBe(Keychain.ACCESSIBLE.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY);
+    expect(lastSet?.options?.accessible).not.toBe(Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY);
+  });
+});

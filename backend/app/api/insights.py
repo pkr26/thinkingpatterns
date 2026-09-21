@@ -68,7 +68,9 @@ from ..services import brain, llm, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
 from .entries import _blob_length as _entry_blob_length
+from .entries import _increment_entries_revision
 from .entries import _user_locks as _entry_locks
+from .measures import _increment_measures_revision
 
 router = APIRouter(tags=["insights"])
 
@@ -336,7 +338,12 @@ def _rekey_entry_batch(
             raise _RekeyMismatch() from exc
         # Every rekeyed entry is upgraded to the v2 (version-bound) AAD.
         out.append(
-            (row_id, crypto.encrypt(new_key, plaintext, crypto.entry_aad_v2(user_id, client_entry_id, version)))
+            (
+                row_id,
+                crypto.encrypt(
+                    new_key, plaintext, crypto.entry_aad_v2(user_id, client_entry_id, version)
+                ),
+            )
         )
     return out
 
@@ -461,18 +468,16 @@ async def rekey(
                             query = query.where(Entry.id > cursor)
                         rows = [
                             (row_id, cid, int(version), bytes(blob))
-                            for row_id, cid, version, blob in (
-                                await session.execute(query)
-                            ).all()
+                            for row_id, cid, version, blob in (await session.execute(query)).all()
                         ]
                         if not rows:
                             break
                         cursor = rows[-1][0]
-                        reencrypted = await anyio.to_thread.run_sync(
-                            lambda batch=rows: _rekey_entry_batch(
-                                old_key, new_key, batch, fresh_user.id
-                            )
-                        )
+
+                        def _reencrypt(batch: list[tuple[str, str, int, bytes]] = rows):
+                            return _rekey_entry_batch(old_key, new_key, batch, fresh_user.id)
+
+                        reencrypted = await anyio.to_thread.run_sync(_reencrypt)
                         for row_id, new_blob in reencrypted:
                             await session.execute(
                                 update(Entry).where(Entry.id == row_id).values(blob=new_blob)
@@ -539,6 +544,17 @@ async def rekey(
                             )
                         measures_done = len(reencrypted)
 
+                    # 2026-09-21 audit A-1: every entry blob was rewritten
+                    # without advancing entries_revision, so a client or
+                    # portal mid-pagination across a rekey passed its
+                    # expected_revision check and received mixed old/new-key
+                    # pages — undecryptable rows, no collection_changed
+                    # signal. The rekey is exactly the collection-wide
+                    # mutation the revision exists to mark; measures get the
+                    # same treatment (A-3) since their blobs are rewritten
+                    # in this same transaction.
+                    await _increment_entries_revision(session, fresh_user)
+                    await _increment_measures_revision(session, fresh_user)
                     try:
                         await session.commit()
                     except IntegrityError as exc:
@@ -1064,6 +1080,23 @@ async def recompute(
                     settings.recompute_entry_limit,
                     settings.analysis_blob_budget,
                 )
+                # 2026-09-21 audit A-8: an account above the unlock
+                # threshold by definition holds entries, so an EMPTY load
+                # means the analysis blob budget could not fit even the
+                # newest one. Proceeding would run the brain on an empty
+                # corpus and silently overwrite the user's stored patterns
+                # with that empty run — refuse instead; the config floor
+                # (budget >= max_body_bytes) makes this unreachable except
+                # through post-boot mutation.
+                if not rows and date_rows:
+                    raise ApiError(
+                        status_code=413,
+                        detail=(
+                            "analysis blob budget is smaller than the newest "
+                            "entry; refusing to analyze an empty corpus"
+                        ),
+                        code="payload_too_large",
+                    )
                 # The SERVER-validated outer dates drive the brain's calendar;
                 # the client-controlled created_at inside each blob is only
                 # sanity-checked.
@@ -1084,19 +1117,16 @@ async def recompute(
                 # read the authoritative same-day check (recomputes for one
                 # account serialize on it end to end).
                 question_pinned = (
-                    (
-                        await session.execute(
-                            select(Insight.id)
-                            .where(
-                                Insight.user_id == user.id,
-                                Insight.kind == "question",
-                                Insight.for_date == today,
-                            )
-                            .limit(1)
+                    await session.execute(
+                        select(Insight.id)
+                        .where(
+                            Insight.user_id == user.id,
+                            Insight.kind == "question",
+                            Insight.for_date == today,
                         )
-                    ).scalar_one_or_none()
-                    is not None
-                )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none() is not None
                 entry_items = [
                     (
                         # M-2: fresh blobs bind content_version in their AAD
@@ -1472,9 +1502,7 @@ async def recompute(
                 # ones its own counting loop uses, so brain-only recomputes
                 # report identical numbers.
                 patterns_new=sum(1 for p in merged if p.detail.get("is_new")),
-                patterns_fading=sum(
-                    1 for p in merged if p.detail.get("pattern_state") == "fading"
-                ),
+                patterns_fading=sum(1 for p in merged if p.detail.get("pattern_state") == "fading"),
             )
     finally:
         # Scrub before any awaited cleanup. A cancellation during context

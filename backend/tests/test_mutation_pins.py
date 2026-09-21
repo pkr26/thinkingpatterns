@@ -6,10 +6,24 @@ rounds of 2026-09-18/19); each test's docstring names the mutant it pins.
 If one starts failing, a pinned behavior changed -- the mutant it guards
 against is live again. Campaign reports are preserved in git history.
 """
+
 from __future__ import annotations
 from app import cache as cache_module
-from app.api import account as account_api, auth as auth_api, entries as entries_api, insights as insights_api, meta as meta_api
-from app.cache import FixedWindowCounter, HitResult, MAX_TRACKED_KEYS, RateLimitCheck, client_key, make_rate_limiter
+from app.api import (
+    account as account_api,
+    auth as auth_api,
+    entries as entries_api,
+    insights as insights_api,
+    meta as meta_api,
+)
+from app.cache import (
+    FixedWindowCounter,
+    HitResult,
+    MAX_TRACKED_KEYS,
+    RateLimitCheck,
+    client_key,
+    make_rate_limiter,
+)
 from app.config import DEFAULT_INSECURE_SECRET, Settings, _bool_env, _cors_origins
 from app.locks import UserLocks
 from app.main import create_app, app as module_level_app
@@ -19,7 +33,14 @@ from app.schemas import InsightOut
 from app.security import crypto as crypto_module, tokens as tokens_module
 from app.security.enclave import InMemoryKeyStore, KeyStoreFull
 from app.security.tokens import TokenError, issue_token, verify_token
-from app.services import brain, crisis, llm, patterns as patterns_module, questions, questions as questions_module
+from app.services import (
+    brain,
+    crisis,
+    llm,
+    patterns as patterns_module,
+    questions,
+    questions as questions_module,
+)
 from app.services.brain import JournalEntry, StoredPattern, dump_state, load_state
 from app.services.llm import LLMAnalyzer, get_enricher, sanitize_pattern
 from app.services.patterns import Pattern
@@ -2154,7 +2175,6 @@ def test_theme_scan_skips_rare_themes_and_finds_later_ones():
     assert any(p.label == "work" for p in temporal)
 
 
-
 # ---------------------------------------------------------------------------
 # Pins from test_mutation_pins_2026_09_18.py (renamed in the 2026-09-20 production
 # cleanup; see git history for the original file).
@@ -2270,7 +2290,6 @@ class TestQuestionInterlockLayers:
         unflagged = Pattern("recurring_phrase", "want to disappear", 4, 0.4, {})
         pool = questions.build_pool([unflagged])
         assert all("disappear" not in q for q in pool)
-
 
 
 # ---------------------------------------------------------------------------
@@ -2528,7 +2547,6 @@ class TestOwnMedianSleepSplit:
             "poor-sleep days must be exactly the nights rated strictly below "
             "THIS user's median (1.5), not below any population norm"
         )
-
 
 
 # ---------------------------------------------------------------------------
@@ -3081,4 +3099,3 @@ async def test_absent_keys_stay_on_the_overflow_lock_until_it_drains():
     await asyncio.gather(first, second)
 
     assert observed == [True], "the same key ran concurrently with its overflow-held section"
-

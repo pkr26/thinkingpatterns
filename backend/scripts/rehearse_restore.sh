@@ -12,13 +12,22 @@
 # recovery point — not a false "restore failed" verdict.
 #
 # Usage:
-#   bash backend/scripts/rehearse_restore.sh [--env-file FILE]... [--dev]
+#   bash backend/scripts/rehearse_restore.sh [--env-file FILE]... [--dev] [--remote]
 #
 # `--env-file` is repeatable and is passed directly to `docker compose` — the
 # script never sources an env artifact.  A production rehearsal can therefore
 # safely combine an owner-only secrets file and the public release image-ref
 # fragment.  `--dev` explicitly adds docker-compose.dev.yml for a local
 # source-built stack.  Without it, the production compose contract is used.
+#
+# `--remote` rehearses the runbook's "Recovery when the HOST is gone" steps
+# instead of the local volume: the off-site ciphertext is FETCHED through the
+# backup-offsite overlay's one-shot mode into a throwaway host scratch dir
+# (mounted at /restore, the container-side path of the documented commands),
+# then authenticated, decrypted, and restored from there.  The
+# BACKUP_OFFSITE_REMOTE / BACKUP_OFFSITE_RCLONE_CONFIG values must reach
+# compose via one of the passed --env-file arguments (they are never read by
+# this script itself).
 #
 # Needs: docker and the compose stack running (live counts come from `db`).
 # Crypto tooling comes from the checked-in backup image; this rehearsal never
@@ -29,15 +38,20 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 CALLER_DIR=$(pwd -P)
 COMPOSE=(docker compose -f "$REPO_ROOT/docker-compose.yml")
+REMOTE_MODE=0
+FETCH_DIR=""
 
 usage() {
   cat >&2 <<'EOF'
-usage: bash backend/scripts/rehearse_restore.sh [--env-file FILE]... [--dev]
+usage: bash backend/scripts/rehearse_restore.sh [--env-file FILE]... [--dev] [--remote]
 
 Pass each Compose env file explicitly; files are forwarded as arguments and
 are never sourced by this script. For production, pass the owner-only secrets
 file first and the validated release image-ref asset second. Use --dev only
-for a stack started with docker-compose.dev.yml.
+for a stack started with docker-compose.dev.yml. Use --remote to rehearse the
+off-site (host-gone) recovery: fetch from the BACKUP_OFFSITE remote via the
+overlay's one-shot mode, then verify/decrypt/restore through the /restore
+container path, exactly as docs/INCIDENT_RUNBOOK.md documents it.
 EOF
   exit 64
 }
@@ -62,6 +76,10 @@ while [ "$#" -gt 0 ]; do
       COMPOSE+=(-f "$REPO_ROOT/docker-compose.dev.yml")
       shift
       ;;
+    --remote)
+      REMOTE_MODE=1
+      shift
+      ;;
     --help|-h)
       usage
       ;;
@@ -71,6 +89,20 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+# One trap for everything throwaway this script creates: the scratch Postgres
+# container (SUFFIX, created below) and, in --remote mode, the host scratch
+# dir holding the fetched ciphertext (FETCH_DIR, created below). The guards
+# keep each half a no-op before its variable exists.
+cleanup() {
+  if [ -n "${SUFFIX:-}" ]; then
+    docker rm -f "db-$SUFFIX" >/dev/null 2>&1 || true
+  fi
+  if [ -n "${FETCH_DIR:-}" ]; then
+    rm -rf "$FETCH_DIR"
+  fi
+}
+trap cleanup EXIT
 
 cd "$REPO_ROOT"
 
@@ -87,34 +119,74 @@ POSTGRES_DB=$("${COMPOSE[@]}" exec -T db sh -ceu 'printf "%s" "$POSTGRES_DB"')
 # make a rehearsal pass or fail for reasons unrelated to the stored archive.
 POSTGRES_IMAGE="postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685"
 
-echo "==> locating the newest authenticated backup in the compose volume"
-# Run through the checked-in backup image/service rather than guessing the
-# Compose-generated volume name or pulling a mutable Alpine utility image.
-# A candidate without its sidecar is never a restorable backup.
-NEWEST=$("${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
-  --entrypoint sh backup -ceu '
+# Where the newest backup lives INSIDE the backup-service container, plus the
+# extra `compose run` flags that make that true. Local mode: the compose
+# pgbackups volume, already mounted at /backups (no extra flags). Remote
+# mode: the fetched scratch dir mounted at /restore — the runbook's
+# container-side path, deliberately not the host path (that confusion is the
+# exact class of bug the remote rehearsal exists to catch).
+SRC_DIR=/backups
+BACKUP_RUN_ARGS=(--no-deps)
+
+if [ "$REMOTE_MODE" = 1 ]; then
+  echo "==> REMOTE rehearsal: fetching the newest ciphertext from the off-site store"
+  FETCH_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mindpattern-rehearse-remote.XXXXXX")
+  echo "    fetched ciphertext scratch dir (host): $FETCH_DIR"
+  # The runbook's host-gone step 3, verbatim in shape: the backup-offsite
+  # overlay's one-shot fetch mode pulling the remote into a directory
+  # mounted at /restore. BACKUP_OFFSITE_* interpolation comes from the
+  # passed --env-file files, never from this script.
+  "${COMPOSE[@]}" -f "$REPO_ROOT/deploy/backup-offsite/docker-compose.yml" \
+    --profile backups-offsite run --rm -T \
+    -v "$FETCH_DIR":/restore \
+    -e BACKUP_OFFSITE_MODE=fetch -e BACKUP_FETCH_DIR=/restore backup-offsite \
+    || {
+      echo "off-site fetch failed — are BACKUP_OFFSITE_REMOTE / BACKUP_OFFSITE_RCLONE_CONFIG present in a passed --env-file?" >&2
+      exit 1
+    }
+  # The runbook's step 4, host side: keep the FILE NAME and rebuild the
+  # container-side path from it. A candidate without its sidecar is never a
+  # restorable backup.
+  NEWEST=""
+  for f in $(ls -1t "$FETCH_DIR"/mindpattern-*.dump.enc 2>/dev/null || true); do
+    [ -f "$f.hmac" ] && { NEWEST=$f; break; }
+  done
+  [ -n "$NEWEST" ] || {
+    echo "no authenticated mindpattern-*.dump.enc + .hmac fetched from the off-site remote" >&2
+    exit 1
+  }
+  SRC_DIR=/restore
+  BACKUP_RUN_ARGS=(--no-deps -v "$FETCH_DIR":/restore)
+else
+  echo "==> locating the newest authenticated backup in the compose volume"
+  # Run through the checked-in backup image/service rather than guessing the
+  # Compose-generated volume name or pulling a mutable Alpine utility image.
+  # A candidate without its sidecar is never a restorable backup.
+  NEWEST=$("${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
+    --entrypoint sh backup -ceu '
     for f in $(ls -1t /backups/mindpattern-*.dump.enc 2>/dev/null || true); do
       test -f "$f.hmac" && { printf "%s" "$f"; exit 0; }
     done
     exit 0
   ')
-[ -n "$NEWEST" ] || { echo "no authenticated mindpattern-*.dump.enc + .hmac found in compose backup volume" >&2; exit 1; }
+  [ -n "$NEWEST" ] || { echo "no authenticated mindpattern-*.dump.enc + .hmac found in compose backup volume" >&2; exit 1; }
+fi
 FILE=$(basename "$NEWEST")
 echo "==> newest backup: $FILE"
 
 echo "==> authenticating then decrypting $FILE (to /dev/null in backup image)"
-"${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
-  -e FILE="$FILE" --entrypoint sh backup -ceu '
-    mindpattern-backup-mac verify "/backups/$FILE"
+"${COMPOSE[@]}" --profile backups run --rm -T "${BACKUP_RUN_ARGS[@]}" \
+  -e FILE="$FILE" -e SRC_DIR="$SRC_DIR" --entrypoint sh backup -ceu '
+    mindpattern-backup-mac verify "$SRC_DIR/$FILE"
     openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY \
-      < "/backups/$FILE" > /dev/null
+      < "$SRC_DIR/$FILE" > /dev/null
   ' || { echo "DECRYPTION FAILED — is BACKUP_KEY the backup service key?" >&2; exit 1; }
 
 echo "==> proving the authentication tag rejects ciphertext tampering"
-"${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
-  -e FILE="$FILE" --entrypoint sh backup -ceu '
-    cp "/backups/$FILE" /tmp/tampered.dump.enc
-    cp "/backups/$FILE.hmac" /tmp/tampered.dump.enc.hmac
+"${COMPOSE[@]}" --profile backups run --rm -T "${BACKUP_RUN_ARGS[@]}" \
+  -e FILE="$FILE" -e SRC_DIR="$SRC_DIR" --entrypoint sh backup -ceu '
+    cp "$SRC_DIR/$FILE" /tmp/tampered.dump.enc
+    cp "$SRC_DIR/$FILE.hmac" /tmp/tampered.dump.enc.hmac
     printf x >> /tmp/tampered.dump.enc
     if mindpattern-backup-mac verify /tmp/tampered.dump.enc; then
       echo "tampered backup unexpectedly verified" >&2
@@ -123,12 +195,11 @@ echo "==> proving the authentication tag rejects ciphertext tampering"
   '
 
 # Throwaway restore target: same major version as the live server, no
-# published port, removed by the EXIT trap below.
+# published port, removed by the EXIT trap above.
 SUFFIX="rehearse-$(date +%s)"
 docker run --rm -d --name "db-$SUFFIX" \
   -e POSTGRES_PASSWORD=rehearse \
   "$POSTGRES_IMAGE" >/dev/null
-trap 'docker rm -f "db-$SUFFIX" >/dev/null 2>&1 || true' EXIT
 ready=0
 attempt=1
 while [ "$attempt" -le 60 ]; do
@@ -150,11 +221,11 @@ fi
 # host disk). Verify MUST precede EVERY decrypt operation. -iter is pinned to
 # the compose backup service's encryptor — the counts must match exactly or
 # decryption fails closed.
-"${COMPOSE[@]}" --profile backups run --rm --no-deps -T \
-  -e FILE="$FILE" --entrypoint sh backup -ceu '
-    mindpattern-backup-mac verify "/backups/$FILE"
+"${COMPOSE[@]}" --profile backups run --rm -T "${BACKUP_RUN_ARGS[@]}" \
+  -e FILE="$FILE" -e SRC_DIR="$SRC_DIR" --entrypoint sh backup -ceu '
+    mindpattern-backup-mac verify "$SRC_DIR/$FILE"
     openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY \
-      < "/backups/$FILE"
+      < "$SRC_DIR/$FILE"
   ' | docker exec -i "db-$SUFFIX" pg_restore -U postgres -d postgres --no-owner >/dev/null
 
 echo "==> asserting the restored schema and reporting snapshot row counts"
@@ -195,4 +266,8 @@ for t in users entries insights access_log; do
     echo "    note: snapshot differs from current live data (expected when writes followed the dump)" >&2
   fi
 done
-echo "==> RESTORE REHEARSAL PASSED (authenticated archive restored into a stamped, usable schema; throwaway DB torn down)"
+if [ "$REMOTE_MODE" = 1 ]; then
+  echo "==> REMOTE RESTORE REHEARSAL PASSED (off-site ciphertext fetched, authenticated, and restored into a stamped, usable schema; fetch scratch dir and throwaway DB torn down)"
+else
+  echo "==> RESTORE REHEARSAL PASSED (authenticated archive restored into a stamped, usable schema; throwaway DB torn down)"
+fi

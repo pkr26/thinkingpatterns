@@ -25,6 +25,7 @@
  */
 
 import { nextReminderFireTime } from "./reminders";
+import { t } from "./strings";
 
 export interface NativeCapability {
   available: boolean;
@@ -104,12 +105,21 @@ const FALLBACK_REPEAT_FREQUENCY_DAILY = 1;
 const REMINDER_CHANNEL_ID = "mindpattern-reminders";
 
 /** Calm copy for the notification itself: an invitation, never a debt —
- *  no streak counts, no "you missed", nothing to feel bad about. */
-const REMINDER_NOTIFICATION = {
-  title: "MindPattern",
-  body: "A quiet moment to write, whenever it suits you.",
-  android: { channelId: REMINDER_CHANNEL_ID },
-};
+ *  no streak counts, no "you missed", nothing to feel bad about. Resolved
+ *  through the catalog at schedule time (audit fix 22, 2026-09-21) so the
+ *  nudge speaks the app locale; the title is the app name and stays fixed
+ *  in every language. */
+function reminderNotification(): {
+  title: string;
+  body: string;
+  android: { channelId: string };
+} {
+  return {
+    title: "MindPattern",
+    body: t("notify.reminderBody"),
+    android: { channelId: REMINDER_CHANNEL_ID },
+  };
+}
 
 function notifeeFrom(mod: unknown): NotifeeModule | null {
   if (mod === null || typeof mod !== "object") return null;
@@ -154,11 +164,12 @@ export async function scheduleDailyReminder(hour: number, minute: number): Promi
     const triggerType = enums.TriggerType?.TIMESTAMP ?? FALLBACK_TRIGGER_TYPE_TIMESTAMP;
     const repeatFrequency = enums.RepeatFrequency?.DAILY ?? FALLBACK_REPEAT_FREQUENCY_DAILY;
     // Android delivers through a channel; creating it again is an idempotent
-    // update. A channel-less Android notification never shows.
+    // update. A channel-less Android notification never shows. The channel
+    // NAME is user-visible in system settings, so it localizes too (fix 22).
     if (typeof api.createChannel === "function") {
-      await api.createChannel({ id: REMINDER_CHANNEL_ID, name: "Journal reminders" });
+      await api.createChannel({ id: REMINDER_CHANNEL_ID, name: t("notify.channelName") });
     }
-    await api.createTriggerNotification(REMINDER_NOTIFICATION, {
+    await api.createTriggerNotification(reminderNotification(), {
       type: triggerType,
       // The first fire is the next H:M still ahead of now; the daily repeat
       // keeps that time-of-day (reminders.ts computes it in LOCAL time).

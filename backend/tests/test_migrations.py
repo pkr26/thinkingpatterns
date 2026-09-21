@@ -95,11 +95,60 @@ def test_autogenerate_against_migrated_head_is_empty(tmp_path, monkeypatch):
 
     engine = create_engine(f"sqlite:///{migrated}")
     with engine.connect() as conn:
-        # render_as_batch matches alembic/env.py's SQLite configuration.
-        ctx = MigrationContext.configure(conn, opts={"render_as_batch": True})
+        # render_as_batch matches alembic/env.py's SQLite configuration —
+        # and so do the comparison flags (2026-09-21, audit fix B-2): without
+        # compare_type/compare_server_default the diff cannot SEE type or
+        # default drift, the exact divergence class once fixed as L-33.
+        ctx = MigrationContext.configure(
+            conn,
+            opts={
+                "render_as_batch": True,
+                "compare_type": True,
+                "compare_server_default": True,
+            },
+        )
         diff = compare_metadata(ctx, Base.metadata)
     engine.dispose()
     assert diff == []
+
+
+def test_alembic_env_sets_autogenerate_comparison_flags(tmp_path, monkeypatch):
+    """The parity gate above only sees type/default drift if alembic/env.py
+    hands the flags to context.configure — otherwise the OPERATOR path
+    (`alembic revision --autogenerate`) stays blind even while the test
+    passes. Spy on context.configure during a real env.py execution, in
+    BOTH branches: the online one (a normal upgrade) and the offline one
+    (`sql=True`, the `--sql` emit path).
+    """
+    from alembic import context as alembic_context
+
+    recorded: list[dict] = []
+    real_configure = alembic_context.configure
+
+    def spy(*args, **kwargs):
+        recorded.append(kwargs)
+        return real_configure(*args, **kwargs)
+
+    monkeypatch.setattr(alembic_context, "configure", spy)
+
+    db_file = tmp_path / "flags.db"
+    _upgrade_head(f"sqlite+aiosqlite:///{db_file}", monkeypatch)  # online branch
+    assert recorded, "env.py never called context.configure during upgrade"
+    for kwargs in recorded:
+        assert kwargs.get("compare_type") is True, f"online branch: {kwargs}"
+        assert kwargs.get("compare_server_default") is True, f"online branch: {kwargs}"
+
+    recorded.clear()
+    monkeypatch.setenv("MINDPATTERN_DB_URL", f"sqlite+aiosqlite:///{tmp_path / 'offline.db'}")
+    # --sql mode (offline branch). Stop at the initial revision: later
+    # revisions use batch_alter_table, and batch mode needs a live
+    # connection to reflect — one revision is enough to prove the offline
+    # configure call carries the flags.
+    command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "73031d06d71b", sql=True)
+    assert recorded, "env.py never called context.configure in --sql mode"
+    for kwargs in recorded:
+        assert kwargs.get("compare_type") is True, f"offline branch: {kwargs}"
+        assert kwargs.get("compare_server_default") is True, f"offline branch: {kwargs}"
 
 
 def test_insights_unique_constraint_revision_roundtrips(tmp_path, monkeypatch):

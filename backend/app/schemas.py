@@ -25,6 +25,7 @@ class StrictRequestModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 # Hard request-size ceilings (defense against memory-exhaustion DoS).
 # b64(16 bytes) = 24 chars for salts; b64(32 bytes) = 44 chars for keys;
 # entries are journal-sized text, so ~1 MiB of decoded envelope is generous.

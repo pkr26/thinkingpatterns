@@ -206,6 +206,23 @@ async def export_account(
             .scalars()
             .all()
         )
+        # 2026-09-21 audit A-6: shares get the same frozen-id snapshot.
+        # The old (granted_at, id) keyset walked a MUTABLE column — a
+        # re-grant rewrites granted_at, so a re-grant mid-export moved the
+        # share across the cursor and silently dropped it from the bundle.
+        # Membership is frozen here instead; a row deleted between pages is
+        # skipped, but nothing that existed at the cutoff is ever dropped.
+        share_snapshot = list(
+            (
+                await session.execute(
+                    select(Consent.id)
+                    .where(Consent.user_id == fresh.id, Consent.granted_at <= cutoff)
+                    .order_by(Consent.granted_at.asc(), Consent.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
         head = ExportBundle(
             version=1,
             exported_at=cutoff,
@@ -240,40 +257,32 @@ async def export_account(
             yield head_json
             yield ',"shares":['
             first = True
-            share_cursor: tuple | None = None
-            while True:
+            # Snapshot-driven pages (audit A-6, see the head): walk the
+            # frozen id list in bounded chunks. granted_at is mutable
+            # (re-grant rewrites it) and must never back a keyset cursor.
+            for chunk_start in range(0, len(share_snapshot), EXPORT_METADATA_PAGE_SIZE):
+                chunk_ids = share_snapshot[chunk_start : chunk_start + EXPORT_METADATA_PAGE_SIZE]
                 async with sessionmaker() as page_session:
-                    # L-9 (2026-09-20): select ONLY the metadata columns the
-                    # page renders. The former full-Consent load pulled
-                    # wrapped_key and summary_blob ciphertext for up to 100
-                    # rows per page — bytes the export never emits, defeating
-                    # the metadata-first page design.
-                    query = (
-                        select(
-                            Consent.id,
-                            Consent.status,
-                            Consent.granted_at,
-                            Consent.revoked_at,
-                            User.username,
-                            User.display_name,
-                        )
-                        .join(User, Consent.therapist_id == User.id)
-                        .where(Consent.user_id == fresh.id, Consent.granted_at <= cutoff)
-                        .order_by(Consent.granted_at.asc(), Consent.id.asc())
-                        .limit(EXPORT_METADATA_PAGE_SIZE)
-                    )
-                    if share_cursor is not None:
-                        last_granted, last_id = share_cursor
-                        query = query.where(
-                            or_(
-                                Consent.granted_at > last_granted,
-                                and_(
-                                    Consent.granted_at == last_granted,
-                                    Consent.id > last_id,
-                                ),
+                    share_rows = (
+                        await page_session.execute(
+                            select(
+                                Consent.id,
+                                Consent.status,
+                                Consent.granted_at,
+                                Consent.revoked_at,
+                                User.username,
+                                User.display_name,
+                            )
+                            .join(User, Consent.therapist_id == User.id)
+                            .where(
+                                Consent.user_id == fresh.id,
+                                Consent.id.in_(chunk_ids),
                             )
                         )
-                    share_rows = (await page_session.execute(query)).all()
+                    ).all()
+                    # SQL IN has no order guarantee: restore the frozen
+                    # snapshot order so the bundle is deterministic.
+                    by_id = {row[0]: row for row in share_rows}
                     rendered = [
                         ShareRecord(
                             therapist_username=username,
@@ -282,13 +291,10 @@ async def export_account(
                             granted_at=granted_at,
                             revoked_at=revoked_at,
                         ).model_dump(mode="json")
-                        for _, status, granted_at, revoked_at, username, display_name in share_rows
+                        for _, status, granted_at, revoked_at, username, display_name in (
+                            by_id[row_id] for row_id in chunk_ids if row_id in by_id
+                        )
                     ]
-                    if share_rows:
-                        last = share_rows[-1]
-                        share_cursor = (last[2], last[0])
-                if not rendered:
-                    break
                 for item in rendered:
                     yield ("" if first else ",") + json.dumps(item)
                     first = False
@@ -401,9 +407,7 @@ async def export_account(
                                         _export_blob_length(page_session, Insight.blob).label(
                                             "size"
                                         ),
-                                    ).where(
-                                        Insight.user_id == fresh.id, Insight.id.in_(chunk_ids)
-                                    )
+                                    ).where(Insight.user_id == fresh.id, Insight.id.in_(chunk_ids))
                                 )
                             ).all()
                         }
@@ -413,9 +417,7 @@ async def export_account(
                         # pending-tail cursor below advances over the SAME
                         # sequence.
                         ordered_meta = [
-                            (row_id, sizes[row_id])
-                            for row_id in chunk_ids
-                            if row_id in sizes
+                            (row_id, sizes[row_id]) for row_id in chunk_ids if row_id in sizes
                         ]
                         selected = _take_export_metadata_page(ordered_meta)
                         used_blob_bytes = 0
@@ -464,8 +466,16 @@ async def export_account(
                         # page, exactly like the entries cursor's
                         # last_processed. An empty selection means the whole
                         # chunk vanished since the snapshot: consume it too.
+                        # 2026-09-21 audit A-2: the processed branch used to
+                        # replace pending_ids with the chunk tail ALONE,
+                        # silently discarding every id queued past the first
+                        # EXPORT_METADATA_PAGE_SIZE rows — latent at ~93
+                        # insight rows max today, a live GDPR truncation the
+                        # moment retention or page size grows past one chunk.
                         if processed_pos >= 0:
-                            pending_ids = chunk_ids[processed_pos + 1 :]
+                            pending_ids = (
+                                chunk_ids[processed_pos + 1 :] + pending_ids[len(chunk_ids) :]
+                            )
                         else:
                             pending_ids = pending_ids[len(chunk_ids) :]
                 for item in rendered:

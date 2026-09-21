@@ -361,3 +361,42 @@ describe("EntryScreen pins: the crisis support dialog contract", () => {
     ]);
   });
 });
+
+describe("EntryScreen pins: 44pt touch contract on every chip (audit fix 23, 2026-09-21)", () => {
+  it("sleep options meet t.minTouch like their mood/energy siblings (40pt before)", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    const sleep = root.root.findAll((n) => n.props.accessibilityLabel === "Sleep: Rough")[0];
+    expect(sleep).toBeTruthy();
+    expect(sleep.props.style).toEqual([
+      { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
+      { backgroundColor: "#1a1e26", borderRadius: 10, minHeight: 44 },
+    ]);
+  });
+
+  it("activity-tag chips carry minHeight 44 (they measured ~33pt before)", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await openDetails(root);
+    const tag = root.root.findAll((n) => n.props.accessibilityLabel === "Tag: work")[0];
+    expect(tag).toBeTruthy();
+    expect((tag.props.style as unknown[])[1]).toMatchObject({ minHeight: 44 });
+    // The selected variant keeps the contract too.
+    await pressLabel(root, "work");
+    const selected = root.root.findAll(
+      (n) => n.props.accessibilityLabel === "Tag: work" && n.props.accessibilityState?.checked === true,
+    )[0];
+    expect((selected.props.style as unknown[])[1]).toMatchObject({ minHeight: 44 });
+  });
+
+  it("prompt chips (blank-page starters) carry minHeight 44", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    const chip = root.root
+      .findAll((n) => typeof n.props.accessibilityLabel === "string")
+      .find((n) => (n.props.accessibilityLabel as string).startsWith("Start with:"));
+    expect(chip).toBeTruthy();
+    expect((chip!.props.style as unknown[])[1]).toMatchObject({ minHeight: 44, justifyContent: "center" });
+  });
+});

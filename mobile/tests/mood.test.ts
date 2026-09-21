@@ -53,3 +53,37 @@ describe("localSentiment — now the real graded engine (2026-09-19)", () => {
     expect(localSentiment("goodness gracious")).toBe(1);
   });
 });
+
+describe("check-in localization (audit fix 21, 2026-09-21)", () => {
+  it("display labels localize by value while the WIRE values stay fixed", async () => {
+    const { __setLocaleForTests, t } = await import("../src/strings");
+    const { ENERGY_OPTIONS, SLEEP_OPTIONS, ACTIVITY_TAGS, activityTagLabel } = await import("../src/mood");
+
+    __setLocaleForTests("es");
+    try {
+      expect(moodLabel(-0.9)).toBe("Pesado"); // the History badge path localizes too
+      expect(MOOD_OPTIONS.map((o) => t(o.labelKey))).toEqual(["Pesado", "Bajo", "Normal", "Bien", "Ligero"]);
+      expect(ENERGY_OPTIONS.map((o) => t(o.labelKey))).toEqual(["Baja", "Estable", "Alta"]);
+      expect(SLEEP_OPTIONS.map((o) => t(o.labelKey))).toEqual(["Difícil", "Mala", "Regular", "Buena", "Reparadora"]);
+      expect(ACTIVITY_TAGS.map((tag) => activityTagLabel(tag))).toEqual([
+        "Trabajo", "Familia", "Amistades", "Ejercicio", "Aire libre",
+        "Descanso", "Creatividad", "Salud", "Dinero", "Viaje",
+      ]);
+    } finally {
+      __setLocaleForTests("en");
+    }
+
+    // The wire contract is locale-independent: numeric values and English
+    // tag tokens are what the entry payload carries (parity pin).
+    expect(MOOD_OPTIONS.map((o) => o.value)).toEqual([-1, -0.5, 0, 0.5, 1]);
+    expect(ENERGY_OPTIONS.map((o) => o.value)).toEqual([-1, 0, 1]);
+    expect(SLEEP_OPTIONS.map((o) => o.value)).toEqual([1, 2, 3, 4, 5]);
+    expect([...ACTIVITY_TAGS]).toEqual([
+      "work", "family", "friends", "exercise", "outdoors",
+      "rest", "creative", "health", "money", "travel",
+    ]);
+    // An unknown tag (another client's vocabulary) renders as its raw wire
+    // value, never a raw catalog key.
+    expect(activityTagLabel("unknown-tag")).toBe("unknown-tag");
+  });
+});

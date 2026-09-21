@@ -111,9 +111,7 @@ async def test_replace_enforces_next_version(client: AsyncClient):
     assert stale.status_code == 409
     assert stale.json()["code"] == "version_conflict"
 
-    ok = await emu.replace_entry(
-        client, "e-m2-c", "edited text", TODAY, content_version=2
-    )
+    ok = await emu.replace_entry(client, "e-m2-c", "edited text", TODAY, content_version=2)
     assert ok["content_version"] == 2
     assert emu.decrypt_entry(ok["blob"], "e-m2-c", 2)["text"] == "edited text"
 
@@ -242,9 +240,7 @@ async def test_full_rotation_flow_recovers_every_collection():
         emu.derive_new_generation("pw-new-rotating-1")
         # Rekey/rewrap are proven with the OLD password: the credential itself is
         # rotated only after every key-bearing step has completed.
-        counts = await emu.rekey(
-            http, old_key=old_key, new_key=emu.data_key, verifier=old_auth_b64
-        )
+        counts = await emu.rekey(http, old_key=old_key, new_key=emu.data_key, verifier=old_auth_b64)
         assert counts["entries"] == 2
         assert counts["insights"] >= 2  # patterns + brain (+ question)
         assert counts["measures"] == 1
@@ -296,9 +292,7 @@ async def test_full_rotation_flow_recovers_every_collection():
         assert rewrap["status"] == 200, rewrap["body"]
 
         # The portal unwraps the NEW data key and reads an entry with it.
-        patients = (
-            await http.get("/api/therapist/patients", headers=therapist.headers)
-        ).json()
+        patients = (await http.get("/api/therapist/patients", headers=therapist.headers)).json()
         assert patients[0]["wrapped_key"] is not None
         unwrapped = therapist.unwrap_patient_data_key(
             emu, patients[0]["ephemeral_pub"], patients[0]["wrapped_key"]
@@ -313,9 +307,7 @@ async def test_full_rotation_flow_recovers_every_collection():
         assert entry_page, "therapist must still read entries after rotation"
 
         # --- rotate the login credential ---------------------------------
-        status = await emu.rotate_credential(
-            http, old_auth_b64, emu.salt, emu.auth_key_b64
-        )
+        status = await emu.rotate_credential(http, old_auth_b64, emu.salt, emu.auth_key_b64)
         assert status == 204
 
         # The phished OLD verifier no longer logs in; the NEW one does, the
@@ -365,7 +357,9 @@ async def test_rekey_with_wrong_old_key_changes_nothing():
 
         # Nothing committed: the stored blob still decrypts under the real key.
         row = await emu.get_entry(http, "e-bad-1")
-        assert emu.decrypt_entry(row["blob"], "e-bad-1", row["content_version"])["text"] == "keep me"
+        assert (
+            emu.decrypt_entry(row["blob"], "e-bad-1", row["content_version"])["text"] == "keep me"
+        )
     finally:
         await http.aclose()
 

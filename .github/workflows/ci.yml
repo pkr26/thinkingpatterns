@@ -107,6 +107,31 @@ jobs:
         working-directory: mobile
         run: npm audit --audit-level=moderate
 
+  native-release-preflight:
+    # mobile/tools/verify_native_release.mjs is the fail-closed gate for the
+    # committed native projects (audit E-1, 2026-09-21: ios/ and android/
+    # now ship in-tree with the hardening surface — Health usage strings,
+    # allowBackup=false, FLAG_SECURE, keychain autolinking). The check ran
+    # nowhere before, so the exact "cannot build or install today" decay
+    # mode was invisible. It must run on every push: regenerating the
+    # projects or touching package.json deps can silently drop a hardening
+    # property the preflight exists to police.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies (autolinking inspection needs the CLI)
+        working-directory: mobile
+        run: npm ci
+      - name: Native release preflight
+        working-directory: mobile
+        run: npm run verify:native-release
+
   portal:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -302,6 +327,51 @@ jobs:
           reject duplicate-key "$(printf 'MINDPATTERN_API_IMAGE=ghcr.io/e/a@sha256:%s\nMINDPATTERN_API_IMAGE=ghcr.io/e/b@sha256:%s\n' \
             "$(printf 'a%.0s' {1..64})" "$(printf 'b%.0s' {1..64})")"
 
+  monitoring-verify:
+    # deploy/monitoring/verify.sh is the drift gate for the alerting stack
+    # (YAML structure, every alert expression grounded in metrics.py's real
+    # exposition, the bearer_token_file contract) and previously ran in NO
+    # CI job — the exact decay mode this repo already suffered once
+    # (mutation-mobile "had NEVER executed"). Alert or metric drift must be
+    # visible in CI, not only on an operator's laptop. Also shellchecks
+    # every shell script in the tree, at error severity: the tree's
+    # deliberate idioms (`ls -1t` newest-file selection, single-quoted
+    # snippets handed to containers) are info/warning-level notes and stay
+    # out of the gate; parse and quoting failures still fail.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      # Applies to this job's own shellcheck step AND to verify.sh's
+      # internal shellcheck pass (which runs bare `shellcheck` at the
+      # default style severity and would trip on those same info notes).
+      SHELLCHECK_OPTS: --severity=error
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.lock.txt
+      - name: Install a PyYAML-carrying python
+        # verify.sh's structural pass needs a python that imports yaml; the
+        # runner's system python does not ship one. Same pinned, hash-checked
+        # runtime set the contract-gates job installs (PyYAML rides along).
+        run: python -m pip install --require-hashes -r backend/requirements.lock.txt
+      - name: Put promtool on PATH
+        # Same version tag deploy/monitoring/docker-compose.yml ships, so
+        # the semantic check validates the rules against the Prometheus the
+        # stack actually runs; extracting the binary from the image avoids a
+        # second, unpinned download path.
+        run: |
+          docker create --name promtool-copy prom/prometheus:v3.4.1
+          docker cp promtool-copy:/bin/promtool /usr/local/bin/promtool
+          docker rm promtool-copy >/dev/null
+          promtool --version
+      - name: Monitoring stack verify (YAML + structure + grounding + promtool)
+        run: bash deploy/monitoring/verify.sh
+      - name: Shellcheck every shell script (error severity)
+        run: shellcheck --severity=error $(find . -name '*.sh' -not -path '*/node_modules/*')
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -324,6 +394,31 @@ jobs:
       - name: mypy
         working-directory: backend
         run: python -m mypy
+      - name: README error-code list covers every code the backend raises
+        # The README's error-contract section claims its code list is
+        # COMPLETE (audit A-4: it had silently gone stale). Collect every
+        # `code="..."` literal under backend/app plus the status-default
+        # envelope map in deps.py and require each to appear in README.md.
+        run: |
+          python - <<'EOF'
+          import re
+          from pathlib import Path
+
+          backend = Path("backend/app")
+          readme = Path("README.md").read_text(encoding="utf-8")
+
+          codes = set()
+          for path in sorted(backend.rglob("*.py")):
+              codes |= set(re.findall(r'code="([a-z0-9_]+)"', path.read_text(encoding="utf-8")))
+          deps = (backend / "deps.py").read_text(encoding="utf-8")
+          defaults = re.search(r"DEFAULT_ERROR_CODES[^{]*\{(.*?)\}", deps, re.S)
+          assert defaults, "DEFAULT_ERROR_CODES map not found in backend/app/deps.py"
+          codes |= set(re.findall(r':\s*"([a-z0-9_]+)"', defaults.group(1)))
+
+          missing = sorted(c for c in codes if f"`{c}`" not in readme)
+          assert not missing, "README.md error-code list is missing: " + ", ".join(missing)
+          print(f"README error-code list covers all {len(codes)} raised codes")
+          EOF
 
   supply-chain:
     runs-on: ubuntu-latest

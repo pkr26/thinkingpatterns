@@ -195,7 +195,9 @@ class TestCrashMetricsVisibility:
         async def boom(scope, receive, send):
             raise RuntimeError("crash-class failure")
 
-        app = HardeningMiddleware(boom, max_body_bytes=1024, status_observer=registry.observe_request)
+        app = HardeningMiddleware(
+            boom, max_body_bytes=1024, status_observer=registry.observe_request
+        )
         r = await self._request_asgi(app, "GET", "/anything")
         assert r.status_code == 500
         assert 'mindpattern_requests_total{status="5xx"} 1' in registry.render(0)
@@ -228,7 +230,7 @@ class TestCrashMetricsVisibility:
         assert r.status_code == 413
         # render() always emits the TYPE header line; the pin is that no
         # status SAMPLE line exists.
-        assert 'mindpattern_requests_total{status=' not in registry.render(0)
+        assert "mindpattern_requests_total{status=" not in registry.render(0)
 
     async def test_flood_429_is_observed_in_the_real_app(self):
         settings = _settings(auth_rate_limit=1, auth_rate_window=60)
@@ -410,7 +412,9 @@ class TestCorsOnMiddlewareResponses:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://testserver") as c:
                 r = await c.post(
-                    "/api/auth/salt", content=b"x" * 2048, headers={"content-type": "application/json"}
+                    "/api/auth/salt",
+                    content=b"x" * 2048,
+                    headers={"content-type": "application/json"},
                 )
         assert r.status_code == 413
         assert "access-control-allow-origin" not in r.headers

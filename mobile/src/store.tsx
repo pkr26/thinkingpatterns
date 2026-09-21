@@ -21,6 +21,7 @@ import { clearCrisisDialogStamp } from "./crisisDialog";
 import { syncReminderSchedule } from "./reminderSync";
 import { disableBiometricUnlock } from "./biometricUnlock";
 import { cancelDailyReminder } from "./nativeFeatures";
+import { loadHapticsSetting } from "./haptics";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
@@ -156,6 +157,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // Stryker disable next-line ConditionalExpression: React 18 made setState on an unmounted component a silent no-op, so skipping the cancelled guard is unobservable
       if (!cancelled) setAuthStatus(logged ? "loggedIn" : "loggedOut");
     });
+    // Audit fix 19 (2026-09-21): the haptics preference loads at session
+    // start, not on the first Settings visit — the module defaults to
+    // enabled, so a stored "off" (the sensory-anxiety setting) pulsed after
+    // every cold start until Settings happened to be opened.
+    void loadHapticsSetting();
     // Local-reminder reconciliation (2026-09-19), once per session start:
     // align the native schedule with the stored per-account preference —
     // disabled/absent cancels any stale schedule, enabled reschedules.

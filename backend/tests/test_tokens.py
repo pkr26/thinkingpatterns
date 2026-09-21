@@ -190,7 +190,10 @@ def test_payload_field_types_hardened():
     # ep absent (legacy) and ep null both parse; the epoch comparison in
     # deps.require_user fails closed for null.
     assert "ep" not in tokens.verify_token(signed({"uid": "u", "exp": 9999999999}), SECRET)
-    assert tokens.verify_token(signed({"uid": "u", "exp": 9999999999, "ep": None}), SECRET)["ep"] is None
+    assert (
+        tokens.verify_token(signed({"uid": "u", "exp": 9999999999, "ep": None}), SECRET)["ep"]
+        is None
+    )
 
 
 def test_issued_tokens_carry_hardened_shapes():

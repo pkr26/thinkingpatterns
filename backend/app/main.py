@@ -424,7 +424,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # L-2 (2026-09-20): one shared generous bucket for the ops pair —
         # unthrottled, /healthz+/readyz were the only DB-touching endpoints
         # with no limiter, a free pool-pressure flood for anyone unauthenticated.
-        dependencies=[Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))],
+        dependencies=[
+            Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))
+        ],
     )
     async def healthz() -> dict:
         # Liveness only: no DB touch, so a wedged pool still reports the
@@ -460,7 +462,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     @app.get(
         "/readyz",
         tags=["ops"],
-        dependencies=[Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))],
+        dependencies=[
+            Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))
+        ],
     )
     async def readyz(request: Request):
         try:

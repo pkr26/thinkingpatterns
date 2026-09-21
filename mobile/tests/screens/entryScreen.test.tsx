@@ -263,7 +263,8 @@ describe("EntryScreen progress display", () => {
     // 2026-09-17: navigation is the PERSISTENT bottom bar (MainShell), no
     // longer an in-scroll NavRow. Its styles are pinned in
     // components.bottomNav.test.tsx; this screen keeps the chips row.
-    expectStyle(root, { backgroundColor: "#141821", borderRadius: 10 }); // prompt chip themed
+    // Fix 23 (2026-09-21): chips carry t.minTouch — they measured ~33pt.
+    expectStyle(root, { backgroundColor: "#141821", borderRadius: 10, minHeight: 44, justifyContent: "center" }); // prompt chip themed
     expectStyle(root, { paddingHorizontal: 12, paddingVertical: 8 }); // prompt chip base
   });
 

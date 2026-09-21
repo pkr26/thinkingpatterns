@@ -408,9 +408,7 @@ async def test_measures_page_deterministically_on_both_paths(client):
     th = TherapistEmulator("m4-dr", "pw")
     await th.register(client)
     for offset in range(4):
-        assert (
-            await _record_measure(emu, client, f"m4-a-{offset}", 5, TODAY)
-        ).status_code == 201
+        assert (await _record_measure(emu, client, f"m4-a-{offset}", 5, TODAY)).status_code == 201
     for offset in range(3):
         assert (
             await _record_measure(emu, client, f"m4-b-{offset}", 6, TODAY - timedelta(days=5))

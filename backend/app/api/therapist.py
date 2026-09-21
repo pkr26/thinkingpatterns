@@ -79,7 +79,14 @@ from ..services import threshold
 from .account import _require_verifier
 from .auth import SALT_BYTES, AUTH_KEY_SIZE, _auth_limiter, auth_work_slot, hash_verifier_off_loop
 from .consents import MAX_PATIENTS_PER_THERAPIST, SHARING_DISCLOSURE_VERSION
-from .measures import MEASURE_PAGE_LIMIT, _measure_out
+from .measures import (
+    MEASURE_PAGE_BLOB_BYTES,
+    MEASURE_PAGE_LIMIT,
+    MEASURES_REVISION_HEADER,
+    _measure_blob_length,
+    _measure_out,
+    current_measures_revision,
+)
 from .entries import (
     ENTRIES_REVISION_HEADER,
     MAX_COLLECTION_REVISION,
@@ -672,10 +679,13 @@ async def read_patient_insights(
 )
 async def read_patient_measures(
     user_id: str,
+    response: Response,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
     limit: int = Query(default=200, ge=1, le=MEASURE_PAGE_LIMIT),
     offset: int = Query(default=0, ge=0, le=100_000),
+    page_bytes: int | None = Query(default=None, ge=1, le=MEASURE_PAGE_BLOB_BYTES),
+    expected_revision: str | None = None,
 ):
     """The patient's recorded wellbeing measures (MBC, 2026-09-19): opaque
     blobs under the SAME active-consent rule as entries — the portal
@@ -689,11 +699,15 @@ async def read_patient_measures(
     disclosure_outdated (meta carries the current version) instead of
     serving data the patient never agreed to share in those terms.
 
-    M-4 (2026-09-20): mirrors the patient read's deterministic
-    (measure_date, received_at, id) DESC ordering with limit/offset paging
-    (cap raised 200 -> 500): the old hardcoded 200-row, no-continuation
-    read truncated the MBC trend while the patient's write quota is 2000.
+    A-3 (2026-09-21): the entries pagination contract, ported. Byte-bounded
+    pages (``page_bytes`` opt-in with ``X-Next-Offset``; legacy requests
+    over the 2 MiB ciphertext budget get an explicit 413) and the
+    ``X-Measures-Revision`` snapshot marker — a concurrent patient create
+    answers 409 collection_changed instead of letting offset paging on the
+    DESC list duplicate or skip rows. ``id`` breaks
+    (measure_date, received_at) ties for one stable order across pages.
     """
+    expected = parse_expected_revision(expected_revision)
     if len(user_id) > 32:
         raise ApiError(status_code=404, detail="patient not found", code="not_found")
     out: list[MeasureOut] = []
@@ -705,33 +719,108 @@ async def read_patient_measures(
                 # touching any ciphertext (and before any audit row — the
                 # refusal exposed no patient data).
                 return _disclosure_outdated_response()
-            rows = (
-                (
-                    await session.execute(
-                        select(Measure)
-                        .where(Measure.user_id == user_id)
-                        .order_by(
-                            Measure.measure_date.desc(),
-                            Measure.received_at.desc(),
-                            Measure.id.desc(),
-                        )
-                        .offset(offset)
-                        .limit(limit)
+            revision = await current_measures_revision(session, consent.user_id)
+            assert_expected_revision(
+                expected,
+                revision,
+                collection="measures",
+                header_name=MEASURES_REVISION_HEADER,
+            )
+            _audit(session, user, consent.user_id, "read_measures")
+            # Ids + byte lengths first; full blobs are fetched only for the
+            # rows that fit the response budget.
+            metadata = (
+                await session.execute(
+                    select(Measure.id, _measure_blob_length(session).label("blob_bytes"))
+                    .where(Measure.user_id == consent.user_id)
+                    .order_by(
+                        Measure.measure_date.desc(),
+                        Measure.received_at.desc(),
+                        Measure.id.desc(),
                     )
+                    .offset(offset)
+                    # One extra metadata row tells the portal whether it
+                    # must follow a cursor without inferring from page
+                    # length.
+                    .limit(limit + 1)
                 )
-                .scalars()
-                .all()
-            )
+            ).all()
+            requested = [(str(row[0]), int(row[1])) for row in metadata[:limit]]
+            selected: list[tuple[str, int]]
+            if page_bytes is None:
+                selected = requested
+                if sum(size for _, size in selected) > MEASURE_PAGE_BLOB_BYTES:
+                    raise ApiError(
+                        status_code=413,
+                        detail=(
+                            "requested measure page exceeds the 2 MiB ciphertext budget; "
+                            "upgrade to a byte-paginating portal"
+                        ),
+                        code="payload_too_large",
+                    )
+            else:
+                selected = []
+                used_bytes = 0
+                for row_id, size in requested:
+                    if size > page_bytes:
+                        if not selected:
+                            raise ApiError(
+                                status_code=413,
+                                detail=("a measure exceeds the requested page byte budget"),
+                                code="payload_too_large",
+                            )
+                        break
+                    if used_bytes + size > page_bytes:
+                        break
+                    selected.append((row_id, size))
+                    used_bytes += size
+
+            selected_ids = [row_id for row_id, _ in selected]
+            rows: list[Measure] = []
+            if selected_ids:
+                rows = list(
+                    (
+                        await session.execute(
+                            select(Measure).where(
+                                Measure.user_id == consent.user_id,
+                                Measure.id.in_(selected_ids),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                # Audit durability (M-30 pattern): measure ciphertext is now
+                # in memory, so the audit row added above must survive any
+                # later failure — commit it in its own short transaction
+                # before the consistency checks that can refuse the page.
+                await session.commit()
+                rows_by_id = {row.id: row for row in rows}
+                if len(rows_by_id) != len(selected_ids):
+                    raise collection_changed_error("measures", MEASURES_REVISION_HEADER, revision)
+                rows = [rows_by_id[row_id] for row_id in selected_ids]
+                byte_limit = page_bytes if page_bytes is not None else MEASURE_PAGE_BLOB_BYTES
+                if sum(len(bytes(row.blob)) for row in rows) > byte_limit:
+                    raise collection_changed_error("measures", MEASURES_REVISION_HEADER, revision)
+
+            has_more = len(selected) < len(requested) or len(metadata) > limit
+            if has_more and rows:
+                response.headers["X-Next-Offset"] = str(offset + len(rows))
             out = [_measure_out(row) for row in rows]
-            session.add(
-                AccessLog(
-                    actor_id=user.id,
-                    actor_role=user.role,
-                    user_id=user_id,
-                    action="read_measures",
-                )
-            )
-            await session.commit()  # the audit row
+            final_revision = await current_measures_revision(session, consent.user_id)
+            if final_revision != revision:
+                raise collection_changed_error("measures", MEASURES_REVISION_HEADER, final_revision)
+            response.headers[MEASURES_REVISION_HEADER] = str(revision)
+            # Audit bookkeeping, corrected 2026-09-21 (audit A-7): the
+            # after-fetch commit above only ran for pages that selected
+            # rows. An EMPTY page skips it entirely, so the audit row —
+            # written unconditionally before the metadata query — is
+            # persisted HERE: empty reads ARE audited, which is the right
+            # posture (the consented scope was exercised even when no
+            # rows matched). Oversized-refused 413 pages raise before any
+            # commit and stay unaudited: no ciphertext was served. This
+            # trailing commit closes the read transaction symmetrically.
+            await session.commit()
     return out
 
 
@@ -905,10 +994,15 @@ async def read_patient_entries(
             # and terminal pages, so a caller never needs to infer it from a
             # continuation header.
             response.headers[ENTRIES_REVISION_HEADER] = str(revision)
-            # The audit row was already committed after the blob fetch (M-30);
-            # empty/oversized-refused pages never reached that commit and are
-            # correctly unaudited (no ciphertext was served). This trailing
-            # commit closes the read transaction symmetrically.
+            # Audit bookkeeping, corrected 2026-09-21 (audit A-7): the
+            # after-fetch commit above only ran for pages that selected
+            # rows. An EMPTY page skips it entirely, so the audit row —
+            # written unconditionally before the metadata query — is
+            # persisted HERE: empty reads ARE audited, which is the right
+            # posture (the consented scope was exercised even when no
+            # rows matched). Oversized-refused 413 pages raise before any
+            # commit and stay unaudited: no ciphertext was served. This
+            # trailing commit closes the read transaction symmetrically.
             await session.commit()
     return result
 
@@ -1139,8 +1233,12 @@ async def list_notes(
         if final_revision != revision:
             raise collection_changed_error("notes", NOTES_REVISION_HEADER, final_revision)
         response.headers[NOTES_REVISION_HEADER] = str(revision)
-        # The audit row was already committed after the blob fetch (M-30);
-        # refused pages that never fetched ciphertext are correctly
+        # Audit bookkeeping, corrected 2026-09-21 (audit A-7): the
+        # after-fetch commit above only ran for pages that fetched note
+        # ciphertext. An EMPTY page skips it entirely, so the audit row —
+        # written unconditionally above — is persisted HERE: empty reads
+        # ARE audited (the consent scope was exercised even when no rows
+        # matched). Refused pages raise before any commit and stay
         # unaudited. This closes the read transaction symmetrically.
         await session.commit()
     # Modern byte-bounded pages always advance exactly by materialized rows.

@@ -70,6 +70,11 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
   const serverError = !baseUrl
     ? "This portal must be served from its configured HTTPS origin (or a loopback development origin)."
     : "";
+  // Audit fix 18 (2026-09-21): the fields live in a real <form>, so Enter
+  // submits. These guards mirror the submit buttons' disabled logic — an
+  // incomplete form stays inert instead of firing a doomed request.
+  const canSignIn = Boolean(username && password && baseUrl);
+  const canRegister = Boolean(username && password && password2 && !passwordError && baseUrl && sharingAvailable === true);
 
   // Never guess that a random server can create a clinician account.  The
   // backend advertises this non-personal deployment policy specifically so
@@ -212,75 +217,93 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
     }
   };
 
+  // Audit fix 18 (2026-09-21): real form semantics — Enter in any field
+  // submits; preventDefault keeps the browser from reloading the SPA.
+  const submit = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (busy) return;
+    if (mode === "login") {
+      if (canSignIn) void signIn();
+    } else if (canRegister) {
+      void register();
+    }
+  };
+
   return (
     <main style={{ backgroundColor: theme.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ width: 420, display: "flex", flexDirection: "column", gap: 14 }}>
         <h1 style={{ color: theme.text, fontSize: 22, margin: 0 }}>MindPattern · Therapist portal</h1>
         <Card title={mode === "login" ? "Sign in" : "Create a therapist account"}>
-          {mode === "register" && (
-            <>
-              <Field label="Your name (shown to patients)" value={displayName} onChange={setDisplayName} placeholder="Dr. Jane Omega" autoComplete="name" />
-              <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />
-            </>
-          )}
-          {mode === "login" && <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />}
-          <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
-          {mode === "register" && (
-            <Field label="Repeat password" value={password2} onChange={setPassword2} type="password" autoComplete="new-password" />
-          )}
-          {mode === "register" && (
-            <>
-              <Field
-                label="Clinician enrollment token (if issued)"
-                value={enrollmentToken}
-                onChange={setEnrollmentToken}
-                type="password"
-                autoComplete="one-time-code"
-                placeholder="Organization-issued token"
-              />
-              {sharingAvailable === false && (
-                <Note tone="danger">New clinician enrollment is unavailable on this server. Contact your organization administrator.</Note>
-              )}
-              {sharingAvailable === null && !sharingPolicyError && baseUrl && (
-                <Note>Checking this server's clinician enrollment policy…</Note>
-              )}
-              {sharingPolicyError && <Note tone="danger">{sharingPolicyError}</Note>}
-            </>
-          )}
-          <Note>
-            Server: this portal&apos;s own secure origin. It cannot be changed from the sign-in screen.
-          </Note>
-          {serverError && <Note tone="danger">{serverError}</Note>}
-          {mode === "register" && (
-            <>
-              <Note>
-                Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters.
-              </Note>
-              <Note>
-                If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal&apos;s same-origin secure API connection and is never stored by this portal.
-              </Note>
-            </>
-          )}
-          <ErrorBanner message={error} />
-          {mode === "login" ? (
-            <>
-              <Button label={busy ? "Signing in…" : "Sign in"} onPress={signIn} disabled={busy || !username || !password || !baseUrl} />
-              <Button label="Create a therapist account instead" small onPress={() => { setMode("register"); setError(""); }} disabled={busy} />
-            </>
-          ) : (
-            <>
-              <Button
-                label={busy ? "Creating…" : "Create account"}
-                onPress={register}
-                disabled={busy || !username || !password || !password2 || Boolean(passwordError) || !baseUrl || sharingAvailable !== true}
-              />
-              <Button label="Back to sign in" small onPress={() => { setMode("login"); setError(""); }} disabled={busy} />
-            </>
-          )}
-          <Note>
-            Your password never leaves this page: the server stores only a hash of a derived key, and
-            your sharing key is decryptable only with your password.
-          </Note>
+          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {mode === "register" && (
+              <>
+                <Field label="Your name (shown to patients)" value={displayName} onChange={setDisplayName} placeholder="Dr. Jane Omega" autoComplete="name" />
+                <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />
+              </>
+            )}
+            {mode === "login" && <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />}
+            <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
+            {mode === "register" && (
+              <Field label="Repeat password" value={password2} onChange={setPassword2} type="password" autoComplete="new-password" />
+            )}
+            {mode === "register" && (
+              <>
+                <Field
+                  label="Clinician enrollment token (if issued)"
+                  value={enrollmentToken}
+                  onChange={setEnrollmentToken}
+                  type="password"
+                  autoComplete="one-time-code"
+                  placeholder="Organization-issued token"
+                />
+                {sharingAvailable === false && (
+                  <Note tone="danger" role="status">New clinician enrollment is unavailable on this server. Contact your organization administrator.</Note>
+                )}
+                {sharingAvailable === null && !sharingPolicyError && baseUrl && (
+                  <Note role="status">Checking this server&apos;s clinician enrollment policy…</Note>
+                )}
+                {sharingPolicyError && <Note tone="danger" role="status">{sharingPolicyError}</Note>}
+              </>
+            )}
+            <Note>
+              Server: this portal&apos;s own secure origin. It cannot be changed from the sign-in screen.
+            </Note>
+            {serverError && <Note tone="danger" role="status">{serverError}</Note>}
+            {mode === "register" && (
+              <>
+                <Note>
+                  Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters.
+                </Note>
+                <Note>
+                  If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal&apos;s same-origin secure API connection and is never stored by this portal.
+                </Note>
+                {/* Audit F-4 (2026-09-21): the credential lifecycle has no
+                    reset path in v1 — say so BEFORE the account exists. */}
+                <Note tone="danger">
+                  There is no password reset and no account recovery. Your sharing key is
+                  wrapped to this password alone: if you forget it, your account and every
+                  shared note become permanently unreadable. Save the password in a
+                  password manager before you continue.
+                </Note>
+              </>
+            )}
+            <ErrorBanner message={error} />
+            {mode === "login" ? (
+              <>
+                <Button label={busy ? "Signing in…" : "Sign in"} onPress={signIn} disabled={busy || !canSignIn} />
+                <Button label="Create a therapist account instead" small onPress={() => { setMode("register"); setError(""); }} disabled={busy} />
+              </>
+            ) : (
+              <>
+                <Button label={busy ? "Creating…" : "Create account"} onPress={register} disabled={busy || !canRegister} />
+                <Button label="Back to sign in" small onPress={() => { setMode("login"); setError(""); }} disabled={busy} />
+              </>
+            )}
+            <Note>
+              Your password never leaves this page: the server stores only a hash of a derived key, and
+              your sharing key is decryptable only with your password.
+            </Note>
+          </form>
         </Card>
       </div>
     </main>

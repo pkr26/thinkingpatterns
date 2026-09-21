@@ -259,6 +259,10 @@ export function PatientView(props: {
   const [patterns, setPatterns] = useState<PatternPayload[] | null>(null);
   const [phaseNote, setPhaseNote] = useState<string | null>(null);
   const [error, setError] = useState("");
+  /** Audit fix 17 (2026-09-21): a failed CHART load (insights or notes)
+   *  offers an in-page retry; drill-down and note-action failures still
+   *  render the banner alone. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selected, setSelected] = useState<PatternPayload | null>(null);
   const [entries, setEntries] = useState<EntryRow[] | null>(null);
   const [notes, setNotes] = useState<OpenNote[]>([]);
@@ -288,6 +292,7 @@ export function PatientView(props: {
   const load = useCallback(async () => {
     const operation = ++loadGeneration.current;
     setError("");
+    setLoadFailed(false);
     setPatterns(null);
     setPhaseNote(null);
     setStats(null);
@@ -411,6 +416,7 @@ export function PatientView(props: {
     })().catch((err: unknown) => {
       if (operation === loadGeneration.current) {
         setError(err instanceof Error ? err.message : "could not load therapist notes");
+        setLoadFailed(true);
       }
     });
 
@@ -454,8 +460,9 @@ export function PatientView(props: {
         const surfaced = sortForReview(payload.stats.patterns ?? []);
         // The pre-session delta (2026-09-17 fix): the stamp moves ONLY on the
         // explicit "Mark reviewed" action — a 30-second glance no longer
-        // resets the delta, and a second browser sees the same anchor.
-        // Storage basis per the L-75 decision: per-tab sessionStorage
+        // resets the delta. Storage basis per the L-75 decision: the anchor
+        // is PER-TAB (a second tab or browser legitimately starts from its
+        // own anchor — see portal/README.md), per-tab sessionStorage
         // (survives idle locks, dies with the browser session), falling
         // back to lock-scrubbed localStorage where sessionStorage is
         // unavailable.
@@ -468,6 +475,7 @@ export function PatientView(props: {
     } catch (err) {
       if (operation === loadGeneration.current) {
         setError(err instanceof Error ? err.message : "could not load this patient");
+        setLoadFailed(true);
       }
     } finally {
       await notesLoad;
@@ -735,6 +743,14 @@ export function PatientView(props: {
       )}
 
       <ErrorBanner message={error} />
+      {loadFailed && (
+        // Audit fix 17 (2026-09-21): recovery from a failed load used to
+        // require a reload or sign-out; the retry re-runs the whole load
+        // (it invalidates any earlier generation's results itself).
+        <div className="no-print" style={{ marginTop: 8 }}>
+          <Button label="Retry loading this patient" small onPress={() => void load()} />
+        </div>
+      )}
 
       {notesOnly && (
         <Card title="Sharing ended">
@@ -816,7 +832,9 @@ export function PatientView(props: {
       )}
 
       {selected && (
-        <Card title={`Evidence entries (${entries?.length ?? 0})`}>
+        // Audit fix 15 (2026-09-21): this card carries the patient's full
+        // decrypted journal text — it must never reach paper.
+        <Card className="no-print" title={`Evidence entries (${entries?.length ?? 0})`}>
           {/* H-13 (2026-09-20): entries without an explicit mood pick carry
               null sentiment; they are DROPPED here, never coerced to 0 —
               `?? 0` fabricated a mid-scale trend and average for patients
@@ -838,7 +856,9 @@ export function PatientView(props: {
               {typeof entry.sentiment === "number" && (
                 <span style={{ color: theme.muted, fontSize: 12, marginLeft: 8 }}>mood {entry.sentiment.toFixed(2)}</span>
               )}
-              <p style={{ margin: "4px 0 0", fontSize: 14, lineHeight: 1.5, color: theme.body }}>
+              {/* Audit fix 16 (2026-09-21): journal entries are multi-line;
+                  pre-wrap keeps the patient's line breaks. */}
+              <p style={{ margin: "4px 0 0", fontSize: 14, lineHeight: 1.5, color: theme.body, whiteSpace: "pre-wrap" }}>
                 {selected && labelMatches(entry.text, selected.label) ? <mark>{entry.text}</mark> : entry.text}
               </p>
             </div>
@@ -846,7 +866,9 @@ export function PatientView(props: {
         </Card>
       )}
 
-      <Card title={selected ? "Notes on this pattern" : "General notes about this patient"}>
+      {/* Audit fix 15 (2026-09-21): the note composer (search filter,
+          templates, draft) is interactive chrome — excluded from print. */}
+      <Card className="no-print" title={selected ? "Notes on this pattern" : "General notes about this patient"}>
         {(selected ? patternNotes : generalNotes).length > 2 && (
           <input
             value={noteQuery}
@@ -995,8 +1017,8 @@ ${tpl}` : tpl)}
       </Card>
 
       {/* Print-only session summary (2026-09-17): everything a paper record
-          needs, nothing the interactive chrome shows. window.print() with
-          .no-print hiding. */}
+          needs, nothing the interactive chrome shows. Under print this is
+          the ONLY visible block (audit 15, 2026-09-21). */}
       <div className="print-only" style={{ display: "none" }}>
         <h1 style={{ fontSize: 18 }}>MindPattern session summary — {patient.username}</h1>
         <p style={{ fontSize: 12 }}>
@@ -1013,6 +1035,21 @@ ${tpl}` : tpl)}
             {typeof stats.avg_sentiment === "number" && ` · average reading ${stats.avg_sentiment.toFixed(2)}`}
           </p>
         )}
+        {/* Audit fix 15 (2026-09-21): recorded measures join the printed
+            summary (same per-instrument display slice as the interactive
+            card, hidden remainder disclosed) — the paper record keeps the
+            measurement-based-care trail. */}
+        {measureGroups.length > 0 && (
+          <>
+            <h2 style={{ fontSize: 14, marginTop: 10 }}>Recorded measures</h2>
+            {measureGroups.map((group) => (
+              <p key={group.instrument} style={{ fontSize: 12, margin: "2px 0" }}>
+                {group.instrument}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+                {group.hidden > 0 && ` · +${group.hidden} earlier not shown`}
+              </p>
+            ))}
+          </>
+        )}
         {(patterns ?? []).map((pattern, index) => (
           <div key={patternKey(pattern, index)} style={{ borderTop: "1px solid #999", paddingTop: 6, marginTop: 6 }}>
             <strong style={{ fontSize: 13 }}>{pattern.detail.sensitive ? "A difficult thought (non-quoting)" : `${pattern.kind} — ${pattern.label}`}</strong>
@@ -1026,7 +1063,7 @@ ${tpl}` : tpl)}
           <>
             <h2 style={{ fontSize: 14, marginTop: 10 }}>Therapist notes ({selected ? "this pattern" : "general"})</h2>
             {(selected ? patternNotes : generalNotes).map((note) => (
-              <p key={note.id} style={{ fontSize: 12, borderTop: "1px solid #999", paddingTop: 4 }}>
+              <p key={note.id} style={{ fontSize: 12, borderTop: "1px solid #999", paddingTop: 4, whiteSpace: "pre-wrap" }}>
                 {dayOf(note.created_at)} — {note.text}
               </p>
             ))}
@@ -1037,11 +1074,25 @@ ${tpl}` : tpl)}
         </p>
       </div>
 
+      {/* Audit fix 15 (2026-09-21): under print, ONLY the .print-only session
+          summary may render. The old rule hid two header rows and let every
+          card print light-on-dark — including the evidence drill-down's full
+          decrypted journal text, exactly what this block exists to exclude.
+          The child-selector rule hides every other direct section of the
+          chart; .no-print additionally excludes the interactive sections
+          that carry raw text (evidence drill-down, note composer, controls)
+          even if the DOM later gains wrapper elements between them and
+          <main>. `!important` is required on both sides: it is the only
+          author-origin way to override the inline style objects above, and
+          .print-only's inline display:none is what keeps the summary hidden
+          on screen. The color rule strips the inline dark-theme colors from
+          paper — the summary's own #333/#555 accents stay legible on white. */}
       <style>{`
         @media print {
+          main > *:not(.print-only) { display: none !important; }
           .no-print, .no-print * { display: none !important; }
           .print-only { display: block !important; }
-          body { background: #fff !important; color: #000 !important; }
+          body, main { background: #fff !important; color: #000 !important; }
         }
       `}</style>
     </main>

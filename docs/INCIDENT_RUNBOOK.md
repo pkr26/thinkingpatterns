@@ -11,6 +11,44 @@ issue, not just an SLO miss.** This runbook is the operator's checklist.
 | **S2** | Service unusable | API down; login broken; recomputes 500ing | 1 hour |
 | **S3** | Degraded | elevated latency; one client version broken; rate-limit storms | next business day |
 
+## Detection & escalation (S1)
+
+Nothing pages yet — v1 detection is the alert rules and scheduled jobs
+below plus a human watching them; wiring them to an on-call channel
+(Alertmanager or equivalent) is tracked follow-up work. Until that lands,
+**whoever deployed the system is on-call by default.**
+
+**Where signals surface today**
+
+| Signal | Source | Notes |
+|---|---|---|
+| `MindPatternAPIDown`, `MindPatternHigh5xxRatio`, `MindPatternRecomputeP95Slow`, `MindPatternKeystoreSessionsStuck`, `MindPatternLLMFailureRatioHigh` | `deploy/monitoring/alerts.yml` | Check the Prometheus `/alerts` view (the keystore alert is the S1 plaintext-exposure tripwire — an unconsumed processing session). The rule set is drift-gated in CI: the `monitoring-verify` job runs `deploy/monitoring/verify.sh` on every PR. |
+| Liveness / readiness | `/healthz`, `/readyz` | Blackbox probe rules are shipped commented-out in `alerts.yml` — enable at deploy time. |
+| Backup freshness | `deploy/monitoring/check-backup-freshness.sh` + heartbeat rules | Run during any incident touching the host or DB (step 4 below). |
+| Attack-surface regression | weekly `redteam` CI job (Saturdays) | Fails on any new FINDING; the accepted standing set is registered in `docs/SECURITY_RESIDUALS.md`. |
+
+**Escalation ladder (S1 — 15-minute target).** Fill in the bracketed
+contacts at deployment; they are deliberately part of this file so the
+lives in exactly one place.
+
+1. **0–5 min — whoever sees it**: run "The first five minutes" below and
+   declare the severity, with timestamps, in your incident channel.
+2. **5–15 min — primary operator** `[OPERATOR_PRIMARY — name/contact]`:
+   confirm severity, execute the matching S1 section. Unreachable at
+   minute 10 → secondary `[OPERATOR_SECONDARY — name/contact]` takes over.
+3. **Safety-content defects** (crisis screen copy, resources): also bring
+   in the clinical advisor `[CLINICAL_ADVISOR — contact]` — bad safety
+   copy is a user-safety issue even with every system green.
+4. **Suspected data exposure**: start the Art. 33 / breach-notification
+   clock immediately (see the plaintext-exposure section) and involve the
+   DPO `[DPO — contact]` — the 72h runs from awareness, not confirmation.
+
+**Manual operator levers (v1):** account deactivation
+(`UPDATE users SET is_active = false WHERE ...` via direct database
+access) is reserved for incident response — every auth path checks
+`is_active`, but no API or job exposes it (see README "Scope decisions").
+Token invalidation is `MINDPATTERN_TOKEN_SECRET` rotation.
+
 ## The first five minutes (any severity)
 
 1. **Look at the four signals that exist**: `/healthz` (liveness), `/readyz`
@@ -73,7 +111,8 @@ this).
 - The compose backup service writes encrypted daily dumps; retention is
   the deletion promise (default 35 days).
 - **Rehearse restores** — `bash backend/scripts/rehearse_restore.sh` is
-  the scripted rehearsal; an unrehearsed restore is not a backup.
+  the scripted rehearsal (add `--remote` to rehearse the off-site,
+  host-gone path); an unrehearsed restore is not a backup.
 - `BACKUP_KEY` loss = all backups unreadable. Store it in a second secret
   location. Rotation: decrypt-and-redump the corpus under the new key in a
   maintenance window (the dumps are the only ciphertext that does not
@@ -130,14 +169,18 @@ compose stack are all lost):
    ```
 4. Authenticate before decrypting (the fetch brings the `.hmac` sidecars;
    a missing or mismatching tag is a hard stop), then pipe the decrypt
-   straight into the running database — plaintext never touches host disk:
+   straight into the running database — plaintext never touches host disk.
+   `$NEWEST` is the bare FILE NAME: `/srv/restore` is the HOST path, the
+   containers see the same directory mounted at `/restore`, so every
+   in-container reference must be `/restore/$NEWEST` (the rehearsal script
+   machine-tests exactly this shape):
    ```bash
-   NEWEST=$(ls -1t /srv/restore/mindpattern-*.dump.enc | head -n 1)
+   NEWEST=$(basename "$(ls -1t /srv/restore/mindpattern-*.dump.enc | head -n 1)")
    docker run --rm -v /srv/restore:/restore -e BACKUP_KEY \
-     --entrypoint mindpattern-backup-mac "$BACKUP_IMAGE" verify "$NEWEST"
+     --entrypoint mindpattern-backup-mac "$BACKUP_IMAGE" verify "/restore/$NEWEST"
    docker run --rm -i -v /srv/restore:/restore -e BACKUP_KEY \
      --entrypoint openssl "$BACKUP_IMAGE" enc -d -aes-256-cbc -pbkdf2 \
-     -iter 600000 -pass env:BACKUP_KEY -in "$NEWEST" \
+     -iter 600000 -pass env:BACKUP_KEY -in "/restore/$NEWEST" \
      | docker compose --env-file "$SECRETS_ENV" \
      -f "$APP_DIR/docker-compose.yml" \
      exec -T db pg_restore -U "${POSTGRES_USER:-mindpattern}" -d "${POSTGRES_DB:-mindpattern}" --clean --if-exists
@@ -149,10 +192,14 @@ compose stack are all lost):
    — then verify `curl http://127.0.0.1:8000/readyz` before serving
    traffic.
 
-**Rehearse this quarterly**: run steps 3–4 from the REMOTE copy into a
-scratch Postgres (mirroring `backend/scripts/rehearse_restore.sh`), not
-from the local volume. An off-site copy that has never been restored from
-is a hypothesis, not a backup.
+**Rehearse this quarterly**: `bash backend/scripts/rehearse_restore.sh
+--remote --env-file <secrets.env> [--env-file <release.env>]` IS steps 3–4
+— it fetches from the off-site store through the overlay's one-shot mode
+(the `BACKUP_OFFSITE_*` values must live in one of the passed `--env-file`
+arguments), then authenticates, decrypts via the `/restore/$NEWEST`
+container path, and restores into a scratch Postgres, tearing everything
+down. An off-site copy that has never been restored from is a hypothesis,
+not a backup.
 
 ## Post-incident
 

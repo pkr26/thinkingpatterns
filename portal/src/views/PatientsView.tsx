@@ -35,6 +35,9 @@ export function PatientsView(props: {
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** Audit fix 17 (2026-09-21): the patients-load failure (not pairing-code
+   *  or scan errors) offers an in-page retry of the fetch. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [scan, setScan] = useState<Record<string, CaseloadScanRow> | null>(null);
   const [scanning, setScanning] = useState(false);
   /** This therapist's own wrap-key fingerprint (shown beside the pairing
@@ -51,7 +54,12 @@ export function PatientsView(props: {
   }, [props.session]);
 
   const refresh = useCallback(() => {
-    api.patients().then(setPatients).catch((err) => setError(err instanceof Error ? err.message : "could not load patients"));
+    setError("");
+    setLoadFailed(false);
+    api.patients().then(setPatients).catch((err) => {
+      setError(err instanceof Error ? err.message : "could not load patients");
+      setLoadFailed(true);
+    });
   }, []);
   useEffect(refresh, [refresh]);
 
@@ -196,6 +204,13 @@ export function PatientsView(props: {
       </Card>
 
       <ErrorBanner message={error} />
+      {loadFailed && (
+        // Audit fix 17 (2026-09-21): recovery from a failed caseload load
+        // used to require a reload or sign-out.
+        <div style={{ marginTop: 8 }}>
+          <Button label="Retry loading patients" small onPress={refresh} />
+        </div>
+      )}
 
       {sensitiveCount > 0 && (
         <div data-testid="sensitive-banner" style={{ marginBottom: 14 }}>

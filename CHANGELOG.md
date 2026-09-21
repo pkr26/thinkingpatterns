@@ -6,6 +6,111 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Deep-audit gap closure (2026-09-21, follow-up to AUDIT_2026-09-21.md)
+
+The seven findings the Phase 1 plan left unscheduled (verified open during
+remediation review), each with a regression test where testable:
+
+- **A-7:** corrected the three stale "empty pages are unaudited" comments
+  in the therapist read endpoints — empty pages ARE audited (the trailing
+  commit persists the unconditionally-written audit row); only refused
+  413 pages are unaudited.
+- **A-8:** config now enforces upper bounds on `unlock_threshold_days`,
+  `max_entries_per_user`, `max_user_blob_bytes` and `db_pool_timeout`;
+  `analysis_blob_budget` must be >= `max_body_bytes` (one max-size entry
+  always fits); a recompute whose budget loads zero rows refuses with
+  413 instead of overwriting stored patterns with an empty run; the
+  deprecated unversioned `/api` mount serves every response with
+  `Deprecation: true`.
+- **B-8 (half):** `users.is_active` documented as a reserved operator
+  lever (README "Scope decisions" + runbook "Manual operator levers") —
+  checked on every auth path, set only by direct DB action in v1.
+- **D-6:** phrase pattern ids re-link to their stored record across
+  window/budget rotation (anchor + variants matched at the clusterer's
+  own Jaccard bar), so a chronic rumination's lifecycle no longer
+  restarts as a fresh candidate when its anchor sentence leaves the
+  180-day window.
+- **D-8:** the per-character fold cache is explicitly bounded (cap +
+  clear; behavior unchanged).
+- **F-4 (warning half):** therapist registration now warns, before the
+  account exists, that a forgotten password is unrecoverable.
+- **F-3 residual:** removed the stale "a second browser sees the same
+  anchor" comment contradicting the per-tab visit-anchor contract.
+- **H-8:** incident runbook gained a Detection & escalation section for
+  S1 (alert-rule inventory incl. the keystore tripwire, escalation ladder
+  with bracketed contacts, manual operator levers).
+- **H-1 caveat:** the red-team CI gate's 8 allowlisted FINDING ids now
+  live in an authoritative register, `docs/SECURITY_RESIDUALS.md` (one
+  written defense per id); the workflow asserts the register names every
+  allowlisted id.
+
+### Deep-audit Phase 1 remediation (2026-09-21, AUDIT_2026-09-21.md)
+
+All 33 Phase 1 items from the eight-area deep audit, each with a
+regression test naming its finding:
+
+- **Brain correctness (the two verified HIGH defects).** The replication
+  gate no longer reads set membership in the EVIDENCE_DATES_CAP-truncated
+  list — genuinely new evidence must postdate the newest stored day, so a
+  same-corpus recompute can never satisfy "independent replication" for a
+  >60-evidence-day pattern. Spanish topic mining unions the Spanish
+  function-word set into eligibility (no more presence cards for "cuando"
+  et al.); the README's Spanish claim now states what actually fires.
+  Budget-truncated (textless, untagged) entries stay out of the mood and
+  PA/NA series instead of injecting fabricated neutral days; person-name
+  anchoring is English-only (German noun orthography minted person cards
+  for common nouns); the confirmation clock restarts at the
+  candidate→emerging transition (a late-replicating claim surfaces as
+  "emerging", never straight to "confirmed").
+- **Security lifecycle.** Password rotation self-completes: the vault
+  locks and the biometric wrap is disabled inside `rotatePassword` before
+  the success alert (an Android-dismissable alert can no longer leave the
+  vault on the old key). The biometric unlock path verifies the unwrapped
+  key against the unlock proof and auto-deletes a stale wrap. The session
+  device key uses the `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY` Keychain class.
+- **Backend correctness.** Rekey advances `entries_revision` AND
+  `measures_revision` in its commit (mid-pagination clients get
+  `collection_changed`, never mixed-key pages). The GDPR export keeps
+  every insight id queued past the first metadata chunk (the pending-tail
+  truncation) and snapshots consent-share ids in the head transaction (a
+  re-grant mid-download can no longer drop a share). Consent
+  revoke/rewrap map a concurrently cascade-deleted grant to 404, never a
+  500. Measures reads (patient + therapist) carry the full entries
+  pagination contract: `page_bytes` byte-bounded pages with
+  `X-Next-Offset`, legacy 413 over the 2 MiB budget, and the
+  `X-Measures-Revision` snapshot marker backed by a new
+  `measures_revision` column + migration.
+- **Portal.** Printing emits only the `.print-only` summary (the
+  interactive cards — including the decrypted journal drill-down — no
+  longer print light-on-dark or leak raw text onto paper); notes and
+  entries render with `white-space: pre-wrap`; load failures offer a
+  retry button; the login form submits on Enter with `role="status"`
+  notices.
+- **Mobile UX.** The haptics preference loads at session start (not
+  first-visit-to-Settings); the phishing warning uses the theme error
+  color (WCAG-passing, no hex literals); the check-in vocabulary
+  (moods/energy/sleep/activity tags) renders localized labels keyed by
+  value while wire values stay English; reminder notification copy
+  routes through the catalog; chips/options/radios meet the 44pt touch
+  contract; the mute note auto-dismisses.
+- **Ship blockers.** `ios/` and `android/` native projects are committed
+  (generated from the pinned RN 0.87.1 toolchain with the hardening
+  checklist applied: Health usage strings, `allowBackup="false"`,
+  `adjustResize`, FLAG_SECURE in `MainActivity`), `@notifee/react-native`
+  and `react-native-health` are declared dependencies (reminders and the
+  HealthKit mirror are no longer permanent "unavailable" seams; audit
+  overrides neutralize their build-tooling transitive advisories), and
+  `verify:native-release` runs in CI (`native-release-preflight`).
+- **Ops, docs, gates.** The incident runbook's host-gone restore commands
+  work as written (`basename` + container `/restore` paths) and
+  `rehearse_restore.sh --remote` machine-tests the off-site fetch path.
+  `deploy/monitoring/verify.sh` + shellcheck run in CI; the red-team
+  harnesses run weekly in CI failing on any FINDING. Stale README claims
+  corrected (rotation model, LLM testing, error-code list with a CI
+  completeness grep, `ANALYSIS_BLOB_BUDGET` semantics, portal per-tab
+  anchor). Alembic autogenerate now compares types and server defaults,
+  and the schema-parity test asserts both flags.
+
 ### Security hardening close-out (2026-09-15 -> 2026-09-21)
 
 Between first release and this point the codebase went through an

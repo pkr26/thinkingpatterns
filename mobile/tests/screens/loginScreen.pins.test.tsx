@@ -239,3 +239,25 @@ describe("LoginScreen pins: node-exact style overlays", () => {
     expect(node.props.style).toEqual({ color: "#b6bdc9", fontSize: 13, lineHeight: 19 });
   });
 });
+
+describe("LoginScreen pins: origin-change warning theme contract (audit fix 20, 2026-09-21)", () => {
+  it("the phishing warning uses the theme error color — no hardcoded hex remains in the source", async () => {
+    vi.mocked(api.originPinChanged).mockResolvedValue(true);
+    const { darkTheme } = await import("../../src/theme");
+    const root = await render(<LoginScreen />);
+    await flush();
+    const warning = root.root.findAll(
+      (n) => n.props.accessibilityLabel === "Warning: server address changed",
+    )[0];
+    expect(warning).toBeTruthy();
+    // t.colors.error on the dark palette (6.8:1) — the old hardcoded
+    // #b3261e measured 2.89:1, a WCAG AA failure on a security warning.
+    expect(warning.props.style).toEqual({ color: darkTheme.colors.error, fontSize: 13 });
+    expect(darkTheme.colors.error).not.toBe("#b3261e");
+
+    // The no-hex-literals theme contract, enforced on the source itself.
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../../src/screens/LoginScreen.tsx", import.meta.url), "utf8");
+    expect(source).not.toMatch(/#[0-9a-fA-F]{6}\b/);
+  });
+});

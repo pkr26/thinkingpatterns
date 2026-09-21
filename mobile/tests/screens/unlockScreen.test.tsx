@@ -24,11 +24,12 @@ vi.mock("../../src/unlockProof", () => ({
 const biometricsSupported = vi.fn(async () => false);
 const hasBiometricUnlock = vi.fn(async () => false);
 const unwrapBiometricDataKey = vi.fn(async (): Promise<Buffer | null> => null);
+const disableBiometricUnlock = vi.fn(async () => {});
 vi.mock("../../src/biometricUnlock", () => ({
   biometricsSupported: () => biometricsSupported(),
   hasBiometricUnlock: (userId: string) => hasBiometricUnlock(userId),
   unwrapBiometricDataKey: (userId: string) => unwrapBiometricDataKey(userId),
-  disableBiometricUnlock: vi.fn(async () => {}),
+  disableBiometricUnlock: (userId: string) => disableBiometricUnlock(userId),
 }));
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -83,6 +84,8 @@ beforeEach(() => {
   hasBiometricUnlock.mockImplementation(async () => false);
   unwrapBiometricDataKey.mockReset();
   unwrapBiometricDataKey.mockImplementation(async () => null);
+  disableBiometricUnlock.mockReset();
+  disableBiometricUnlock.mockImplementation(async () => {});
   vi.mocked(deriveKeysAsync).mockReset();
   vi.mocked(deriveKeysAsync).mockImplementation(async () => {
     lastDerived = {
@@ -548,6 +551,38 @@ describe("UnlockScreen biometric unlock (offered only when a wrap exists)", () =
     await act(async () => {
       resolveUnwrap(Buffer.alloc(32, 9));
     });
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+  });
+
+  // Audit fix 8 (2026-09-21): the biometric path must VERIFY the unwrapped
+  // key against the sealed proof — a stale wrap (rotation / re-enrollment
+  // left the OLD key sealed) otherwise unlocks under the wrong key and the
+  // journal reads as tamper failures.
+  it("a STALE wrap fails the proof, is DELETED, and the password path takes over", async () => {
+    biometricsSupported.mockImplementation(async () => true);
+    hasBiometricUnlock.mockImplementation(async () => true);
+    unwrapBiometricDataKey.mockImplementation(async () => Buffer.alloc(32, 9)); // unwrap succeeds…
+    vi.mocked(verifyUnlockProof).mockResolvedValue("wrong"); // …but under the WRONG key
+    const root = await render(<UnlockScreen />);
+    await flush();
+    await pressLabel(root, "Unlock with biometrics");
+    await flush();
+
+    // The same proof check the password path runs, on the unwrapped key.
+    expect(verifyUnlockProof).toHaveBeenCalledWith(Buffer.alloc(32, 9), "user-1");
+    // The stale wrap is deleted — the next visit cannot offer it again.
+    expect(disableBiometricUnlock).toHaveBeenCalledWith("user-1");
+    // The vault NEVER unlocked under the wrong key.
+    expect(vault.isUnlocked()).toBe(false);
+    // The biometric offer retracts and the calm line points at the password.
+    expect(textOf(root)).not.toContain("Unlock with biometrics");
+    expect(textOf(root)).toContain("Biometric unlock didn't work — your password always works below.");
+    expect(Alert.alert).not.toHaveBeenCalled();
+
+    // Fall back to the password path: it still unlocks (verified online).
+    await typeInto(root, "password", "correct horse");
+    await submitInput(root, "password");
     await flush();
     expect(vault.isUnlocked()).toBe(true);
   });

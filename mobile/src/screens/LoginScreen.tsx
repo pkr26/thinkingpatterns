@@ -228,7 +228,10 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         </Text>
       )}
       {serverChanged && (
-        <Text style={{ color: "#b3261e", fontSize: 13 }} accessibilityLabel={tr("login.serverChangedA11y")}>
+        // Audit fix 20 (2026-09-21): t.colors.error, not a hardcoded hex —
+        // the literal measured 2.89:1 on the dark bg (WCAG AA failure on a
+        // security warning); the theme's error color measures 6.8:1.
+        <Text style={{ color: t.colors.error, fontSize: 13 }} accessibilityLabel={tr("login.serverChangedA11y")}>
           {tr("login.serverChangedWarning")}
           {"\n"}
           <Text

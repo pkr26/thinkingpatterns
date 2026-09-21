@@ -257,6 +257,41 @@ export const es: Record<string, string> = {
     "La cola sin conexión se vació mientras se guardaba (¿cerró la sesión?). Su entrada sigue en pantalla.",
   "entry.couldNotSaveTitle": "No se pudo guardar",
 
+  // ------------------------------------- check-in vocabulary (audit fix 21)
+  // Etiquetas de visualización por VALOR de la opción; los valores del
+  // contrato — los números y los tokens de etiqueta en inglés de
+  // src/mood.ts — nunca se traducen (el motor del servidor los lee).
+  "mood.option.heavy": "Pesado",
+  "mood.option.low": "Bajo",
+  "mood.option.okay": "Normal",
+  "mood.option.good": "Bien",
+  "mood.option.light": "Ligero",
+  "energy.option.drained": "Baja",
+  "energy.option.steady": "Estable",
+  "energy.option.energized": "Alta",
+  "sleep.option.1": "Difícil",
+  "sleep.option.2": "Mala",
+  "sleep.option.3": "Regular",
+  "sleep.option.4": "Buena",
+  "sleep.option.5": "Reparadora",
+  "activityTag.work": "Trabajo",
+  "activityTag.family": "Familia",
+  "activityTag.friends": "Amistades",
+  "activityTag.exercise": "Ejercicio",
+  "activityTag.outdoors": "Aire libre",
+  "activityTag.rest": "Descanso",
+  "activityTag.creative": "Creatividad",
+  "activityTag.health": "Salud",
+  "activityTag.money": "Dinero",
+  "activityTag.travel": "Viaje",
+
+  // -------------------------------------- reminder notifications (fix 22)
+  // El texto del sistema (cuerpo de la notificación, nombre del canal de
+  // Android) se resuelve por catálogo para que un dispositivo en español
+  // lea un recordatorio en español.
+  "notify.reminderBody": "Un momento tranquilo para escribir, cuando le venga bien.",
+  "notify.channelName": "Recordatorios del diario",
+
   // ---------------------------------------------------------------- history
   "history.snapshotReload": "Su diario cambió mientras se cargaban las entradas más antiguas. Recargando el historial más reciente desde el principio.",
   "history.revisionConflict": "Su diario cambió mientras se cargaba. Inténtelo de nuevo para recargar el historial más reciente.",

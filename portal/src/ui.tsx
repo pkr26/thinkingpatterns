@@ -48,9 +48,10 @@ export function Button(props: {
   );
 }
 
-export function Card(props: { children: ReactNode; deep?: boolean; title?: string }): React.JSX.Element {
+export function Card(props: { children: ReactNode; deep?: boolean; title?: string; className?: string }): React.JSX.Element {
   return (
     <section
+      className={props.className}
       style={{
         backgroundColor: props.deep ? theme.cardDeep : theme.card,
         borderRadius: theme.radius,
@@ -100,13 +101,15 @@ export function Field(props: {
   );
 }
 
-export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn" }): React.JSX.Element {
+export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn"; role?: "status" }): React.JSX.Element {
   const color =
     props.tone === "ok" ? theme.ok
       : props.tone === "danger" ? theme.danger
         : props.tone === "warn" ? theme.accentBright
           : theme.muted;
-  return <p style={{ margin: 0, color, fontSize: 13, lineHeight: 1.5 }}>{props.children}</p>;
+  // Audit fix 16 (2026-09-21): NOTE_TEMPLATES invite multi-line drafts; a
+  // plain <p> collapsed the therapist's (and the patient's) line breaks.
+  return <p role={props.role} style={{ margin: 0, color, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{props.children}</p>;
 }
 
 export function ErrorBanner({ message }: { message: string }): React.JSX.Element | null {

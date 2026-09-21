@@ -7,6 +7,7 @@ blocker. The original per-finding audit reports were removed in the
 production cleanup; the full remediation history is preserved in git
 history (commits 2026-09-16 .. 2026-09-21).
 """
+
 from __future__ import annotations
 from app import singleprocess
 from app.api.auth import SCRYPT_N, decoy_salt
@@ -900,7 +901,6 @@ async def test_load_rows_sql_bounds_to_the_most_recent_n(client, app):
     assert dates == [day - timedelta(days=o) for o in (4, 3, 2, 1)]  # newest 4, ascending
 
 
-
 # ---------------------------------------------------------------------------
 # Pins from test_redteam_fixes.py (renamed in the 2026-09-20 production
 # cleanup; see git history for the original file).
@@ -1361,7 +1361,6 @@ def test_decoy_salt_uses_an_hkdf_subkey_not_the_raw_secret():
     assert decoy_salt("ghost", secret) != base64.b64encode(legacy[:16]).decode("ascii")
 
 
-
 # ---------------------------------------------------------------------------
 # Pins from test_redteam_fixes_2026_09_16.py (renamed in the 2026-09-20 production
 # cleanup; see git history for the original file).
@@ -1512,7 +1511,9 @@ class TestMoodShiftPhiOne:
             )
             for i in range(35, 0, -1)
         ]
-        result = brain.update(brain.fresh_state(), entries, TODAY_FIXED)  # used to ZeroDivisionError
+        result = brain.update(
+            brain.fresh_state(), entries, TODAY_FIXED
+        )  # used to ZeroDivisionError
         assert isinstance(result.surfaced, list)
 
     def test_perfectly_constant_mood_does_not_crash(self):
@@ -1633,4 +1634,3 @@ def test_processing_ttl_ceiling_matches_consent_copy():
 def test_kdf_floor_constant():
     assert kdf.MIN_ITERATIONS == 100_000
     assert kdf.MIN_ITERATIONS < kdf.KDF_ITERATIONS
-

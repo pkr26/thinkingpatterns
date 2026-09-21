@@ -23,8 +23,14 @@ patient patterns**, plus the therapist's own encrypted notes.
   patient app): the card never echoes the wording; the drill-down shows
   the entries in the patient's own words.
 - **"Since your last visit"** — patterns whose `first_seen` is newer than
-  the locally stored visit stamp are flagged: the pre-session delta. The
-  stamp is a date in localStorage; no content is ever stored locally.
+  the visit stamp are flagged: the pre-session delta. Anchors are
+  per-patient DATE STAMPS in per-tab sessionStorage: they survive idle
+  locks within the tab's browser session and disappear when the tab
+  closes — so a second tab or browser starts from its own anchor and two
+  open tabs can legitimately disagree. Where sessionStorage is
+  unavailable (locked-down privacy modes), a localStorage fallback is
+  scrubbed at every lock boundary instead. No content is ever stored
+  locally.
 
 ## Running
 

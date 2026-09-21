@@ -58,3 +58,19 @@ redteam/results/
 redteam/mutation_campaign_*/results/
 mobile/reports/
 portal/reports/
+
+# Native project build/state artifacts (2026-09-21: ios/ + android/ now ship
+# in-tree; everything a per-machine build regenerates stays out)
+mobile/ios/build/
+mobile/ios/DerivedData/
+mobile/ios/*.xcuserstate
+mobile/ios/*.xcworkspace/xcuserdata/
+mobile/ios/.bundle/
+mobile/ios/vendor/
+mobile/android/local.properties
+mobile/android/.kotlin/
+mobile/android/build/
+mobile/android/app/release/
+mobile/android/keystore.properties
+*.keystore
+!mobile/android/app/debug.keystore

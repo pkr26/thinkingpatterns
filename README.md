@@ -114,9 +114,14 @@ historical suppressions apply (topics, text sentiment, rumination
 classification step aside; client mood tags still count, and phrase
 repetition still counts for the tokenizable Latin-script languages —
 the [a-z']+ tokenizer reads no Cyrillic/Greek tokens, so phrase
-repetition itself steps aside for those scripts). Consequences: Spanish journals get the FULL analysis — mood
-series, PA/NA, rumination, sense-making, topics — in Spanish, with the
-Spanish copy surfaced by the same machinery; English wins every lexicon
+repetition itself steps aside for those scripts). Consequences: Spanish
+journals get mood series, PA/NA, rumination classification, sense-making,
+writing-calendar/cadence, phrase repetition and topic mining — with the
+Spanish function-word set joined into topic eligibility so filler words
+("para", "cuando", "porque") cannot become topic cards. What stays
+English-only today: THEME_LEXICON-driven cards (temporal/mood_correlation/
+link themes) and person-name anchoring — a Spanish theme set is tracked
+as follow-up work. English wins every lexicon
 collision by merge order; `stats.language` carries the detection so the
 app renders an honest "not yet supported" card for other languages
 instead of an unexplained quiet analysis. The mobile i18n and the
@@ -288,11 +293,18 @@ New in this wave: `POST/GET /api/v1/measures` (the patient's opaque
 encrypted questionnaire records — same date/quota/idempotency discipline
 as entries, AAD context `"measure"`) and the consent-gated
 `GET /api/v1/therapist/patients/{id}/measures` (audit-logged like every
-patient-data read).
+patient-data read). Both measure reads carry the full entries pagination
+contract (2026-09-21 audit A-3): `page_bytes` opt-in byte-bounded pages
+with `X-Next-Offset` continuation (legacy pages over the 2 MiB ciphertext
+budget answer an explicit 413), and the `X-Measures-Revision` snapshot
+marker — pass it back as `expected_revision` and any concurrent create
+answers 409 `collection_changed` instead of letting offset paging on the
+DESC list duplicate or skip rows. Every measure create and the corpus-wide
+rekey advance the marker in the same transaction.
 
-All routes mount under **`/api/v1`** (canonical); the same routers are also served under **`/api`** as a deprecated legacy alias for existing clients. `GET /api/v1/meta` returns `{unlock_days, llm_available, api_version, version}` — `api_version` is how a client discovers the canonical base. Alongside `GET /healthz` (liveness only, no DB touch), **`GET /readyz`** runs `SELECT 1` against the database and answers 503 when it fails — that is the probe to gate deploys on. `DELETE /api/v1/account` takes the verifier in the **`X-Account-Verifier`** header (a JSON body is still accepted as a deprecated fallback — DELETE bodies are unreliable across clients and proxies).
+All routes mount under **`/api/v1`** (canonical); the same routers are also served under **`/api`** as a deprecated legacy alias for existing clients — every response it serves carries the **`Deprecation: true`** header (2026-09-21 audit A-8), alongside `/api/meta`'s `api_version` as the discovery path to the canonical base. `GET /api/v1/meta` returns `{unlock_days, llm_available, api_version, version}` — `api_version` is how a client discovers the canonical base. Alongside `GET /healthz` (liveness only, no DB touch), **`GET /readyz`** runs `SELECT 1` against the database and answers 503 when it fails — that is the probe to gate deploys on. `DELETE /api/v1/account` takes the verifier in the **`X-Account-Verifier`** header (a JSON body is still accepted as a deprecated fallback — DELETE bodies are unreliable across clients and proxies).
 
-Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes (complete — every value `backend/app/**` raises plus the status-default envelope map in `backend/app/deps.py`): `unauthorized`, `invalid_credentials`, `forbidden` (403 — role/ownership walls, e.g. a regular user on a therapist route), `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `method_not_allowed` (405), `request_timeout` (408), `conflict`, `collection_changed` (409 — the paginated collection changed while paging; restart from the first page), `account_deleted` (410 — the account was deleted mid-request), `gone` (410 status-default), `disclosure_outdated` (409 — the sharing disclosure version moved past what the client recorded), `llm_unavailable` (409 — consent requested but the operator has not configured `MINDPATTERN_LLM_URL`), `feedback_blob_invalid` (the recompute feedback attachment failed its crypto/shape check), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `processing_session_required`, `processing_session_invalid`, `internal_error`, `service_unavailable`.
+Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes (complete — every value `backend/app/**` raises plus the status-default envelope map in `backend/app/deps.py`): `unauthorized`, `invalid_credentials`, `forbidden` (403 — role/ownership walls, e.g. a regular user on a therapist route), `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `method_not_allowed` (405), `request_timeout` (408), `conflict`, `collection_changed` (409 — the paginated collection changed while paging; restart from the first page), `version_conflict` (409 — a version-bound entry replacement lost the race to another device; refetch and retry), `account_deleted` (410 — the account was deleted mid-request), `gone` (410 status-default), `disclosure_outdated` (409 — the sharing disclosure version moved past what the client recorded), `llm_unavailable` (409 — consent requested but the operator has not configured `MINDPATTERN_LLM_URL`), `feedback_blob_invalid` (the recompute feedback attachment failed its crypto/shape check), `rekey_key_mismatch` (400 — the rekey's old key did not authenticate every blob; nothing was changed), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `processing_session_required`, `processing_session_invalid`, `internal_error`, `service_unavailable`.
 
 ## Running
 
@@ -396,21 +408,28 @@ PATH="$PWD/../.venv/bin:$PATH" ../.venv/bin/mutmut run
 ../.venv/bin/mutmut show <id>                 # inspect a mutant
 ```
 
-CI (`.github/workflows/ci.yml`) runs nine jobs: the backend suite on a
+CI (`.github/workflows/ci.yml`) runs eleven jobs: the backend suite on a
 Python 3.12 + 3.14 matrix (97% coverage floor), the same suite against real
 Postgres (`backend-postgres`, via `MINDPATTERN_TEST_DB_URL`), the mobile
 and portal suites (typecheck, tests, production build, and hard dependency
-audits), contract gates
+audits), the native release preflight (`verify:native-release` — the
+committed `ios/`/`android/` projects and their hardening surface: Health
+usage strings, `allowBackup=false`, keychain autolinking), contract gates
 (`probe_brain.py` must go 9/9; `verify_vectors.mjs` over the real compiled
 modules), a Docker job (image build + compose boot asserting `/healthz`,
 `/readyz`, `alembic current` at head, and a verified authenticated backup
 restore), a release-env-contract job (proves `deploy/verify-release-env.sh`
 — the digest-pinning enforcement point for releases — is executable and
-accepts exactly the valid env shape while rejecting every invalid one), lint
+accepts exactly the valid env shape while rejecting every invalid one), a
+monitoring-verify job (`deploy/monitoring/verify.sh` plus shellcheck at
+error severity — the alerting stack's drift gate), lint
 (ruff check + formatting + mypy), and
 supply-chain (`pip-audit` on the pinned lock file). The release workflow
 repeats these gates before publishing multi-architecture images;
 prerelease tags never move the `latest` image tag.
+The red-team attack harnesses run weekly via
+`.github/workflows/redteam.yml` (scheduled + manual dispatch; any FINDING
+or crashed harness fails the run).
 Deep mutation testing runs weekly via `.github/workflows/mutation.yml`
 (scheduled, resumable cache, results artifact — deliberately not a PR
 gate), and Dependabot watches pip, npm, github-actions, and docker.
@@ -441,7 +460,7 @@ limiting/concurrency (46 killed + 14 new pins + 2 documented residuals).
 | `MINDPATTERN_TOKEN_TTL` | `86400` | Session-token lifetime in seconds (≤ 30 days; logout revokes immediately via token-epoch bump, so this is only the idle-expiry ceiling) |
 | `MINDPATTERN_UNLOCK_DAYS` | `30` | Pattern-revelation threshold |
 | `MINDPATTERN_PROCESSING_TTL` | `300` | Processing-session key lifetime (seconds); sessions are single-use |
-| `MINDPATTERN_ANALYSIS_BLOB_BUDGET` | `8388608` | Byte budget for the encrypted insights/measures blobs a recompute may store in one response (413 `blob_quota_exceeded` past it) |
+| `MINDPATTERN_ANALYSIS_BLOB_BUDGET` | `8388608` | Cumulative ciphertext-byte budget bounding which entries one analysis may LOAD — the newest rows are kept whole and older rows are dropped past it, so peak recompute memory follows the analysis budget, never the account's storage quota. It never raises 413 (storage quotas are the `MINDPATTERN_MAX_*` settings) |
 | `MINDPATTERN_LLM_URL` | unset | HTTPS OpenAI-compatible endpoint for the optional LLM analyzer (exact loopback HTTP only in development); per-user consent still required; unset = deterministic mini-brain. **Mandatory companions when set outside development** (the boot refuses without all three): `MINDPATTERN_LLM_PROVIDER_NAME` (≤ 120 chars), `MINDPATTERN_LLM_DATA_RETENTION` (≤ 500 chars, the provider-declared retention that consent copy must mirror), `MINDPATTERN_LLM_POLICY_VERSION` (≤ 64 chars; the consent fingerprint covers it, so changing vendors/terms invalidates stale consents). `MINDPATTERN_LLM_API_KEY`/`MINDPATTERN_LLM_MODEL` complete the wiring |
 | `MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN` | *(empty)* | Therapist sharing is **fail-closed OFF in production**: `therapist_sharing_enabled` defaults to true only in development, and enabling it in production requires this controlled enrollment token (≥ 32 chars) with which therapists register. Same posture for the LLM: unset `MINDPATTERN_LLM_URL` means the analyzer is off for every account and `llm-consent` answers 409 `llm_unavailable` |
 | `MINDPATTERN_AUTH_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Fixed-window rate limits for auth and salt lookups; registration conflicts also use a per-username bucket (login intentionally does not, so an attacker cannot spend a victim's lockout budget) |
@@ -494,6 +513,12 @@ turn it back into readable files offline.
 
 ## Scope decisions
 
+- **`users.is_active` is a reserved operator lever, not an app feature**
+  (2026-09-21 audit B-8). Every auth path checks it, but nothing in the
+  application sets it to `false` in v1: deactivation is a deliberate
+  manual database action during incident response (procedure in
+  `docs/INCIDENT_RUNBOOK.md`, "Manual operator levers"), not a
+  self-service admin surface.
 - **The mini-brain v3** (`app/services/brain.py`) is described in the table
   above. The whole engine is deterministic; a corrupt or tampered brain
   state degrades to amnesia, never a bricked account. Recompute is only
@@ -504,16 +529,28 @@ turn it back into readable files offline.
   (2026-09-17): the model receives the brain's findings and may only
   attach one sanitized narrative to them — label-restricted by
   construction, it cannot mint claims that bypassed the statistics. It
-  remains consent-gated, threshold-gated, and untested-by-unit-suite by
-  design (its `_post` is monkeypatched in tests).
+  remains consent-gated and threshold-gated; the HTTP seam (`_post`) is
+  monkeypatched in tests, and `backend/tests/test_llm.py` carries 33
+  tests over the sanitizer, narrative filters, and that seam's auth /
+  oversized-response / stream-deadline behavior. `app/services/llm.py`
+  is also inside mutation scope (pyproject.toml notes it is fully
+  unit-testable for exactly this reason).
 - The enclave is an in-process seam (`app/security/enclave.py`); SGX/TEE
   attestation is deployment work, not application logic.
 - Single-process deployment: the rate counter, keystore, and token epochs
   assume one worker per instance (scale horizontally behind a shared
   counter when needed).
-- Password change / key rotation remains out of scope (documented,
-  deliberate). A leaked password requires account recreation; a leaked
-  token dies at logout (epoch bump) or expiry.
+- Password rotation shipped (2026-09-20): a leaked password or captured
+  data key is a recoverable event, not account recreation. The client
+  re-authenticates with the old password, then POST /api/v1/processing/rekey
+  re-encrypts every stored blob old data key → new inside one
+  all-or-nothing transaction (a wrong old key aborts with
+  `rekey_key_mismatch` and nothing commits), each active therapist grant
+  is re-wrapped to the new key, and PUT /api/v1/account/credential
+  retires the old credential (the epoch bump kills every bearer). The
+  vault then re-locks and the biometric wrap resets — the next unlock
+  happens under the new password. A leaked token still dies at logout
+  (epoch bump) or expiry.
 - Mobile repo contains JS/TS source only; `ios/`/`android/` projects are
   generated with the React Native toolchain when building. TLS certificate
   pinning and native hardening (`FLAG_SECURE`, `allowBackup=false`) are

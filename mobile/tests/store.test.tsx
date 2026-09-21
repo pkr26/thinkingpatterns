@@ -731,3 +731,28 @@ describe("draft stash survival", () => {
     expect(takeStashedDraft("user-1")).toBe("alice's draft");
   });
 });
+
+describe("haptics preference loads at session start (audit fix 19, 2026-09-21)", () => {
+  it("a cold start with a stored 'off' keeps haptics disabled with no screen interaction", async () => {
+    // The sensory-anxiety setting used to be ignored until Settings was
+    // opened (the only caller of loadHapticsSetting); the provider mount
+    // now loads it, before any screen could fire a pulse.
+    const storage = (await import("./helpers/storageMock")).default;
+    const { hapticsEnabled, loadHapticsSetting } = await import("../src/haptics");
+    await storage.setItem("@mindpattern/haptics.enabled", "off");
+    try {
+      await render(
+        <SessionProvider>
+          <Probe />
+        </SessionProvider>,
+      );
+      await flush();
+      expect(hapticsEnabled()).toBe(false);
+    } finally {
+      // Restore the module default for any later test in this file.
+      storage.__reset();
+      await loadHapticsSetting();
+    }
+    expect(hapticsEnabled()).toBe(true);
+  });
+});

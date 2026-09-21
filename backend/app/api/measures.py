@@ -29,17 +29,24 @@ import base64
 import binascii
 from datetime import date as date_type, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Query, Request, Response
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
+from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
 from ..models import Measure, User
 from ..schemas import MeasureCreate, MeasureOut
 from ..security.crypto import MIN_BLOB_SIZE
+from .entries import (
+    MAX_COLLECTION_REVISION,
+    assert_expected_revision,
+    collection_changed_error,
+    parse_expected_revision,
+)
 
 router = APIRouter(prefix="/measures", tags=["measures"])
 
@@ -49,8 +56,8 @@ router = APIRouter(prefix="/measures", tags=["measures"])
 BACKDATE_GRACE_DAYS = 1
 FORWARD_GRACE_DAYS = 1
 
-# A weekly measure over four decades; generous for the use, bounded for
-# the database. Measures are tiny (scores, not prose).
+# A weekly measure over four decades; generous for the use, bounded for the
+# database. Measures are tiny (scores, not prose).
 MAX_MEASURES_PER_USER = 2000
 
 # Page ceiling for BOTH measure read paths (patient + therapist mirror,
@@ -60,7 +67,56 @@ MAX_MEASURES_PER_USER = 2000
 # id) ordering plus offset paging lets clients walk the whole history.
 MEASURE_PAGE_LIMIT = 500
 
+# 2026-09-21 audit A-3: measures join the entries pagination contract.
+# A hard per-response ciphertext budget (a legacy 500-row page of 8 KiB
+# blobs was ~4 MB of base64 on the wire), an explicit page_bytes opt-in
+# with X-Next-Offset continuation, and an optimistic revision marker so
+# a concurrent create can never let an offset continuation duplicate or
+# skip rows silently.
+MEASURE_PAGE_BLOB_BYTES = 2 * 1024 * 1024
+MEASURES_REVISION_HEADER = "X-Measures-Revision"
+
 _user_locks = UserLocks()
+
+
+def _measure_blob_length(session: AsyncSession):
+    """Byte length of the measure blob, per dialect (same shape as entries'
+    _blob_length: octet_length on Postgres, length on SQLite)."""
+    if session.bind.dialect.name == "postgresql":
+        return func.octet_length(Measure.blob)
+    return func.length(Measure.blob)
+
+
+async def current_measures_revision(session: AsyncSession, user_id: str) -> int:
+    """Return a freshly selected measure collection marker (entries'
+    current_entries_revision contract: a missing owner is a lifecycle
+    fence violation and must force a retry, never a bare offset page)."""
+    revision = await session.scalar(select(User.measures_revision).where(User.id == user_id))
+    if revision is None:
+        raise collection_changed_error("measures", MEASURES_REVISION_HEADER)
+    return int(revision)
+
+
+async def _increment_measures_revision(session: AsyncSession, user: User) -> int:
+    """Atomically advance the owner's measure marker in the write
+    transaction (mirror of entries' _increment_entries_revision)."""
+    result = await session.execute(
+        update(User)
+        .where(User.id == user.id, User.measures_revision < MAX_COLLECTION_REVISION)
+        .values(measures_revision=User.measures_revision + 1)
+    )
+    if db_rowcount(result) != 1:
+        # Do not commit the paired measure write if the marker cannot
+        # advance: an unmarked mutation could otherwise make a
+        # continuation drift.
+        raise ApiError(
+            status_code=503,
+            detail="unable to advance measures revision; retry shortly",
+            code="service_unavailable",
+            headers={"Retry-After": "1"},
+        )
+    await session.refresh(user, attribute_names=["measures_revision"])
+    return user.measures_revision
 
 
 def _utc_today() -> date_type:
@@ -199,6 +255,10 @@ async def create_measure(
                 measure_date=body.measure_date,
             )
             session.add(row)
+            # 2026-09-21 audit A-3: the create advances the measure marker
+            # in the same transaction, so a mid-pagination client sees
+            # collection_changed instead of silently shifted offsets.
+            await _increment_measures_revision(session, fresh_user)
             try:
                 await session.commit()
             except IntegrityError as exc:
@@ -234,25 +294,40 @@ async def create_measure(
     ],
 )
 async def list_measures(
-    limit: int = Query(default=100, ge=1, le=MEASURE_PAGE_LIMIT),
-    offset: int = Query(default=0, ge=0, le=100_000),
+    response: Response,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=100, ge=1, le=MEASURE_PAGE_LIMIT),
+    offset: int = Query(default=0, ge=0, le=100_000),
+    page_bytes: int | None = Query(default=None, ge=1, le=MEASURE_PAGE_BLOB_BYTES),
+    expected_revision: str | None = None,
 ):
     """The patient's own measures, newest completion first.
 
-    Offset paging (2026-09-20 audit fix M-4): the write quota is 2000 but
-    reads used to hard-cap at 100-200 rows with no continuation, so
-    measure #201+ was stored and quota-charged yet invisible to the
-    patient, the therapist, and the export. ``id`` breaks
-    (measure_date, received_at) ties — without a deterministic total order
-    an offset page can skip or repeat a row across pages. Clients page by
-    offset until a short page.
+    The entries pagination contract, ported 2026-09-21 (audit A-3).
+    ``page_bytes`` is the explicit modern-client opt-in to a short page and
+    ``X-Next-Offset`` continuation; a legacy client never receives a
+    silently truncated page — a page over the hard ciphertext budget is an
+    explicit 413. ``X-Measures-Revision`` carries the snapshot marker;
+    passing it back as ``expected_revision`` makes any concurrent create
+    answer 409 collection_changed instead of letting offset paging
+    duplicate or skip rows on the DESC list. Metadata (id + byte length)
+    is selected first; the database never materializes full blobs just to
+    discover a response would be too large. ``id`` breaks
+    (measure_date, received_at) ties for one stable order across pages.
     """
-    rows = (
-        (
+    expected = parse_expected_revision(expected_revision)
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        revision = await current_measures_revision(session, user.id)
+        assert_expected_revision(
+            expected,
+            revision,
+            collection="measures",
+            header_name=MEASURES_REVISION_HEADER,
+        )
+        metadata = (
             await session.execute(
-                select(Measure)
+                select(Measure.id, _measure_blob_length(session).label("blob_bytes"))
                 .where(Measure.user_id == user.id)
                 .order_by(
                     Measure.measure_date.desc(),
@@ -260,10 +335,77 @@ async def list_measures(
                     Measure.id.desc(),
                 )
                 .offset(offset)
-                .limit(limit)
+                # The extra metadata-only row says whether a full
+                # item-count page has more history without loading
+                # another ciphertext.
+                .limit(limit + 1)
             )
-        )
-        .scalars()
-        .all()
-    )
-    return [_measure_out(row) for row in rows]
+        ).all()
+        requested = [(str(row[0]), int(row[1])) for row in metadata[:limit]]
+        selected: list[tuple[str, int]]
+
+        if page_bytes is None:
+            selected = requested
+            if sum(size for _, size in selected) > MEASURE_PAGE_BLOB_BYTES:
+                raise ApiError(
+                    status_code=413,
+                    detail=(
+                        "requested measure page exceeds the 2 MiB ciphertext budget; "
+                        "upgrade to a byte-paginating client"
+                    ),
+                    code="payload_too_large",
+                )
+        else:
+            selected = []
+            total_bytes = 0
+            for measure_id, blob_bytes in requested:
+                if blob_bytes > page_bytes:
+                    # Never hand back an empty, apparently complete page
+                    # when the caller asked for less than one measure's
+                    # ciphertext.
+                    if not selected:
+                        raise ApiError(
+                            status_code=413,
+                            detail="a measure exceeds the requested page byte budget",
+                            code="payload_too_large",
+                        )
+                    break
+                if total_bytes + blob_bytes > page_bytes:
+                    break
+                selected.append((measure_id, blob_bytes))
+                total_bytes += blob_bytes
+
+        selected_ids = [measure_id for measure_id, _ in selected]
+        ordered_rows: list[Measure] = []
+        if selected_ids:
+            rows = (
+                (
+                    await session.execute(
+                        select(Measure).where(
+                            Measure.user_id == user.id, Measure.id.in_(selected_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            rows_by_id = {row.id: row for row in rows}
+            if len(rows_by_id) != len(selected_ids):
+                # The collection moved between the metadata and blob
+                # fetches; do not fabricate a non-advancing cursor.
+                raise collection_changed_error("measures", MEASURES_REVISION_HEADER, revision)
+            ordered_rows = [rows_by_id[measure_id] for measure_id in selected_ids]
+
+        has_more = len(selected) < len(requested) or len(metadata) > limit
+        result = [_measure_out(row) for row in ordered_rows]
+        final_revision = await current_measures_revision(session, user.id)
+        if final_revision != revision:
+            raise collection_changed_error("measures", MEASURES_REVISION_HEADER, final_revision)
+        # Set it even for an empty or terminal page: the client stores this
+        # exact snapshot marker before deciding whether to continue.
+        response.headers[MEASURES_REVISION_HEADER] = str(revision)
+        if has_more:
+            # A continuation is always exactly the number of rows the
+            # caller received — clients can reject malformed continuations.
+            response.headers["X-Next-Offset"] = str(offset + len(result))
+    return result

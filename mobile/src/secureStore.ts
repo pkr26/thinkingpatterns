@@ -41,12 +41,15 @@ const LEGACY_DEVICE_KEY_STORAGE = "@mindpattern/device_k";
 const KEYCHAIN_SERVICE = "com.mindpattern.session-device-key.v1";
 const KEYCHAIN_USERNAME = "mindpattern-device-key";
 
-/** Keychain / Keystore-backed custody. `WHEN_UNLOCKED_THIS_DEVICE_ONLY`
+/** Keychain / Keystore-backed custody. `WHEN_PASSCODE_SET_THIS_DEVICE_ONLY`
  * prevents iOS migration/backups from carrying the data key to another
- * device. Android's implementation uses the Android Keystore. We do not
- * demand hardware-only security level: many legitimate Android devices lack
- * StrongBox, while Keystore-backed software storage is still materially
- * safer than a plaintext app database. */
+ * device, and (audit fix 9, 2026-09-21) demands a passcode like the
+ * biometric wrap does — on a passcode-less device the bearer token was
+ * protected only by the OS sandbox. Android's implementation uses the
+ * Android Keystore. We do not demand hardware-only security level: many
+ * legitimate Android devices lack StrongBox, while Keystore-backed
+ * software storage is still materially safer than a plaintext app
+ * database. */
 const keychainBackend: SecureStoreBackend = {
   async readDeviceKey(): Promise<string | null> {
     const credentials = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
@@ -57,7 +60,7 @@ const keychainBackend: SecureStoreBackend = {
   async writeDeviceKey(keyB64: string): Promise<void> {
     const result = await Keychain.setGenericPassword(KEYCHAIN_USERNAME, keyB64, {
       service: KEYCHAIN_SERVICE,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      accessible: Keychain.ACCESSIBLE.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
     if (!result) throw new Error("device secure storage rejected the session key");
   },

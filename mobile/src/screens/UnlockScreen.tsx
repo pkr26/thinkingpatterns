@@ -44,7 +44,12 @@ import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { storeUnlockProof, verifyUnlockProof } from "../unlockProof";
-import { biometricsSupported, hasBiometricUnlock, unwrapBiometricDataKey } from "../biometricUnlock";
+import {
+  biometricsSupported,
+  disableBiometricUnlock,
+  hasBiometricUnlock,
+  unwrapBiometricDataKey,
+} from "../biometricUnlock";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy } from "../components/errors";
@@ -96,6 +101,19 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       if (!userId) throw new Error("no saved account on this device");
       const dataKey = await unwrapBiometricDataKey(userId);
       if (dataKey === null) throw new Error("biometric unlock declined");
+      // Audit fix 8 (2026-09-21): the unwrapped key runs the SAME sealed
+      // proof check the password path runs. A stale wrap (a rotation or a
+      // re-enrollment left the OLD key sealed) otherwise "unlocks" with the
+      // wrong key and the whole journal reads as tamper failures. A "wrong"
+      // proof deletes the stored wrap; any non-ok proof refuses the unlock
+      // and falls back to the password path below.
+      const proof = await verifyUnlockProof(dataKey, userId);
+      if (proof !== "ok") {
+        if (proof === "wrong") await disableBiometricUnlock(userId).catch(() => {});
+        setShowBiometric(false);
+        setBiometricError(true);
+        return;
+      }
       // WHY the dummy master/auth keys are honest here: vault.unlock
       // zeroizes the master key immediately (it exists only to derive the
       // other two), and the auth key is only ever SENT at password login —

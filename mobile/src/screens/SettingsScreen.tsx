@@ -440,6 +440,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           outcome.rewrapFailures.length > 0
             ? `\n\n${tr("settings.rotateRewrapFailed", { names: outcome.rewrapFailures.join(", ") })}`
             : "";
+        // Audit fix 7 (2026-09-21): rotatePassword itself already locked the
+        // vault and removed the biometric wrap BEFORE this alert — the
+        // security cleanup no longer hangs off this OK button (Android can
+        // dismiss an alert without firing it). The button's signOut is
+        // idempotent-safe belt-and-braces: it revokes tokens and clears the
+        // session so the next unlock goes through the NEW password's login.
         Alert.alert(
           tr("settings.rotateSuccessTitle"),
           `${tr("settings.rotateSuccessBody")}${rewrapNote}`,
@@ -645,7 +651,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                   {
                     backgroundColor: themeMode === mode ? t.colors.primary : t.colors.cardDeep,
                     borderRadius: t.radius.md,
-                    minHeight: 40,
+                    // Fix 23 (2026-09-21): radios meet the 44pt touch
+                    // contract (40pt before).
+                    minHeight: t.minTouch,
                   },
                 ]}
                 onPress={() => {
@@ -720,7 +728,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                     {
                       backgroundColor: selected ? t.colors.primary : t.colors.cardDeep,
                       borderRadius: t.radius.md,
-                      minHeight: 40,
+                      // Fix 23 (2026-09-21): time chips meet the 44pt touch
+                      // contract (40pt before).
+                      minHeight: t.minTouch,
                     },
                   ]}
                   onPress={() => void chooseReminderTime(preset.hour, preset.minute)}

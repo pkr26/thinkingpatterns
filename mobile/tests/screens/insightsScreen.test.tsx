@@ -1420,3 +1420,36 @@ describe("M-36: weekday words localize at render time", () => {
     }
   });
 });
+
+describe("InsightsScreen mute status note auto-dismisses (audit fix 24, 2026-09-21)", () => {
+  it("the 'pattern muted' note clears itself after the inline-status lifetime", async () => {
+    vi.mocked(api.insights).mockResolvedValue({
+      phase: "insight",
+      active_days: 45,
+      days_remaining: 0,
+      blob: insightsBlob({
+        stats: { patterns: [pattern({ kind: "topic", label: "guitar", detail: { pattern_pid: "topic:guitar" } })] },
+      }),
+    } as never);
+    const { pressLabel, act } = await import("../helpers/rtr");
+    const root = await render(<InsightsScreen />);
+    await flush();
+    // Real timers for the mount/load phases; fake timers BEFORE the press,
+    // so the dismissal timer registers on the fake clock and can be
+    // advanced deterministically (flush() would deadlock under fakes).
+    vi.useFakeTimers();
+    try {
+      await pressLabel(root, "Not about me anymore — mute");
+      // The note is up right after the optimistic mute…
+      expect(textOf(root)).toContain("Muted — hidden here now");
+
+      // …and clears itself once the transient inline-status lifetime ends.
+      await act(async () => {
+        vi.advanceTimersByTime(2_600);
+      });
+      expect(textOf(root)).not.toContain("Muted — hidden here now");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

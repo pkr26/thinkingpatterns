@@ -1,0 +1,182 @@
+name: Red-team campaigns
+
+# Policy: the executable attack harnesses under redteam/ (crypto, auth,
+# API, multi-worker, fake-LLM egress, crisis, brain, infra, privacy, and
+# the mobile vitest campaign) are the repo's only attack-regression
+# signal, and until this workflow they ran ONLY by hand — the attack
+# surface could rot invisibly (audit finding H-1, the same decay mode as
+# mutation-mobile "had NEVER executed"). Weekly cadence, plus
+# workflow_dispatch for manual runs after touching the harnesses.
+#
+# The run FAILS when any harness records a FINDING verdict (an attack
+# that succeeded) or an ERROR verdict (a harness crashed — a crashed
+# harness certifies nothing), and when any expected per-harness results
+# file is missing (a harness that died before dumping its buffer).
+# run_all.sh itself always exits 0 — it prints a summary — so the gate
+# below parses the same redteam/results/*.json files the summary reads.
+#
+# DOCUMENTED RESIDUALS: eight FINDING verdicts are standing, reviewed
+# attack residuals the 2026-09-21 audit explicitly accepted for v1 (see
+# AUDIT_2026-09-21.md Part C's "documented residuals" and the README
+# security notes). They are allowlisted BELOW THE GATE with their
+# defenses, so the weekly signal is REGRESSION — any NEW finding, or an
+# allowlisted id disappearing (fixed!), fails or flags the run. The list
+# must never grow silently: adding an id requires the written defense in
+# the same block.
+#
+# Environment, stated rather than hidden:
+# - NOTHING is skipped for needing a device. Every campaign runs: the
+#   mobile harness executes the real shipping modules under vitest in
+#   Node (no hardware), c1_multiworker binds a throwaway uvicorn on
+#   loopback :8971, d_llm runs against a fake in-process LLM endpoint.
+# - Two verdicts legitimately read NOT-RUN in this environment, for
+#   environment-shaped reasons the harnesses themselves report:
+#   G1.dump-contents (a fresh checkout has no dev sqlite DB to inspect)
+#   and G2.npm-audit (g_infra looks for the developers' bundled
+#   .tools/node/bin/npm; CI's node comes from setup-node — the mobile
+#   dependency audit already gates ci.yml's mobile job instead).
+# - run_all.sh hardcodes ../.venv/bin/python relative to redteam/, so
+#   this job builds the repo-root venv from the pinned backend dev lock.
+
+on:
+  schedule:
+    # Saturdays 02:23 UTC — deliberately off the crowded :00/:30 marks
+    # and away from Monday's mutation campaign.
+    - cron: "23 2 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: redteam-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.dev.lock.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Build the repo-root venv run_all.sh expects
+        # redteam/run_all.sh (and c1_multiworker's spawned uvicorn)
+        # invoke ../.venv/bin/python relative to redteam/ — build exactly
+        # that, pinned and hash-checked like every other install here.
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --require-hashes -r backend/requirements.dev.lock.txt
+      - name: Mobile deps for the vitest campaign
+        working-directory: mobile
+        run: npm ci
+      - name: Run every attack campaign
+        run: bash redteam/run_all.sh
+      - name: Gate on the verdicts (FINDING or ERROR fails)
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          # Standing attack residuals, reviewed and accepted for v1 on
+          # 2026-09-21. The authoritative register — one written defense
+          # per id — is docs/SECURITY_RESIDUALS.md; the assert below keeps
+          # this set and that document in sync. Removing an id because it
+          # got fixed is welcome and should update both. Anything NOT here
+          # that reads FINDING fails CI.
+          DOCUMENTED_RESIDUALS = {
+              # The auth verifier is password-equivalent by design (the
+              # server never sees the password, only scrypt(verifier)) —
+              # replaying it equals presenting the password. TLS-only
+              # transport + per-IP/username rate limits bound it.
+              "B1.verifier-replay",
+              # A replayed verifier can also toggle the opt-in LLM consent
+              # (re-authenticated action). Same password-equivalence class;
+              # egress remains opt-in, disclosed, and per-user.
+              "B1.verifier-enables-llm-egress",
+              # Journal text to the configured third-party LLM endpoint is
+              # plaintext AT the provider — inherent to optional LLM
+              # analysis; opt-in per user, provider/retention disclosed at
+              # consent time, off by default.
+              "D2.plaintext-egress",
+              # A hostile LLM endpoint can shape surfaced card copy; the
+              # sanitizer length-caps and verifies phrases against the
+              # user's actual text, bounding it to copy within the app.
+              "D2.endpoint-to-card-injection",
+              # A deliberately slow LLM endpoint stretches the single-use
+              # processing session's key lifetime for that one request;
+              # sessions stay memory-only, single-use, TTL-bounded, purged.
+              "D2.slow-endpoint-key-lifetime",
+              # The on-device mood log / offline state is an offline
+              # password oracle (keys derive from the password) and
+              # discloses state to a device holder — the zero-knowledge
+              # trade itself; the threat model excludes the device owner
+              # attacking their own account.
+              "A2.offline-oracle",
+              # The data key crosses the wire to /processing/sessions —
+              # the documented v1 server-side-analysis trade-off
+              # (README security note #2): single-use, TLS in production,
+              # memory-only, destroyed on consumption. The harness runs
+              # cleartext localhost by construction.
+              "F2.http-key-shipment",
+              # The server holds per-entry dates/sizes (metadata
+              # inference) — documented in README security note #7;
+              # content stays opaque.
+              "H1.metadata-inference",
+          }
+
+          # The register is load-bearing: every allowlisted id must carry
+          # its written defense in docs/SECURITY_RESIDUALS.md.
+          residuals_doc = Path("docs/SECURITY_RESIDUALS.md").read_text(encoding="utf-8")
+          undocumented = sorted(i for i in DOCUMENTED_RESIDUALS if f"`{i}`" not in residuals_doc)
+          assert not undocumented, (
+              "DOCUMENTED_RESIDUALS ids missing from docs/SECURITY_RESIDUALS.md: "
+              + ", ".join(undocumented)
+          )
+
+          expected = {
+              "a_crypto", "b_auth", "c_api", "e_crisis", "e2_brain",
+              "g_infra", "h_privacy", "d_llm", "c1_multiworker", "f_mobile",
+          }
+          files = sorted(Path("redteam/results").glob("*.json"))
+          seen = {f.stem for f in files}
+          rows = []
+          for f in files:
+              rows += json.loads(f.read_text(encoding="utf-8"))
+
+          missing = sorted(expected - seen)
+          findings = sorted(r["id"] for r in rows if r["status"] == "FINDING")
+          errors = sorted(r["id"] for r in rows if r["status"] == "ERROR")
+          assert not missing, f"harness produced no results file: {', '.join(missing)}"
+          new_findings = sorted(set(findings) - DOCUMENTED_RESIDUALS)
+          assert not new_findings, (
+              "NEW FINDING verdicts (attacks that succeeded, not in the "
+              f"documented-residual allowlist): {', '.join(new_findings)}"
+          )
+          fixed = sorted(DOCUMENTED_RESIDUALS - set(findings))
+          if fixed:
+              # Not a failure — a documented residual stopped reproducing.
+              # Shout so the allowlist gets pruned and the audit updated.
+              print(f"::notice::residual(s) no longer reproduce, prune the allowlist: {', '.join(fixed)}")
+          assert not errors, f"ERROR verdicts (harness crashes): {', '.join(errors)}"
+          counts = Counter(r["status"] for r in rows)
+          print(f"{len(rows)} verdicts: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+          print(f"documented residuals reproduced: {len(DOCUMENTED_RESIDUALS & set(findings))}/{len(DOCUMENTED_RESIDUALS)}")
+          EOF
+      - name: Upload verdicts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: redteam-verdicts
+          path: redteam/results/
+          if-no-files-found: error

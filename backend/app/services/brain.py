@@ -160,7 +160,15 @@ STATISTICAL_KINDS = frozenset(
 # topic is a direct measurement, but "taking up more space lately" is a
 # p-value-tested inference the same gate must cover.
 EVIDENCE_DATE_KINDS = frozenset(
-    {"temporal", "mood_correlation", "link", "avoidance", "sense_making", "activity_diversity", "topic"}
+    {
+        "temporal",
+        "mood_correlation",
+        "link",
+        "avoidance",
+        "sense_making",
+        "activity_diversity",
+        "topic",
+    }
 )
 WINDOW_STAT_KINDS = frozenset(
     {
@@ -186,6 +194,7 @@ def _is_statistical(kind: str, detail: dict[str, Any]) -> bool:
     if kind in STATISTICAL_KINDS:
         return True
     return kind == "topic" and detail.get("trend") == "rising"
+
 
 # --- statistical gates -------------------------------------------------------
 ALPHA = 0.05
@@ -1454,7 +1463,14 @@ _KNOWN_TOKENS_ES: frozenset[str] = (
 # Per-character fold cache for _fold_sentiment_text: journals repeat the
 # same accented characters thousands of times, and NFKD per call would
 # otherwise be the recompute's hottest loop after the regex itself.
+# 2026-09-21 audit D-8: single-character KEYS kept growth slow in
+# practice, but nothing ENFORCED it — a process fed adversarial Unicode
+# grew the map for its lifetime. Hard cap + clear: the working set of any
+# real journal corpus is a few dozen characters, 4096 distinct codepoints
+# is two orders of magnitude beyond that, and the rare clear is one cheap
+# pass that cannot change behavior (the cache is a pure memo).
 _FOLD_CACHE: dict[str, str] = {}
+_FOLD_CACHE_LIMIT = 4096
 
 
 def _fold_sentiment_text(text: str) -> str:
@@ -1497,6 +1513,8 @@ def _fold_sentiment_text(text: str) -> str:
                 folded = base
             else:
                 folded = ch
+            if len(_FOLD_CACHE) >= _FOLD_CACHE_LIMIT:
+                _FOLD_CACHE.clear()
             _FOLD_CACHE[ch] = folded
         out.append(folded)
     return "".join(out)
@@ -2719,12 +2737,20 @@ def _detect_phrases(
         )
         kind = "rumination" if is_rumination else "recurring_phrase"
         tokens = " ".join(variants).split()
+        anchor = min(cluster.members, key=lambda r: (r.day, r.text))
         detail: dict[str, Any] = {
             "span_days": cluster.span_days,
             "distinct_days": cluster.distinct_days,
             "first": days[0].isoformat(),
             "last": days[-1].isoformat(),
             "variants": variants[:3],
+            # 2026-09-21 audit D-6: the pid below is anchored on this
+            # sentence's TEXT. Persisting the anchor (variants above
+            # persist alongside) lets a later recompute re-link a cluster
+            # to this record after window/budget rotation evicts the
+            # anchor itself and the pid derivation moves to a newer
+            # member — see _phrase_alias_pid in the lifecycle merge.
+            "phrase_anchor": anchor.text[:200],
         }
         # Suppress-tier tripwire over EVERY variant (2026-09-20 audit
         # L-18): the stored display list is trimmed to three, but a
@@ -3044,6 +3070,7 @@ def _cluster_covered_days(clusters: list[phrase_miner.PhraseCluster], label: str
 def _detect_topics(
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
     phrase_clusters: list[phrase_miner.PhraseCluster],
+    language: str = "en",
 ) -> list[_Signal]:
     """Discover recurring content n-grams the fixed lexicon does not cover.
 
@@ -3099,8 +3126,19 @@ def _detect_topics(
     recent_idx = {i for i, (d, _) in enumerate(doc_tokens) if d >= split}
     earlier_n = n - len(recent_idx)
 
+    # 2026-09-21 audit D-2: TOPIC_STOPWORDS is English-only, so on a
+    # Spanish corpus the eligibility filter let every function word
+    # through ("para", "cuando", "porque", "ahora" …) and presence cards
+    # surfaced for filler. Under language "es" the Spanish function-word
+    # set joins the exclusions — same rule the English side always had.
+    # (The grammatical sets below — NEGATORS, BUT_WORDS, ABSOLUTIST_WORDS,
+    # INTENSIFIERS, SENTIMENT_LEXICON — are already EN+ES unions.)
+    eligibility_stopwords: frozenset[str] = (
+        TOPIC_STOPWORDS | LANGUAGE_FUNCTION_WORDS_ES if language == "es" else TOPIC_STOPWORDS
+    )
+
     def eligible(token: str) -> bool:
-        if token in TOPIC_STOPWORDS or token in NEGATORS or token in BUT_WORDS:
+        if token in eligibility_stopwords or token in NEGATORS or token in BUT_WORDS:
             return False
         if token in ABSOLUTIST_WORDS or token in INTENSIFIERS:
             return False
@@ -3231,6 +3269,59 @@ _SEMANTIC_DETAIL_KEYS = {
     "mood_shift": "direction",
 }
 
+# The near-duplicate family: pid anchored on an earliest member's text
+# (see _phrase_pid), therefore exposed to anchor churn at the window and
+# sentence-budget edges.
+PHRASE_KINDS = frozenset({"rumination", "recurring_phrase"})
+
+
+def _phrase_alias_pid(signal: _Signal, patterns: dict[str, StoredPattern]) -> str:
+    """The stored pid for a phrase signal whose anchor rotated out of the
+    window (2026-09-21 audit D-6), or its own pid when nothing matches.
+
+    Cluster membership churns at the 180-day window and sentence-budget
+    edges; the recurring thought itself does not. A stored record's
+    anchor sentence and top variants carry that identity across the
+    rotation. Match at the clusterer's own DEFAULT_JACCARD bar — two
+    texts the miner would have merged ARE one pattern — keeping the
+    highest-similarity record (insertion order wins ties, so the result
+    is deterministic). Without this bridge, a chronic rumination's pid
+    re-derived from a newer member minted a fresh candidate and restarted
+    the lifecycle the day the original anchor left the window.
+    """
+    incoming = [
+        phrase_miner.shingles(text.split())
+        for text in [
+            signal.detail.get("phrase_anchor", ""),
+            *signal.detail.get("variants", []),
+        ]
+        if text
+    ]
+    if not incoming:
+        return signal.pid
+    best_pid: str | None = None
+    best_score = phrase_miner.DEFAULT_JACCARD
+    for record in patterns.values():
+        if record.kind not in PHRASE_KINDS:
+            continue
+        stored = [
+            phrase_miner.shingles(text.split())
+            for text in [
+                record.detail.get("phrase_anchor", ""),
+                *record.detail.get("variants", []),
+            ]
+            if text
+        ]
+        for left in incoming:
+            for right in stored:
+                if not left or not right:
+                    continue
+                score = len(left & right) / len(left | right)
+                if score > best_score:
+                    best_pid = record.pid
+                    best_score = score
+    return best_pid if best_pid is not None else signal.pid
+
 
 def _semantic_flip(record: StoredPattern, signal: _Signal) -> bool:
     """True when a re-qualification rewrites the claim's core semantics
@@ -3274,7 +3365,17 @@ def _replication_satisfied(
     if len(record.qualification_days) < 2:
         return False
     if record.kind in EVIDENCE_DATE_KINDS:
-        return any(_iso(day) not in prior_evidence for day in signal.evidence_days)
+        # 2026-09-21 audit D-1: set membership against the stored list was
+        # defeated by the EVIDENCE_DATES_CAP. The cap keeps the NEWEST
+        # EVIDENCE_DATES_CAP days, so for a well-evidenced pattern (>60
+        # evidence days) an evicted older day counted as "new" — a
+        # same-corpus, zero-new-data recompute satisfied "independent
+        # replication" (verified: mood_correlation:work, 73 evidence days,
+        # surfaced on a second identical run). Genuinely new evidence must
+        # postdate everything any earlier run held, and the newest stored
+        # day survives every cap — compare against it, not membership.
+        newest_prior = max(prior_evidence) if prior_evidence else ""
+        return any(_iso(day) > newest_prior for day in signal.evidence_days)
     spread = (
         date.fromisoformat(record.qualification_days[-1])
         - date.fromisoformat(record.qualification_days[0])
@@ -3288,6 +3389,15 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
     qualified_pids = set()
 
     for signal in qualified:
+        if signal.pid not in patterns and signal.kind in PHRASE_KINDS:
+            # 2026-09-21 audit D-6: window/budget rotation can evict the
+            # sentence a phrase pid was anchored on, so the re-derived pid
+            # misses its own record and a chronic pattern restarts as a
+            # fresh candidate. Re-link first: a cluster whose text is
+            # near-duplicate (the clusterer's own bar) of a stored phrase
+            # record's anchor/variants IS that pattern — continue its
+            # lifecycle under the stored pid.
+            signal.pid = _phrase_alias_pid(signal, patterns)
         record = patterns.get(signal.pid)
         if record is not None and _semantic_flip(record, signal):
             # Semantic flip: the re-qualified claim contradicts the stored
@@ -3318,9 +3428,10 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
                 target = signal.detail.get(semantic_key)
                 suffix = 2
                 while (candidate := patterns.get(f"{base_pid}~{suffix}")) is not None:
-                    if candidate.kind == signal.kind and candidate.detail.get(
-                        semantic_key
-                    ) == target:
+                    if (
+                        candidate.kind == signal.kind
+                        and candidate.detail.get(semantic_key) == target
+                    ):
                         reuse = candidate
                         break
                     suffix += 1
@@ -3329,7 +3440,9 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
                 record = reuse
             else:
                 suffix = 2
-                while f"{base_pid}~{suffix}" in patterns or f"{base_pid}~{suffix}" in qualified_pids:
+                while (
+                    f"{base_pid}~{suffix}" in patterns or f"{base_pid}~{suffix}" in qualified_pids
+                ):
                     suffix += 1
                 signal.pid = f"{base_pid}~{suffix}"
                 record = None
@@ -3383,16 +3496,27 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
                 date.fromisoformat(record.qualification_days[-1])
                 - date.fromisoformat(record.qualification_days[0])
             ).days
+            promoted = False
             if _is_statistical(record.kind, record.detail):
                 if _replication_satisfied(record, signal, prior_evidence):
-                    record.state = "emerging"
+                    promoted = True
             elif (
                 record.occurrences >= STRONG_EVIDENCE
                 or len(record.qualification_days) >= 2
                 or (today - date.fromisoformat(record.first_qualified)).days >= PROMOTE_AGE_DAYS
                 or spread >= PROMOTE_AGE_DAYS
             ):
+                promoted = True
+            if promoted:
+                # 2026-09-21 audit D-5: the confirm clock starts at the
+                # EMERGING transition, not at first candidate qualification.
+                # first_qualified used to stay at the day the pattern first
+                # qualified as a candidate, so a claim that sat as candidate
+                # >= CONFIRM_AGE_DAYS (e.g. waiting on replication) jumped
+                # candidate -> confirmed in one run and the first card the
+                # user ever saw carried the highest-confidence label.
                 record.state = "emerging"
+                record.first_qualified = today_iso
         if record.state == "emerging":
             if (today - date.fromisoformat(record.first_qualified)).days >= CONFIRM_AGE_DAYS:
                 record.state = "confirmed"
@@ -3568,18 +3692,6 @@ def update(
         if entry.entry_date in poor_sleep_days:
             themes.add(SLEEP_CHANNEL_THEME)
         per_entry.append((entry, tokens, themes, sentiment))
-    # Person anchoring: computed once per run over the raw window.
-    person_names = _person_candidates(window)
-    if person_names:
-        per_entry = [
-            (
-                entry,
-                tokens,
-                themes | {n for n in person_names if _mentions_name(entry.text, n)},
-                sentiment,
-            )
-            for entry, tokens, themes, sentiment in per_entry
-        ]
 
     # Language gate (2026-09-17): see the LANGUAGE_* constants. When the
     # window's text is not something the lexicons know, mood analyses keep
@@ -3612,6 +3724,25 @@ def update(
         else:
             language = "other"
     language_ok = language != "other"
+    # Person anchoring: computed once per run over the raw window — but
+    # only for English (2026-09-21 audit D-4). The heuristic reads "a
+    # recurring MID-SENTENCE capitalized token" as a name; German-style
+    # orthography capitalizes every noun, so under language "other" (or
+    # Spanish sentence starts) common nouns masquerade as people and a
+    # mood-tagging user gets source="person" cards for ordinary words.
+    # English is the only orthography where the signal means what it says.
+    person_names = _person_candidates(window) if language == "en" else set()
+    if person_names:
+        per_entry = [
+            (
+                entry,
+                tokens,
+                themes | {n for n in person_names if _mentions_name(entry.text, n)},
+                sentiment,
+            )
+            for entry, tokens, themes, sentiment in per_entry
+        ]
+
     mood_entries = (
         per_entry
         if language_ok
@@ -3628,6 +3759,15 @@ def update(
 
     day_buckets: dict[date, list[float]] = {}
     for entry, _, _, sentiment in mood_entries:
+        # 2026-09-21 audit D-3: an entry with NO text and NO explicit mood
+        # tag carries zero mood evidence — it is a corpus-budget truncation
+        # (the API layer blanks the oldest over-budget entries) or an empty
+        # submit, and scoring it injected a fabricated neutral 0.0 day into
+        # means/baselines/EWMA for prolific long-term users. The day still
+        # counts for cadence/calendar below (entry_day_set comes from
+        # `window`, untouched); only the mood series drops it.
+        if not entry.text and entry.sentiment is None:
+            continue
         day_buckets.setdefault(entry.entry_date, []).append(sentiment)
     day_sentiments = sorted((day, sum(v) / len(v)) for day, v in day_buckets.items())
 
@@ -3655,6 +3795,11 @@ def update(
     if language_ok:
         for entry, tokens, _, _ in per_entry:
             if entry.sentiment is not None:
+                continue
+            if not entry.text:
+                # Budget-truncated/empty entry (audit D-3): no text means no
+                # affect components either — (0.0, 0.0) would be fabricated
+                # neutral PA/NA days, the same lie as the mood series.
                 continue
             pa, na = sentiment_components(tokens)
             day_pa_buckets.setdefault(entry.entry_date, []).append(pa)
@@ -3790,7 +3935,7 @@ def update(
         if diversity is not None:
             signals.append(diversity)
         if language_ok:
-            signals.extend(_detect_topics(per_entry, clusters))
+            signals.extend(_detect_topics(per_entry, clusters, language))
 
     # Origin marking (2026-09-17): patterns fed by the user's own tags or
     # structured ratings say so — "you tagged it" is a different evidence

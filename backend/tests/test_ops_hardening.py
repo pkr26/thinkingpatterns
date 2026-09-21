@@ -5,6 +5,7 @@ Pins from the 2026-09-17 ops hardening wave and its round-B follow-up
 cross-host boot guard. If one starts failing, an operational safety fix
 regressed -- treat it as a release blocker.
 """
+
 from __future__ import annotations
 from app.config import Settings
 from app.main import _acquire_cross_host_guard, create_app
@@ -276,7 +277,6 @@ async def test_cross_host_guard_refuses_when_lock_taken():
         await _acquire_cross_host_guard(TakenEngine())
 
 
-
 # ---------------------------------------------------------------------------
 # Pins from test_ops_fixes_2026_09_17b.py (renamed in the 2026-09-20 production
 # cleanup; see git history for the original file).
@@ -389,4 +389,3 @@ async def test_pairing_codes_and_sweep_share_one_prune_statement(client, monkeyp
 
     await main_mod._prune_access_log_once(client._transport.app)  # the sweep path
     assert len(seen) == 2
-

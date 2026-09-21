@@ -73,6 +73,13 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         render_as_batch=_is_sqlite(url),
+        # Autogenerate must SEE type and server-default drift, not just
+        # added/dropped tables and columns (the L-33 class: a column whose
+        # type or default silently diverged between models.py and a
+        # revision). Both flags, both branches — the parity test in
+        # backend/tests/test_migrations.py pins them.
+        compare_type=True,
+        compare_server_default=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -92,6 +99,11 @@ def do_run_migrations(connection: Connection) -> None:
             connection=connection,
             target_metadata=target_metadata,
             render_as_batch=connection.dialect.name == "sqlite",
+            # Same rationale as the offline branch above: without these two
+            # flags, `alembic revision --autogenerate` (and the parity gate
+            # that mirrors it) is blind to type/server-default drift.
+            compare_type=True,
+            compare_server_default=True,
         )
         with context.begin_transaction():
             context.run_migrations()

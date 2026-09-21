@@ -39,8 +39,12 @@ def generate_key() -> bytes:
     return os.urandom(KEY_SIZE)
 
 
-def encrypt(key: bytes, plaintext: bytes, aad: bytes | None = None) -> bytes:
+def encrypt(key: bytes | bytearray, plaintext: bytes, aad: bytes | None = None) -> bytes:
     """Encrypt and authenticate *plaintext* under *key*, returning the envelope.
+
+    ``key`` accepts bytearray for the same reason ``decrypt`` does: the
+    rekey path passes its ONE zeroizable mutable key buffer instead of an
+    immutable per-call copy that would linger until GC.
 
     The nonce is ALWAYS fresh and random — deterministic output is a
     nonce-reuse hazard, so the fixed-nonce path is deliberately NOT
@@ -52,7 +56,7 @@ def encrypt(key: bytes, plaintext: bytes, aad: bytes | None = None) -> bytes:
 
 
 def encrypt_with_nonce(
-    key: bytes,
+    key: bytes | bytearray,
     plaintext: bytes,
     aad: bytes | None,
     nonce: bytes,

@@ -423,11 +423,7 @@ def _clean_narrative(raw: object) -> str | None:
     text = _CONTROL_CHARS.sub(" ", raw).strip()
     if not text or len(text) > MAX_NARRATIVE_CHARS:
         return None if not text else text[:MAX_NARRATIVE_CHARS].rstrip()
-    if (
-        _URL_OR_PHONE.search(text)
-        or _SPELLED_CONTACT.search(text)
-        or _SPELLED_DOMAIN.search(text)
-    ):
+    if _URL_OR_PHONE.search(text) or _SPELLED_CONTACT.search(text) or _SPELLED_DOMAIN.search(text):
         return None
     if _SECOND_PERSON_ADVICE.search(text) or _IMPERATIVE_OPENERS.search(text):
         return None

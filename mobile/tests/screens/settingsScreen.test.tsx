@@ -41,6 +41,21 @@ vi.mock("../../src/offlineQueue", () => ({
   hasLegacyQueueRecovery: vi.fn(async () => false),
 }));
 
+// The rotation flow derives keys four times per attempt; the node tests
+// mock the derivation (loginScreen/unlockScreen idiom) so the flow runs
+// without the real 600k-iteration PBKDF2.
+vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+  return {
+    ...actual,
+    deriveKeysAsync: vi.fn(async () => ({
+      masterKey: Buffer.alloc(32, 1),
+      authKey: Buffer.alloc(32, 5),
+      dataKey: Buffer.alloc(32, 6),
+    })),
+  };
+});
+
 const signOut = vi.fn(async () => {});
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
@@ -1340,5 +1355,35 @@ describe("recovered entries surface — edge branches", () => {
       resolveRequeue?.(1);
     });
     await flush();
+  });
+});
+
+describe("change-password rotation self-completes (audit fix 7, 2026-09-21)", () => {
+  it("locks the vault and drops the biometric wrap BEFORE the alert — even when the alert is dismissed without OK", async () => {
+    const { enableBiometricUnlock, hasBiometricUnlock } = await import("../../src/biometricUnlock");
+    // A biometric wrap exists for this account — the stale-key hazard the
+    // fix exists for (a wrap sealed under the OLD data key).
+    await enableBiometricUnlock("user-1", Buffer.alloc(32, 7));
+    expect(await hasBiometricUnlock("user-1")).toBe(true);
+
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Change password");
+    await typeInto(root, "password", "correct old password");
+    await typeInto(root, "New password (12+ characters)", "a strong new passphrase 42!");
+    await pressLabel(root, "Rotate keys and sign in again");
+    await flush(6);
+
+    // The success alert IS up: the rotation finished server-side. Deliberately
+    // DO NOT press OK — Android can dismiss an alert without firing its
+    // button, and the cleanup must not depend on it.
+    expect(Alert.alert).toHaveBeenCalledWith("Password changed", expect.any(String), expect.anything());
+    // The vault no longer holds the OLD data key…
+    expect(vault.isUnlocked()).toBe(false);
+    // …and the biometric wrap (which still sealed the old key) is gone.
+    expect(await hasBiometricUnlock("user-1")).toBe(false);
+    // The OK-button-only signOut never ran — proving none of the security
+    // cleanup hung off the alert.
+    expect(signOut).not.toHaveBeenCalled();
   });
 });

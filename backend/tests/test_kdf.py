@@ -121,8 +121,7 @@ def test_vector_file_is_committed():
     data = json.loads(VECTORS_PATH.read_text())
     vectors = data.get("vectors")
     assert isinstance(vectors, list) and len(vectors) >= 2, (
-        "vectors section missing/truncated: expected at least two pinned "
-        "600k-iteration KDF vectors"
+        "vectors section missing/truncated: expected at least two pinned 600k-iteration KDF vectors"
     )
     for vector in vectors:
         assert vector["iterations"] == 600_000, "pinned KDF vectors are the full-cost contract"

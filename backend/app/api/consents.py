@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
@@ -469,16 +470,13 @@ async def rewrap_consent(
         if fresh_user is None or not fresh_user.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
         row = (
-            (
-                await session.execute(
-                    select(Consent, User)
-                    .join(User, Consent.therapist_id == User.id)
-                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
-                    .execution_options(populate_existing=True)
-                )
+            await session.execute(
+                select(Consent, User)
+                .join(User, Consent.therapist_id == User.id)
+                .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
+                .execution_options(populate_existing=True)
             )
-            .first()
-        )
+        ).first()
         if row is None:
             raise ApiError(status_code=404, detail="consent not found", code="not_found")
         consent, therapist = row
@@ -496,7 +494,16 @@ async def rewrap_consent(
                 action="rewrap",
             )
         )
-        await session.commit()
+        try:
+            await session.commit()
+        except StaleDataError:
+            # 2026-09-21 audit A-5: only the patient lock is held here, so a
+            # concurrent therapist deletion can cascade-delete this consent
+            # between the read and the flush — the UPDATE then matches zero
+            # rows and SQLAlchemy raises. The grant vanished server-side;
+            # the honest answer is the same flat 404 the read paths give,
+            # never a 500.
+            raise ApiError(status_code=404, detail="consent not found", code="not_found") from None
         await session.refresh(consent)
         return _consent_out(consent, therapist)
 
@@ -562,4 +569,12 @@ async def revoke_consent(
                     action="revoke",
                 )
             )
-            await session.commit()
+            try:
+                await session.commit()
+            except StaleDataError:
+                # 2026-09-21 audit A-5: same race as the rewrap path — a
+                # concurrent therapist deletion cascade-deleted the consent
+                # between the read and this flush. Flat 404, never a 500.
+                raise ApiError(
+                    status_code=404, detail="consent not found", code="not_found"
+                ) from None

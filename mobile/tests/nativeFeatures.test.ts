@@ -120,3 +120,45 @@ describe("module ABSENT (this build)", () => {
     }
   });
 });
+
+describe("notification copy resolves through the catalog (audit fix 22, 2026-09-21)", () => {
+  it("the reminder body and Android channel name follow the app locale (catalog parity in both)", async () => {
+    const { __setLocaleForTests, enCatalog, esCatalog } = await import("../src/strings");
+    // Catalog parity: both locales carry the two keys with distinct copy.
+    for (const key of ["notify.reminderBody", "notify.channelName"]) {
+      expect(typeof enCatalog[key]).toBe("string");
+      expect(enCatalog[key]!.length).toBeGreaterThan(2);
+      expect(typeof esCatalog[key]).toBe("string");
+      expect(esCatalog[key]!.length).toBeGreaterThan(2);
+      expect(esCatalog[key]).not.toBe(enCatalog[key]);
+    }
+
+    __setLocaleForTests("es");
+    try {
+      expect(await scheduleDailyReminder(20, 0)).toBe(true);
+      const [notification] = createTriggerNotification.mock.calls[0] as [
+        { title: string; body: string },
+        unknown,
+      ];
+      // Spanish nudge, Spanish channel name…
+      expect(notification.body).toBe("Un momento tranquilo para escribir, cuando le venga bien.");
+      expect(createChannel).toHaveBeenCalledWith({
+        id: "mindpattern-reminders",
+        name: "Recordatorios del diario",
+      });
+      // …but the app-name title is the brand and never translates.
+      expect(notification.title).toBe("MindPattern");
+    } finally {
+      __setLocaleForTests("en");
+    }
+
+    // English still resolves through the catalog (not a hardcoded literal).
+    expect(await scheduleDailyReminder(20, 0)).toBe(true);
+    const calls = createTriggerNotification.mock.calls as unknown as [
+      { title: string; body: string },
+      unknown,
+    ][];
+    const english = calls[calls.length - 1]![0];
+    expect(english.body).toBe("A quiet moment to write, whenever it suits you.");
+  });
+});

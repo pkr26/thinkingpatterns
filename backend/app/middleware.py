@@ -82,6 +82,15 @@ _RATE_LIMITED = json.dumps({"detail": "rate limit exceeded", "code": "rate_limit
 )
 
 
+def _is_legacy_api_path(path: str) -> bool:
+    """True when the path is served by the deprecated unversioned /api
+    mount (anything under /api that is not /api/v1 — see main.py, where
+    the same routers are included twice)."""
+    if path == "/api":
+        return True
+    return path.startswith("/api/") and not path.startswith("/api/v1")
+
+
 def _forwarded_client(
     raw_headers: list[tuple[bytes, bytes]],
     trusted_networks: tuple[IPv4Network | IPv6Network, ...],
@@ -179,7 +188,9 @@ class HardeningMiddleware:
             return False
         return any(peer in network for network in self.trusted_proxy_networks)
 
-    def _cors_extra_headers(self, raw_headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
+    def _cors_extra_headers(
+        self, raw_headers: list[tuple[bytes, bytes]]
+    ) -> list[tuple[bytes, bytes]]:
         """CORS headers to mirror onto a short-circuit response (L-4).
 
         CORSMiddleware sits INSIDE this layer, so responses generated here
@@ -452,6 +463,15 @@ class HardeningMiddleware:
                 existing = {name.lower() for name, _ in message.get("headers", [])}
                 extra = [h for h in SECURITY_HEADERS if h[0] not in existing]
                 message.setdefault("headers", []).extend(extra)
+                # 2026-09-21 audit A-8: every response the deprecated
+                # unversioned /api mount serves carries the standard
+                # Deprecation header, so a client can notice
+                # programmatically (alongside /api/meta's api_version,
+                # which points at the canonical /api/v1 base).
+                if "deprecation" not in existing and _is_legacy_api_path(
+                    scope.get("path", "")
+                ):
+                    message["headers"].append((b"deprecation", b"true"))
                 # M-1: the validation handler flagged this 422 as a BODY-PARSE
                 # failure (error type json_invalid — schema failures flow
                 # through the route dependencies and are counted there).

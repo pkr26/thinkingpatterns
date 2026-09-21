@@ -550,8 +550,12 @@ def _dedup_fold(text: str) -> str:
 # rather than risk a dialog false positive on a benign sentence.
 _FOLD_EXEMPT: frozenset[str] = frozenset({"\\boff(?:ing)?\\s+myself\\b"})
 
-DIALOG_FOLDED_RE = _compile_tier(tuple(_dedup_fold(p) for p in DIALOG_PATTERNS if p not in _FOLD_EXEMPT))
-SUPPRESS_FOLDED_RE = _compile_tier(tuple(_dedup_fold(p) for p in SUPPRESS_PATTERNS if p not in _FOLD_EXEMPT))
+DIALOG_FOLDED_RE = _compile_tier(
+    tuple(_dedup_fold(p) for p in DIALOG_PATTERNS if p not in _FOLD_EXEMPT)
+)
+SUPPRESS_FOLDED_RE = _compile_tier(
+    tuple(_dedup_fold(p) for p in SUPPRESS_PATTERNS if p not in _FOLD_EXEMPT)
+)
 DIALOG_FOLDED_CONCAT_RE = _compile_tier(
     tuple(_concat_pattern(_dedup_fold(p)) for p in DIALOG_PATTERNS if p not in _FOLD_EXEMPT)
 )
@@ -607,7 +611,8 @@ def matches_dialog(text: str) -> bool:
     # are clean, so it can only ever ADD a catch.
     folded = _folded_variants(text)
     return bool(
-        any(DIALOG_FOLDED_RE.search(v) for v in folded[:2]) or DIALOG_FOLDED_CONCAT_RE.search(folded[2])
+        any(DIALOG_FOLDED_RE.search(v) for v in folded[:2])
+        or DIALOG_FOLDED_CONCAT_RE.search(folded[2])
     )
 
 
@@ -619,5 +624,6 @@ def matches_suppress(text: str) -> bool:
         return True
     folded = _folded_variants(text)
     return bool(
-        any(SUPPRESS_FOLDED_RE.search(v) for v in folded[:2]) or SUPPRESS_FOLDED_CONCAT_RE.search(folded[2])
+        any(SUPPRESS_FOLDED_RE.search(v) for v in folded[:2])
+        or SUPPRESS_FOLDED_CONCAT_RE.search(folded[2])
     )

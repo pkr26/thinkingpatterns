@@ -28,6 +28,10 @@ from app.cache import (
 )
 from app.config import (
     MAX_BODY_READ_TIMEOUT_SECONDS,
+    MAX_DB_POOL_TIMEOUT,
+    MAX_ENTRIES_PER_USER,
+    MAX_UNLOCK_THRESHOLD_DAYS,
+    MAX_USER_BLOB_BYTES,
     Settings,
     _optional_bool_env,
     _validate_cors_origins,
@@ -147,6 +151,29 @@ def test_config_rejects_remaining_operational_upper_bounds():
         _dev_settings(analysis_blob_budget=64 * 1024 * 1024 + 1)
     with pytest.raises(RuntimeError, match="access_log_retention_days"):
         _dev_settings(access_log_retention_days=3_651)
+
+
+def test_config_rejects_absurd_resource_knobs_2026_09_21():
+    # 2026-09-21 audit A-8: knobs whose misconfiguration only shows up as
+    # resource exhaustion get explicit ceilings (each 30x+ the default).
+    for name, ceiling in (
+        ("unlock_threshold_days", MAX_UNLOCK_THRESHOLD_DAYS),
+        ("max_entries_per_user", MAX_ENTRIES_PER_USER),
+        ("max_user_blob_bytes", MAX_USER_BLOB_BYTES),
+        ("db_pool_timeout", MAX_DB_POOL_TIMEOUT),
+    ):
+        with pytest.raises(RuntimeError, match=name):
+            _dev_settings(**{name: ceiling + 1})
+        # The boundary itself boots.
+        _dev_settings(**{name: ceiling})
+
+
+def test_analysis_budget_floor_covers_one_max_entry_2026_09_21():
+    # A budget smaller than one request body can never load the newest
+    # entry — the empty-corpus overwrite the audit flagged. Fail at boot.
+    with pytest.raises(RuntimeError, match="max_body_bytes"):
+        _dev_settings(analysis_blob_budget=1024 * 1024)
+    _dev_settings(analysis_blob_budget=2 * 1024 * 1024)  # exactly one body: OK
 
 
 def test_config_requires_production_llm_policy_and_valid_authority():

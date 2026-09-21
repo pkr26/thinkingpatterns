@@ -1293,9 +1293,9 @@ class TestEvidenceDates:
             # classification kind, so a cluster whose mean negativity
             # oscillates cannot flip its own pid).
             assert detail["pattern_pid"]
-            assert detail["pattern_pid"].startswith(
-                pattern["kind"]
-            ) or detail["pattern_pid"].startswith("phrase:")
+            assert detail["pattern_pid"].startswith(pattern["kind"]) or detail[
+                "pattern_pid"
+            ].startswith("phrase:")
 
     async def test_therapist_sees_evidence_dates_after_e2e_decrypt(self, client, monkeypatch):
         # Full loop: patient surfaces patterns, shares; the therapist
