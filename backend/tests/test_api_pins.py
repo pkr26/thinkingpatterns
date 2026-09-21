@@ -1,7 +1,7 @@
 """API-workstream regression pins for the 2026-09-20 audit wave.
 
 (The infra-workstream pins for the same audit live in
-test_audit_fixes_2026_09_20.py; this file covers the account/insights/
+test_infra_pins.py; this file covers the account/insights/
 measures/therapist/consents + services findings.)
 
   * H-3  — the account export streams every Measure row, decryptable with

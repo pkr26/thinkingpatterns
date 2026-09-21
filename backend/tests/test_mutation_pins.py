@@ -1,51 +1,51 @@
-"""Survivor-killing pins from deep mutation testing (mutmut, expanded scope).
+"""Mutation-campaign pin corpus.
 
-Every test here exists because a mutant survived the main suites. They pin:
-  * configuration defaults and environment-variable wiring (config.py),
-  * route wiring: prefixes, tags, methods, and rate-limiter bucket names,
-  * exact user-facing error details (clients branch on them),
-  * validation boundaries (base64 strictness, sizes, dates, pagination),
-  * internal constants that are deployment or cost contracts,
-  * behaviors only distinguishable at the exact boundary.
+Every test here kills a mutant that survived a mutation campaign against
+the backend (the original 2026-09-15 mutmut campaign plus the behavioral
+rounds of 2026-09-18/19); each test's docstring names the mutant it pins.
+If one starts failing, a pinned behavior changed -- the mutant it guards
+against is live again. Campaign reports are preserved in git history.
 """
-
 from __future__ import annotations
-
+from app import cache as cache_module
+from app.api import account as account_api, auth as auth_api, entries as entries_api, insights as insights_api, meta as meta_api
+from app.cache import FixedWindowCounter, HitResult, MAX_TRACKED_KEYS, RateLimitCheck, client_key, make_rate_limiter
+from app.config import DEFAULT_INSECURE_SECRET, Settings, _bool_env, _cors_origins
+from app.locks import UserLocks
+from app.main import create_app, app as module_level_app
+from app.middleware import HardeningMiddleware, SECURITY_HEADERS
+from app.models import Insight
+from app.schemas import InsightOut
+from app.security import crypto as crypto_module, tokens as tokens_module
+from app.security.enclave import InMemoryKeyStore, KeyStoreFull
+from app.security.tokens import TokenError, issue_token, verify_token
+from app.services import brain, crisis, llm, patterns as patterns_module, questions, questions as questions_module
+from app.services.brain import JournalEntry, StoredPattern, dump_state, load_state
+from app.services.llm import LLMAnalyzer, get_enricher, sanitize_pattern
+from app.services.patterns import Pattern
+from dataclasses import asdict, dataclass, replace
+from datetime import date, datetime, timedelta, timezone
+from fastapi.routing import APIRoute
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, insert, select
+from sqlalchemy.exc import IntegrityError
+from tests.helpers import ClientEmulator, TherapistEmulator, daterange
+from types import SimpleNamespace
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
 import logging
-import re
-from dataclasses import asdict, dataclass, replace
-from datetime import date, datetime, timedelta, timezone
-
 import pytest
-from fastapi.routing import APIRoute
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import insert, select
+import random
+import re
 
-from app import cache as cache_module
-from app.api import account as account_api
-from app.api import auth as auth_api
-from app.api import entries as entries_api
-from app.api import insights as insights_api
-from app.cache import RateLimitCheck
-from app.api import meta as meta_api
-from app.cache import FixedWindowCounter, HitResult, MAX_TRACKED_KEYS, client_key, make_rate_limiter
-from app.config import Settings, DEFAULT_INSECURE_SECRET, _bool_env, _cors_origins
-from app.main import app as module_level_app, create_app
-from app.middleware import HardeningMiddleware, SECURITY_HEADERS
-from app.models import Insight
-from app.schemas import InsightOut
-from app.security import crypto as crypto_module
-from app.security import tokens as tokens_module
-from app.security.tokens import TokenError, issue_token, verify_token
-from app.services import patterns as patterns_module
-from app.services import questions as questions_module
-from app.services.llm import LLMAnalyzer, get_enricher, sanitize_pattern
-from tests.helpers import ClientEmulator, daterange
 
+# ---------------------------------------------------------------------------
+# Pins from test_mutation_pins.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
 TODAY = date.today()
 
 # ---------------------------------------------------------------------------
@@ -2152,3 +2152,933 @@ def test_theme_scan_skips_rare_themes_and_finds_later_ones():
     analysis = analyze_patterns(entries)
     temporal = [p for p in analysis.patterns if p.kind == "temporal"]
     assert any(p.label == "work" for p in temporal)
+
+
+
+# ---------------------------------------------------------------------------
+# Pins from test_mutation_pins_2026_09_18.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
+CALM = "felt calm and grateful today"
+T0_R1 = date(2026, 9, 4)
+
+
+def _trivial_effect_corpus() -> tuple[list[JournalEntry], JournalEntry]:
+    """Sundays carry 'work' with a tight, low mood tag; every other day is
+    calm text with a wide, noisy tag. Result (measured, deterministic seed):
+    reported mood_delta ≈ 0.25 (clears MOOD_MIN_DELTA) while |d| ≈ 0.42
+    (under the 0.5 floor) — a statistically detectable but practically
+    trivial separation that ONLY the effect-size gate refuses."""
+    rng = random.Random(5)
+    days = [T0_R1 - timedelta(days=279 - i) for i in range(280)]
+
+    def mood(theme_day: bool) -> float:
+        center, width = (-0.25, 0.12) if theme_day else (0.03, 0.65)
+        return max(-1.0, min(1.0, rng.gauss(center, width)))
+
+    entries = [
+        JournalEntry(
+            "anxious about work" if d.weekday() == 6 else CALM,
+            d,
+            sentiment=mood(d.weekday() == 6),
+        )
+        for d in days
+    ]
+    extra = JournalEntry("anxious about work", T0_R1 + timedelta(days=1), sentiment=mood(True))
+    return entries, extra
+
+
+def _surface_after_two_qualification_days(
+    entries: list[JournalEntry], extra: JournalEntry
+) -> list[Pattern]:
+    first = brain.update(brain.load_state(None), entries, T0_R1)
+    second = brain.update(
+        brain.load_state(brain.dump_state(first.new_state)),
+        entries + [extra],
+        T0_R1 + timedelta(days=1),
+    )
+    return list(second.surfaced)
+
+
+class TestEffectSizeFloor:
+    def test_trivial_standardized_effect_never_surfaces(self):
+        """A5: MOOD_MIN_EFFECT = 0.0 survived the ENTIRE suite. The only
+        prior pin (test_effect_and_significance_gates) asserts the card's
+        detail against the constant itself — true for any constant. This
+        corpus clears the delta gate with a |d| well under the floor and
+        must earn no mood_correlation card, even after a second,
+        independently-qualifying day."""
+        entries, extra = _trivial_effect_corpus()
+        surfaced = _surface_after_two_qualification_days(entries, extra)
+        assert all(not (p.kind == "mood_correlation" and p.label == "work") for p in surfaced)
+
+    def test_trivial_effect_corpus_canary(self):
+        """Same corpus with the floor relaxed to 0.0 MUST surface the card —
+        this is what proves the corpus still discriminates (and what the
+        A5 mutant does to production code)."""
+        entries, extra = _trivial_effect_corpus()
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(brain, "MOOD_MIN_EFFECT", 0.0)
+            surfaced = _surface_after_two_qualification_days(entries, extra)
+        work = [p for p in surfaced if p.kind == "mood_correlation" and p.label == "work"]
+        assert work, "corpus lost its discriminating power — recalibrate it"
+        assert work[0].detail["mood_delta"] >= brain.MOOD_MIN_DELTA
+        assert abs(work[0].detail["cohens_d"]) < 0.5
+
+    def test_floor_value_is_pinned(self):
+        """The 0.5 Cohen's d floor is a product decision (RESEARCH.md):
+        smaller effects are honest noise at journal scale. Changes must be
+        deliberate, not a silent constant edit — which is exactly mutant A5."""
+        assert brain.MOOD_MIN_EFFECT == 0.5
+
+
+class TestNarrativeClinicalBoundary:
+    def test_narrative_rejects_diagnosis_language(self):
+        """D1: deleting the diagnosis words from _CLINICAL_TERMS survived —
+        every existing narrative input overlapped another rule
+        ('medication', domains, phones). These inputs trip ONLY the
+        clinical-term check: no digits, no contacts, no crisis echo."""
+        clean = llm._clean_narrative
+        assert clean("a doctor would diagnose this pattern quickly") is None
+        assert clean("you are clearly diagnosed with something common") is None
+        assert clean("this reads like a textbook diagnosis of low mood") is None
+
+    def test_narrative_rejects_digits_alone(self):
+        """D2: the digit ban was only exercised through inputs that also
+        contained phones/domains/medication wording. A bare minted statistic
+        must die on the digit rule alone."""
+        clean = llm._clean_narrative
+        assert clean("your darker Saturdays came to 87 percent of them") is None
+        assert clean("mood dipped for 14 of the last 30 days") is None
+
+
+class TestQuestionInterlockLayers:
+    def test_label_tripwire_fires_without_the_sensitive_flag(self):
+        """E3: disabling the label tripwire of pattern_is_sensitive survived
+        the full suite — the composite outcome stayed safe through the
+        'sensitive' flag (brain-side) and the belt-and-braces filter on
+        rendered questions. But the label tripwire is the layer that covers
+        patterns arriving WITHOUT the flag (LLM extras, legacy payloads);
+        it earns its own pin. Defense in depth only counts if every layer
+        is individually testable."""
+        unflagged = Pattern("recurring_phrase", "want to disappear", 4, 0.4, {})
+        assert questions.pattern_is_sensitive(unflagged) is True
+
+    def test_unflagged_crisis_label_never_renders_a_question(self):
+        """End-to-end form of the same pin: an unflagged crisis-adjacent
+        pattern must contribute no rendered question to the pool."""
+        unflagged = Pattern("recurring_phrase", "want to disappear", 4, 0.4, {})
+        pool = questions.build_pool([unflagged])
+        assert all("disappear" not in q for q in pool)
+
+
+
+# ---------------------------------------------------------------------------
+# Pins from test_mutation_pins_2026_09_18b.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
+T0_R2 = date(2026, 6, 1)
+
+
+def _days(n: int, start: date = T0_R2) -> list[date]:
+    return [start + timedelta(days=i) for i in range(n)]
+
+
+# ---------------------------------------------------------------------------
+# G4/G5: the EWMA control chart's honesty parameters
+# ---------------------------------------------------------------------------
+
+
+class TestEwmaChartPins:
+    def _update_twice(self, sentiments: list[float], start: date = T0_R2):
+        """mood_shift is a WINDOW_STAT kind: it surfaces only after a second
+        qualification day >= 2 calendar days out (the replication gate), so
+        every chart pin recomputes twice."""
+        first = [
+            JournalEntry("ordinary day notes", d, sentiment=s)
+            for d, s in zip(_days(len(sentiments), start), sentiments)
+        ]
+        res1 = brain.update(brain.fresh_state(), first, start + timedelta(days=len(sentiments)))
+        tail_days = _days(2, start + timedelta(days=len(sentiments) + 1))
+        second = first + [
+            JournalEntry("ordinary day notes", d, sentiment=sentiments[-1]) for d in tail_days
+        ]
+        res2 = brain.update(res1.new_state, second, tail_days[-1] + timedelta(days=1))
+        return res2
+
+    def test_autocorrelated_stationary_series_does_not_fire(self):
+        """G4 pin: a stationary AR-like series with strong carryover must not
+        fire the chart — the limits are inflated by (1+phi)/(1-phi) precisely
+        so ordinary autocorrelated mood is not a 'shift'.
+
+        Corpus (tuned and verified discriminating): a single smooth hump
+        baseline (lag-1 phi ~= 0.81, well above the 0.35 inflation trigger,
+        sigma ~= 0.26), a quiet continuation, then a moderate elevated run
+        (+0.5, ~1.6 sigma). Without the inflation the run clears the limits
+        at p ~= 1e-6 and surfaces; the honest chart must stay silent.
+        """
+        hump = [0.10, 0.25, 0.40, 0.30, 0.15, -0.05, -0.25, -0.40, -0.25, -0.05]
+        continuation = [0.05, 0.20, 0.05, -0.15, 0.05]
+        elevated = [0.5] * 8
+        result = self._update_twice(hump + continuation + elevated)
+        shifts = [p for p in result.surfaced if p.kind == "mood_shift"]
+        assert shifts == [], [s.detail for s in shifts]
+
+    def test_single_beyond_limit_spike_is_not_a_shift(self):
+        """G5 pin: MOOD_SHIFT_RUN is 3 — one beyond-limit point in the recent
+        tail (a transient spike at the very end) must not surface a card.
+
+        Corpus: flat baseline (sigma from mild variation), quiet run, one
+        large spike on the final day. The spike's EWMA crosses the limit for
+        exactly one point; the spike is repeated on the replication days so
+        the second qualification is not what silences it — the run rule is.
+        """
+        baseline = [
+            0.1,
+            -0.1,
+            0.2,
+            -0.2,
+            0.05,
+            -0.05,
+            0.15,
+            -0.15,
+            0.1,
+            -0.1,
+            0.2,
+            -0.2,
+            0.0,
+            0.1,
+            -0.1,
+        ] + [0.0] * 8
+        result = self._update_twice(baseline + [2.5])
+        shifts = [p for p in result.surfaced if p.kind == "mood_shift"]
+        assert shifts == [], [s.detail for s in shifts]
+
+
+# ---------------------------------------------------------------------------
+# G14/G15: lifecycle boundaries are exact
+# ---------------------------------------------------------------------------
+
+
+def _store_with_pattern(last_qualified: str, state_name: str) -> dict:
+    store = brain.fresh_state()
+    record = StoredPattern(
+        pid="temporal:work",
+        kind="temporal",
+        label="work",
+        first_seen=last_qualified,
+        last_seen=last_qualified,
+        first_qualified=last_qualified,
+        last_qualified=last_qualified,
+        occurrences=12,
+        state=state_name,
+        qualification_days=[last_qualified],
+        evidence_dates=[last_qualified],
+        feedback={},
+        detail={"day": "Sunday"},
+    )
+    store["patterns"][record.pid] = record
+    # Round-trip so _merge_lifecycle sees a normalized store, exactly as a
+    # recompute would after loading the encrypted blob.
+    return load_state(dump_state(store))
+
+
+class TestLifecycleBoundaries:
+    def test_active_pattern_survives_exactly_seven_stale_days(self):
+        """G14 pin: GRACE_DAYS is 7 — at exactly 7 stale days the pattern is
+        still active; fading starts only past 7 (a ->6 mutant fades early)."""
+        last = "2026-08-01"
+        for stale, expect_fading in ((7, False), (8, True)):
+            store = _store_with_pattern(last, "confirmed")
+            brain._merge_lifecycle(store, [], date.fromisoformat(last) + timedelta(days=stale))
+            assert store["patterns"]["temporal:work"].state == (
+                "fading" if expect_fading else "confirmed"
+            ), f"stale={stale}"
+
+    def test_fading_pattern_archives_only_past_forty_five_days(self):
+        """G15 pin: ARCHIVE_DAYS is 45 — at exactly 45 stale days the pattern
+        is still fading; archival starts only past 45 (a ->44 mutant
+        archives a day early)."""
+        last = "2026-08-01"
+        for stale, expect_archived in ((45, False), (46, True)):
+            store = _store_with_pattern(last, "fading")
+            brain._merge_lifecycle(store, [], date.fromisoformat(last) + timedelta(days=stale))
+            assert store["patterns"]["temporal:work"].state == (
+                "archived" if expect_archived else "fading"
+            ), f"stale={stale}"
+
+
+# ---------------------------------------------------------------------------
+# J2: crisis-adjacent surfaced cards carry detail.sensitive
+# ---------------------------------------------------------------------------
+
+
+class TestSensitiveFlagPin:
+    def test_suppress_tier_rumination_surfaces_non_quoting(self):
+        """J2 pin: a recurring negative cluster whose label is suppress-tier
+        crisis language must surface with detail.sensitive — the mobile app
+        and portal render the non-quoting card keyed off this flag."""
+        phrase = "i can't go on anymore"  # dialog tier (therefore suppress tier)
+        assert crisis.matches_suppress(phrase)
+        days = _days(12)  # direct-measurement kinds surface at STRONG_EVIDENCE=10 occurrences
+        entries = [
+            JournalEntry(
+                f"{phrase} and everything feels heavy and hopeless and unbearable",
+                d,
+                sentiment=-0.8,
+            )
+            for d in days
+        ]
+        result = brain.update(brain.fresh_state(), entries, days[-1] + timedelta(days=1))
+        surfaced = [p for p in result.surfaced if p.kind in ("rumination", "recurring_phrase")]
+        assert surfaced, "corpus must surface the recurring cluster"
+        flagged = [p for p in surfaced if p.detail.get("sensitive")]
+        assert flagged, [(p.kind, p.label, p.detail.get("sensitive")) for p in surfaced]
+
+    def test_label_branch_of_sensitivity_flag(self):
+        """J2 pin (the label branch): a record whose LABEL is suppress-tier
+        is sensitive even when the stored variant list cannot catch it —
+        the representative must not be the only unchecked copy. The variants
+        check subsumes the label check whenever the representative survives
+        the variants[:3] cap; this is the record shape where only the label
+        branch sees it."""
+        record = StoredPattern(
+            pid="rumination:x",
+            kind="rumination",
+            label="i can't go on anymore",
+            first_seen="2026-08-01",
+            last_seen="2026-08-12",
+            first_qualified="2026-08-12",
+            last_qualified="2026-08-12",
+            occurrences=12,
+            state="emerging",
+            qualification_days=["2026-08-12"],
+            evidence_dates=["2026-08-01"],
+            feedback={},
+            # Benign variants only: the variants branch cannot fire here.
+            detail={"variants": ["everything feels heavy and slow", "so tired of everything"]},
+        )
+        assert crisis.matches_suppress(record.label)
+        assert not any(crisis.matches_suppress(v) for v in record.detail["variants"])
+        assert brain._record_is_sensitive(record) is True
+
+
+# ---------------------------------------------------------------------------
+# K1/K4: fail-closed boot gates
+# ---------------------------------------------------------------------------
+
+
+class TestBootGates:
+    def test_uppercase_environment_hits_production_gates(self):
+        """K1 pin: environment values normalize before any comparison. The
+        security direction is the DEV side — 'DEVELOPMENT'/' Development '
+        are the developer's OPT-IN to dev gates; without normalization a
+        case typo silently hits the production gates instead (fail-closed,
+        but it means normalization is dead code and the next check built on
+        the comparison inherits the typo)."""
+        for env in ("DEVELOPMENT", " Development ", "development"):
+            s = Settings(environment=env)  # dev secret allowed exactly here
+            assert s.environment == "development", env
+        # ...and no production-adjacent spelling may reach the dev gates.
+        for env in ("PRODUCTION", " Production ", "prod", "staging"):
+            with pytest.raises(RuntimeError, match="MINDPATTERN_TOKEN_SECRET"):
+                Settings(environment=env)
+
+    def test_production_app_mounts_no_docs(self):
+        """K4 pin: /docs and /openapi.json exist only in development. The
+        FastAPI attributes are set at construction, before any lifespan
+        work, so construction alone is the honest pin."""
+        settings = Settings(
+            environment="production",
+            token_secret="x" * 48,
+            database_url="postgresql+asyncpg://u:p@localhost:5432/mindpattern_test",
+        )
+        app = create_app(settings)  # no lifespan: construction must not touch the DB
+        assert app.docs_url is None
+        assert app.openapi_url is None
+
+
+# ---------------------------------------------------------------------------
+# L2: the poor-sleep split is against the user's OWN median
+# ---------------------------------------------------------------------------
+
+
+class TestOwnMedianSleepSplit:
+    def test_split_is_strictly_below_the_users_own_median(self):
+        """L2 pin: a user rating every night 1 or 2 (median 1.5) has poor
+        nights ONLY on the 1s. A fixed 3.0 population norm would mark every
+        night poor — the within-person promise, pinned at the theme-day set
+        (the candidate mood-correlation record's evidence dates)."""
+        days = _days(20)  # the mood tie needs >=8 entries per side (poor vs not)
+        entries = []
+        for i, d in enumerate(days):
+            rating = 1 if i % 2 == 0 else 2
+            # Poor nights read lower, decent nights fine — the mood tie the
+            # channel exists to find (and the reason the record lands in the
+            # store at all: unqualified candidates are never merged).
+            mood = -0.8 if rating == 1 else 0.5
+            entries.append(
+                JournalEntry("quiet notes and tea", d, sentiment=mood, sleep_quality=rating)
+            )
+        result = brain.update(brain.fresh_state(), entries, days[-1] + timedelta(days=1))
+        record = result.new_state["patterns"].get("mood_correlation:poor sleep")
+        assert record is not None, "the poor-sleep theme must be analyzed"
+        expected = {d.isoformat() for d in days[0::2]}  # the rating-1 nights
+        assert set(record.evidence_dates) == expected, (
+            "poor-sleep days must be exactly the nights rated strictly below "
+            "THIS user's median (1.5), not below any population norm"
+        )
+
+
+
+# ---------------------------------------------------------------------------
+# Pins from test_mutation_pins_2026_09_19.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
+# --- O2: suspended account must be refused on routes without a fresh re-check
+
+
+async def test_suspended_account_is_refused_on_insights_reads(client, app):
+    """The /entries routes re-check is_active under their lifecycle fence;
+    GET /insights has no such re-check — require_user itself must refuse a
+    deactivated account there. (Kills mutant O2.)"""
+    from sqlalchemy import update
+
+    from app.models import User
+
+    emu = ClientEmulator("pins-o2", "pw-pins-o2")
+    await emu.register(client)
+    await emu.create_entry(client, "an ordinary day", TODAY, client_entry_id="pins-o2-e1")
+
+    async with app.state.sessionmaker() as session:
+        await session.execute(update(User).where(User.id == emu.user_id).values(is_active=False))
+        await session.commit()
+
+    response = await client.get("/api/insights", headers=emu.headers)
+    assert response.status_code == 401
+    assert response.json()["code"] == "unauthorized"
+
+
+# --- O10: therapist registration honors the enrollment-token gate
+
+
+async def test_therapist_registration_requires_the_enrollment_token(client, settings):
+    """When an enrollment token is configured, a wrong or absent
+    X-Therapist-Enrollment-Token must answer a flat 404; the right one
+    registers. (Kills mutant O10.)"""
+    settings.therapist_sharing_enabled = True
+    settings.therapist_enrollment_token = "t" * 32
+
+    def payload(emu: TherapistEmulator) -> dict:
+        return {
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "display_name": emu.display_name,
+            "wrap_pub_key": emu.wrap_pub_key,
+            "wrap_key_blob": emu.wrap_key_blob_b64(),
+        }
+
+    wrong = TherapistEmulator("pins-o10-wrong", "pw")
+    no_header = await client.post("/api/therapist/register", json=payload(wrong))
+    assert no_header.status_code == 404
+    assert no_header.json()["code"] == "not_found"
+
+    bad_header = await client.post(
+        "/api/therapist/register",
+        json=payload(TherapistEmulator("pins-o10-bad", "pw")),
+        headers={"X-Therapist-Enrollment-Token": "wrong-token-of-at-least-some-length"},
+    )
+    assert bad_header.status_code == 404
+
+    right = TherapistEmulator("pins-o10-right", "pw")
+    accepted = await client.post(
+        "/api/therapist/register",
+        json=payload(right),
+        headers={"X-Therapist-Enrollment-Token": "t" * 32},
+    )
+    assert accepted.status_code == 201, accepted.text
+
+
+# --- P5: paginated entry order must be fully deterministic
+
+
+async def test_entry_page_ordering_carries_the_id_tiebreak(client, app):
+    """The page METADATA query (the one that sizes rows with LENGTH and
+    paginates) must order by (entry_date, received_at, id): without the id
+    tiebreak, rows sharing date+receipt time can swap across pages. The
+    later blob-fetch query keeps its own full ordering, so only the
+    metadata query distinguishes the mutant. (Kills mutant P5.)"""
+    emu = ClientEmulator("pins-p5", "pw-pins-p5")
+    await emu.register(client)
+    await emu.create_entry(client, "one", TODAY, client_entry_id="pins-p5-a")
+    await emu.create_entry(client, "two", TODAY, client_entry_id="pins-p5-b")
+
+    statements: list[str] = []
+
+    @event.listens_for(app.state.engine.sync_engine, "before_cursor_execute")
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    response = await client.get("/api/entries", headers=emu.headers)
+    assert response.status_code == 200
+
+    lowered = [s.lower() for s in statements]
+    metadata_queries = [
+        q for q in lowered if "length(" in q and "from entries" in q and "order by" in q
+    ]
+    assert metadata_queries, statements
+    for query in metadata_queries:
+        ordering = query.split("order by", 1)[1]
+        assert "entry_date" in ordering and "received_at" in ordering and "id" in ordering, query
+
+
+# --- P6 (REPURPOSED 2026-09-20, audit H-12): a same-day recompute must
+# NOT rewrite the stored question blob. The old pin asserted the opposite
+# (fresh ciphertext on every same-day recompute) and the audit proved that
+# behavior breaks "one question per day, stable within the day" — a
+# recompute after an evening entry served a different question than the one
+# the user may already have answered. The day's question is now pinned on
+# first write; the pin asserts byte-identical stability.
+
+
+async def test_same_day_recompute_preserves_the_question_blob(client):
+    """Audit H-12: recompute with an extra pattern -> SAME question for the
+    same day. The rotation pool changing underneath must never change an
+    already-served (possibly already-answered) question."""
+    from tests.test_insights_api import seed_corpus
+
+    emu = ClientEmulator("pins-p6", "pw-pins-p6")
+    await emu.register(client)
+    await seed_corpus(client, emu, days=32)
+    await emu.recompute(client)
+    first = (await client.get("/api/questions/today", headers=emu.headers)).json()["blob"]
+    assert first
+
+    await emu.create_entry(
+        client, "a late evening note about sleep", TODAY, client_entry_id="pins-p6-extra"
+    )
+    await emu.recompute(client)
+    second = (await client.get("/api/questions/today", headers=emu.headers)).json()["blob"]
+
+    assert second == first, "same-day recompute changed the pinned daily question"
+
+
+# --- Q1: the legacy entry-page byte budget is exactly 2 MiB (independent of
+#     the code under test — the existing test imported the constant, so the
+#     mutant scaled the test along with the budget).
+
+
+async def test_legacy_entry_page_budget_is_two_mebibytes(client, app):
+    """2 x ~1.05 MiB entries exceed the 2 MiB legacy response budget: an
+    unpaged request must 413. Constants here are independent literals by
+    design. (Kills mutant Q1.)"""
+    from app.models import Entry
+
+    emu = ClientEmulator("pins-q1", "pw-pins-q1")
+    await emu.register(client)
+    async with app.state.sessionmaker() as session:
+        session.add_all(
+            [
+                Entry(
+                    user_id=emu.user_id,
+                    client_entry_id=f"pins-q1-{index}",
+                    blob=bytes([index + 1]) * 1_100_000,
+                    entry_date=TODAY,
+                )
+                for index in range(2)
+            ]
+        )
+        await session.commit()
+
+    legacy = await client.get("/api/entries", headers=emu.headers, params={"limit": 25})
+    assert legacy.status_code == 413
+    assert legacy.json()["code"] == "payload_too_large"
+
+    paged = await client.get(
+        "/api/entries", headers=emu.headers, params={"limit": 25, "page_bytes": 2 * 1024 * 1024}
+    )
+    assert paged.status_code == 200
+    assert len(paged.json()) == 1  # only ONE ~1.05 MiB entry fits per budgeted page
+
+
+# --- Q9: the therapist caseload cap is enforced at grant time
+
+
+async def test_grant_rejects_when_the_therapist_caseload_is_full(client, app):
+    """100 existing consent rows (any status) cap the therapist's caseload;
+    the 101st pair must 413 without burning the pairing code. The filler
+    count is an independent literal: reading MAX_PATIENTS_PER_THERAPIST
+    here would scale the pin with the mutant. (Kills mutant Q9.)"""
+    from app.models import Consent, User, new_id
+
+    therapist = TherapistEmulator("pins-q9-th", "pw")
+    patient = ClientEmulator("pins-q9-pt", "pw")
+    await patient.register(client)
+    await therapist.register(client)
+    code = await therapist.create_pairing_code(client)
+
+    async with app.state.sessionmaker() as session:
+        filler = [
+            User(
+                id=new_id(),
+                username=f"pins-q9-filler-{index}",
+                salt="s" * 24,
+                verifier=b"v" * 64,
+                scrypt_salt=b"k" * 16,
+            )
+            for index in range(100)
+        ]
+        session.add_all(filler)
+        await session.flush()
+        session.add_all(
+            Consent(
+                user_id=row.id,
+                therapist_id=therapist.user_id,
+                status="revoked",
+            )
+            for row in filler
+        )
+        await session.commit()
+
+    result = await patient.grant_consent(
+        client, code, therapist.wrap_pub_key, therapist.user_id or ""
+    )
+    assert result["status"] == 413
+    assert result["body"]["code"] == "payload_too_large"
+
+
+# --- R8: a losing concurrent same-pair grant answers the 409 contract
+
+
+class _GrantRaceSession:
+    """Proxy over a real session whose commit fails with a unique violation
+    the moment the pairing-code claim UPDATE has run (the commit-time race
+    the 409 mapping exists for)."""
+
+    def __init__(self, inner, error: Exception):
+        self._inner = inner
+        self._error = error
+        self._armed = False
+
+    async def execute(self, statement, *args, **kwargs):
+        if "update pairing_codes" in str(statement).lower():
+            self._armed = True
+        return await self._inner.execute(statement, *args, **kwargs)
+
+    async def commit(self):
+        if self._armed:
+            raise self._error
+        return await self._inner.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def __aenter__(self):
+        await self._inner.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc):
+        return await self._inner.__aexit__(*exc)
+
+
+async def test_concurrent_pair_grant_answers_conflict_not_500(client, app, monkeypatch):
+    """The grant commit's IntegrityError must map to the retryable 409
+    envelope, never leak as a 500. (Kills mutant R8.)"""
+    patient = ClientEmulator("pins-r8", "pw-pins-r8")
+    therapist = TherapistEmulator("pins-r8-th", "pw")
+    await patient.register(client)
+    await therapist.register(client)
+    code = await therapist.create_pairing_code(client)
+
+    original_factory = app.state.sessionmaker
+    boom = IntegrityError(
+        "INSERT INTO consents ...",
+        {},
+        RuntimeError("UNIQUE constraint failed: uq_consents_user_therapist"),
+    )
+
+    def factory():
+        return _GrantRaceSession(original_factory(), boom)
+
+    monkeypatch.setattr(app.state, "sessionmaker", factory)
+
+    result = await patient.grant_consent(
+        client, code, therapist.wrap_pub_key, therapist.user_id or ""
+    )
+    assert result["status"] == 409
+    assert result["body"]["code"] == "conflict"
+
+
+# --- R10: only unique violations are retried during pairing-code allocation
+
+
+async def test_pairing_code_creation_only_retries_unique_violations():
+    """A non-unique IntegrityError during code creation must propagate
+    immediately, never be retried. Direct route call with fakes: the clean
+    handler re-raises on the FIRST non-unique failure, while the
+    retry-everything mutant grinds through all five attempts and answers its
+    503 ApiError instead. (Kills mutant R10.)"""
+    from app.api import therapist as therapist_api
+    from app.deps import ApiError
+
+    boom = IntegrityError(
+        "INSERT INTO pairing_codes ...",
+        {},
+        RuntimeError("FOREIGN KEY constraint failed"),
+    )
+
+    class FakeSession:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+        async def execute(self, statement, *args, **kwargs):
+            return SimpleNamespace(rowcount=0)
+
+        async def commit(self):
+            raise boom
+
+        async def rollback(self):
+            return None
+
+        def add(self, obj):
+            return None
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=SimpleNamespace(token_secret="s" * 40, access_log_retention_days=730)
+            )
+        )
+    )
+    user = SimpleNamespace(id="therapist-r10")
+
+    with pytest.raises(IntegrityError):
+        await therapist_api.create_pairing_code(
+            request=request,
+            user=user,
+            session=FakeSession(),  # type: ignore[arg-type]
+        )
+
+    # Positive control: a UNIQUE violation is retried (bounded), surfacing
+    # as the 503 allocation error rather than a raw leak.
+    unique_boom = IntegrityError(
+        "INSERT INTO pairing_codes ...",
+        {},
+        RuntimeError("UNIQUE constraint failed: uq_pairing_codes_code_hash"),
+    )
+
+    class RetryingSession(FakeSession):
+        async def commit(self):
+            raise unique_boom
+
+    with pytest.raises(ApiError) as info:
+        await therapist_api.create_pairing_code(
+            request=request,
+            user=user,
+            session=RetryingSession(),  # type: ignore[arg-type]
+        )
+    assert info.value.status_code == 503
+
+
+# --- S3: the per-owner processing-session cap
+
+
+def test_keystore_per_owner_session_cap():
+    """Four live sessions per account; the fifth is refused without evicting
+    anyone else's. (Kills mutant S3.)"""
+    store = InMemoryKeyStore(max_sessions=64, max_sessions_per_owner=4)
+    key = bytes(range(32))
+    for _ in range(4):
+        store.create(key, ttl_seconds=60, owner="user-a")
+    with pytest.raises(KeyStoreFull, match="for account"):
+        store.create(key, ttl_seconds=60, owner="user-a")
+    # The cap is per owner: another account is unaffected.
+    store.create(key, ttl_seconds=60, owner="user-b")
+
+
+# --- C3 (round 1, re-pinned 2026-09-19): pop() consumes the token
+
+
+def test_keystore_pop_is_single_use_by_mechanism():
+    """A second pop of the same token must fail: pop() is an atomic consume
+    under the store lock. Re-pinned by the round-3 campaign after the PR
+    gate found the round-1 pin had rotted (no suite still exercised a
+    double-pop)."""
+    from app.security.enclave import KeyNotFound
+
+    store = InMemoryKeyStore()
+    key = bytes(range(32))
+    token = store.create(key, ttl_seconds=60, owner="user-a")
+
+    popped = store.pop(token, owner="user-a")
+    assert bytes(popped) == key
+    with pytest.raises(KeyNotFound):
+        store.pop(token, owner="user-a")
+
+
+# --- S5: a snapshot marker AHEAD of the server is still a conflict
+
+
+async def test_ahead_of_server_snapshot_marker_also_conflicts(client):
+    """expected_revision diverging in EITHER direction must 409: a client
+    holding a marker from a future/rolled-back state must not receive a
+    silently wrong page. (Kills mutant S5.)"""
+    emu = ClientEmulator("pins-s5", "pw-pins-s5")
+    await emu.register(client)
+    await emu.create_entry(client, "day one", TODAY, client_entry_id="pins-s5-e1")
+
+    current = await client.get("/api/entries", headers=emu.headers)
+    assert current.status_code == 200
+    revision = int(current.headers["X-Entries-Revision"])
+
+    ahead = await client.get(
+        "/api/entries", headers=emu.headers, params={"expected_revision": str(revision + 5)}
+    )
+    assert ahead.status_code == 409
+    assert ahead.json()["code"] == "collection_changed"
+
+
+# --- S6/S7: a threshold regression must stop serving the stored blob
+
+
+async def _regressed_account(client, app, username: str) -> ClientEmulator:
+    from tests.test_insights_api import seed_corpus
+
+    emu = ClientEmulator(username, f"pw-{username}")
+    await emu.register(client)
+    await emu.backdate_account(client, days=40)
+    ids_by_day = {}
+    for day in daterange(32, TODAY):
+        entry_id = f"{username}-{day.isoformat()}"
+        ids_by_day[day] = entry_id
+        await emu.create_entry(
+            client, "a day with work and some sleep", day, client_entry_id=entry_id
+        )
+    await emu.recompute(client)
+    blob = (await client.get("/api/insights", headers=emu.headers)).json()["blob"]
+    assert blob is not None  # insight phase: the blob is legitimately served
+    # Delete 3 days: 29 distinct active days — back below the threshold.
+    for day in sorted(ids_by_day)[:3]:
+        response = await client.delete(f"/api/entries/{ids_by_day[day]}", headers=emu.headers)
+        assert response.status_code == 204
+    return emu
+
+
+async def test_insights_blob_not_served_after_threshold_regression(client, app):
+    """Baseline reveals nothing — not even a blob stored while the account
+    WAS in the insight phase. (Kills mutant S6.)"""
+    emu = await _regressed_account(client, app, "pins-s6")
+
+    summary = await client.get("/api/insights", headers=emu.headers)
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["phase"] == "baseline"
+    assert body["blob"] is None
+
+
+async def test_therapist_insights_read_phase_gates_the_blob(client, app):
+    """The therapist's view of a regressed account must match the patient's:
+    no blob in baseline. (Kills mutant S7.)"""
+    from tests.helpers import patient_wrap_for
+
+    emu = await _regressed_account(client, app, "pins-s7")
+    therapist = TherapistEmulator("pins-s7-th", "pw")
+    await therapist.register(client)
+    code = await therapist.create_pairing_code(client)
+    wrap = patient_wrap_for(emu, therapist.wrap_pub_key, therapist.user_id or "")
+    from app.api.consents import SHARING_DISCLOSURE_VERSION
+
+    granted = await client.post(
+        "/api/consents",
+        headers={**emu.headers, "X-Account-Verifier": emu.auth_key_b64},
+        json={"code": code, **wrap, "disclosure": SHARING_DISCLOSURE_VERSION},
+    )
+    assert granted.status_code == 201, granted.text
+
+    response = await client.get(
+        f"/api/therapist/patients/{emu.user_id}/insights", headers=therapist.headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["phase"] == "baseline"
+    assert body["blob"] is None
+
+
+# --- S10 (recompute-lock keying) is NOT pinned: the per-user recompute lock
+# sits nested inside the per-user lifecycle fence the route takes first, so
+# two recomputes for one account serialize at the OUTER lock today and the
+# inner-lock mutant (S10) is API-unobservable. It guards a future refactor
+# that drops the fence, not the current shape — see the campaign report.
+
+
+# --- T6: a forwarded identity is only trusted for an allowlisted peer
+
+
+class _FakeRequest:
+    def __init__(self, state: dict, client_host: str):
+        self.state = SimpleNamespace(**state)
+        self.client = SimpleNamespace(host=client_host)
+
+
+def test_forwarded_identity_requires_the_trusted_peer_decision():
+    """trust_proxy_headers=True is NOT sufficient: the middleware's
+    authenticated peer decision (state.mindpattern_trusted_proxy) gates the
+    forwarded value. A direct client must stay keyed on its socket address
+    even when it forges X-Forwarded-For. (Kills mutant T6.)"""
+    forged = _FakeRequest(
+        {"mindpattern_trusted_proxy": False, "mindpattern_forwarded_client": "2001:db8::9"},
+        client_host="203.0.113.7",
+    )
+    assert client_key(forged, trust_proxy_headers=True) == "203.0.113.7"
+    assert client_key(forged, trust_proxy_headers=False) == "203.0.113.7"
+
+    authenticated = _FakeRequest(
+        {"mindpattern_trusted_proxy": True, "mindpattern_forwarded_client": "2001:db8::9"},
+        client_host="10.0.0.8",
+    )
+    assert client_key(authenticated, trust_proxy_headers=True) == "2001:db8::/64"
+
+
+# --- T8: absent keys stay on the overflow lock until it drains
+
+
+async def test_absent_keys_stay_on_the_overflow_lock_until_it_drains():
+    """While the overflow lock is live, an absent key must JOIN it (even if a
+    stale registry slot could be evicted): otherwise the same key can hold a
+    fresh dedicated lock concurrently with its own earlier overflow-held
+    section. (Kills mutant T8.)"""
+    locks = UserLocks(max_keys=1)
+
+    k1_acquired = asyncio.Event()
+    k1_release = asyncio.Event()
+
+    async def hold_k1():
+        async with locks.hold("K1"):
+            k1_acquired.set()
+            await k1_release.wait()
+
+    k1_task = asyncio.create_task(hold_k1())
+    await k1_acquired.wait()
+
+    overflow_started = asyncio.Event()
+    observed = []
+
+    async def hold_k2_first():
+        async with locks.hold("K2"):  # registry full with live K1 -> overflow
+            overflow_started.set()
+            await asyncio.sleep(0.5)
+
+    first = asyncio.create_task(hold_k2_first())
+    await overflow_started.wait()
+    k1_release.set()
+    await k1_task  # K1's slot is now a STALE registry entry
+
+    async def hold_k2_second():
+        async with locks.hold("K2"):  # same key, overflow still live
+            observed.append(first.done())
+
+    second = asyncio.create_task(hold_k2_second())
+    await asyncio.gather(first, second)
+
+    assert observed == [True], "the same key ran concurrently with its overflow-held section"
+

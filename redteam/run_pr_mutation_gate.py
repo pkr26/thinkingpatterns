@@ -36,13 +36,14 @@ HARNESS_GLOBS = (
 )
 
 # Genuine survivors that are deliberately unpinned, with the report section
-# that argues why. Round 2: I4 (pairing burn's expiry WHERE only closes the
+# that argues why (campaign reports preserved in git
+# history). Round 2: I4 (pairing burn's expiry WHERE only closes the
 # lookup→burn race window; _live_code rejects expired codes), J1 (pool-side
 # suppress filter subsumed by three upstream tripwires), N4 (e2_brain's
 # noise corpora stay silent even at ALPHA=0.5 because the effect-size and
 # replication gates absorb the inflation; a borderline-p planted-
-# association corpus is the recorded follow-up — reports/
-# mutation_campaign_2026-09-18_round2.md, campaign N). Round 3: O6 (note
+# association corpus is the recorded follow-up — see the round-2
+# campaign report in git history, campaign N). Round 3: O6 (note
 # re-fetch scoping unreachable behind the still-scoped pre-lock read), S10
 # (recompute-lock keying masked by the outer per-user lifecycle fence).
 DOCUMENTED_RESIDUALS = {"I4", "J1", "N4", "N9", "O6", "S10"}

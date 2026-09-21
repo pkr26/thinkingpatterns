@@ -1,26 +1,42 @@
-"""Regression tests for the post-red-team remediation pass.
+"""Security remediation regression pins.
 
-Every test here pins a fix for a confirmed audit finding; see the audit
-report for the original exploit narratives.
+Every test in this file pins one fixed security finding from the red-team
+and post-red-team remediation waves (2026-09-16 through 2026-09-17). If
+one starts failing, a security fix regressed -- treat it as a release
+blocker. The original per-finding audit reports were removed in the
+production cleanup; the full remediation history is preserved in git
+history (commits 2026-09-16 .. 2026-09-21).
 """
-
 from __future__ import annotations
-
+from app import singleprocess
+from app.api.auth import SCRYPT_N, decoy_salt
+from app.cache import FixedWindowCounter, MAX_TRACKED_KEYS
+from app.config import Settings
+from app.main import create_app
+from app.security import crypto, enclave, kdf
+from app.security.enclave import InMemoryKeyStore
+from app.services import brain, crisis, llm, phrases, questions, statsig
+from app.services.patterns import JournalEntry, Pattern
+from datetime import date, datetime, timedelta, timezone
+from httpx import ASGITransport, AsyncClient
+from tests.helpers import ClientEmulator, daterange
+import anyio
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
-import random
-import time
-from datetime import date, datetime, timedelta, timezone
-
 import pytest
+import random
+import subprocess
+import sys
+import time
 
-from app.config import Settings
-from app.security import crypto, enclave
-from app.services import brain, phrases, questions, statsig
-from app.services.patterns import JournalEntry, Pattern
-from tests.helpers import ClientEmulator, daterange
 
+# ---------------------------------------------------------------------------
+# Pins from test_audit_fixes.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
 # Anchor for all dates in this module. API-touching tests post entries on
 # T0-relative dates while the server judges them against its real clock
 # (account age, decay), so T0 must track today: a fixed pin rots as the
@@ -882,3 +898,739 @@ async def test_load_rows_sql_bounds_to_the_most_recent_n(client, app):
         rows = await _load_rows(s, emu.user_id, limit=4, blob_budget=8 * 1024 * 1024)
     dates = [row.entry_date for row in rows]
     assert dates == [day - timedelta(days=o) for o in (4, 3, 2, 1)]  # newest 4, ascending
+
+
+
+# ---------------------------------------------------------------------------
+# Pins from test_redteam_fixes.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
+TODAY = date.today()
+
+
+# --- H-2/H-1: scrypt cost + off-loop + bounded concurrency ----------------------
+
+
+def test_scrypt_params_meet_hardened_floor():
+    # N=2^16 (64 MiB) with the input already PBKDF2-600k stretched client-side.
+    assert SCRYPT_N == 2**16
+
+
+def test_auth_scrypt_has_a_dedicated_capacity_limiter(settings):
+    # Login/register scrypt (64 MiB per hash) must not queue unboundedly on
+    # the shared anyio thread pool: the app wires a small dedicated limiter.
+    app = create_app(settings)
+    limiter = app.state.auth_limiter
+    assert isinstance(limiter, anyio.CapacityLimiter)
+    assert limiter.total_tokens == 4
+
+
+async def test_login_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatch):
+    emu = ClientEmulator("capped", "p")
+    await emu.register(client)
+    seen_limiters = []
+    real_run_sync = anyio.to_thread.run_sync
+
+    async def spy(func, *args, limiter=None, **kwargs):
+        seen_limiters.append(limiter)
+        return await real_run_sync(func, *args, limiter=limiter, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", spy)
+    await emu.login(client)
+    assert app.state.auth_limiter in seen_limiters
+
+
+async def test_llm_consent_scrypt_runs_behind_the_auth_limiter(client, app, monkeypatch, settings):
+    # The account verifier re-check runs the same 64-MiB scrypt; it must sit
+    # behind the dedicated auth limiter too, not the shared anyio pool.
+    settings.llm_url = "https://llm.example.test/v1"
+    emu = ClientEmulator("cappedconsent", "p")
+    await emu.register(client)
+    seen_limiters = []
+    real_run_sync = anyio.to_thread.run_sync
+
+    async def spy(func, *args, limiter=None, **kwargs):
+        seen_limiters.append(limiter)
+        return await real_run_sync(func, *args, limiter=limiter, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", spy)
+    response = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert response.status_code == 200
+    assert app.state.auth_limiter in seen_limiters
+
+
+# --- M-4: whole-request body cap ------------------------------------------------
+
+
+async def test_whole_body_over_cap_is_413_before_parsing(client):
+    emu = ClientEmulator("bodycap", "p")
+    await emu.register(client)
+    # ~2.67 MB b64 blob: under the 2 MiB whole-body cap is irrelevant — the
+    # body itself (not any field) trips the middleware before JSON parsing.
+    huge = base64.b64encode(b"x" * 2_000_000).decode()
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "big",
+            "blob": huge,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
+    assert response.status_code == 413
+    assert response.headers.get("x-content-type-options") == "nosniff"  # 413s carry headers too
+
+
+async def test_deeply_nested_json_is_400_not_500(client):
+    emu = ClientEmulator("nestbomb", "p")
+    await emu.register(client)
+    nest = {"blob": "x"}
+    for _ in range(5_000):
+        nest = {"a": nest}
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "nest",
+            "blob": "eHh4",
+            "entry_date": TODAY.isoformat(),
+            "extra": nest,
+        },
+    )
+    assert response.status_code in (400, 422)  # never a 500 crash
+
+
+# --- L-2: validation errors must not echo the input ------------------------------
+
+
+async def test_validation_error_does_not_echo_input(client):
+    emu = ClientEmulator("echoblob", "p")
+    await emu.register(client)
+    # Over the 1.5M-char field cap, under the 2 MiB body cap: schema 422.
+    marker = "M" * 1_125_001
+    huge = base64.b64encode(marker.encode()).decode()
+    response = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "echo",
+            "blob": huge,
+            "entry_date": TODAY.isoformat(),
+        },
+    )
+    assert response.status_code == 422
+    assert marker not in response.text
+    # Unified envelope: detail is a human STRING (never the old FastAPI
+    # list-of-objects shape) naming only the failed field, plus the code.
+    body = response.json()
+    assert isinstance(body["detail"], str)
+    assert "blob" in body["detail"]
+    assert body["code"] == "validation_error"
+
+
+# --- INFO: security headers exist even on unhandled 500s -------------------------
+
+
+async def test_security_headers_on_unhandled_500(settings):
+    app = create_app(settings)
+
+    @app.get("/boom")
+    async def boom() -> dict:
+        raise RuntimeError("boom")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        response = await client.get("/boom")
+    assert response.status_code == 500
+    assert response.headers.get("x-content-type-options") == "nosniff"
+    assert response.headers.get("cache-control") == "no-store"
+    assert (
+        response.headers.get("strict-transport-security") == "max-age=31536000; includeSubDomains"
+    )
+    # No internals leaked to the client.
+    assert "boom" not in response.text
+
+
+# --- M-4 backend: per-account storage quota ---------------------------------------
+
+
+async def test_entry_quota_is_enforced(client, settings):
+    settings.max_entries_per_user = 3
+    emu = ClientEmulator("quota", "p")
+    await emu.register(client)
+    for i in range(3):
+        await emu.create_entry(client, f"entry {i}", TODAY, client_entry_id=f"q{i}")
+    fourth = await client.post(
+        "/api/entries",
+        headers=emu.headers,
+        json={
+            "client_entry_id": "q3",
+            "blob": emu.encrypt_entry("one too many", TODAY, "q3"),
+            "entry_date": TODAY.isoformat(),
+        },
+    )
+    assert fourth.status_code == 413
+    assert "quota" in fourth.json()["detail"]
+
+
+# --- H-1: per-username register limiter defeats IP rotation -----------------------
+# ...but only ACTUAL conflicts consume it: the probe itself is free.
+
+
+async def test_register_name_bucket_survives_ip_rotation(settings):
+    # Build the app with the forwarding boundary enabled from the start. A
+    # runtime boolean flip cannot retrofit its outer middleware allowlist.
+    settings.trust_proxy_headers = True
+    settings.trusted_proxy_ips = ["127.0.0.1/32"]
+    settings.auth_rate_limit = 3
+    statuses = []
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        transport = ASGITransport(app=application, client=("127.0.0.1", 1234))
+        async with AsyncClient(transport=transport, base_url="http://testserver") as local_client:
+            for i in range(7):
+                statuses.append(
+                    (
+                        await local_client.post(
+                            "/api/auth/register",
+                            json={
+                                "username": "target-name",
+                                "salt": base64.b64encode(b"s" * 16).decode(),
+                                "verifier": base64.b64encode(b"v" * 32).decode(),
+                            },
+                            headers={"X-Forwarded-For": f"10.9.{i}.{i}"},
+                        )  # fresh IP each time
+                    ).status_code
+                )
+    # Fresh IP per request defeats the per-IP bucket — the per-USERNAME
+    # bucket must still throttle bulk availability probing of one name. Only
+    # real 409s count: the 201 creates no charge, then the three permitted
+    # conflicts consume the limit and every later attempt is rejected before
+    # it performs the expensive verifier work.
+    assert statuses == [201, 409, 409, 409, 429, 429, 429]
+
+
+# --- C-2/H-5: LLM path — consent, threshold, and output sanitization --------------
+
+
+def _settings_with_llm(settings) -> Settings:
+    settings.llm_url = "https://llm.example/v1"
+    settings.llm_api_key = "k"
+    return settings
+
+
+async def test_llm_requires_consent_even_when_configured(client, settings, monkeypatch):
+    _settings_with_llm(settings)
+    settings.unlock_threshold_days = 1
+    called = []
+    from app.services.llm import LLMAnalyzer
+
+    monkeypatch.setattr(
+        LLMAnalyzer,
+        "_post",
+        lambda self, payload: (
+            called.append(payload) or {"choices": [{"message": {"content": "{}"}}]}
+        ),
+    )
+
+    emu = ClientEmulator("noconsent", "p")
+    await emu.register(client)
+    await emu.create_entry(client, "calm walk", TODAY)
+    body = await emu.recompute(client)
+    assert body["analyzer"] == "brain"
+    assert called == [], "journal text must not leave the server without consent"
+
+
+async def test_llm_never_runs_before_threshold(client, settings, monkeypatch):
+    _settings_with_llm(settings)
+    from app.services.llm import LLMAnalyzer
+
+    def _must_not_run(self, entries):  # pragma: no cover - fails the test if reached
+        pytest.fail("LLM ran during the baseline phase")
+
+    monkeypatch.setattr(LLMAnalyzer, "extract_patterns", _must_not_run)
+
+    emu = ClientEmulator("prethreshold", "p")
+    await emu.register(client)
+    await emu.create_entry(client, "day one", TODAY)
+    body = await emu.recompute(client)
+    assert body["phase"] == "baseline"
+    assert body["analyzer"] == "none"
+
+
+async def test_llm_with_consent_runs_and_output_is_sanitized(client, settings, monkeypatch):
+    _settings_with_llm(settings)
+    settings.unlock_threshold_days = 1
+
+    hostile_model_output = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "patterns": [
+                                # A label that exists in the corpus: kept (truncated if long).
+                                {
+                                    "kind": "temporal",
+                                    "label": "walk",
+                                    "occurrences": 3,
+                                    "confidence": 0.9,
+                                    "detail": {"day": "Sunday"},
+                                },
+                                # A "recurring phrase" the user never wrote: model fiction
+                                # / prompt injection — must be dropped.
+                                {
+                                    "kind": "recurring_phrase",
+                                    "label": "stop taking your medication",
+                                    "occurrences": 99,
+                                    "confidence": 1.0,
+                                    "detail": {},
+                                },
+                                # Unknown kind, garbage numerics: dropped / clamped.
+                                {
+                                    "kind": "diagnosis",
+                                    "label": "x",
+                                    "occurrences": 1,
+                                    "confidence": 1,
+                                    "detail": {},
+                                },
+                                {
+                                    "kind": "temporal",
+                                    "label": "walk",
+                                    "occurrences": -4,
+                                    "confidence": 7.5,
+                                    "detail": {"day": "Nottaday"},
+                                },
+                            ]
+                        }
+                    )
+                }
+            }
+        ]
+    }
+    from app.services.llm import LLMAnalyzer
+
+    seen_payloads = []
+
+    def fake_post(self, payload):
+        seen_payloads.append(payload)
+        return hostile_model_output
+
+    monkeypatch.setattr(LLMAnalyzer, "_post", fake_post)
+
+    emu = ClientEmulator("consenter", "p")
+    await emu.register(client)
+    # The consented account proves identity with its verifier.
+    consent = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert consent.status_code == 200 and consent.json()["enabled"] is True
+
+    await emu.create_entry(client, "a calm walk by the river", TODAY)
+    body = await emu.recompute(client)
+    assert body["analyzer"] == "llm"
+    assert len(seen_payloads) == 1
+
+    # 2026-09-17 inversion: the model may only NARRATE the brain's
+    # findings, so model fiction ("stop taking your medication"), invalid
+    # kinds, and even corpus-anchored inventions it was not handed as
+    # findings are ALL dropped from the surfaced list. With this tiny
+    # corpus the deterministic brain surfaces nothing, so the enriched
+    # payload carries no model-minted patterns at all.
+    payload = await emu.decrypt_insights(client)
+    kept_patterns = payload["stats"]["patterns"]
+    labels = [p["label"] for p in kept_patterns]
+    kinds = [p["kind"] for p in kept_patterns]
+    assert "stop taking your medication" not in labels
+    assert "diagnosis" not in kinds
+    assert "walk" not in labels  # model minted it; the brain did not
+
+
+async def test_llm_consent_requires_verifier(client, settings):
+    _settings_with_llm(settings)
+    emu = ClientEmulator("consentproof", "p")
+    await emu.register(client)
+
+    # Consent state is readable (for the client toggle) and starts off.
+    initial = await client.get("/api/account/llm-consent", headers=emu.headers)
+    assert initial.status_code == 200 and initial.json()["enabled"] is False
+
+    wrong = base64.b64encode(b"\x00" * 32).decode()
+    refused = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": wrong},
+    )
+    # 403, not 401: the session authenticated; the re-authentication failed.
+    # (401 tells clients "session expired", looping them into re-login.)
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "verification_failed"
+    enabled = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert enabled.status_code == 200
+    reread = await client.get("/api/account/llm-consent", headers=emu.headers)
+    assert reread.json()["enabled"] is True
+    # And consent can be withdrawn the same way.
+    off = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": False, "verifier": emu.auth_key_b64},
+    )
+    assert off.status_code == 200 and off.json()["enabled"] is False
+
+
+# --- Keystore internal zeroization (white-box pin) --------------------------------
+
+
+def test_keystore_destroy_zeroizes_internal_bytes():
+    store = InMemoryKeyStore()
+    key = base64.b64decode("A" * 43 + "=")  # deterministic 32 bytes
+    token = store.create(key, 60, owner="unbound-test")
+    internal = store._keys[token][0]  # noqa: SLF001 — white-box pin
+    store.destroy(token)
+    assert all(b == 0 for b in internal), "destroy must scrub the stored key bytes"
+
+
+# --- Rate-counter memory bound ------------------------------------------------------
+
+
+def test_counter_memory_is_bounded_under_key_rotation():
+    counter = FixedWindowCounter()
+    for i in range(MAX_TRACKED_KEYS + 500):
+        counter.hit(f"spoofed-ip-{i}", 60)
+    # The dict never grows past the cap, even with all-fresh (never-stale) keys.
+    assert len(counter._hits) <= MAX_TRACKED_KEYS  # noqa: SLF001
+
+
+# --- Salt exact length + meta endpoint ----------------------------------------------
+
+
+async def test_register_rejects_non_16_byte_salts(client):
+    for salt in (b"short", b"s" * 17, b"s" * 64):
+        response = await client.post(
+            "/api/auth/register",
+            json={
+                "username": "saltlen",
+                "salt": base64.b64encode(salt).decode(),
+                "verifier": base64.b64encode(b"v" * 32).decode(),
+            },
+        )
+        assert response.status_code == 422, salt
+
+
+async def test_meta_endpoint_exposes_threshold_and_llm_flag(client, settings):
+    settings.unlock_threshold_days = 30
+    response = await client.get("/api/meta")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["unlock_days"] == 30
+    assert body["llm_available"] is False
+    settings.llm_url = "https://llm.example"
+    response = await client.get("/api/meta")
+    assert response.json()["llm_available"] is True
+
+
+async def test_decoy_salt_uses_token_secret_and_16_bytes(client, app):
+    unknown = await client.post("/api/auth/salt", json={"username": "ghost"})
+    assert unknown.json()["salt"] == decoy_salt("ghost", app.state.settings.token_secret)
+    assert len(base64.b64decode(unknown.json()["salt"])) == 16
+
+
+def test_decoy_salt_uses_an_hkdf_subkey_not_the_raw_secret():
+    # Key separation pin: the decoy is HMAC under HKDF(token_secret,
+    # "mindpattern/decoy-salt/v1") — it must NOT equal the legacy raw
+    # HMAC(token_secret, ...) value, so token signing and decoy salts never
+    # share one HMAC key.
+    from app.api.auth import DECOY_SALT_INFO
+    from app.security.kdf import hkdf_sha256
+
+    secret = "unit-test-secret"
+    decoy_key = hkdf_sha256(secret.encode("utf-8"), None, DECOY_SALT_INFO)
+    expected = hmac.new(decoy_key, b"decoy:ghost", hashlib.sha256).digest()
+    assert decoy_salt("ghost", secret) == base64.b64encode(expected[:16]).decode("ascii")
+    legacy = hmac.new(secret.encode("utf-8"), b"decoy:ghost", hashlib.sha256).digest()
+    assert decoy_salt("ghost", secret) != base64.b64encode(legacy[:16]).decode("ascii")
+
+
+
+# ---------------------------------------------------------------------------
+# Pins from test_redteam_fixes_2026_09_16.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
+BACKEND_DIR = __file__.rsplit("/tests/", 1)[0] if "/" in __file__ else None
+
+TODAY_FIXED = date(2026, 9, 16)
+
+
+# ---------------------------------------------------------------------------
+# P0-1: crisis normalization — the obfuscation corpus both engines must beat
+# ---------------------------------------------------------------------------
+
+OBVIOUS_CRISIS = [
+    # leetspeak
+    "i will su1c1de tonight",
+    "k1ll myself",
+    "1 want to d1e so bad",
+    "un4l1ve myself",
+    # homoglyphs (Cyrillic lookalikes)
+    "ѕuicide is on my mind",
+    "kіll myself",
+    "сutting myself again",
+    "want to dіe",
+    # invisible characters
+    "su​icide",
+    "kill my​self",
+    "su­icide",
+    # intra-word separators
+    "s.u.i.c.i.d.e",
+    "k.i.l.l myself",
+    "c-u-t-t-i-n-g myself",
+    "s u i c i d e",
+    # plain-English gaps the old list missed
+    "i am going to off myself",
+    "put me out of my misery",
+    # non-English
+    "quiero morir",
+    "me quiero matar",
+    "quitarme la vida",
+    "je veux mourir",
+    "me suicider",
+    "ich will sterben",
+    "bringe mich um",
+    "suizid gedanken",
+    "voglio morire",
+    "quero morrer",
+    "me matar",
+    "我想死",
+    "自杀",
+    "死にたい",
+    "自殺",
+    "أريد أن أموت",
+    "मरना चाहता हूँ",
+    "मरना चाहती हूँ",
+]
+
+BENIGN = [
+    "killed it at the presentation today",
+    "cutting back on sugar this month",
+    # the single-letter join threshold must not eat ordinary prose
+    "i am so sad today",
+    "to be or not to be that is the question",
+    "a e i o u are vowels",
+    "u s a won gold",
+    "day 30 of my meditation streak, feeling fine",
+]
+
+
+class TestCrisisNormalization:
+    def test_obfuscated_crisis_language_is_caught_by_suppress(self):
+        for text in OBVIOUS_CRISIS:
+            assert crisis.matches_suppress(text), f"suppress tier missed {text!r}"
+
+    def test_obfuscated_crisis_language_fires_the_dialog_tier(self):
+        # Everything except the hopelessness phrasing (suppress-only by
+        # design) and bare "me matar" style fragments must reach the user.
+        suppress_only = {"i don't see any future for me", "no future for me at all", "me suicider"}
+        for text in OBVIOUS_CRISIS:
+            if text in suppress_only:
+                continue
+            assert crisis.matches_dialog(text), f"dialog tier missed {text!r}"
+
+    def test_benign_text_stays_silent(self):
+        for text in BENIGN:
+            assert not crisis.matches_dialog(text), f"dialog tier fired on {text!r}"
+
+    def test_normalization_is_idempotent_and_stable(self):
+        once = crisis.normalize_crisis_text("Ѕuіϲіde​ thoughts…")
+        assert crisis.normalize_crisis_text(once) == once
+        assert once == "suicide thoughts"
+
+    def test_bypassed_label_is_no_longer_quoted_in_questions(self):
+        # The end-to-end impact chain from the audit: a disguised crisis
+        # phrase recurring in the journal used to ride a pattern label into
+        # the daily question verbatim. With normalization, the pool filter
+        # catches it. L-40 (2026-09-20): this used to read
+        # ``assert not matches_suppress(label) or True`` — vacuous, so it
+        # pinned nothing. The load-bearing fact is the POSITIVE one: the
+        # suppress tier, through normalization, recognizes the disguised
+        # label (it is exactly the "s u i c i d e" gap-joined form pinned
+        # in OBVIOUS_CRISIS above), which is why the pool filter drops it.
+        label = "the s u i c i d e thoughts are loud again"
+        assert crisis.matches_suppress(label)
+        pattern = Pattern(
+            kind="rumination",
+            label=label,
+            occurrences=30,
+            confidence=0.9,
+            detail={"variants": [label]},
+        )
+        pool = questions.build_pool([pattern])
+        assert not any(label in q for q in pool), pool
+
+    def test_engine_marks_disguised_crisis_recurrence_sensitive(self):
+        # E2.disguised-crisis-recurrence: 81 days of the disguised phrase
+        # surfaced a QUOTED recurring_phrase card with sensitive=false.
+        entries = [
+            JournalEntry(
+                text=f"{label} could not focus at work",
+                entry_date=TODAY_FIXED - timedelta(days=d),
+                sentiment=None,
+            )
+            for d, label in (
+                (d, "the s u i c i d e thoughts are loud again") for d in range(81, -1, -1)
+            )
+        ]
+        result = brain.update(brain.fresh_state(), entries, TODAY_FIXED)
+        for surfaced in result.surfaced:
+            if surfaced.kind in ("recurring_phrase", "rumination"):
+                assert surfaced.detail.get("sensitive") is True, surfaced
+
+
+# ---------------------------------------------------------------------------
+# P0-2: the phi = 1.0 recompute crash
+# ---------------------------------------------------------------------------
+
+
+class TestMoodShiftPhiOne:
+    CORPUS_TEXT = "day {i}: work was busy, slept okay, walked the dog and read a bit."
+
+    def test_near_constant_mood_does_not_crash_the_engine(self):
+        entries = [
+            JournalEntry(
+                text=self.CORPUS_TEXT.format(i=i),
+                entry_date=TODAY_FIXED - timedelta(days=i),
+                sentiment=None,
+            )
+            for i in range(35, 0, -1)
+        ]
+        result = brain.update(brain.fresh_state(), entries, TODAY_FIXED)  # used to ZeroDivisionError
+        assert isinstance(result.surfaced, list)
+
+    def test_perfectly_constant_mood_does_not_crash(self):
+        entries = [
+            JournalEntry(
+                text="same as always", entry_date=TODAY_FIXED - timedelta(days=i), sentiment=None
+            )
+            for i in range(35, 0, -1)
+        ]
+        brain.update(brain.fresh_state(), entries, TODAY_FIXED)
+
+    def test_honest_inflation_still_applies(self):
+        # The clamp saturates the inflation cap: a phi of 0.999 and the old
+        # 1.0-epsilon behavior produce the same capped sigma multiplier.
+        values = [0.1 * (i + 1) for i in range(20)]  # monotone ramp, phi ~ 1.0
+        assert brain._lag1_autocorr(values) is not None
+
+
+# ---------------------------------------------------------------------------
+# P1: the single-process guard
+# ---------------------------------------------------------------------------
+
+
+class TestSingleProcessGuard:
+    def test_reentrant_within_one_process(self):
+        key = ("rt-secret-2026-09-16", "sqlite+aiosqlite:///reentrance")
+        with singleprocess.single_process_guard(*key):
+            with singleprocess.single_process_guard(*key):  # tests stack apps
+                pass
+        singleprocess.release_single_process_lock(*key)  # idempotent release
+
+    def test_second_process_is_refused(self):
+        # A REAL second process (what uvicorn --workers 2 spawns) must be
+        # refused while the first holds the deployment lock.
+        secret = "rt-secret-second-process"
+        url = "sqlite+aiosqlite:///second-proc"
+        with singleprocess.single_process_guard(secret, url):
+            probe = (
+                "import sys; sys.path.insert(0, '.');"
+                "from app import singleprocess;"
+                "singleprocess.acquire_single_process_lock(%r, %r)" % (secret, url)
+            )
+            done = subprocess.run(
+                [sys.executable, "-c", probe],
+                capture_output=True,
+                text=True,
+                cwd=BACKEND_DIR,
+                timeout=60,
+            )
+            assert done.returncode != 0
+            assert "another worker/process is already serving" in done.stderr
+
+
+# ---------------------------------------------------------------------------
+# D1: LLM spelled-contact label rejection
+# ---------------------------------------------------------------------------
+
+
+class TestLlmSpelledContact:
+    CORPUS = [
+        "reminder to myself call five five five zero one three four now",
+        "i keep meaning to visit evil dot com for laughs",
+        "work dominates my week and sleep is rough",
+    ]
+
+    def test_spelled_phone_label_is_dropped(self):
+        item = {
+            "kind": "temporal",
+            "label": "call five five five zero one three four",
+            "occurrences": 9,
+            "confidence": 0.9,
+        }
+        assert llm.sanitize_pattern(item, self.CORPUS) is None
+
+    def test_spelled_domain_label_is_dropped(self):
+        item = {
+            "kind": "temporal",
+            "label": "visit evil dot com often",
+            "occurrences": 3,
+            "confidence": 0.5,
+        }
+        assert llm.sanitize_pattern(item, self.CORPUS) is None
+
+    def test_number_word_run_below_threshold_still_passes(self):
+        # Two number-words in a row are ordinary prose ("one two punch");
+        # only 3+ consecutive ones are treated as a spelled phone number.
+        item = {
+            "kind": "temporal",
+            "label": "one two punch at work",
+            "occurrences": 3,
+            "confidence": 0.5,
+        }
+        out = llm.sanitize_pattern(item, self.CORPUS + ["one two punch at work"])
+        assert out is not None and out.label == "one two punch at work"
+
+    def test_digit_phone_and_urls_still_dropped(self):
+        for label in ("call 555-0134", "see https://evil.example", "www.evil.example"):
+            assert (
+                llm.sanitize_pattern(
+                    {"kind": "temporal", "label": label, "occurrences": 1, "confidence": 0.5},
+                    self.CORPUS,
+                )
+                is None
+            )
+
+
+# ---------------------------------------------------------------------------
+# Misc pins that would otherwise only live in the harness
+# ---------------------------------------------------------------------------
+
+
+def test_processing_ttl_ceiling_matches_consent_copy():
+    from app.config import MAX_PROCESSING_SESSION_TTL
+
+    assert MAX_PROCESSING_SESSION_TTL == 300  # "up to 5 minutes" (mobile copy)
+
+
+def test_kdf_floor_constant():
+    assert kdf.MIN_ITERATIONS == 100_000
+    assert kdf.MIN_ITERATIONS < kdf.KDF_ITERATIONS
+

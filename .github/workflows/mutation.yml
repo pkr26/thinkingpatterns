@@ -6,7 +6,8 @@ name: Mutation testing
 # coverage floors in ci.yml instead, and this workflow is the scheduled
 # deep check. Surviving mutants do NOT fail the run (`--CI` exits non-zero
 # only on fatal errors); the artifact is the deliverable. Triage survivors
-# against reports/mutation_report.md, which documents scope and caveats.
+# against the pins in backend/tests/ (mutation-pin suites) and pin or
+# document each one.
 #
 # The .mutmut-cache directory is cached between runs so a campaign that
 # exceeds one job's time budget resumes where it stopped instead of

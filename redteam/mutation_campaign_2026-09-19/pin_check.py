@@ -16,7 +16,7 @@ import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 
-PIN_FILE = "tests/test_mutation_pins_2026_09_19.py"
+PIN_FILE = "tests/test_mutation_pins.py"
 
 # mutant id -> the pin test node that must fail under it
 PINS: dict[str, str] = {

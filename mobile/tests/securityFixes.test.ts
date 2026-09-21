@@ -1,6 +1,6 @@
 /**
- * Regression pins for the 2026-09-16 red-team remediation wave
- * (reports/redteam_audit_2026-09-16.md), mobile side. The obfuscation
+ * Regression pins for the 2026-09-16 red-team remediation wave, mobile
+ * side (audit report preserved in git history). The obfuscation
  * corpus for crisis detection is pinned cross-engine by the shared JSON
  * fixtures (crisisPhrases.test.ts replays them); these tests cover the
  * fixes that are mobile-only behavior.

@@ -218,7 +218,7 @@ MUTANTS: list[dict] = [
         file="backend/app/security/enclave.py",
         find="            # Only the authorized caller consumes the store-owned buffer.\n            del self._keys[token]\n            return key",
         replace="            # Only the authorized caller consumes the store-owned buffer.\n            return key",
-        tests=backend_pytest("tests/test_enclave.py", "tests/test_mutation_pins_2026_09_19.py"),
+        tests=backend_pytest("tests/test_enclave.py", "tests/test_mutation_pins.py"),
     ),
     dict(
         id="C4", campaign="C", name="decrypt ignores AAD (context binding dropped)",
@@ -309,7 +309,7 @@ MUTANTS: list[dict] = [
         file="mobile/src/crisisDetect.ts",
         find="  const [primary, orphan, concat] = matchVariants(text);\n  return (\n    SUPPRESS_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||\n    SUPPRESS_CONCAT_PATTERNS.some((p) => p.test(concat))\n  );",
         replace="  const [primary, orphan, concat] = matchVariants(text);\n  return false;",
-        tests=vitest("mobile", "tests/crisisPhrases.test.ts", "tests/redteamFixes2026.test.ts"),
+        tests=vitest("mobile", "tests/crisisPhrases.test.ts", "tests/securityFixes.test.ts"),
     ),
     # ---------------------------------------------------------------- F. sharing & clients
     dict(
@@ -318,7 +318,7 @@ MUTANTS: list[dict] = [
         file="mobile/src/crypto/sharing.ts",
         find='  const digest = engine.createHash("sha256").update(Buffer.from(therapistPubSpkiB64, "base64")).digest();',
         replace='  const digest = engine.createHash("sha256").update(Buffer.from(therapistPubSpkiB64, "utf8")).digest();',
-        tests=vitest("mobile", "tests/crypto.test.ts", "tests/redteamFixes2026.test.ts"),
+        tests=vitest("mobile", "tests/crypto.test.ts", "tests/securityFixes.test.ts"),
     ),
     dict(
         id="F2", campaign="F", name="portal fingerprint hashes base64 text, not the DER key",

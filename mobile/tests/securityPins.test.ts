@@ -1,5 +1,6 @@
 /**
- * 2026-09-20 audit remediation, mobile wave 2 (fourth-pass fixes).
+ * Security pins from the 2026-09-20 remediation wave (fourth-pass
+ * fixes; originally test file auditFixes2026b.test.ts).
  *
  *   M-1  — stateSeqGuard fails closed once a high-water mark exists; the
  *          in-memory mirror survives storage tampering and self-heals it.

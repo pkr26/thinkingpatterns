@@ -11,8 +11,8 @@ name: Mobile mutation gate
 # mobile/.nvmrc that never existed — so the decay went unnoticed while
 # the offline-queue rewrite and keychain custody work landed with far
 # thinner mutation coverage than the 99-era corpus. The audit-fix wave
-# re-ran the FULL gate (24m, committed report in
-# mobile/reports/mutation/mutation.json): 81.21 aggregate, with
+  # re-ran the FULL gate (24m, report artifact under
+  # mobile/reports/mutation/): 81.21 aggregate, with
 # offlineQueue.ts lifted 67.9 -> 87.4 by restored behavior tests on the
 # way. The floor now pins TODAY's honest level so any further decay fails
 # loudly; raise it back toward 99 file-by-file (crisisDetect 66.3,
@@ -75,7 +75,7 @@ jobs:
           ")
           echo "mutation score: $SCORE"
           awk -v s="$SCORE" 'BEGIN { exit !(s < 81.0) }' && {
-            echo "::error::mobile mutation score $SCORE is below the 81.0 floor — triage survivors and pin them (see reports/mutation_report_mobile_2026-09-15.md for the discipline)"
+            echo "::error::mobile mutation score $SCORE is below the 81.0 floor — triage survivors and pin them (see the re-baseline triage note at the top of this workflow for the discipline)"
             exit 1
           }
       - name: Upload the report artifact

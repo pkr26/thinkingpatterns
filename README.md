@@ -391,7 +391,6 @@ cd backend
 MINDPATTERN_TEST_DB_URL="postgresql+asyncpg://…/mindpattern_test" .venv/bin/python -m pytest
 
 # Deep mutation testing over the security + services cores
-# (see reports/mutation_report.md for scope and caveats)
 PATH="$PWD/../.venv/bin:$PATH" ../.venv/bin/mutmut run
 ../.venv/bin/mutmut results                   # triage
 ../.venv/bin/mutmut show <id>                 # inspect a mutant
@@ -419,18 +418,17 @@ Between schedules, `.github/workflows/mutation-pr.yml` gates pull
 requests incrementally: every hand-written behavioral mutant
 (`redteam/mutation_campaign_*/`) whose target file is in the diff is
 re-applied and must stay killed, plus a bounded diff-scoped `mutmut` run
-where survivors fail the PR. Hand-written campaign history: round 1 —
-36 mutants over the non-negotiables, 36/36 post-pins
-(`reports/mutation_campaign_2026-09-18.md`); round 2 — 70 mutants over
-brain round 2, the threshold, crypto contracts, crisis handling, ops,
-idiographic isolation, the sync queue, and the red-team harnesses
-themselves as oracles (`reports/mutation_campaign_2026-09-18_round2.md`,
-which also records the first portal Stryker campaign — baseline 1.41% —
-and the scoped mobile re-runs); round 3 — 62 mutants over backend
+where survivors fail the PR. Hand-written campaign history (reports
+preserved in git history): round 1 —
+36 mutants over the non-negotiables, 36/36 post-pins; round 2 — 70
+mutants over brain round 2, the threshold, crypto contracts, crisis
+handling, ops, idiographic isolation, the sync queue, and the red-team
+harnesses themselves as oracles (which also records the first portal
+Stryker campaign — baseline 1.41% — and the scoped mobile re-runs);
+round 3 — 62 mutants over backend
 infrastructure: authorization & access control, database/ORM, boundaries,
 error handling & transactions, cache/invalidation, and rate
-limiting/concurrency (`reports/mutation_campaign_2026-09-19.md`, 46 killed
-+ 14 new pins + 2 documented residuals).
+limiting/concurrency (46 killed + 14 new pins + 2 documented residuals).
 `.pre-commit-config.yaml` mirrors the ruff gate locally.
 
 ## Environment variables
@@ -524,148 +522,42 @@ turn it back into readable files offline.
   client payload extension — the entry contract (`v:1`, date-only) is
   versioned for exactly this.
 
-## Red-team audit & remediation (2026-09-16)
+## Security & analysis hardening history
 
-A full adversarial audit ran as executable attack harnesses (`redteam/`,
-report in `reports/redteam_audit_2026-09-16.md` — 96 verdicts). Every
-fixable finding was remediated and pinned by regression tests; the
-post-fix campaign re-run shows 63 attacks blocked with the remainder
-documented as design residuals. Headlines: crisis-language normalization
-on both engines (leetspeak/homoglyph/zero-width/non-English bypasses
-closed, 30/35 -> 1/35), the phi=1.0 recompute crash fixed, the data key
-now refuses plain HTTP, multi-worker boots are refused by a deployment
-lock, KDF iteration floors and nonce-seam removal on both platforms, LLM
-generation limits + spelled-contact rejection + 10s timeout, TTL ceiling
-aligned with the consent copy, encrypted backups (required BACKUP_KEY),
-and a username-free export bundle. See CHANGELOG "2026-09-16 red-team
-remediation wave" for the full list.
+This codebase went through an internal multi-pass security program
+(red-team harness campaigns, two pentest rounds, full-codebase audits
+with independent verification, four mutation-testing rounds, and a
+365-day simulation pass) between 2026-09-15 and 2026-09-21. Every
+code-fixable finding was remediated and pinned by a regression test that
+names the finding it guards; the durable summary lives in CHANGELOG.md
+("Security hardening close-out"), and the full per-finding history is
+preserved in git history. The executable attack harnesses remain in
+`redteam/` (`bash redteam/run_all.sh`).
 
-## Post-audit changelog (security remediation)
+Facts an operator should know from that history:
 
-This codebase underwent a multi-pass adversarial audit; all findings were
-fixed or explicitly documented above. Highlights: scrypt moved off the
-event loop (and N raised to 2¹⁶); register enumeration throttled
-per-username with uniform work; salt lookup moved to POST with decoys;
-tokens gained epoch revocation + logout; account deletion and LLM
-enablement require re-authentication; baseline-phase recompute decrypts
-nothing; processing sessions are single-use with key zeroization; LLM path
-is consent-gated and output-sanitized; whole-body size cap + 422
-input-echo removal + headers on 500s; multi-line XFF parsing + bounded
-rate-counter memory + delete-endpoint rate limits; backdating blocked;
-per-account quotas + streamed export; offline queue account-binding +
-wipe races + loud capacity; login-flash tri-state; app-switcher privacy
-shield; TS↔Python AAD canonicalization pinned with non-ASCII vectors.
+- **Statistical honesty is regression-pinned.** All statistical pattern
+  kinds pass a replication gate before surfacing; claims carry real
+  p-values inside the Benjamini-Hochberg family. Single-shot pure-noise
+  runs surface 0 false statistical cards (0/60); daily-cadence pure noise
+  surfaces >=1 false card in <=1/24 runs, the survivor being a documented
+  FDR-budget boundary case (pinned by
+  `test_daily_cadence_pure_noise_replication_bound`).
+- **Crisis interlock.** Crisis-adjacent (suicidal-ideation/self-harm)
+  rumination or phrase patterns never feed question generation; the
+  offline crisis-resources screen is the path instead. Crisis-language
+  normalization (NFKC, invisible characters, homograph/leet folding,
+  SMS-digit and past-tense forms, Spanish) runs on both engines.
+- **Analysis runs on server-validated dates only**; the brain never
+  trusts client-controlled dates inside encrypted blobs.
+- `probe_brain.py` (9/9 planted-pattern corpus) gates CI and exits
+  non-zero on any failure.
+- Documented residuals (accepted with written rationale): data-key escrow
+  during consented recomputes (recoverable via key rotation), CSP
+  `style-src 'unsafe-inline'` (no injection path), plaintext draft
+  surviving vault lock, operator tooling mutable tags (pin before
+  production).
 
-## v3 changelog (analysis remediation)
-
-The v2 engine was audited against a ground-truth corpus (`probe_brain.py`)
-and clinical methodology (RESEARCH.md). Findings fixed: raw pooled mood
-correlations manufactured false claims during any mood trend (now
-within-person residuals — the intensive-longitudinal standard); the
-weekday test selected the argmax day before testing (anti-conservative
-~7×; now every candidate weekday enters the FDR family); binary sentiment
-(now a graded VADER-style engine); no linking (now lag-1 day-after links);
-no dynamics (now inertia + instability); recurring phrases were
-sentiment-blind (negative clusters now surface as rumination with
-absolutist density); EWMA λ moved into the validated 0.05–0.25 band; phrase
-pattern-ids anchored on their earliest member (stable lifecycle). Added:
-crisis resources screen (offline, safe-messaging), evidence panel per
-pattern card, device-local baseline-phase mood trend, the demo seeder, and
-emergent topic discovery (the audit's topic-blindness finding — the lexicon
-no longer bounds what the brain can talk about).
-
-A second independent audit of the v3 work was then applied: every weekday
-candidate now enters the FDR family (not just the best); non-finite client
-mood tags are rejected at the parse layer and clamped in the engine; the
-device-local mood log is AES-256-GCM encrypted under the data key
-(AAD-bound to the account, legacy plaintext migrates transparently);
-high-frequency journal verbs can no longer surface as "topics".
-**Migration note:** phrase/rumination pattern-ids changed format
-(representative text → hash anchored on the cluster's earliest member), so
-patterns stored by the pre-v3 brain orphan once and age out through the
-fade → archive → drop lifecycle instead of being silently re-labeled.
-
-## Post-audit remediation #2 (red-team round)
-
-A second multi-pass adversarial audit found and this pass fixed:
-
-* **Analysis runs on server-validated dates only.** The brain previously
-  trusted the client-controlled `created_at` inside the encrypted blob —
-  one entry dated year 3000 overflowed the decay math and 500-bricked
-  every future recompute (reproduced end-to-end). The inner date is now
-  sanity-checked against the stored `entry_date` (±1 day), decay weights
-  are clamped, and `OverflowError` is handled.
-* **Statistical honesty:** inertia/instability/mood-shift claims now carry
-  real p-values inside the Benjamini–Hochberg family (they previously
-  bypassed correction); the EWMA chart inflates its limits for
-  autocorrelated mood (measured ~18% false alarms on stationary AR(1)
-  series, now ≤2/12 in the regression sim); two *constant* mood groups can
-  no longer fabricate p≈1e-22 from the variance floor alone; rising-topic
-  claims are corrected for the full candidate family and require a
-  substantial relative gain (false rising-topic windows on pure noise:
-  66/100 → 19/100); corpus-boilerplate words ("unique day") can no longer
-  surface as topics; pattern labels are capped at write time.
-  *Honest residual, re-measured after the later full-family-BH and
-  replication-gate fixes (which supersede the ~29% figure this pass
-  reported):* single-shot pure-noise runs now surface **0** false
-  statistical cards (0/60); daily-cadence pure noise (14 recomputes over a
-  growing corpus) surfaces ≥1 false card in ≤1/24 runs (4.2%), and the one
-  surviving card is a documented FDR-budget boundary case — a fluke weekday
-  concentration at p ≈ 5e-4 that the q = 0.05 correction legitimately
-  calls a discovery, corroborated the next day by a chance mention — not a
-  gate leak. Regression-pinned by
-  `test_daily_cadence_pure_noise_replication_bound` in `tests/test_brain.py`.
-* **Crisis interlock:** rumination/recurring-phrase patterns whose label
-  is crisis-adjacent (suicidal ideation, self-harm) are excluded from
-  question generation — the app never asks the user to reflectively engage
-  with such a thought; the offline crisis-resources screen is the path.
-  The mobile app additionally exposes crisis resources from the login and
-  locked screens, and can unlock the vault offline from a cached salt.
-* **Ops fail-closed gaps:** `MINDPATTERN_ENV` is normalized (case/
-  whitespace typos no longer disarm production gates); the ≥32-char token
-  secret floor applies to every non-development environment; empty
-  secrets are treated as unset; numeric settings are range-validated
-  (0/negative abort startup); registration issues the token before the
-  row commits.
-* **Availability:** per-user locking makes the storage quota race-free
-  (30 concurrent creates against a 5-entry quota now store exactly 5);
-  baseline-phase recomputes load dates only (no ciphertext pull); analysis
-  text is capped per entry and per recompute; overlong sentences are
-  excluded from phrase clustering and LSH buckets are pair-capped (a
-  crafted 400 KB corpus cost 127 s of pairwise comparison, now bounded);
-  recomputes run on a dedicated capacity limiter so they cannot starve
-  login scrypt on the shared thread pool.
-* **Rate limiting:** registration's per-username bucket counts only real
-  name conflicts (anonymous garbage probes cannot lock out a prospective
-  user); login remains source-rate-limited rather than name-locked so a
-  distributed attacker cannot spend a victim's lockout budget. IPv6 clients
-  aggregate to /64; eviction prefers single-hit garbage over active
-  multi-hit buckets.
-* **Integrity:** SQLite enforces foreign keys (`PRAGMA foreign_keys=ON`),
-  so `ondelete=CASCADE` is real and post-deletion stragglers become
-  orphan-proof; only unique-constraint failures map to 409; processing
-  sessions are single-use by atomic `pop()` (mechanism, not scheduling).
-* **LLM sanitizer:** every label is corpus-grounded (prompt-injected
-  "URGENT call 555-0134" labels are rejected) and URL/phone-free;
-  non-finite numerics (NaN/Infinity) are dropped and all numerics are
-  bounded, so a hostile model can no longer write invalid JSON into the
-  insights blob.
-* **Mobile:** changing the server URL clears the session (a live token +
-  data key can no longer be silently repointed at an attacker's origin);
-  sign-out preserves the offline queue (unsynced entries are no longer
-  destroyed); a corrupt queue is quarantined, not deleted; enqueue is
-  TOCTOU-safe; the legacy plaintext mood log migrates on first read; the
-  vault auto-locks on background; the daily recompute stamp is per-account
-  with an in-flight guard; entry/mood dates use device-local time; the
-  account-deletion path clears mood log, stamps, cached salt and queue;
-  server error text strips bidi/zero-width characters; off-origin
-  redirects are refused.
-* `probe_brain.py` now exits non-zero on any FAIL (it can gate CI).
-
-The CI workflows are the current source of truth for test totals: they run
-the backend matrix plus PostgreSQL, the 9/9 brain probe, mobile and portal
-type/test/build/audit gates, and cross-platform crypto vectors from clean
-dependency installs.
 
 ## License
 

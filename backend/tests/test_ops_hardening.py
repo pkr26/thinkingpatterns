@@ -1,40 +1,33 @@
-"""2026-09-17 ops hardening — metrics, byte budget, cross-host guard.
+"""Ops hardening regression pins (metrics, byte budget, retention, guards).
 
-Three changes, pinned here:
-
-  1. /metrics — privacy-safe aggregate counters (status families, recompute
-     histogram, LLM failure counts, keystore length). Fail-closed auth:
-     without MINDPATTERN_METRICS_TOKEN the endpoint is development-only.
-  2. ANALYSIS BLOB BUDGET — _load_rows fetches ids+sizes first and only
-     then the newest rows within the byte budget, so peak recompute
-     memory is bounded by the analysis budget, not the storage quota.
-  3. CROSS-HOST BOOT GUARD — on Postgres the app holds a lifetime session
-     advisory lock; a second host on the same database refuses to boot
-     (the 2026-09-16 flock guard is per-host only). The lock's autobegun
-     transaction is COMMITTED — session locks survive commit, and an
-     idle-in-transaction guard connection would pin xmin for the app
-     lifetime (see test_ops_fixes_2026_09_17b.py for the rest of the
-     2026-09-17 ops fixes).
+Pins from the 2026-09-17 ops hardening wave and its round-B follow-up
+(live metrics token, constant-time compare, retention sweep), plus the
+cross-host boot guard. If one starts failing, an operational safety fix
+regressed -- treat it as a release blocker.
 """
-
 from __future__ import annotations
-
-import base64
-import json
-import os
-import uuid
-from datetime import date, timedelta
-
-import pytest
-
 from app.config import Settings
 from app.main import _acquire_cross_host_guard, create_app
-from app.metrics import RECOMPUTE_BUCKETS, MetricsRegistry
-from app.models import Entry
+from app.metrics import MetricsRegistry, RECOMPUTE_BUCKETS
+from app.models import AccessLog, Entry, new_id, utcnow
 from app.security import crypto
+from datetime import date, timedelta
+from sqlalchemy import select
+from tests.helpers import ClientEmulator, TherapistEmulator
+import asyncio
+import base64
+import hmac
+import json
+import app.main as main_mod
+import os
+import pytest
+import uuid
 
-from .helpers import ClientEmulator
 
+# ---------------------------------------------------------------------------
+# Pins from test_ops_hardening_2026_09_17.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
 TODAY = date(2026, 9, 17)
 
 
@@ -281,3 +274,119 @@ async def test_cross_host_guard_refuses_when_lock_taken():
 
     with pytest.raises(RuntimeError, match="another host"):
         await _acquire_cross_host_guard(TakenEngine())
+
+
+
+# ---------------------------------------------------------------------------
+# Pins from test_ops_fixes_2026_09_17b.py (renamed in the 2026-09-20 production
+# cleanup; see git history for the original file).
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 1-2. /metrics token: live settings + constant-time compare
+# ---------------------------------------------------------------------------
+
+
+async def test_metrics_token_comes_from_the_live_settings():
+    # The closure's settings carry NO token; a runtime replacement does.
+    # Against the stale closure the empty "Bearer " expectation used to
+    # be accepted — the live read must reject everything but the token
+    # the app is actually running with.
+    closure_settings = Settings(environment="development")
+    assert closure_settings.metrics_token == ""
+    app = create_app(closure_settings)
+    app.state.settings = Settings(
+        environment="development",
+        token_secret="live-settings-secret-not-for-production",
+        metrics_token="live-token",
+    )
+    from httpx import ASGITransport, AsyncClient
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        assert (await ac.get("/metrics")).status_code == 401
+        # The stale-closure expectation (empty token) must NOT authenticate.
+        stale = await ac.get("/metrics", headers={"Authorization": "Bearer "})
+        assert stale.status_code == 401
+        ok = await ac.get("/metrics", headers={"Authorization": "Bearer live-token"})
+        assert ok.status_code == 200
+
+
+async def test_metrics_token_comparison_is_constant_time(monkeypatch):
+    token_settings = Settings(environment="development")
+    token_settings.metrics_token = "ops-secret"
+    token_app = create_app(token_settings)
+    seen: list[tuple[object, object]] = []
+    real = hmac.compare_digest
+
+    def spy(left, right):
+        seen.append((left, right))
+        return real(left, right)
+
+    monkeypatch.setattr(main_mod.hmac, "compare_digest", spy)
+    from httpx import ASGITransport, AsyncClient
+
+    async with AsyncClient(transport=ASGITransport(app=token_app), base_url="http://t") as ac:
+        response = await ac.get("/metrics", headers={"Authorization": "Bearer ops-secret"})
+    assert response.status_code == 200
+    byte_pairs = [
+        pair for pair in seen if isinstance(pair[0], bytes) and isinstance(pair[1], bytes)
+    ]
+    assert byte_pairs, "the /metrics token check must call hmac.compare_digest on bytes"
+
+
+# ---------------------------------------------------------------------------
+# 3. access_log retention sweep
+# ---------------------------------------------------------------------------
+
+
+async def test_sweep_task_is_created_and_cancelled_with_the_lifespan(settings):
+    application = create_app(settings)
+    async with application.router.lifespan_context(application):
+        task = application.state.access_log_sweep_task
+        assert isinstance(task, asyncio.Task)
+        assert not task.done()
+    # Shutdown cancels the sweep (and reaps it) before the engine is
+    # disposed — a lingering task would race the dispose.
+    assert task.cancelled() or task.done()
+
+
+async def test_prune_once_deletes_only_rows_past_retention(client, app):
+    now = utcnow()
+
+    def _row(action: str, at) -> AccessLog:
+        return AccessLog(
+            actor_id=new_id(), actor_role="therapist", user_id=new_id(), action=action, at=at
+        )
+
+    async with app.state.sessionmaker() as session:
+        session.add(_row("read_insights", now - timedelta(days=731)))
+        session.add(_row("read_notes", now))
+        await session.commit()
+
+    await main_mod._prune_access_log_once(app)
+
+    async with app.state.sessionmaker() as session:
+        remaining = (await session.execute(select(AccessLog.action))).scalars().all()
+    assert remaining == ["read_notes"]
+
+
+async def test_pairing_codes_and_sweep_share_one_prune_statement(client, monkeypatch):
+    import app.api.therapist as therapist_mod
+
+    seen = []
+    real = therapist_mod.access_log_prune_statement
+
+    def spy(now, retention_days=730):
+        statement = real(now, retention_days)
+        seen.append(statement)
+        return statement
+
+    monkeypatch.setattr(therapist_mod, "access_log_prune_statement", spy)
+
+    doc = TherapistEmulator("sweepshare", "pw")
+    await doc.register(client)
+    await doc.create_pairing_code(client)  # the opportunistic prune path
+    assert len(seen) == 1
+
+    await main_mod._prune_access_log_once(client._transport.app)  # the sweep path
+    assert len(seen) == 2
+

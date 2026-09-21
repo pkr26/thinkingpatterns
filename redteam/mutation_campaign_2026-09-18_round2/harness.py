@@ -312,7 +312,7 @@ MUTANTS: list[dict] = [
         find="    earliest = min(created_day, today) - timedelta(days=BACKDATE_GRACE_DAYS)",
         replace="    earliest = min(created_day, today) - timedelta(days=400)",
         tests=backend_pytest("tests/test_entries_api.py", "tests/test_threshold.py",
-                             "tests/test_api_hardening_r3.py"),
+                             "tests/test_api_hardening.py"),
     ),
     dict(
         id="H6", campaign="H", name="forward-dating grace widened to 6 days",
@@ -320,7 +320,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/entries.py",
         find="    if entry_date > today + timedelta(days=FORWARD_GRACE_DAYS):",
         replace="    if entry_date > today + timedelta(days=6):",
-        tests=backend_pytest("tests/test_entries_api.py", "tests/test_api_hardening_r3.py"),
+        tests=backend_pytest("tests/test_entries_api.py", "tests/test_api_hardening.py"),
     ),
     dict(
         id="H7", campaign="H", name="baseline-phase recompute proceeds to analysis anyway",
@@ -478,7 +478,7 @@ MUTANTS: list[dict] = [
         file="backend/app/config.py",
         find="        self.environment = self.environment.strip().lower()",
         replace="        self.environment = self.environment.strip()",
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_ops_hardening_2026_09_17.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_ops_hardening.py"),
     ),
     dict(
         id="K2", campaign="K", name="32-char token-secret floor removed",
@@ -486,7 +486,7 @@ MUTANTS: list[dict] = [
         file="backend/app/config.py",
         find='            if len(self.token_secret.strip()) < 32:',
         replace="            if len(self.token_secret.strip()) < 1:",
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_ops_hardening_2026_09_17.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_ops_hardening.py"),
     ),
     dict(
         id="K3", campaign="K", name="SQLite accepted outside development",
@@ -494,7 +494,7 @@ MUTANTS: list[dict] = [
         file="backend/app/config.py",
         find='            if self.database_url.startswith("sqlite"):',
         replace="            if False:",
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_ops_hardening_2026_09_17.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_ops_hardening.py"),
     ),
     dict(
         id="K4", campaign="K", name="OpenAPI docs always mounted",
@@ -502,7 +502,7 @@ MUTANTS: list[dict] = [
         file="backend/app/main.py",
         find='        docs_url="/docs" if is_development else None,',
         replace='        docs_url="/docs",',
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py", "tests/test_mutation_pins_2026_09_18b.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening.py", "tests/test_mutation_pins.py"),
     ),
     dict(
         id="K5", campaign="K", name="HSTS header dropped from the response set",
@@ -510,7 +510,7 @@ MUTANTS: list[dict] = [
         file="backend/app/middleware.py",
         find='    (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),\n',
         replace="",
-        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py", "tests/test_mutation_pins.py"),
+        tests=backend_pytest("tests/test_hardening.py", "tests/test_api_hardening.py", "tests/test_mutation_pins.py"),
     ),
     dict(
         id="K6", campaign="K", name="request body cap effectively removed (x 1,000,000)",
@@ -518,7 +518,7 @@ MUTANTS: list[dict] = [
         file="backend/app/middleware.py",
         find="        self.max_body_bytes = max_body_bytes",
         replace="        self.max_body_bytes = max_body_bytes * 1_000_000",
-        tests=backend_pytest("tests/test_api_hardening_r3.py", "tests/test_hardening.py"),
+        tests=backend_pytest("tests/test_api_hardening.py", "tests/test_hardening.py"),
     ),
     dict(
         id="K7", campaign="K", name="per-account entry-count quota check disabled",
@@ -526,7 +526,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/entries.py",
         find="    if count >= settings.max_entries_per_user:",
         replace="    if False:",
-        tests=backend_pytest("tests/test_entries_api.py", "tests/test_api_hardening_r3.py"),
+        tests=backend_pytest("tests/test_entries_api.py", "tests/test_api_hardening.py"),
     ),
     # ---------------------------------------------------------------- L. idiographic isolation
     dict(

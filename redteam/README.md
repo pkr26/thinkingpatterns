@@ -1,7 +1,10 @@
 # Red-team campaign harness
 
-Executable attack harnesses for the audits catalogued in
-`reports/redteam_audit_2026-09-16.md`. Run everything:
+Executable attack harnesses for the security audits (2026-09-16 through
+2026-09-20). The original per-finding reports were removed in the
+production cleanup; the remediations live on as regression pins in the
+backend/mobile test suites, and the full audit history is preserved in git
+history (commits tagged 2026-09-16 .. 2026-09-21). Run everything:
 
 ```bash
 bash redteam/run_all.sh
@@ -19,12 +22,12 @@ bash redteam/run_all.sh
 | `g_infra.py` | G1–G3 | backup config, supply chain, fail-closed boots, hygiene |
 | `h_privacy.py` | H1–H3 | metadata inference, export, erasure |
 | `../mobile/redteam/f_mobile.test.ts` | E1-TS, A2, A3, A4-TS, A6-TS, F1, F2, F4 | real mobile modules under vitest |
-| `mutation_campaign_2026-09-18/` | — | behavioral mutation campaign: 36 mutants over the non-negotiables (see `../../reports/mutation_campaign_2026-09-18.md`) |
-| `mutation_campaign_2026-09-18_round2/` | — | round 2: 70 mutants over brain round 2, threshold, crypto contracts, crisis, ops, idiographic isolation, sync queue, and REDTEAM-AS-ORACLE (mutate a control, check these harnesses notice) — which found and fixed the harness rot below (see `../../reports/mutation_campaign_2026-09-18_round2.md`) |
-| `mutation_campaign_2026-09-19/` | — | round 3: 62 mutants over backend infrastructure — authorization & access control, database/ORM, boundaries & business logic, error handling & transactions, cache & invalidation, rate limiting & concurrency (see `../../reports/mutation_campaign_2026-09-19.md`; adds `pin_check.py`, the hand-verification driver that re-applies each mutant against its pin) |
+| `mutation_campaign_2026-09-18/` | — | behavioral mutation campaign: 36 mutants over the non-negotiables (campaign report preserved in git history) |
+| `mutation_campaign_2026-09-18_round2/` | — | round 2: 70 mutants over brain round 2, threshold, crypto contracts, crisis, ops, idiographic isolation, sync queue, and REDTEAM-AS-ORACLE (mutate a control, check these harnesses notice) — which found and fixed the harness rot below |
+| `mutation_campaign_2026-09-19/` | — | round 3: 62 mutants over backend infrastructure — authorization & access control, database/ORM, boundaries & business logic, error handling & transactions, cache & invalidation, rate limiting & concurrency (adds `pin_check.py`, the hand-verification driver that re-applies each mutant against its pin) |
 | `run_pr_mutation_gate.py` | — | per-PR gate: re-applies every behavioral mutant whose target file is in the diff (wired in `.github/workflows/mutation-pr.yml` with a bounded diff-scoped mutmut job) |
 
-Artefacts: `results/*.json` (verdicts), `aad_corpus.json`, `crisis_corpus.json`
+Generated at runtime (gitignored): `results/*.json` verdicts and per-campaign `results/`. Tracked fixtures: `aad_corpus.json`, `crisis_corpus.json`
 (promote both into the main suites as regression fixtures). Everything runs
 against throwaway in-process or localhost servers; nothing leaves the machine.
 

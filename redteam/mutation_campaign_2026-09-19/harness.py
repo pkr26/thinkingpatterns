@@ -81,7 +81,7 @@ MUTANTS: list[dict] = [
         file="backend/app/deps.py",
         find='    if payload.get("ep", 1) != user.token_epoch:',
         replace="    if False:",
-        tests=[backend_pytest("tests/test_auth_api.py", "tests/test_api_hardening_r3.py")],
+        tests=[backend_pytest("tests/test_auth_api.py", "tests/test_api_hardening.py")],
     ),
     dict(
         id="O2", campaign="O", name="is_active check dropped (deactivated accounts authenticate)",
@@ -89,7 +89,7 @@ MUTANTS: list[dict] = [
         file="backend/app/deps.py",
         find="    if user is None or not user.is_active:\n        raise failure",
         replace="    if user is None:\n        raise failure",
-        tests=[backend_pytest("tests/test_hardening.py", "tests/test_auth_api.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_hardening.py", "tests/test_auth_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="O3", campaign="O", name="journal role wall removed (therapist token reaches journal endpoints)",
@@ -155,7 +155,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/therapist.py",
         find="        if not hmac.compare_digest(provided_enrollment.encode(), expected_enrollment.encode()):",
         replace="        if False:",
-        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="O11", campaign="O", name="recompute pops the processing token without the owner pin",
@@ -196,7 +196,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/insights.py",
         find="                select(Entry.entry_date)\n                .distinct()",
         replace="                select(Entry.entry_date)",
-        tests=[backend_pytest("tests/test_threshold.py", "tests/test_insights_api.py", "tests/test_api_hardening_r3.py")],
+        tests=[backend_pytest("tests/test_threshold.py", "tests/test_insights_api.py", "tests/test_api_hardening.py")],
     ),
     dict(
         id="P5", campaign="P", name="entries pagination loses the id tiebreak (unstable page order)",
@@ -204,7 +204,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/entries.py",
         find="                metadata_query.order_by(\n                    Entry.entry_date.asc(), Entry.received_at.asc(), Entry.id.asc()\n                )",
         replace="                metadata_query.order_by(\n                    Entry.entry_date.asc(), Entry.received_at.asc()\n                )",
-        tests=[backend_pytest("tests/test_entry_pagination_bytes.py", "tests/test_snapshot_revisions.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_entry_pagination_bytes.py", "tests/test_snapshot_revisions.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="P6", campaign="P", name="same-day question upsert no longer rewrites the blob",
@@ -212,7 +212,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/insights.py",
         find='            set_={"blob": blob, "created_at": now},',
         replace='            set_={"created_at": now},',
-        tests=[backend_pytest("tests/test_api_hardening_r3.py", "tests/test_insights_api.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_api_hardening.py", "tests/test_insights_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="P7", campaign="P", name="undated insight replace deletes EVERY kind for the user",
@@ -253,7 +253,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/entries.py",
         find="ENTRY_PAGE_BLOB_BYTES = 2 * 1024 * 1024",
         replace="ENTRY_PAGE_BLOB_BYTES = 200 * 1024 * 1024",
-        tests=[backend_pytest("tests/test_entry_pagination_bytes.py", "tests/test_api_hardening_r3.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_entry_pagination_bytes.py", "tests/test_api_hardening.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="Q2", campaign="Q", name="has_more probe row dropped (limit+1 -> limit)",
@@ -301,7 +301,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/insights.py",
         find="QUESTION_RETENTION_DAYS = 90",
         replace="QUESTION_RETENTION_DAYS = 900",
-        tests=[backend_pytest("tests/test_api_hardening_r3.py", "tests/test_deep_mutation_pins.py")],
+        tests=[backend_pytest("tests/test_api_hardening.py", "tests/test_deep_mutation_pins.py")],
     ),
     dict(
         id="Q8", campaign="Q", name="access-log retention x100 (prune never fires)",
@@ -309,7 +309,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/therapist.py",
         find="    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days))",
         replace="    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days * 100))",
-        tests=[backend_pytest("tests/test_ops_fixes_2026_09_17b.py")],
+        tests=[backend_pytest("tests/test_ops_hardening.py")],
     ),
     dict(
         id="Q9", campaign="Q", name="therapist caseload cap 100 -> 10,000",
@@ -317,7 +317,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/consents.py",
         find="MAX_PATIENTS_PER_THERAPIST = 100",
         replace="MAX_PATIENTS_PER_THERAPIST = 10_000",
-        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="Q10", campaign="Q", name="wrapped-key size bound 256 -> 256,000",
@@ -333,7 +333,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/insights.py",
         find="INNER_DATE_TOLERANCE_DAYS = 1",
         replace="INNER_DATE_TOLERANCE_DAYS = 30",
-        tests=[backend_pytest("tests/test_brain_api.py", "tests/test_brain_hardening_2026_09_17.py", "tests/test_deep_mutation_pins.py")],
+        tests=[backend_pytest("tests/test_brain_api.py", "tests/test_brain_hardening.py", "tests/test_deep_mutation_pins.py")],
     ),
     # ---------------------------------------------------------------- R. error handling & transactions
     dict(
@@ -342,7 +342,7 @@ MUTANTS: list[dict] = [
         file="backend/app/main.py",
         find="    if not isinstance(detail, str) or not detail:",
         replace="    if False:",
-        tests=[backend_pytest("tests/test_api_hardening_r3.py", "tests/test_hardening.py", "tests/test_deep_mutation_pins.py")],
+        tests=[backend_pytest("tests/test_api_hardening.py", "tests/test_hardening.py", "tests/test_deep_mutation_pins.py")],
     ),
     dict(
         id="R2", campaign="R", name="deep-JSON RecursionError arm retargeted (400 becomes 500)",
@@ -350,7 +350,7 @@ MUTANTS: list[dict] = [
         file="backend/app/middleware.py",
         find="        except RecursionError:",
         replace="        except IndexError:",
-        tests=[backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py", "tests/test_coverage_gaps.py")],
+        tests=[backend_pytest("tests/test_hardening.py", "tests/test_api_hardening.py", "tests/test_coverage_gaps.py")],
     ),
     dict(
         id="R3", campaign="R", name="middleware-produced responses drop the security header set",
@@ -358,7 +358,7 @@ MUTANTS: list[dict] = [
         file="backend/app/middleware.py",
         find='                "headers": [(b"content-type", b"application/json"), *SECURITY_HEADERS],',
         replace='                "headers": [(b"content-type", b"application/json")],',
-        tests=[backend_pytest("tests/test_hardening.py", "tests/test_api_hardening_r3.py", "tests/test_coverage_gaps.py")],
+        tests=[backend_pytest("tests/test_hardening.py", "tests/test_api_hardening.py", "tests/test_coverage_gaps.py")],
     ),
     dict(
         id="R4", campaign="R", name="recompute FK violation no longer maps to 410",
@@ -366,7 +366,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/insights.py",
         find="                    if _is_fk_violation(exc):",
         replace="                    if False:",
-        tests=[backend_pytest("tests/test_deep_mutation_pins.py", "tests/test_api_hardening_r3.py")],
+        tests=[backend_pytest("tests/test_deep_mutation_pins.py", "tests/test_api_hardening.py")],
     ),
     dict(
         id="R5", campaign="R", name="unique-violation classifier says yes to everything",
@@ -382,7 +382,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/auth.py",
         find="            update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)",
         replace="            update(User).where(User.id == user.id).values(token_epoch=user.token_epoch)",
-        tests=[backend_pytest("tests/test_auth_api.py", "tests/test_api_hardening_r3.py")],
+        tests=[backend_pytest("tests/test_auth_api.py", "tests/test_api_hardening.py")],
     ),
     dict(
         id="R7", campaign="R", name="export admission slot never released in the generator finally",
@@ -398,7 +398,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/consents.py",
         find='                raise ApiError(\n                    status_code=409, detail="consent already being granted", code="conflict"\n                ) from exc',
         replace="                raise",
-        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_api_resilience_coverage.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_api_resilience_coverage.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="R9", campaign="R", name="revoke lifecycle recheck disabled (deleted account still revokes)",
@@ -414,7 +414,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/therapist.py",
         find="            await session.rollback()\n            if not _is_unique_violation(exc):\n                raise",
         replace="            await session.rollback()\n            if False:\n                raise",
-        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_mutation_pins.py")],
     ),
     # ---------------------------------------------------------------- S. cache & invalidation
     dict(
@@ -432,7 +432,7 @@ MUTANTS: list[dict] = [
         file="backend/app/security/enclave.py",
         find="            doomed = [t for t, (_, _, o) in self._keys.items() if o == owner]",
         replace="            doomed = []",
-        tests=[backend_pytest("tests/test_enclave.py", "tests/test_api_hardening_r3.py",
+        tests=[backend_pytest("tests/test_enclave.py", "tests/test_api_hardening.py",
                              "tests/test_account_api.py")],
     ),
     dict(
@@ -441,7 +441,7 @@ MUTANTS: list[dict] = [
         file="backend/app/security/enclave.py",
         find="                if owner_sessions >= self._max_sessions_per_owner:",
         replace="                if False:",
-        tests=[backend_pytest("tests/test_enclave.py", "tests/test_hardening.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_enclave.py", "tests/test_hardening.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="S4", campaign="S", name="entry delete does not advance the snapshot revision",
@@ -457,7 +457,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/entries.py",
         find="    if expected_revision is not None and expected_revision != current_revision:",
         replace="    if expected_revision is not None and expected_revision < current_revision:",
-        tests=[backend_pytest("tests/test_snapshot_revisions.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_snapshot_revisions.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="S6", campaign="S", name="GET /insights serves the stored blob regardless of phase",
@@ -465,7 +465,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/insights.py",
         find="        if latest and state.phase is Phase.INSIGHT\n        else None",
         replace="        if latest\n        else None",
-        tests=[backend_pytest("tests/test_insights_api.py", "tests/test_threshold.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_insights_api.py", "tests/test_threshold.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="S7", campaign="S", name="therapist insights read serves the blob regardless of phase",
@@ -473,7 +473,7 @@ MUTANTS: list[dict] = [
         file="backend/app/api/therapist.py",
         find="                if latest and state.phase is threshold.Phase.INSIGHT",
         replace="                if latest",
-        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_insights_api.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_therapist_api.py", "tests/test_insights_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="S8", campaign="S", name="note write does not advance the therapist-global marker",
@@ -523,7 +523,7 @@ MUTANTS: list[dict] = [
         file="backend/app/cache.py",
         find="    result = counter.check(key, window)",
         replace="    result = counter.hit(key, window)",
-        tests=[backend_pytest("tests/test_rate_limit.py", "tests/test_redteam_fixes.py")],
+        tests=[backend_pytest("tests/test_rate_limit.py", "tests/test_security_fixes.py")],
     ),
     dict(
         id="T4", campaign="T", name="eviction by oldest window only (count ignored)",
@@ -531,7 +531,7 @@ MUTANTS: list[dict] = [
         file="backend/app/cache.py",
         find="                overflow, self._hits, key=lambda k: (self._hits[k][0], self._hits[k][1])",
         replace="                overflow, self._hits, key=lambda k: (self._hits[k][1],)",
-        tests=[backend_pytest("tests/test_mutation_pins.py", "tests/test_deep_mutation_pins.py", "tests/test_audit_fixes.py")],
+        tests=[backend_pytest("tests/test_mutation_pins.py", "tests/test_deep_mutation_pins.py", "tests/test_security_fixes.py")],
     ),
     dict(
         id="T5", campaign="T", name="stale-window drop removed from eviction",
@@ -547,7 +547,7 @@ MUTANTS: list[dict] = [
         file="backend/app/cache.py",
         find='    if trust_proxy_headers and getattr(request.state, "mindpattern_trusted_proxy", False):',
         replace="    if trust_proxy_headers:",
-        tests=[backend_pytest("tests/test_infra_coverage.py", "tests/test_hardening.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_infra_coverage.py", "tests/test_hardening.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="T7", campaign="T", name="IPv6 /64 aggregation removed",
@@ -555,7 +555,7 @@ MUTANTS: list[dict] = [
         file="backend/app/cache.py",
         find='    return str(ipaddress.ip_network(f"{ip}/64", strict=False).network_address) + "/64"',
         replace="    return host",
-        tests=[backend_pytest("tests/test_mutation_pins.py", "tests/test_hardening.py", "tests/test_audit_fixes.py")],
+        tests=[backend_pytest("tests/test_mutation_pins.py", "tests/test_hardening.py", "tests/test_security_fixes.py")],
     ),
     dict(
         id="T8", campaign="T", name="lock overflow discipline dropped (fresh keys bypass the fallback)",
@@ -563,7 +563,7 @@ MUTANTS: list[dict] = [
         file="backend/app/locks.py",
         find="            if self._overflow_refs:",
         replace="            if False:",
-        tests=[backend_pytest("tests/test_infra_coverage.py", "tests/test_mutation_pins_2026_09_19.py")],
+        tests=[backend_pytest("tests/test_infra_coverage.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="T9", campaign="T", name="lock registry evicts LIVE entries (refs==0 -> True)",
