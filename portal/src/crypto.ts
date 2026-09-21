@@ -257,10 +257,15 @@ export async function decryptMeasure(
     );
     const payload = decodeJson(plain) as Record<string, unknown>;
     const score = payload.score;
-    if (typeof score !== "number" || !Number.isFinite(score)) return null;
+    // F-6 (2026-09-21): an out-of-range score (a PHQ-9 is 0-27 rendered on
+    // a 0-100 scale by the mobile app) is corrupt or hostile data — REJECT
+    // it, never clamp it into a plausible-looking wrong value.
+    if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 100) {
+      return null;
+    }
     return {
       measure: typeof payload.measure === "string" ? payload.measure.slice(0, 24) : "measure",
-      score: Math.max(0, Math.min(100, Math.round(score))),
+      score: Math.round(score),
       completedAt:
         typeof payload.completed_at === "string" ? payload.completed_at.slice(0, 10) : null,
       measureDate: measure.measure_date.slice(0, 10),

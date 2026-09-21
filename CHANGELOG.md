@@ -6,6 +6,39 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Deep-audit Phase 2, wave 5: portal polish (2026-09-21)
+
+The F-6 low-bundle, per item: the sensitive-caseload banner folds in
+fresher manual-scan rows (per patient, a scan row outranks the summary
+it supersedes); the note composer keeps SEPARATE drafts for the general
+and pattern-anchored contexts (a general draft no longer rides into a
+pattern note); `window.print()` and randomness go through the platform
+seam (`printPage`/`randomBytes`) instead of bare globals;
+`decryptMeasure` REJECTS out-of-range scores instead of clamping them
+into plausible-looking clinical values; the caseload list no longer
+flashes "No patients" before the first fetch (loading state), and
+gains username search plus ordering (newest share / username /
+post-scan triage: sensitive first, then most-new). jest-axe a11y suite
+deferred (new dev dependency).
+
+### Deep-audit Phase 2, wave 4: audit-trail read path + DPIA (2026-09-21)
+
+- **The access audit trail is readable (B-4).** `GET /api/v1/account/
+  access-log` — the patient's who-accessed-my-data view (GDPR Art. 15
+  parity; own lifecycle rows as "self", therapist reads with display
+  names); `GET /api/v1/therapist/access-log` — the therapist's own
+  action history. Both cursor-paginated (`X-Next-Cursor`), consent-
+  scoped, no cross-subject leakage; the previously dead
+  `ix_access_log_actor`/`ix_access_log_user` indexes now serve them.
+  The portal gains an on-demand "My access history" panel (loads only
+  when asked).
+- **DPIA completed for H-7**: the erasure section now discloses the
+  730-day access-log retention residual (rows deliberately outlive the
+  account for the compliance window); a subprocessor + international-
+  transfer table (LLM provider, off-site backup — both optional and
+  off by default); and an Art. 30 RoPA section pointing at the DPIA
+  and docs/SECURITY_RESIDUALS.md.
+
 ### Deep-audit Phase 2, waves 1–3 (2026-09-21)
 
 - **Therapist lifecycle (C-2/F-4).** `PUT /api/v1/account/credential` now

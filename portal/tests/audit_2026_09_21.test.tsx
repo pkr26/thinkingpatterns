@@ -39,6 +39,10 @@ vi.mock("../src/api", async (importOriginal) => {
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
       patientMeasures: vi.fn(async () => []),
+      accessLog: vi.fn(async () => [
+        { at: "2026-09-21T10:00:00Z", action: "read_notes", patient_name: "pat1" },
+        { at: "2026-09-21T09:00:00Z", action: "wrap_key_rotate", patient_name: null },
+      ]),
     },
   };
 });
@@ -335,5 +339,46 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
     await flush();
     expect(textOf(root)).toContain("There is no password reset and no account recovery");
     expect(textOf(root)).toContain("permanently unreadable");
+  });
+
+  it("FIX B-4: the therapist can read their own access history on demand", async () => {
+    // Nothing loads until asked (the trail is a compliance read, not a
+    // default panel); pressing load renders the audited actions.
+    const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush();
+    expect(mockedApi.accessLog).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("My access history");
+
+    await press(root, "Load access history");
+    await flush();
+    expect(mockedApi.accessLog).toHaveBeenCalledTimes(1);
+    const text = textOf(root);
+    expect(text).toContain("read notes");
+    expect(text).toContain("pat1");
+    expect(text).toContain("wrap key rotate");
+  });
+
+  it("F-6: no empty-caseload flash before the first fetch resolves", async () => {
+    // Park the first patients() call so the loading state is observable.
+    mockedApi.patients.mockImplementationOnce(() => new Promise(() => {}));
+    const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("Loading your caseload");
+    expect(textOf(root)).not.toContain("No patients are sharing with you yet");
+  });
+
+  it("F-6: search filters the active list by username", async () => {
+    mockedApi.patients.mockResolvedValueOnce([
+      patient,
+      { ...patient, user_id: "u2", username: "zeta" },
+    ]);
+    const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("zeta");
+    await typeInto(root, "search", "pat");
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("patienta");
+    expect(text).not.toContain("zeta");
   });
 });

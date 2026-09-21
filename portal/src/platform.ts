@@ -5,6 +5,20 @@
  * of crashing the view.
  */
 
+/** F-6 (2026-09-21): printing goes through the seam so tests can observe
+ *  (and a future non-browser host can override) it. */
+export function printPage(): void {
+  if (typeof window !== "undefined") window.print();
+}
+
+/** F-6 (2026-09-21): randomness goes through the seam for the same
+ *  reason — views used to call bare crypto.getRandomValues. */
+export function randomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytes;
+}
+
 export function currentOrigin(): string {
   try {
     return typeof window !== "undefined" ? window.location.origin : "";

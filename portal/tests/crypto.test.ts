@@ -623,4 +623,26 @@ describe("decryptMeasure", () => {
       }),
     ).toBeNull();
   });
+
+  it("F-6 (2026-09-21): out-of-range scores are REJECTED, never clamped", async () => {
+    const { decryptMeasure, encrypt, toBase64 } = await import("../src/crypto");
+    const { buildAad } = await import("../src/aad");
+    // Locally-encrypted fixtures: a clamp used to fold 140 -> 100 and
+    // -7 -> 0, manufacturing plausible-looking clinical values.
+    for (const score of [140, -7]) {
+      const blob = toBase64(
+        await encrypt(
+          KEY,
+          new TextEncoder().encode(JSON.stringify({ v: 1, measure: "phq9", score })),
+          buildAad("measure", "user-42", `m-range-${score}`),
+        ),
+      );
+      const reading = await decryptMeasure(KEY, "user-42", {
+        client_measure_id: `m-range-${score}`,
+        blob,
+        measure_date: "2026-09-21",
+      });
+      expect(reading).toBeNull();
+    }
+  });
 });

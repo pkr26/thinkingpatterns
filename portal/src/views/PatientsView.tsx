@@ -4,7 +4,7 @@
  * states. Selecting an active patient opens the pattern view.
  */
 import { useCallback, useEffect, useState } from "react";
-import { api, type Patient } from "../api";
+import { api, type AccessLogRow, type Patient } from "../api";
 import { decryptCaseloadSummary, decryptInsights, keyFingerprint, unwrapPatientDataKey } from "../crypto";
 import type { Bytes, CaseloadSummary } from "../crypto";
 import { visitAnchorStore } from "../platform";
@@ -38,11 +38,31 @@ export function PatientsView(props: {
   /** Audit fix 17 (2026-09-21): the patients-load failure (not pairing-code
    *  or scan errors) offers an in-page retry of the fetch. */
   const [loadFailed, setLoadFailed] = useState(false);
+  /** F-6 (2026-09-21): the list used to flash "No patients are sharing
+   *  with you yet." before the FIRST fetch resolved. */
+  const [loaded, setLoaded] = useState(false);
+  /** F-6 (2026-09-21): search + ordering for the active list. */
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<"shared" | "username" | "triage">("shared");
   const [scan, setScan] = useState<Record<string, CaseloadScanRow> | null>(null);
   const [scanning, setScanning] = useState(false);
   /** This therapist's own wrap-key fingerprint (shown beside the pairing
    * code so the patient can verify it after lookup — 2026-09-17 audit). */
   const [fingerprint, setFingerprint] = useState<string | null>(null);
+  /** Audit B-4 (2026-09-21): the accountability view of this therapist's
+   *  own portal actions, fetched on demand from the server's access log. */
+  const [auditRows, setAuditRows] = useState<AccessLogRow[] | null>(null);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditError, setAuditError] = useState("");
+
+  const loadAudit = useCallback(() => {
+    setAuditError("");
+    setAuditBusy(true);
+    api.accessLog()
+      .then(setAuditRows)
+      .catch(() => { setAuditError("could not load the access history"); })
+      .finally(() => { setAuditBusy(false); });
+  }, []);
 
   useEffect(() => {
     if (!props.session) return;
@@ -56,10 +76,15 @@ export function PatientsView(props: {
   const refresh = useCallback(() => {
     setError("");
     setLoadFailed(false);
-    api.patients().then(setPatients).catch((err) => {
-      setError(err instanceof Error ? err.message : "could not load patients");
-      setLoadFailed(true);
-    });
+    api.patients()
+      .then((rows) => {
+        setPatients(rows);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "could not load patients");
+        setLoadFailed(true);
+      });
   }, []);
   useEffect(refresh, [refresh]);
 
@@ -93,7 +118,17 @@ export function PatientsView(props: {
     return () => { cancelled = true; };
   }, [props.session, patients]);
 
-  const sensitiveCount = Object.values(summaries).filter((s) => s?.sensitive === true).length;
+  /** F-6 (2026-09-21): the sensitive-caseload banner folds in the FRESHER
+   *  manual scan rows — a summary can lag a scan that just found a
+   *  sensitive card (and vice versa: per patient, whichever exists latest
+   *  wins; a scan row always outranks the summary it supersedes). */
+  const sensitiveCount = Array.from(
+    new Set([...Object.keys(summaries), ...Object.keys(scan ?? {})]),
+  ).filter((uid) => {
+    const row = scan?.[uid];
+    if (row) return row.sensitive === true;
+    return summaries[uid]?.sensitive === true;
+  }).length;
 
   const newCode = async () => {
     if (busy) return;
@@ -172,7 +207,27 @@ export function PatientsView(props: {
     }
   };
 
-  const active = patients.filter((p) => p.status === "active");
+  const activeAll = patients.filter((p) => p.status === "active");
+  // F-6 (2026-09-21): search + sort. Triage ordering (sensitive first,
+  // then most-new-since-reviewed, per the freshest scan row) only applies
+  // after a scan — otherwise newest share first.
+  const needle = search.trim().toLowerCase();
+  const active = activeAll
+    .filter((p) => !needle || p.username.toLowerCase().includes(needle))
+    .sort((a, b) => {
+      if (sort === "username") return a.username.localeCompare(b.username);
+      if (sort === "triage" && scan) {
+        const rowA = scan[a.user_id];
+        const rowB = scan[b.user_id];
+        const sensA = rowA?.sensitive === true ? 1 : 0;
+        const sensB = rowB?.sensitive === true ? 1 : 0;
+        if (sensA !== sensB) return sensB - sensA;
+        const newA = rowA?.newSinceReviewed ?? -1;
+        const newB = rowB?.newSinceReviewed ?? -1;
+        if (newA !== newB) return newB - newA;
+      }
+      return dayOf(b.granted_at).localeCompare(dayOf(a.granted_at));
+    });
   const stopped = patients.filter((p) => p.status !== "active");
 
   return (
@@ -223,15 +278,63 @@ export function PatientsView(props: {
       )}
 
       <h2 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>ACTIVE</h2>
-      {active.length > 1 && (
-        <div style={{ marginBottom: 10 }}>
+      {activeAll.length > 1 && (
+        <div style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <Button label={scanning ? "Scanning caseload…" : "Scan caseload for triage"} small onPress={() => void scanCaseload()} disabled={scanning} />
-          <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
-            Fetches each patient's decrypted pattern counts sequentially — nothing is stored.
+          {/* F-6 (2026-09-21): search + sort for the caseload. */}
+          <label style={{ color: theme.muted, fontSize: 12 }}>
+            search{" "}
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="username…"
+              aria-label="Search patients by username"
+              style={{
+                backgroundColor: theme.cardDeep,
+                color: theme.text,
+                border: `1px solid ${theme.border}`,
+                borderRadius: theme.radius,
+                padding: "6px 10px",
+                fontSize: 13,
+                fontFamily: "inherit",
+              }}
+            />
+          </label>
+          <label style={{ color: theme.muted, fontSize: 12 }}>
+            sort{" "}
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as typeof sort)}
+              aria-label="Sort patients"
+              style={{
+                backgroundColor: theme.cardDeep,
+                color: theme.text,
+                border: `1px solid ${theme.border}`,
+                borderRadius: theme.radius,
+                padding: "4px 6px",
+                fontSize: 13,
+              }}
+            >
+              <option value="shared">newest share</option>
+              <option value="username">username</option>
+              <option value="triage">triage{scan ? "" : " (scan first)"}</option>
+            </select>
+          </label>
+        </div>
+      )}
+      {activeAll.length > 1 && (
+        <div style={{ marginBottom: 10 }}>
+          <span style={{ color: theme.muted, fontSize: 12 }}>
+            The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored.
           </span>
         </div>
       )}
-      {active.length === 0 && <Note>No patients are sharing with you yet.</Note>}
+      {/* F-6 (2026-09-21): no empty-state flash before the first fetch. */}
+      {!loaded && !loadFailed && <Note>Loading your caseload…</Note>}
+      {loaded && activeAll.length === 0 && <Note>No patients are sharing with you yet.</Note>}
+      {loaded && activeAll.length > 0 && active.length === 0 && (
+        <Note>No patients match “{search.trim()}”.</Note>
+      )}
       {active.map((patient) => {
         const row = scan?.[patient.user_id];
         const summary = summaries[patient.user_id];
@@ -285,6 +388,39 @@ export function PatientsView(props: {
           ))}
         </>
       )}
+      {/* Audit B-4 (2026-09-21): the audit trail used to be write-only —
+          neither party could read who accessed what. This is the
+          therapist-side accountability view; patients have their own
+          who-accessed-my-data endpoint on the mobile side. */}
+      <Card title="My access history" deep>
+        {auditRows === null ? (
+          <div>
+            <Button
+              label={auditBusy ? "Loading…" : "Load access history"}
+              small
+              onPress={loadAudit}
+              disabled={auditBusy}
+            />
+            <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
+              Every read and write this portal performed (newest 100) — nothing is loaded until you ask.
+            </span>
+          </div>
+        ) : auditRows.length === 0 ? (
+          <Note>No recorded actions yet.</Note>
+        ) : (
+          auditRows.map((row, index) => (
+            <Note key={`${row.at}-${index}`}>
+              {new Date(row.at).toLocaleString()} — {row.action.replaceAll("_", " ")}
+              {row.patient_name ? ` — ${row.patient_name}` : ""}
+            </Note>
+          ))
+        )}
+        {auditError && (
+          <Note tone="danger" role="status">
+            {auditError}
+          </Note>
+        )}
+      </Card>
     </main>
   );
 }

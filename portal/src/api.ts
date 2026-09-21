@@ -311,6 +311,15 @@ export interface TherapistMe {
   wrap_key_blob: string;
 }
 
+/** One row of the therapist's own action history (2026-09-21 audit B-4):
+ *  every portal read/write, newest first. `patient_name` is null on
+ *  self-lifecycle rows (e.g. wrap-key rotation). */
+export interface AccessLogRow {
+  at: string;
+  action: string;
+  patient_name: string | null;
+}
+
 export interface Patient {
   user_id: string;
   username: string;
@@ -477,6 +486,8 @@ export interface PatientNotesPage {
 
 export const api = {
   me: () => request<TherapistMe>("GET", "/therapist/me"),
+  /** The newest 100 of this therapist's own audited actions (B-4). */
+  accessLog: () => request<AccessLogRow[]>("GET", "/therapist/access-log?limit=100"),
   patients: () => request<Patient[]>("GET", "/therapist/patients"),
   patientInsights: (userId: string) =>
     request<InsightsSummary>("GET", `/therapist/patients/${encodeURIComponent(userId)}/insights`),

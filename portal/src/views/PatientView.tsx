@@ -33,7 +33,7 @@ import {
   type PatternPayload,
 } from "../crypto";
 import { Button, Card, ErrorBanner, Note as NoteText, theme } from "../ui";
-import { visitAnchorStore } from "../platform";
+import { printPage, randomBytes, visitAnchorStore } from "../platform";
 
 export interface PortalSession {
   username: string;
@@ -210,7 +210,8 @@ function evidenceRows(pattern: PatternPayload): [string, string][] {
 }
 
 function newNoteId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  // F-6 (2026-09-21): through the platform seam, not bare crypto.
+  const bytes = randomBytes(8);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -266,7 +267,18 @@ export function PatientView(props: {
   const [selected, setSelected] = useState<PatternPayload | null>(null);
   const [entries, setEntries] = useState<EntryRow[] | null>(null);
   const [notes, setNotes] = useState<OpenNote[]>([]);
-  const [draft, setDraft] = useState("");
+  // F-6 (2026-09-21): the note draft is CONTEXT-SCOPED — one buffer for the
+  // general composer, one for the pattern-anchored composer. A single
+  // shared buffer used to carry general-patient text into a pattern note
+  // (and back), silently mis-anchoring it.
+  const [drafts, setDrafts] = useState<{ general: string; pattern: string }>({
+    general: "",
+    pattern: "",
+  });
+  const draft = selected ? drafts.pattern : drafts.general;
+  const setDraft = (value: string): void => {
+    setDrafts((prev) => (selected ? { ...prev, pattern: value } : { ...prev, general: value }));
+  };
   const [busy, setBusy] = useState(false);
   const [newCount, setNewCount] = useState(0);
   const [lastReviewed, setLastReviewed] = useState<string | null>(null);
@@ -711,7 +723,7 @@ export function PatientView(props: {
           </NoteText>
         </div>
         <div className="no-print" style={{ display: "flex", gap: 8 }}>
-          <Button label="Print session summary" small onPress={() => window.print()} />
+          <Button label="Print session summary" small onPress={printPage} />
           <Button label="Back to patients" small onPress={props.onBack} />
           {props.onSignOut && <Button label="Sign out" small danger onPress={props.onSignOut} />}
         </div>

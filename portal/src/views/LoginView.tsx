@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { auth, ApiError, clearSession, normalizeApiBaseUrl, setSession, type TokenResponse } from "../api";
 import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, toBase64 } from "../crypto";
 import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
-import { currentOrigin } from "../platform";
+import { currentOrigin, randomBytes } from "../platform";
 
 export interface PortalKeys {
   username: string;
@@ -170,7 +170,8 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
     let derivedKeys: Awaited<ReturnType<typeof derivePortalKeys>> | undefined;
     let transferred = false;
     try {
-      const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+      // F-6 (2026-09-21): through the platform seam, not bare crypto.
+      const saltBytes = randomBytes(16);
       const salt = btoa(String.fromCharCode(...saltBytes));
       const master = await deriveMasterKey(password, saltBytes);
       try {

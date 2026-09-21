@@ -57,8 +57,49 @@ the operator, processor roles, and hosting choices are yours.
 - **Erasure**: `DELETE /api/account` (password proof) cascades live data;
   backups age out per `BACKUP_RETENTION_DAYS` — this delay must be
   disclosed to the user; LLM provider copies per provider terms.
+  **Access-log residual (2026-09-21 audit H-7): audit rows are retained
+  for the full `MINDPATTERN_ACCESS_LOG_RETENTION_DAYS` window (default
+  730 days) BEYOND erasure — deliberately, so the trail of who accessed
+  a deleted subject's data outlives the account for its compliance
+  window. Rows carry usernames-adjacent ids and action names only, never
+  content. Disclose this retention in the erasure notice; a shorter
+  window is an operator decision that trades accountability for
+  minimisation.**
+- **Access to the access trail itself (2026-09-21 audit B-4)**: the
+  subject can read who accessed their data (`GET /api/v1/account/access-log`)
+  — GDPR Art. 15 parity for the audit trail — and therapists can read
+  their own action history (`GET /api/v1/therapist/access-log` + the
+  portal's "My access history" panel). Deleted accounts' trails are
+  operator-readable via direct database query (the rows outlive the
+  account by design).
 - **Rectification**: entries are user-authored and editable; no inferred
   records exist server-side (patterns re-derive from entries).
+
+## 4a. Subprocessors & international transfers (2026-09-21 audit H-7)
+
+Complete for YOUR deployment — the defaults avoid both categories
+entirely:
+
+| Subprocessor | When engaged | Data disclosed | Transfer mechanism |
+|---|---|---|---|
+| LLM provider (`MINDPATTERN_LLM_URL`) | only if an individual user re-authenticates consent (off by default) | the brain's findings + sanitized journal-derived text during that analysis | provider DPA + region disclosed at consent time; if outside the EEA, SCCs (or an adequacy decision) must be executed by the OPERATOR before enabling |
+| Off-site object storage (S3-compatible, `deploy/backup-offsite/`) | only if the operator enables the offsite backup overlay | encrypted dump artifacts only (BACKUP_KEY-wrapped; the operator holds the key) | none if the bucket region is in-EEA; otherwise document the transfer basis with the storage provider's DPA |
+
+No other subprocessors exist: no analytics, no crash reporting, no
+third-party SDKs in the mobile app, no map/font/CDN fetches.
+
+## 4b. Art. 30 RoPA
+
+This DPIA is not the record of processing activities. Maintain the Art.
+30 RoPA alongside it: controller identity and contact (and DPO, if
+designated), purposes (journal-based pattern observation; consented
+therapist sharing), categories of subjects and data (data subjects:
+app users and their consenting therapists; special-category: journal
+content — Art. 9(2)(a) explicit consent is the ONLY viable basis for
+this processing), recipients (the subprocessor table above), the
+retention figures set in `MINDPATTERN_*` configuration (backup, access
+log), and the security measures documented in the README's security
+notes. Point the RoPA at this file and at `docs/SECURITY_RESIDUALS.md`.
 
 ## 5. EU AI Act note (2026)
 
