@@ -122,10 +122,16 @@ Spanish function-word set joined into topic eligibility so filler words
 baseline loop is fully localized too (2026-09-21, audit E-3): the daily
 generic question rotates over `shared/generic_questions_es.json`
 (position-parity with the English pool) and the blank-page prompt chips
-ship a parallel Spanish pool — both keyed off the device locale. What
-stays English-only today: THEME_LEXICON-driven cards
-(temporal/mood_correlation/link themes) and person-name anchoring — a
-Spanish theme set is tracked as follow-up work. English wins every
+ship a parallel Spanish pool — both keyed off the device locale. The
+SPANISH THEME SET shipped with the independent-verification follow-up
+(2026-09-21): `THEME_LEXICON_ES` carries the same nine canonical themes in
+Spanish, language-gated per corpus (an English word never reads Spanish
+text and vice versa — "son las cinco" mints no family theme), so
+temporal/mood_correlation/link cards fire for Spanish journals from
+Spanish words; the golden vectors' `spanish-mixed` case pins the behavior
+for the on-device port. What stays English-only today: person-name
+anchoring — English is the only orthography where the mid-sentence
+capitalization heuristic means what it says. English wins every
 lexicon collision by merge order; `stats.language` carries the detection
 so the app renders an honest "not yet supported" card for other languages
 instead of an unexplained quiet analysis. The mobile i18n and the

@@ -1,0 +1,89 @@
+# MINIMAL ALERTMANAGER EXAMPLE — 2026-09-21 audit workstream 6 follow-up.
+#
+# This file is an EXAMPLE, deliberately not enabled: nothing in the
+# monitoring compose runs it, because where S1/S2 pages land is an
+# operator decision (PagerDuty? Slack? email? your existing pager).
+# alerts evaluate inside Prometheus either way (its UI /api/v1/alerts);
+# this config is the shortest honest path from "firing" to "delivered".
+#
+# To enable:
+#   1. Copy this file to alertmanager.yml and fill in the receiver(s).
+#   2. Add an `alertmanager` service to deploy/monitoring/docker-compose.yml
+#      with the same hardening quartet the other services carry, e.g.:
+#
+#        alertmanager:
+#          image: prom/alertmanager:v0.28.0   # PIN A DIGEST before production
+#          cap_drop: ["ALL"]
+#          security_opt: ["no-new-privileges:true"]
+#          read_only: true
+#          tmpfs: [/tmp]
+#          volumes:
+#            - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+#          ports: ["127.0.0.1:9093:9093"]     # loopback only, like Grafana
+#          networks: [internal]
+#          restart: unless-stopped
+#
+#   3. Point Prometheus at it (prometheus.yml):
+#
+#        alerting:
+#          alertmanagers:
+#            - static_configs:
+#                - targets: ["alertmanager:9093"]
+#
+# Severity routing mirrors docs/INCIDENT_RUNBOOK.md: S1/S2 page (the
+# runbook's 15-minute target), S3 lands in the low-priority channel only.
+
+global:
+  # The From address for every receiver that sends email.
+  smtp_from: "mindpattern-alerts@example.com"
+  # smtp_smarthost: "smtp.example.com:587"
+  # smtp_auth_username: "..."
+  # smtp_auth_password: "..."
+
+route:
+  # Group S1s individually — a plaintext-exposure page must not wait behind
+  # a batching window. Everything else batches briefly to avoid flapping.
+  receiver: s1-page
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = "S1"
+      receiver: s1-page
+      group_wait: 0s
+      repeat_interval: 30m
+    - matchers:
+        - severity = "S2"
+      receiver: s2-page
+      group_wait: 30s
+      repeat_interval: 2h
+    - matchers:
+        - severity = "S3"
+      receiver: s3-quiet
+      group_wait: 5m
+      repeat_interval: 12h
+
+receivers:
+  - name: s1-page
+    webhook_configs:
+      # Your pager's webhook (PagerDuty Events API v2, Opsgenie, ...).
+      - url: "http://fill-me-in.example.com/pager/s1"
+        send_resolved: true
+  - name: s2-page
+    webhook_configs:
+      - url: "http://fill-me-in.example.com/pager/s2"
+        send_resolved: true
+  - name: s3-quiet
+    webhook_configs:
+      - url: "http://fill-me-in.example.com/chat/s3"
+        send_resolved: true
+
+# A resolved S2/S3 must not re-page while its S1 is still firing.
+inhibit_rules:
+  - source_matchers:
+      - severity = "S1"
+    target_matchers:
+      - severity =~ "S2|S3"
+    equal: ["alertname"]

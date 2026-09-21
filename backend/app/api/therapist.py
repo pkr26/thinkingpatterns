@@ -1452,6 +1452,21 @@ async def create_note(
             )
             changed = bytes(existing.blob) != blob or existing.pattern_pid != body.pattern_pid
             if changed:
+                if bytes(existing.blob) != blob:
+                    # Note-history parity (independent audit V-4,
+                    # 2026-09-21): an idempotent RETRY arriving with
+                    # different content is still a CHANGING update — the
+                    # superseded blob is preserved as an immutable revision
+                    # exactly like PATCH, or a retried create silently
+                    # replaces history. Same AAD (client_note_id is stable).
+                    session.add(
+                        TherapistNoteRevision(
+                            note_id=existing.id,
+                            therapist_id=user.id,
+                            blob=bytes(existing.blob),
+                            created_at=utcnow(),
+                        )
+                    )
                 existing.blob = blob
                 existing.pattern_pid = body.pattern_pid
                 existing.updated_at = utcnow()

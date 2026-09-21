@@ -190,14 +190,23 @@ def main() -> None:
         work_corpus.append(JournalEntry("anxious about work", t0 + td(weeks=week)))
         for d in range(1, 7):
             work_corpus.append(JournalEntry("felt calm and grateful today", t0 + td(weeks=week, days=d)))
-    spanish_corpus = [
-        JournalEntry("muy ansioso por el trabajo otra vez", t0 + td(weeks=w))
-        for w in range(5)
-    ] + [JournalEntry("me sentí tranquilo y agradecido", t0 + td(weeks=w, days=3)) for w in range(5)]
+    # Spanish twin of the work corpus (70 days / 10 work weekdays): the
+    # ES theme lexicon must drive the same candidate machinery from Spanish
+    # text — this case is the golden pin for the on-device port's Spanish
+    # theme handling (audit Phase 2 workstream 1).
+    spanish_corpus = []
+    for week in range(10):
+        spanish_corpus.append(
+            JournalEntry("muy ansioso por el trabajo otra vez", t0 + td(weeks=week))
+        )
+        for d in range(1, 7):
+            spanish_corpus.append(
+                JournalEntry("me sentí tranquilo y agradecido", t0 + td(weeks=week, days=d))
+            )
     update_vectors = [
         {"name": "calm-30d", "case": _update_case(calm_corpus, t0 + td(days=30))},
         {"name": "weekly-work-anxiety", "case": _update_case(work_corpus, t0 + td(weeks=6))},
-        {"name": "spanish-mixed", "case": _update_case(spanish_corpus, t0 + td(weeks=6))},
+        {"name": "spanish-mixed", "case": _update_case(spanish_corpus, t0 + td(weeks=10))},
     ]
 
     payload = {

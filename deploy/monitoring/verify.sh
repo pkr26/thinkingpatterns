@@ -251,9 +251,56 @@ if isinstance(alerts, dict):
 else:
     errors.append("alerts.yml: not a rule-file mapping (expected groups:)")
 
+# --- provisioned Grafana dashboards: JSON + metric grounding --------------
+# Same discipline as alerts.yml (2026-09-21 follow-up): every panel
+# expression must reference only names metrics.py actually exports (plus
+# the textfile heartbeat), and every panel must point at the provisioned
+# datasource uid — a dashboard that drifts from the exposition fails here,
+# not at 3am on a blank chart.
+import json  # noqa: E402 — local to this pass on purpose
+
+for db_rel in sorted((base / "grafana" / "dashboards").glob("*.json")):
+    rel = f"grafana/dashboards/{db_rel.name}"
+    try:
+        dashboard = json.loads(db_rel.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        errors.append(f"{rel}: JSON parse FAILED: {exc}")
+        continue
+    panels = dashboard.get("panels")
+    if not isinstance(panels, list) or not panels:
+        errors.append(f"{rel}: no panels")
+        continue
+    n_exprs = 0
+    for panel in panels:
+        if not isinstance(panel, dict) or not panel.get("title"):
+            errors.append(f"{rel}: every panel needs a title")
+            continue
+        ds = panel.get("datasource")
+        if not isinstance(ds, dict) or ds.get("uid") != "mindpattern-prometheus":
+            errors.append(
+                f"{rel}: panel {panel['title']!r} must use the provisioned "
+                "datasource uid mindpattern-prometheus"
+            )
+        for target in panel.get("targets") or []:
+            expr = target.get("expr") if isinstance(target, dict) else None
+            if not expr or not str(expr).strip():
+                continue
+            n_exprs += 1
+            tokens = set(re.findall(r"[a-zA-Z_][a-zA-Z0-9_:]*", str(expr)))
+            used = sorted(t for t in tokens if t.startswith("mindpattern_"))
+            bad = sorted(t for t in used if t not in EXPORTED | TEXTFILE)
+            if bad:
+                errors.append(
+                    f"{rel}: panel {panel['title']!r} references metric(s) "
+                    f"metrics.py does NOT export: {', '.join(bad)}"
+                )
+    print(f"verify: dashboard {rel}: {len(panels)} panel(s), {n_exprs} grounded expression(s)")
+
 for rel in [
     "docker-compose.yml",
     "grafana/provisioning/datasources/datasource.yml",
+    "grafana/provisioning/dashboards/dashboards.yml",
+    "alertmanager/alertmanager.example.yml",
     "../backup-offsite/docker-compose.yml",
 ]:
     path = base / rel

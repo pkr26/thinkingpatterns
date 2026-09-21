@@ -1421,6 +1421,59 @@ describe("M-36: weekday words localize at render time", () => {
   });
 });
 
+describe("theme-key labels localize at render time (ES theme set, 2026-09-21)", () => {
+  it("themeLabel maps the engine's canonical theme keys onto the locale", async () => {
+    const { themeLabel } = await import("../../src/screens/InsightsScreen");
+    const { __setLocaleForTests } = await import("../../src/strings");
+    __setLocaleForTests("en");
+    try {
+      expect(themeLabel("work")).toBe("work");
+      expect(themeLabel("weather")).toBe("weather");
+    } finally {
+      __setLocaleForTests("en");
+    }
+    __setLocaleForTests("es");
+    try {
+      // The engine's wire label is the canonical English key; the Spanish
+      // card must read "el trabajo", not "'work'".
+      expect(themeLabel("work")).toBe("el trabajo");
+      expect(themeLabel("family")).toBe("la familia");
+      // Check-in tag labels reuse the activityTag catalog.
+      expect(themeLabel("friends")).toBe("Amistades");
+      // Topics/phrases/attacker text pass through raw — only the known
+      // vocabularies are ever translated.
+      expect(themeLabel("guitarra")).toBe("guitarra");
+      expect(themeLabel("constructor")).toBe("constructor");
+      expect(themeLabel("")).toBe("");
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
+  it("a Spanish temporal card with the canonical 'work' label renders localized", async () => {
+    const { __setLocaleForTests } = await import("../../src/strings");
+    __setLocaleForTests("es");
+    try {
+      vi.mocked(api.insights).mockResolvedValue({
+        phase: "insight",
+        active_days: 40,
+        days_remaining: 0,
+        blob: insightsBlob({
+          stats: { patterns: [pattern({ kind: "temporal", label: "work", detail: { day: "Sunday" } })] },
+        }),
+      } as never);
+      const root = await render(<InsightsScreen />);
+      await flush();
+      const text = textOf(root);
+      expect(text).toContain("Ha mencionado 'el trabajo' 7 veces, la mayoría de las veces en domingo.");
+      expect(text).not.toContain("'work'");
+      await act(async () => root.unmount());
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+});
+
 describe("InsightsScreen mute status note auto-dismisses (audit fix 24, 2026-09-21)", () => {
   it("the 'pattern muted' note clears itself after the inline-status lifetime", async () => {
     vi.mocked(api.insights).mockResolvedValue({

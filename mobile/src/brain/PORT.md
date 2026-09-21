@@ -39,7 +39,10 @@ fisher-z). Regenerate with:
 3. **Day series + structured channels** — mood series (empty-text skip,
    D-3), PA/NA day buckets, energy/sleep/tags channels, active days,
    cadence; EWMA + the inertia/instability family (statsig.py).
-4. **Themes + statistical detectors** — THEME_LEXICON extraction, the
+4. **Themes + statistical detectors** — THEME_LEXICON extraction — BOTH
+   language maps now: the English set and THEME_LEXICON_ES (2026-09-21
+   follow-up, language-gated per corpus; the spanish-mixed golden case
+   pins ES-derived candidates), the
    weekday Bernoulli family with the tod narrowing (P3-B), mood-shift,
    mood_correlation (Welch day-means, M-8), links, avoidance.
 5. **Phrase family** — rumination classification (negativity/negators,

@@ -1,0 +1,143 @@
+{
+  "__inputs": [],
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["mindpattern"],
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "",
+  "title": "MindPattern overview",
+  "uid": "mindpattern-overview",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "API up (mindpattern-api scrape)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(up{job=\"mindpattern-api\"})" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Live processing sessions (keystore)",
+      "description": "mindpattern_keystore_sessions — S2 at >0 sustained; escalates to S1 per the runbook's plaintext-exposure checklist.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(mindpattern_keystore_sessions)" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Hours since last successful backup",
+      "description": "From the textfile heartbeat (backup-heartbeat.sh). Alert fires past 26h.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "(time() - max(mindpattern_backup_last_success_timestamp_seconds)) / 3600" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 24 }, { "color": "red", "value": 26 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "5xx share of responses (5m)",
+      "description": "Empty = no 5xx series yet (the exposition only creates a status family after its first response) — healthy, not broken.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(mindpattern_requests_total{status=\"5xx\"}[5m])) / clamp_min(sum(rate(mindpattern_requests_total[5m])), 1e-9)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request rate by status family",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (status) (rate(mindpattern_requests_total[5m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Recompute latency (p50 / p95)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(mindpattern_recompute_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(mindpattern_recompute_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Recomputes per second",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(mindpattern_recompute_seconds_count[5m]))", "legendFormat": "recomputes" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 20 } }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Optional LLM analyzer: calls by outcome",
+      "description": "Series appear only when MINDPATTERN_LLM_URL is configured and used.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (outcome) (rate(mindpattern_llm_calls_total[5m]))", "legendFormat": "{{outcome}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10 } }, "overrides": [] }
+    }
+  ]
+}

@@ -496,6 +496,269 @@ THEME_WORDS: dict[str, str] = {
     word: theme for theme, words in THEME_LEXICON.items() for word in words
 }
 
+# Spanish theme set (2026-09-21 audit Phase 2 workstream 1, delivered by the
+# independent verification follow-up): the same nine canonical themes with
+# journal-common Spanish words so temporal/mood_correlation/link cards fire
+# for Spanish corpora. Lookups are LANGUAGE-GATED (theme_for/extract_themes
+# select the map by the detected language): a union would let English theme
+# words misread Spanish text ("son las cinco" -> family "son"), and ES words
+# never fire on English corpora. Spellings are PRE-FOLDED (no diacritics,
+# n-tilde as "n") because tokenization folds before [a-z']+ matching
+# (audit H-8) — "sueño" must be stored as "sueno" to ever match. Spanish
+# plurals need no separate entries: word_forms' final-s strip already maps
+# "trabajos" -> "trabajo". High-precision by design — ambiguous everyday
+# words ("solo", "te", "noche") are deliberately absent; a missed synonym
+# only costs sensitivity, a false member costs card honesty.
+THEME_LEXICON_ES: dict[str, tuple[str, ...]] = {
+    "work": (
+        "trabajo",
+        "trabajos",
+        "empleo",
+        "jefe",
+        "jefa",
+        "oficina",
+        "reunion",
+        "reuniones",
+        "proyecto",
+        "proyectos",
+        "cliente",
+        "clientes",
+        "entrevista",
+        "presentacion",
+        "colega",
+        "turno",
+        "jornada",
+        "gerente",
+        "correo",
+        "ascenso",
+        "despido",
+        "nomina",
+        "curro",
+        "sobrecarga",
+    ),
+    "sleep": (
+        "sueno",
+        "suenos",
+        "dormir",
+        "duermo",
+        "dormi",
+        "insomnio",
+        "desvelo",
+        "desvelado",
+        "pesadilla",
+        "pesadillas",
+        "cama",
+        "siesta",
+        "descanso",
+        "descansar",
+        "despertar",
+        "desperte",
+        "cansancio",
+        "cansado",
+        "cansada",
+        "agotado",
+        "agotada",
+        "fatiga",
+    ),
+    "social": (
+        "amigo",
+        "amiga",
+        "amigos",
+        "amigas",
+        "fiesta",
+        "fiestas",
+        "social",
+        "soledad",
+        "aislado",
+        "aislamiento",
+        "compania",
+        "companero",
+        "conocer",
+        "conocidos",
+    ),
+    "family": (
+        "familia",
+        "mama",
+        "papa",
+        "madre",
+        "padre",
+        "hermano",
+        "hermana",
+        "padres",
+        "pareja",
+        "esposa",
+        "marido",
+        "esposo",
+        "hijo",
+        "hija",
+        "hijos",
+        "hijas",
+        "casa",
+        "abuela",
+        "abuelo",
+        "tio",
+        "tia",
+        "primo",
+        "prima",
+        "boda",
+        "divorcio",
+        "bebe",
+        "nino",
+        "nina",
+    ),
+    "health": (
+        "salud",
+        "gimnasio",
+        "ejercicio",
+        "entrenamiento",
+        "entrenar",
+        "correr",
+        "enfermo",
+        "enferma",
+        "enfermedad",
+        "medico",
+        "doctor",
+        "doctora",
+        "dolor",
+        "dolores",
+        "caminar",
+        "paseo",
+        "yoga",
+        "medicina",
+        "medicamento",
+        "migrana",
+        "lesion",
+        "dentista",
+        "terapia",
+        "terapeuta",
+        "gripe",
+        "resfriado",
+    ),
+    "money": (
+        "dinero",
+        "factura",
+        "facturas",
+        "alquiler",
+        "deuda",
+        "deudas",
+        "sueldo",
+        "salario",
+        "presupuesto",
+        "caro",
+        "caros",
+        "carisimo",
+        "carisima",
+        "arruinado",
+        "ahorro",
+        "ahorros",
+        "hipoteca",
+        "prestamo",
+        "banco",
+        "gasto",
+        "gastos",
+        "impuesto",
+        "impuestos",
+        "bancarrota",
+    ),
+    "study": (
+        "estudio",
+        "estudios",
+        "estudiar",
+        "examen",
+        "examenes",
+        "clase",
+        "clases",
+        "universidad",
+        "escuela",
+        "colegio",
+        "instituto",
+        "deberes",
+        "tarea",
+        "tareas",
+        "apuntes",
+        "profesor",
+        "profesora",
+        "estudiante",
+        "lectura",
+        "leer",
+        "aprender",
+        "tesis",
+        "master",
+        "doctorado",
+        "repaso",
+        "repasar",
+        "biblioteca",
+    ),
+    "food": (
+        "comida",
+        "comidas",
+        "comer",
+        "comi",
+        "cena",
+        "cenar",
+        "desayuno",
+        "almuerzo",
+        "merienda",
+        "hambre",
+        "apetito",
+        "antojo",
+        "antojos",
+        "cocinar",
+        "receta",
+        "recetas",
+        "restaurante",
+        "dieta",
+        "azucar",
+        "cafe",
+        "postre",
+        "postres",
+        "dulce",
+        "dulces",
+        "chocolate",
+        "pizza",
+        "verduras",
+        "fruta",
+        "frutas",
+        "carne",
+        "pescado",
+        "pan",
+        "alcohol",
+        "cerveza",
+        "vino",
+    ),
+    "weather": (
+        "lluvia",
+        "llueve",
+        "llovio",
+        "soleado",
+        "sol",
+        "calor",
+        "frio",
+        "fria",
+        "nieve",
+        "nevar",
+        "nevando",
+        "viento",
+        "ventoso",
+        "tormenta",
+        "tormentas",
+        "humedo",
+        "humedad",
+        "nublado",
+        "nube",
+        "nubes",
+        "niebla",
+        "llovizna",
+        "primavera",
+        "verano",
+        "otono",
+        "invierno",
+    ),
+}
+THEME_WORDS_ES: dict[str, str] = {
+    word: theme for theme, words in THEME_LEXICON_ES.items() for word in words
+}
+
 # --- graded sentiment lexicon (VADER-inspired; Hutto & Gilbert 2014) ------------
 # Valences in [-4, 4]; magnitudes follow the VADER convention (a "terrible"
 # outweighs a "bad"). Curated for journal register; superset of the v2 word
@@ -1565,9 +1828,19 @@ def word_forms(token: str) -> list[str]:
     return deduplicated
 
 
-def theme_for(token: str) -> str | None:
+def theme_for(token: str, language: str = "en") -> str | None:
+    """Theme of a token under the corpus language's lexicon.
+
+    Language-gated (2026-09-21 audit Phase 2, ES theme set): "es" corpora
+    read the Spanish map only — a union would let English theme words
+    misread Spanish text ("son las cinco" -> family "son") — and English
+    corpora are untouched. "other" keeps the historical English-map
+    behavior (themes were never language-gated before and detector output
+    for non-en/es corpora must not change).
+    """
+    lexicon = THEME_WORDS_ES if language == "es" else THEME_WORDS
     for form in word_forms(token):
-        theme = THEME_WORDS.get(form)
+        theme = lexicon.get(form)
         if theme is not None:
             return theme
     return None
@@ -1671,8 +1944,12 @@ def absolutist_density(tokens: list[str]) -> float:
     return round(100.0 * hits / len(tokens), 2)
 
 
-def extract_themes(tokens: list[str]) -> set[str]:
-    return {theme for theme in (theme_for(t) for t in tokens) if theme is not None}
+def extract_themes(tokens: list[str], language: str = "en") -> set[str]:
+    return {
+        theme
+        for theme in (theme_for(t, language) for t in tokens)
+        if theme is not None
+    }
 
 
 def sentences_of(text: str) -> list[str]:
@@ -3168,7 +3445,7 @@ def _detect_topics(
             return False
         if token in ABSOLUTIST_WORDS or token in INTENSIFIERS:
             return False
-        if theme_for(token) is not None:  # also catches theme inflections
+        if theme_for(token, language) is not None:  # also catches theme inflections
             return False
         if any(f in SENTIMENT_LEXICON for f in word_forms(token)):
             return False
@@ -3694,12 +3971,13 @@ def update(
     # tags ride the per-theme O(entries) detectors.
     kept_tags = _select_tag_themes(tag_entries_count, tag_distinct_days)
 
-    per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
+    # Tokens first (two passes): language DETECTION must run before themes
+    # are extracted, because the theme lexicon is language-gated (2026-09-21
+    # audit Phase 2, ES theme set) — the same folded tokenization as always
+    # (audit H-8: every accented word must survive [a-z']+ as one whole
+    # token, and iOS U+2019 must read as ' so contraction negators fire).
+    entry_tokens: list[list[str]] = []
     for entry in window:
-        # Folded before tokenization (audit H-8): every accented word must
-        # survive [a-z']+ as one whole token ("depresión" used to become
-        # "depresi" + "n"), and iOS U+2019 must read as ' so contraction
-        # negators still fire.
         tokens = WORD_RE.findall(_fold_sentiment_text(entry.text.lower()))
         # Emoji ride along as their own tokens: they score mood through
         # EMOJI_VALENCES but never become themes or phrase shingles (the
@@ -3707,17 +3985,7 @@ def update(
         # OCCURRENCE: an entry of five sobs carries five sob tokens, not
         # one (a repeated word is counted five times too).
         tokens.extend(e for e in EMOJI_VALENCES for _ in range(entry.text.count(e)))
-        if entry.sentiment is not None and math.isfinite(entry.sentiment):
-            # Client-supplied mood tag: clamped to the engine's scale. A
-            # non-finite value (NaN poisons every average downstream) falls
-            # back to scoring the text.
-            sentiment = max(-1.0, min(1.0, entry.sentiment))
-        else:
-            sentiment = sentiment_score(tokens)
-        themes = extract_themes(tokens) | (set(entry.tags) & kept_tags)
-        if entry.entry_date in poor_sleep_days:
-            themes.add(SLEEP_CHANNEL_THEME)
-        per_entry.append((entry, tokens, themes, sentiment))
+        entry_tokens.append(tokens)
 
     # Language gate (2026-09-17): see the LANGUAGE_* constants. When the
     # window's text is not something the lexicons know, mood analyses keep
@@ -3727,7 +3995,7 @@ def update(
     # "me", "a", "y") are English tokens too, and counting them let
     # negation-dense Spanish through at ~25% "known" — enough to mint
     # English-lexicon rumination cards on Spanish prose.
-    scored = [t for _, tokens, _, _ in per_entry for t in tokens if len(t) >= 3]
+    scored = [t for tokens in entry_tokens for t in tokens if len(t) >= 3]
     # Language DETECTION (2026-09-19): English and Spanish each score a
     # share of the window's tokens against their own detection sets; the
     # higher share wins if it clears the floor, otherwise the language is
@@ -3750,6 +4018,24 @@ def update(
         else:
             language = "other"
     language_ok = language != "other"
+
+    per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
+    for entry, tokens in zip(window, entry_tokens):
+        if entry.sentiment is not None and math.isfinite(entry.sentiment):
+            # Client-supplied mood tag: clamped to the engine's scale. A
+            # non-finite value (NaN poisons every average downstream) falls
+            # back to scoring the text.
+            sentiment = max(-1.0, min(1.0, entry.sentiment))
+        else:
+            sentiment = sentiment_score(tokens)
+        # Themes under the DETECTED language's lexicon (Phase 2 ES theme
+        # set): Spanish corpora read Spanish words, English corpora English
+        # ones; client tags (English wire values) join unchanged.
+        themes = extract_themes(tokens, language) | (set(entry.tags) & kept_tags)
+        if entry.entry_date in poor_sleep_days:
+            themes.add(SLEEP_CHANNEL_THEME)
+        per_entry.append((entry, tokens, themes, sentiment))
+
     # Person anchoring: computed once per run over the raw window — but
     # only for English (2026-09-21 audit D-4). The heuristic reads "a
     # recurring MID-SENTENCE capitalized token" as a name; German-style

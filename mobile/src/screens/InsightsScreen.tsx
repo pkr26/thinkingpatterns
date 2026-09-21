@@ -24,6 +24,7 @@ import { checkAnalysisGeneration } from "../stateSeqGuard";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { MoodDay, localStreak, recentMoods } from "../moodLog";
+import { ACTIVITY_TAGS } from "../mood";
 import { matchesCrisisSuppress } from "../crisisDetect";
 import { useTheme, Theme } from "../theme";
 import { CrisisHelpButton, GhostButton } from "../components/buttons";
@@ -190,6 +191,28 @@ export function localWeekday(day: string): string {
   }
 }
 
+// The engine's theme and tag labels are CANONICAL ENGLISH KEYS on the wire
+// ("work", "sleep", …) so the zero-knowledge payload stays locale-free.
+// Same trust-boundary discipline as localWeekday: the label is
+// attacker-controllable text, so anything outside the known vocabularies
+// passes through as its raw value (topics and phrases are real user words
+// and must never be "translated").
+const THEME_LABEL_KEYS = [
+  "work", "sleep", "social", "family", "health", "money",
+  "study", "food", "weather",
+] as const;
+
+/** The locale's name for a theme-key or check-in-tag label. */
+export function themeLabel(label: string): string {
+  if ((THEME_LABEL_KEYS as readonly string[]).includes(label)) {
+    return tr(`insights.theme.${label}`);
+  }
+  if (ACTIVITY_TAGS.includes(label)) {
+    return tr(`activityTag.${label}`);
+  }
+  return label;
+}
+
 /** |d| in plain words (Cohen's conventions, softened: these are observations). */
 export function effectSizeWords(d: number): string {
   const size = Math.abs(d);
@@ -353,20 +376,20 @@ function technicalRows(p: PatternCard): [string, string][] {
 function describe(p: PatternCard): string {
   if (p.kind === "temporal") {
     const day = p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.sameDay");
-    return tr("insights.desc.temporal", { label: p.label, count: p.occurrences, day });
+    return tr("insights.desc.temporal", { label: themeLabel(p.label), count: p.occurrences, day });
   }
   if (p.kind === "mood_correlation") {
     const delta = p.detail?.mood_delta ?? 0;
     const direction = tr(p.detail?.direction ?? (delta < 0 ? "insights.words.higher" : "insights.words.lower"));
     return tr("insights.desc.moodCorrelation", {
-      label: p.label,
+      label: themeLabel(p.label),
       direction,
       shift: Math.abs(delta).toFixed(1),
     });
   }
   if (p.kind === "link") {
     const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-    return tr("insights.desc.link", { label: p.label, direction });
+    return tr("insights.desc.link", { label: themeLabel(p.label), direction });
   }
   if (p.kind === "inertia") {
     return tr("insights.desc.inertia");
@@ -441,15 +464,15 @@ function describe(p: PatternCard): string {
   if (p.detail?.source === "tag") {
     if (p.kind === "mood_correlation") {
       const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.tagCorrelation", { label: p.label, direction });
+      return tr("insights.desc.tagCorrelation", { label: themeLabel(p.label), direction });
     }
     if (p.kind === "link") {
       const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.tagLink", { label: p.label, direction });
+      return tr("insights.desc.tagLink", { label: themeLabel(p.label), direction });
     }
     if (p.kind === "temporal") {
       return tr("insights.desc.tagTemporal", {
-        label: p.label,
+        label: themeLabel(p.label),
         day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
       });
     }

@@ -91,11 +91,14 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD (openssl rand -base64 24) in the owner-only secrets file}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
-      # Datasource only. No dashboards are shipped: add them in the UI, or
-      # provide a dashboards provider under
-      # deploy/monitoring/grafana/provisioning/dashboards/ and mount it the
-      # same way (README.md, "Grafana").
+      # Dashboards as code (2026-09-21 audit workstream 6 follow-up): the
+      # datasource AND a dashboard provider are provisioned read-only, and
+      # the panels live in ./grafana/dashboards — verify.sh grounds every
+      # panel expression against backend/app/metrics.py, exactly like
+      # alerts.yml, so the dashboard cannot drift from the exposition.
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/opt/mindpattern-dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
       # Loopback only, like the api service: reach it via SSH tunnel or your

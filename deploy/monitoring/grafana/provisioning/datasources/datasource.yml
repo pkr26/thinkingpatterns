@@ -1,6 +1,7 @@
 # Grafana datasource provisioning (mounted read-only by the monitoring
-# docker-compose.yml). No dashboards are provisioned — see
-# deploy/monitoring/README.md, "Grafana", for where to add them.
+# docker-compose.yml). The stable `uid` is what the provisioned dashboard
+# (grafana/dashboards/mindpattern-overview.json) references, so renaming
+# the datasource display name never orphans the dashboard.
 apiVersion: 1
 
 datasources:
@@ -9,5 +10,6 @@ datasources:
     access: proxy
     # Service DNS on the monitoring stack's internal network.
     url: http://prometheus:9090
+    uid: mindpattern-prometheus
     isDefault: true
     editable: false

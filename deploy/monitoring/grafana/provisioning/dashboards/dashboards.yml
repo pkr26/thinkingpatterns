@@ -1,0 +1,18 @@
+# Grafana dashboard provisioning (mounted read-only by the monitoring
+# docker-compose.yml). The dashboards themselves live in
+# ../../grafana/dashboards/ (mounted at /opt/mindpattern-dashboards, also
+# read-only) — dashboards as code, so the panels are reviewable and the
+# verify.sh pass can ground every expression against backend/app/metrics.py
+# exactly like alerts.yml.
+apiVersion: 1
+
+providers:
+  - name: mindpattern
+    orgId: 1
+    folder: MindPattern
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    allowUiUpdates: false
+    options:
+      path: /opt/mindpattern-dashboards

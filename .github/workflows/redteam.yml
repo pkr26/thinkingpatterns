@@ -133,6 +133,14 @@ jobs:
               # inference) — documented in README security note #7;
               # content stays opaque.
               "H1.metadata-inference",
+              # The tracked-secrets hygiene rule matches any *.env path,
+              # which catches mobile/ios/.xcode.env — the React Native
+              # Xcode template (NODE_BINARY export only) that MUST be
+              # versioned for Xcode script phases. No credential, key, or
+              # connection string; inspected line-by-line. Full defense in
+              # docs/SECURITY_RESIDUALS.md. Found by the 2026-09-21
+              # independent verification audit (V-1).
+              "G3.tracked-secrets",
           }
 
           # The register is load-bearing: every allowlisted id must carry

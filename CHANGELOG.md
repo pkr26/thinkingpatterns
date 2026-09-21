@@ -6,6 +6,58 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Independent-audit remediation (2026-09-21): V-1..V-4 closed
+
+Follow-up to the independent verification audit
+(INDEPENDENT_AUDIT_VERIFICATION_2026-09-21.md) — every fixable finding
+fixed, each with its regression test:
+
+- **V-1, the weekly red-team gate was red.** `mobile/ios/.xcode.env`
+  (committed with the Phase 1 native projects) trips the
+  `G3.tracked-secrets` hygiene rule (`*.env` suffix). It is the
+  React Native Xcode template (NODE_BINARY export only, no credential,
+  required to be versioned) — registered as the ninth residual with a
+  written defense in docs/SECURITY_RESIDUALS.md and the workflow's
+  DOCUMENTED_RESIDUALS, so the weekly gate passes again while staying
+  strict for everything else.
+- **V-2, the Spanish theme lexicon (audit Phase 2 workstream 1's
+  deferred demand).** `THEME_LEXICON_ES` in brain.py: the same nine
+  canonical themes with Spanish words, LANGUAGE-GATED per corpus (an
+  English theme word never reads Spanish text and vice versa — "son las
+  cinco" mints no family theme; Spanish words never fire on English
+  corpora; "other" keeps the historical English-map behavior). Language
+  detection moved ahead of theme extraction; topic eligibility excludes
+  Spanish theme words under "es". Spanish journals now get
+  temporal/mood_correlation/link cards from Spanish text; the golden
+  vectors' spanish-mixed case was strengthened to a 70-day corpus and now
+  pins ES-derived candidates for the on-device port. The mobile app
+  renders theme/tag labels localized (`insights.theme.*`, usted-register
+  Spanish) — topics and phrases stay raw user words, and unknown labels
+  pass through untouched.
+- **V-3, provisioned Grafana dashboard + Alertmanager example (audit
+  workstream 6's deferred demand).** A dashboard ships as code
+  (mindpattern-overview.json: up/keystore/backup-age/5xx stats, request
+  rate, recompute p50/p95, LLM outcomes) via a read-only provisioning
+  provider; `verify.sh` now grounds every panel expression against
+  backend/app/metrics.py exactly like alerts.yml. The minimal
+  Alertmanager example (severity routing per the runbook, inhibit rule,
+  enable-in-comments) lives at alertmanager/alertmanager.example.yml —
+  delivery stays an operator decision.
+- **V-4, note edit history missed the POST retry path.** An idempotent
+  note-create retry arriving with different content now preserves the
+  superseded blob as an immutable revision, exactly like PATCH; a
+  byte-identical replay still writes none.
+- V-5 needed no code (behavior was correct; the claims' wording was
+  imprecise). V-6's `verify:native-release` preflight passes 5/5; a full
+  Xcode/Gradle build still requires the operator toolchain (CocoaPods,
+  Android SDK), which is a machine-setup step, not a repo fix.
+
+Verified: backend pytest green (+9 ES-theme tests, +1 note-history
+test), mobile and portal suites green, probe_brain 9/9, crypto vectors,
+brain vectors regenerate deterministically, deploy/monitoring/verify.sh
+(dashboard grounding live), redteam run_all 9/9 FINDINGs registered —
+the weekly CI gate simulates green.
+
 ### Deep-audit Phase 3 (2026-09-21): MBC depth, time-of-day, note history, the on-device protocol
 
 - **Measurement-based care depth.** GAD-7 (anxiety) and PHQ-2 (brief

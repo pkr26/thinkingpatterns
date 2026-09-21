@@ -121,10 +121,14 @@ S1 exposure indicator).
 | `MindPatternReadyzProbeFailing` *(commented; blackbox)* | `probe_success == 0` for 5m | **S2** — DB path broken while the process lives |
 | `MindPatternBackupHeartbeatStale` / `...Absent` *(commented; textfile)* | `time() - mindpattern_backup_last_success_timestamp_seconds > 26h` / `absent(...)` | **S2** — recovery capability degraded; an amplifier for any live incident |
 
-Delivery is honest about its limits: **no Alertmanager is shipped**, so
-alerts evaluate inside Prometheus (visible in its UI and API at
-`/api/v1/alerts`) but nothing pages anyone by itself. Point an Alertmanager
-or your existing pager at Prometheus when you need delivery.
+Delivery is honest about its limits: **no Alertmanager runs by default**,
+so alerts evaluate inside Prometheus (visible in its UI and API at
+`/api/v1/alerts`) but nothing pages anyone until you wire delivery —
+where S1/S2 pages land is an operator decision. `alertmanager/
+alertmanager.example.yml` is the minimal starting config (severity routing
+that mirrors the runbook, an inhibit rule, and the exact compose +
+prometheus.yml snippets to enable it in its header comment): copy it to
+`alertmanager.yml`, fill in the receiver URLs, and add the service.
 
 ## Backup freshness (the honest mechanism)
 
@@ -163,13 +167,19 @@ paths are active.
 
 ## Grafana
 
-The datasource (Prometheus at `http://prometheus:9090`) is provisioned from
-`grafana/provisioning/datasources/`. **No dashboards are shipped.** Add
-them in the UI, or provide a dashboards provider under
-`grafana/provisioning/dashboards/` (provider yml + json) and mount it in
-`docker-compose.yml` next to the datasources mount. Sensible first panels:
-the request-family counters as `rate()`, the recompute histogram via
-`histogram_quantile`, the keystore gauge, and the LLM outcome counters.
+The datasource (Prometheus at `http://prometheus:9090`, stable uid
+`mindpattern-prometheus`) is provisioned from
+`grafana/provisioning/datasources/`, and a dashboard ships as code since
+the 2026-09-21 follow-up: the provider at
+`grafana/provisioning/dashboards/dashboards.yml` loads
+`grafana/dashboards/mindpattern-overview.json` read-only (deletion and UI
+edits disabled — change the JSON and let the 60s reload pick it up). The
+overview carries the alert-backed panels: up/keystore/backup-age/5xx
+stats, request rate by status family, recompute p50/p95 via
+`histogram_quantile`, recompute rate, and the LLM outcome counters.
+`verify.sh` grounds every panel expression against
+`backend/app/metrics.py` the same way it grounds alerts.yml, so a panel
+referencing a metric the API stopped exporting fails the drift gate.
 
 ## Digest pinning (before production use)
 
