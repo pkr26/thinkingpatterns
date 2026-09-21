@@ -745,7 +745,14 @@ def _parse_feedback(raw: bytes) -> FeedbackEvents:
     (the client quarantines it) rather than half-applied invisibly. The
     [:100] bounds are volume caps, not validation: only the first 100
     items of each list are examined, and each examined item must be
-    well-formed."""
+    well-formed.
+
+    The "feedback" key may be ABSENT when mutes/unmutes ride the blob
+    (2026-09-21): the shipped client always emits all three keys, but a
+    mute-only queue is a well-formed state — a blob carrying only
+    muted/unmuted pids is accepted with zero taps. A missing key with NO
+    mute lists at all ({} or a garbage shape) is still the loud 400:
+    nothing would be applied, so nothing may be silently swallowed."""
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -754,7 +761,15 @@ def _parse_feedback(raw: bytes) -> FeedbackEvents:
             detail="feedback blob is malformed",
             code="entry_payload_malformed",
         ) from exc
-    events = payload.get("feedback") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        raise ApiError(
+            status_code=400,
+            detail="feedback blob is malformed",
+            code="entry_payload_malformed",
+        )
+    events = payload.get("feedback")
+    if events is None and ("muted" in payload or "unmuted" in payload):
+        events = []  # mute/unmute-only blob: zero taps is a valid queue state
     if not isinstance(events, list):
         raise ApiError(
             status_code=400,

@@ -11,6 +11,7 @@ import os
 os.environ.setdefault("MINDPATTERN_ENV", "development")
 
 import pathlib
+import time
 
 import pytest
 import pytest_asyncio
@@ -18,6 +19,21 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config import Settings
 from app.main import create_app
+
+# Pin the test process to UTC (2026-09-21, simulation finding): the
+# server's calendar is server-UTC everywhere (_utc_today, entry/measure
+# date bounds, question pinning — the L-1/L-5 fixes), but many tests
+# anchor on the emulated client's host-local ``date.today()``. On hosts
+# west of UTC the local evening (00:00–07:00 UTC) puts that anchor a day
+# BEHIND the server's calendar, so accounts registered "now" reject
+# "yesterday"-dated entries (created_at is UTC) and question AADs miss —
+# 12 spurious failures that never show on UTC CI. Aligning the process
+# timezone with the server's is the same environment CI already runs
+# under; this runs at conftest-import time, which pytest completes
+# BEFORE any test module evaluates its module-level TODAY, and the app
+# itself never reads local time (every clock is explicit-UTC).
+os.environ["TZ"] = "UTC"
+time.tzset()
 
 
 @pytest.fixture

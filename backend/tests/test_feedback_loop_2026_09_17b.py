@@ -226,3 +226,45 @@ def test_parse_feedback_partitions_taps_and_mutes():
             _parse_feedback(json.dumps(payload).encode("utf-8"))
         assert excinfo.value.status_code == 400
         assert excinfo.value.code == "entry_payload_malformed"
+
+
+async def test_mute_only_and_unmute_only_blobs_are_accepted(client):
+    """2026-09-21 fix: the shipped client always emits all three keys, but a
+    queue holding ONLY a mute (or only an unmute) is a well-formed state —
+    the blob must apply, not 400. Found by the 365-day user simulation:
+    a mute-only blob was rejected with entry_payload_malformed."""
+    from app.api.insights import _parse_feedback
+
+    emu = ClientEmulator("fb-mute-only", "deep-password")
+    await emu.register(client)
+    await _mature_account(client, emu)
+    await emu.recompute(client)  # establish the encrypted brain state
+
+    for payload in ({"muted": ["temporal:work"]}, {"unmuted": ["topic:guitar"]}):
+        token = await emu.open_processing_session(client)
+        response = await client.post(
+            "/api/insights/recompute",
+            headers={**emu.headers, "X-Processing-Token": token},
+            json={"feedback_blob": _feedback_blob(emu, payload)},
+        )
+        assert response.status_code == 200, response.text
+
+    # Parser-level: zero taps, the mute lists carried through.
+    events = _parse_feedback(json.dumps({"muted": ["a:1"]}).encode("utf-8"))
+    assert events.taps == []
+    assert events.muted == ["a:1"]
+    assert events.unmuted == []
+
+
+def test_parse_feedback_still_fails_loud_on_empty_or_garbage_shapes():
+    """The leniency ends where nothing would be applied: an empty object or
+    a non-dict payload remains the stable 400 — a blob that would silently
+    do nothing must never be accepted as if it had done something."""
+    from app.api.insights import _parse_feedback
+    from app.deps import ApiError
+
+    for raw in (b"{}", b"[]", b'"a string"', b"not json", b'{"feedback": "not-a-list"}'):
+        with pytest.raises(ApiError) as excinfo:
+            _parse_feedback(raw)
+        assert excinfo.value.status_code == 400
+        assert excinfo.value.code == "entry_payload_malformed"
