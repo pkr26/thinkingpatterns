@@ -20,7 +20,23 @@ export default defineConfig({
       // 98%-per-file gate made `npm test` permanently red despite 1,100+
       // passing behavioral tests and was especially misleading for native
       // availability branches. Raise this only alongside device coverage.
-      thresholds: { statements: 90, branches: 85, functions: 85, lines: 90 },
+      thresholds: {
+        statements: 90,
+        branches: 85,
+        functions: 85,
+        lines: 90,
+        // H-6 (2026-09-21 audit): per-file floors for the security-critical
+        // modules the global-only gate historically let drift (crisisDetect
+        // sat at 66 in the audit's snapshot). Floors sit just under today's
+        // measured values; raise them as coverage grows, never lower.
+        "src/crisisDetect.ts": { lines: 98 },
+        "src/questionFeedback.ts": { lines: 90 },
+        "src/strings.ts": { lines: 90 },
+        "src/rotation.ts": { lines: 85 },
+        "src/crypto/aad.ts": { lines: 95 },
+        "src/crypto/envelope.ts": { lines: 95 },
+        "src/kdf.ts": { lines: 95 },
+      },
     },
   },
   resolve: {

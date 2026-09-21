@@ -30,6 +30,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  FlatList,
   ScrollView,
   Text,
   TextInput,
@@ -288,7 +289,8 @@ describe("HistoryScreen pins: list chrome and row contract", () => {
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
 
-    const scroll = root.root.findAllByType(ScrollView);
+    // E-9 (2026-09-21): the list scroller is a windowed FlatList.
+    const scroll = root.root.findAllByType(FlatList);
     expect(scroll).toHaveLength(1);
     expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
     expect(scroll[0].props.contentContainerStyle).toEqual({ padding: 20, gap: 12, flexGrow: 1 });
@@ -440,7 +442,7 @@ describe("HistoryScreen pins: pagination", () => {
     expect(root.root.findAllByType(ActivityIndicator)).toHaveLength(0);
     // Reload stalls on the network: entries stay, loading is true.
     vi.mocked(api.listEntries).mockImplementation(() => new Promise(() => {}));
-    const scroll = root.root.findAllByType(ScrollView)[0];
+    const scroll = root.root.findAllByType(FlatList)[0];
     const rc = (scroll.props as { refreshControl: React.ReactElement }).refreshControl;
     await act(async () => {
       await (rc.props as { onRefresh: () => unknown }).onRefresh();

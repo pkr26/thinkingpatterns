@@ -30,6 +30,50 @@ export const KeyboardAvoidingView = host("KeyboardAvoidingView");
 export const RefreshControl = host("RefreshControl");
 export const Switch = host("Switch");
 
+/** FlatList renders every row synchronously (tests assert full lists —
+ * the real component's virtualization windowing is native-side behavior
+ * this node environment cannot exercise anyway). Header/footer ride as
+ * children so tree queries keep working. E-9 (2026-09-21). */
+type FlatListProps = {
+  data: unknown[];
+  renderItem: (info: { item: unknown }) => React.ReactElement;
+  keyExtractor?: (item: unknown, index: number) => string;
+  ListHeaderComponent?: React.ReactNode;
+  ListFooterComponent?: React.ReactNode;
+  children?: React.ReactNode;
+  [key: string]: unknown;
+};
+
+const FlatListHost = host("FlatList");
+
+export const FlatList: React.FC<FlatListProps> = ({
+  data,
+  renderItem,
+  keyExtractor,
+  ListHeaderComponent,
+  ListFooterComponent,
+  children,
+  ...rest
+}) => {
+  const rows = data.map((item, index) => (
+    <Fragment key={keyExtractor ? String(keyExtractor(item, index)) : String(index)}>
+      {renderItem({ item })}
+    </Fragment>
+  ));
+  return (
+    <FlatListHost {...rest}>
+      {children ?? (
+        <>
+          {ListHeaderComponent}
+          {rows}
+          {ListFooterComponent}
+        </>
+      )}
+    </FlatListHost>
+  );
+};
+FlatList.displayName = "FlatList";
+
 export const StyleSheet = {
   create: <T,>(styles: T): T => styles,
   flatten: (...styles: unknown[]): Record<string, unknown> =>

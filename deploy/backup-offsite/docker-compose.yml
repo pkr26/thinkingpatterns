@@ -61,7 +61,29 @@ services:
       # replication must never be able to alter or delete local dumps, and
       # a leaked rclone config cannot rewrite backup history.
       - pgbackups:/backups:ro
-    restart: unless-stopped
+    # G-5 (2026-09-21 audit): fetch mode is a ONE-SHOT (the runbook's
+    # host-gone recovery). `unless-stopped` restarted the exited fetch
+    # container forever, hammering the remote. Loop/push deployments set
+    # BACKUP_OFFSITE_RESTART=unless-stopped in the secrets file; the
+    # default stays "no" so the trap cannot re-arm by omission.
+    restart: ${BACKUP_OFFSITE_RESTART:-no}
+    # G-4 (2026-09-21 audit): the production hardening quartet — this
+    # container sits beside the database with S3 credentials loaded.
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      # The entrypoint writes rclone.conf here at start; rclone caches
+      # under /tmp. Both are disposable by design.
+      - /config
+      - /tmp
+    # 2026-09-21 audit G-7: bounded log rotation.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
@@ -111,11 +133,12 @@ services:
           # One-shot recovery: pull the remote down for a host-gone restore.
           mkdir -p "$$BACKUP_FETCH_DIR"
           echo "backup-offsite: fetching $$BACKUP_OFFSITE_REMOTE into $$BACKUP_FETCH_DIR"
-          exec rclone copy "$$BACKUP_OFFSITE_REMOTE" "$$BACKUP_FETCH_DIR" --progress
+          exec rclone copy "$$BACKUP_OFFSITE_REMOTE" "$$BACKUP_FETCH_DIR" --progress --exclude "mindpattern-*.tmp"
         fi
         while :; do
           if rclone copy /backups "$$BACKUP_OFFSITE_REMOTE" \
-              --transfers 4 --retries 3 --log-level INFO; then
+              --transfers 4 --retries 3 --log-level INFO \
+              --exclude "mindpattern-*.tmp"; then
             echo "backup-offsite: replication pass complete at $$(date -u +%Y-%m-%dT%H:%M:%SZ) (copy semantics — remote files are never deleted)"
           else
             echo "backup-offsite: rclone copy failed at $$(date -u +%Y-%m-%dT%H:%M:%SZ); retrying in $$interval s" >&2

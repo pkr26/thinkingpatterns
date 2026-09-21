@@ -89,6 +89,25 @@ describe("prompt chips", () => {
     expect(PROMPT_CHIPS).toContain(a[0]);
   });
 
+  it("E-3 (2026-09-21): the chips localize — es serves the Spanish pool, position-parity", async () => {
+    const { PROMPT_CHIPS_ES } = await import("../src/promptChips");
+    expect(PROMPT_CHIPS_ES.length).toBe(PROMPT_CHIPS.length);
+    const day = new Date(2026, 8, 17, 12, 0);
+    const en = promptChipsFor(day);
+    const es = promptChipsFor(day, 3, "es");
+    expect(es).toHaveLength(3);
+    for (const chip of es) {
+      expect(PROMPT_CHIPS_ES).toContain(chip);
+      expect(PROMPT_CHIPS).not.toContain(chip);
+    }
+    // Parity of position: chip j of each locale sits at the same pool index.
+    for (let j = 0; j < en.length; j++) {
+      expect(PROMPT_CHIPS_ES.indexOf(es[j]!)).toBe(PROMPT_CHIPS.indexOf(en[j]!));
+    }
+    // Deterministic within the day for es too.
+    expect(promptChipsFor(new Date(2026, 8, 17, 23, 30), 3, "es")).toEqual(es);
+  });
+
   it("L-70: the chips rotate at LOCAL midnight, not UTC midnight", () => {
     // Two instants inside the same UTC day can be different LOCAL days
     // (the pre-fix bug: rotation happened at the UTC boundary).

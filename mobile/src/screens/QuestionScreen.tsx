@@ -42,11 +42,12 @@ import { lightHaptic } from "../haptics";
 import { vault } from "../vault";
 import { useSession, stashDraft } from "../store";
 import { genericQuestionForDate } from "../genericQuestions";
+import { localDateISO } from "../moodLog";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { hasKeyShipConsent, recordKeyShipConsent } from "../components/keyConsent";
 import { requestFailureCopy } from "../components/errors";
-import { t as tr } from "../strings";
+import { getLocale, t as tr } from "../strings";
 
 /** Calm copy for a failed load: calm request copy for ApiErrors, our own
  *  sentence for local Errors, one generic line for anything else. */
@@ -194,7 +195,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           setPhase("baseline"); // display path only — see phaseAssumedOffline
           setPhaseAssumedOffline(true);
           setDayProgress(null); // unknown offline — the card omits the day counter
-          setGeneric(genericQuestionForDate());
+          setGeneric(genericQuestionForDate(localDateISO(), getLocale()));
           return;
         }
         throw err;
@@ -212,7 +213,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
         // Day-one value: a reflective question TODAY from the built-in
         // pool, computed on-device — nothing leaves the phone for it, so
         // no key ships and no consent explainer belongs here.
-        setGeneric(genericQuestionForDate());
+        setGeneric(genericQuestionForDate(localDateISO(), getLocale()));
         return;
       }
       // Stryker disable next-line StringLiteral: phase is only ever compared to "baseline" (the card guard and the caption) — "" and "insight" both fail that test identically

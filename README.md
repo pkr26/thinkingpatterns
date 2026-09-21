@@ -118,12 +118,16 @@ repetition itself steps aside for those scripts). Consequences: Spanish
 journals get mood series, PA/NA, rumination classification, sense-making,
 writing-calendar/cadence, phrase repetition and topic mining — with the
 Spanish function-word set joined into topic eligibility so filler words
-("para", "cuando", "porque") cannot become topic cards. What stays
-English-only today: THEME_LEXICON-driven cards (temporal/mood_correlation/
-link themes) and person-name anchoring — a Spanish theme set is tracked
-as follow-up work. English wins every lexicon
-collision by merge order; `stats.language` carries the detection so the
-app renders an honest "not yet supported" card for other languages
+("para", "cuando", "porque") cannot become topic cards. The PRE-THRESHOLD
+baseline loop is fully localized too (2026-09-21, audit E-3): the daily
+generic question rotates over `shared/generic_questions_es.json`
+(position-parity with the English pool) and the blank-page prompt chips
+ship a parallel Spanish pool — both keyed off the device locale. What
+stays English-only today: THEME_LEXICON-driven cards
+(temporal/mood_correlation/link themes) and person-name anchoring — a
+Spanish theme set is tracked as follow-up work. English wins every
+lexicon collision by merge order; `stats.language` carries the detection
+so the app renders an honest "not yet supported" card for other languages
 instead of an unexplained quiet analysis. The mobile i18n and the
 Spanish lexicon are deliberately separate systems (UI language vs
 journal language — either can be either).

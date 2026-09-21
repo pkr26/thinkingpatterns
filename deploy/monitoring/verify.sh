@@ -28,9 +28,47 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
 cd "$SCRIPT_DIR"
 
+# --- optional --production: enforce the digest-pinning contract (G-7) -------
+PRODUCTION=0
+if [ "${1:-}" = "--production" ]; then
+  PRODUCTION=1
+fi
+
 status=0
 note() { printf 'verify: %s\n' "$*"; }
 fail() { printf 'verify: FAIL: %s\n' "$*" >&2; status=1; }
+
+if [ "$PRODUCTION" -eq 1 ]; then
+  note "--production: enforcing the digest-pinned image contract"
+  # 2026-09-21 audit G-7: the "pin before production" comment on the
+  # operator overlays was unenforced. Under --production every image
+  # reference in the production compose and BOTH overlays must be either
+  # the required-env form (no mutable default) or repo:tag@sha256:<64hex>.
+  for compose_file in ../../docker-compose.yml \
+                      docker-compose.yml \
+                      ../backup-offsite/docker-compose.yml; do
+    while IFS= read -r image_line; do
+      image_ref="${image_line#*image: }"
+      image_ref="${image_ref%%#*}"
+      if [ -z "$image_ref" ]; then
+        continue
+      fi
+      case "$image_ref" in
+        *\$\{*:\?\ *|*\$\{*\:\?\ *|*\$\{*\:?*)
+          # required-env form (${VAR:?message}) — no mutable default to pin
+          ;;
+        *@sha256:[a-f0-9]*)
+          ;;
+        *)
+          fail "--production: $compose_file serves a mutable image ref: $image_ref (pin its digest; see the file's pinning notes)"
+          ;;
+      esac
+    done < <(grep -E '^\s*image:' "$compose_file" || true)
+  done
+  if [ "$status" -eq 0 ]; then
+    note "--production digest assertion: OK"
+  fi
+fi
 
 # --- interpreter for the YAML/structure pass -------------------------------
 PY=""

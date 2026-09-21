@@ -13,6 +13,14 @@ services:
     # required verification and docker-compose.dev.yml for local source
     # builds.
     image: ${MINDPATTERN_API_IMAGE:?set MINDPATTERN_API_IMAGE to the API @sha256 reference from the release env asset}
+
+    # 2026-09-21 audit G-7: bounded log rotation (unbounded json-file
+    # logs on a busy API can fill the host disk).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Container hardening (2026-09-19 audit, L-85): the app needs no Linux
     # capabilities and must never gain any (cap_drop ALL +
     # no-new-privileges). The root filesystem is read-only — the only
@@ -77,6 +85,14 @@ services:
     # digest deliberately when adopting a new postgres:16-alpine build
     # (`docker buildx imagetools inspect postgres:16-alpine`).
     image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+
+    # 2026-09-21 audit G-7: bounded log rotation (unbounded json-file
+    # logs on a busy API can fill the host disk).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       # From .env — no committed credentials. Example .env:
       #   POSTGRES_PASSWORD=$(openssl rand -hex 16)
@@ -145,6 +161,14 @@ services:
     # source `build` stanza here: a production backup must use the same
     # reviewed artifact whose SBOM/provenance was published with the API.
     image: ${MINDPATTERN_BACKUP_IMAGE:?set MINDPATTERN_BACKUP_IMAGE to the backup @sha256 reference from the release env asset}
+
+    # 2026-09-21 audit G-7: bounded log rotation (unbounded json-file
+    # logs on a busy API can fill the host disk).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

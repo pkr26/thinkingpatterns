@@ -22,6 +22,16 @@ function weekdayInitials(): string[] {
   return Array.from({ length: 7 }, (_, i) => fmt.format(new Date(Date.UTC(2024, 0, 1 + i))));
 }
 
+/** E-10 (2026-09-21): VoiceOver used to read the raw ISO date ("twenty
+ *  twenty-six dash zero nine…"). Speak it the way the app renders dates
+ *  everywhere else; a garbage cell falls back to the raw string. */
+function spokenDate(iso: string): string {
+  const parsed = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(parsed.getTime())
+    ? iso
+    : parsed.toLocaleDateString(dateLocaleTag(), { year: "numeric", month: "long", day: "numeric" });
+}
+
 export function MoodCalendar({
   dayMoods,
   journaledDays,
@@ -106,9 +116,9 @@ export function MoodCalendar({
               accessibilityLabel={
                 journaled
                   ? selected
-                    ? tr("calendar.dayJournaledSelected", { date: cell.iso })
-                    : tr("calendar.dayJournaled", { date: cell.iso })
-                  : tr("calendar.dayNoEntry", { date: cell.iso })
+                    ? tr("calendar.dayJournaledSelected", { date: spokenDate(cell.iso ?? "") })
+                    : tr("calendar.dayJournaled", { date: spokenDate(cell.iso ?? "") })
+                  : tr("calendar.dayNoEntry", { date: spokenDate(cell.iso ?? "") })
               }
               accessibilityState={selected ? { selected: true } : undefined}
             >

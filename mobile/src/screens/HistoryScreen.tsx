@@ -23,6 +23,7 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -834,103 +835,21 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   );
   const journaledDays = new Set(entries.map((e) => e.entryDate).filter((d) => d !== ""));
   return (
-    <ScrollView
+    // E-9 (2026-09-21): the list is a WINDOWED FlatList, not a plain
+    // ScrollView — up to 500 decrypted rows used to stay mounted (and
+    // rendered) forever. The FlatList keeps the header (search + calendar)
+    // and footer (older-entries affordances) as list chrome and unmounts
+    // far-offscreen rows, so the decrypted plaintext held in the VIEW tree
+    // is bounded by the window, not the history length. (The decrypted
+    // strings themselves remain in screen state until the screen closes —
+    // decrypt-on-demand per row is the Phase 3 on-device-brain follow-up.)
+    <FlatList
       style={[styles.flex, { backgroundColor: t.colors.bg }]}
       contentContainerStyle={{ padding: t.spacing.xl, gap: t.spacing.md, flexGrow: 1 }}
-      onTouchStart={touchActivity}
-      refreshControl={
-        <RefreshControl
-          refreshing={loading}
-          onRefresh={() => void load()}
-          tintColor={t.colors.primaryBright}
-          colors={[t.colors.primaryBright]}
-        />
-      }
-    >
-      {loading && entries.length === 0 && !offline && !error && (
-        <ActivityIndicator color={t.colors.primaryBright} size="large" />
-      )}
-      {error && (
-        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
-          <Text style={{ color: t.colors.error, fontSize: t.type.bodySmall.fontSize }} accessibilityRole="alert">
-            {error}
-          </Text>
-          <GhostButton
-            label={tr("common.tryAgain")}
-            onPress={() => void load()}
-            accessibilityLabel={tr("history.tryAgainA11y")}
-          />
-        </View>
-      )}
-      {!loading && offline && (
-        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
-          <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
-            {tr("history.offlineBody")}
-          </Text>
-          <GhostButton
-            label={tr("common.tryAgain")}
-            onPress={() => void load()}
-            accessibilityLabel={tr("history.tryAgainA11y")}
-          />
-        </View>
-      )}
-      {!loading && !offline && !error && entries.length === 0 && (
-        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
-          <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
-            {tr("history.emptyBody")}
-          </Text>
-        </View>
-      )}
-      {!loading && !offline && !error && entries.length > 0 && (
-        <>
-          {/* Search: filters the decrypted on-device list; never sent anywhere. */}
-          <TextInput
-            style={{
-              backgroundColor: t.colors.card,
-              color: t.colors.text,
-              borderRadius: t.radius.md,
-              padding: 12,
-              fontSize: t.type.body.fontSize,
-            }}
-            placeholder={tr("history.searchPlaceholder")}
-            placeholderTextColor={t.colors.placeholder}
-            value={query}
-            onChangeText={(next) => {
-              touchActivity();
-              setQuery(next);
-              setShown(PAGE_SIZE);
-            }}
-            accessibilityLabel={tr("history.searchPlaceholder")}
-            autoCorrect={false}
-            spellCheck={false}
-            autoCapitalize="none"
-            textContentType="none"
-          />
-          <MoodCalendar
-            dayMoods={logMoods}
-            journaledDays={journaledDays}
-            selectedDay={dayFilter}
-            onSelectDay={(iso) => {
-              touchActivity();
-              setDayFilter(iso);
-              setShown(PAGE_SIZE);
-            }}
-          />
-          {(query.trim() !== "" || dayFilter !== null) && (
-            <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-              {visibleEntries.length === 1
-                ? tr("history.matchOne", { count: visibleEntries.length })
-                : tr("history.matchMany", { count: visibleEntries.length })}
-              {dayFilter !== null ? tr("history.filterDay", { date: dayFilter }) : ""}
-              {query.trim() !== "" ? tr("history.filterSearch") : ""}
-              {hasMore ? tr("history.filterLoaded") : ""}
-            </Text>
-          )}
-        </>
-      )}
-      {visibleEntries.slice(0, shown).map((entry) => (
+      data={visibleEntries.slice(0, shown)}
+      keyExtractor={(entry) => entry.clientEntryId}
+      renderItem={({ item: entry }) => (
         <TouchableOpacity
-          key={entry.clientEntryId}
           style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, minHeight: t.minTouch }]}
           onPress={() => setMode({ kind: "detail", entry })}
           accessibilityRole="button"
@@ -944,44 +863,144 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             {snippetOf(entry.text)}
           </Text>
         </TouchableOpacity>
-      ))}
-      {visibleEntries.length > shown && (
-        <GhostButton
-          label={tr("history.showOlder", { count: visibleEntries.length - shown })}
-          onPress={() => {
-            touchActivity();
-            setShown(shown + PAGE_SIZE);
-          }}
+      )}
+      ListHeaderComponent={
+        <>
+          {loading && entries.length === 0 && !offline && !error && (
+            <ActivityIndicator color={t.colors.primaryBright} size="large" />
+          )}
+          {error && (
+            <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
+              <Text style={{ color: t.colors.error, fontSize: t.type.bodySmall.fontSize }} accessibilityRole="alert">
+                {error}
+              </Text>
+              <GhostButton
+                label={tr("common.tryAgain")}
+                onPress={() => void load()}
+                accessibilityLabel={tr("history.tryAgainA11y")}
+              />
+            </View>
+          )}
+          {!loading && offline && (
+            <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
+              <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
+                {tr("history.offlineBody")}
+              </Text>
+              <GhostButton
+                label={tr("common.tryAgain")}
+                onPress={() => void load()}
+                accessibilityLabel={tr("history.tryAgainA11y")}
+              />
+            </View>
+          )}
+          {!loading && !offline && !error && entries.length === 0 && (
+            <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
+              <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 22 }}>
+                {tr("history.emptyBody")}
+              </Text>
+            </View>
+          )}
+          {!loading && !offline && !error && entries.length > 0 && (
+            <>
+              {/* Search: filters the decrypted on-device list; never sent anywhere. */}
+              <TextInput
+                style={{
+                  backgroundColor: t.colors.card,
+                  color: t.colors.text,
+                  borderRadius: t.radius.md,
+                  padding: 12,
+                  fontSize: t.type.body.fontSize,
+                }}
+                placeholder={tr("history.searchPlaceholder")}
+                placeholderTextColor={t.colors.placeholder}
+                value={query}
+                onChangeText={(next) => {
+                  touchActivity();
+                  setQuery(next);
+                  setShown(PAGE_SIZE);
+                }}
+                accessibilityLabel={tr("history.searchPlaceholder")}
+                autoCorrect={false}
+                spellCheck={false}
+                autoCapitalize="none"
+                textContentType="none"
+              />
+              <MoodCalendar
+                dayMoods={logMoods}
+                journaledDays={journaledDays}
+                selectedDay={dayFilter}
+                onSelectDay={(iso) => {
+                  touchActivity();
+                  setDayFilter(iso);
+                  setShown(PAGE_SIZE);
+                }}
+              />
+              {(query.trim() !== "" || dayFilter !== null) && (
+                <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+                  {visibleEntries.length === 1
+                    ? tr("history.matchOne", { count: visibleEntries.length })
+                    : tr("history.matchMany", { count: visibleEntries.length })}
+                  {dayFilter !== null ? tr("history.filterDay", { date: dayFilter }) : ""}
+                  {query.trim() !== "" ? tr("history.filterSearch") : ""}
+                  {hasMore ? tr("history.filterLoaded") : ""}
+                </Text>
+              )}
+            </>
+          )}
+        </>
+      }
+      ListFooterComponent={
+        <>
+          {visibleEntries.length > shown && (
+            <GhostButton
+              label={tr("history.showOlder", { count: visibleEntries.length - shown })}
+              onPress={() => {
+                touchActivity();
+                setShown(shown + PAGE_SIZE);
+              }}
+            />
+          )}
+          {visibleEntries.length <= shown && hasMore && !historyLimitReached && query.trim() === "" && dayFilter === null && (
+            <GhostButton
+              label={loadingMore ? tr("history.loadingOlder") : tr("history.loadOlder")}
+              onPress={() => void loadOlder()}
+              disabled={loadingMore}
+              accessibilityLabel={tr("history.loadOlderA11y")}
+            />
+          )}
+          {historyLimitReached && hasMore && (
+            <Text accessibilityRole="alert" style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
+              {tr("history.limitReached", { rows: MAX_HISTORY_ROWS, pages: MAX_HISTORY_SERVER_PAGES })}
+            </Text>
+          )}
+          {!loading && !offline && !error && entries.length > 0 && visibleEntries.length === 0 && (
+            <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize, textAlign: "center" }}>
+              {query.trim() !== "" ? tr("history.noMatchSearch") : tr("history.noMatchDay")}
+            </Text>
+          )}
+          {unreadable > 0 && (
+            <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
+              {unreadable === 1
+                ? tr("history.unreadableOne", { count: unreadable })
+                : tr("history.unreadableMany", { count: unreadable })}
+            </Text>
+          )}
+          <InlineStatus message={status} tone={statusTone} />
+          <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
+        </>
+      }
+      onTouchStart={touchActivity}
+      refreshControl={
+        <RefreshControl
+          refreshing={loading}
+          onRefresh={() => void load()}
+          tintColor={t.colors.primaryBright}
+          colors={[t.colors.primaryBright]}
         />
-      )}
-      {visibleEntries.length <= shown && hasMore && !historyLimitReached && query.trim() === "" && dayFilter === null && (
-        <GhostButton
-          label={loadingMore ? tr("history.loadingOlder") : tr("history.loadOlder")}
-          onPress={() => void loadOlder()}
-          disabled={loadingMore}
-          accessibilityLabel={tr("history.loadOlderA11y")}
-        />
-      )}
-      {historyLimitReached && hasMore && (
-        <Text accessibilityRole="alert" style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
-          {tr("history.limitReached", { rows: MAX_HISTORY_ROWS, pages: MAX_HISTORY_SERVER_PAGES })}
-        </Text>
-      )}
-      {!loading && !offline && !error && entries.length > 0 && visibleEntries.length === 0 && (
-        <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize, textAlign: "center" }}>
-          {query.trim() !== "" ? tr("history.noMatchSearch") : tr("history.noMatchDay")}
-        </Text>
-      )}
-      {unreadable > 0 && (
-        <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
-          {unreadable === 1
-            ? tr("history.unreadableOne", { count: unreadable })
-            : tr("history.unreadableMany", { count: unreadable })}
-        </Text>
-      )}
-      <InlineStatus message={status} tone={statusTone} />
-      <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
-    </ScrollView>
+      }
+      initialNumToRender={PAGE_SIZE}
+      windowSize={7}
+    />
   );
 }
 

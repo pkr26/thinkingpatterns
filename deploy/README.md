@@ -203,3 +203,28 @@ own middleware must inspect the raw socket peer before it can trust a
 forwarded address. The template also sets a 30-second `client_body_timeout`
 to match the API's complete-body deadline. Keep both controls in place when
 adapting this configuration.
+
+## Rollback (2026-09-21 audit G-3)
+
+The entrypoint auto-upgrades on every boot (`alembic upgrade head`), so a
+rollback is NOT "redeploy the old image and boot it" — the old image's
+entrypoint would run today's migrations anyway. The safe procedure:
+
+1. **Restore the database from a pre-migration dump** (the one thing that
+   actually reverses a migration). Take a manual dump BEFORE any deploy
+   that includes new migrations:
+   `docker compose exec backup backup.sh` (or the off-site fetch path in
+   `docs/INCIDENT_RUNBOOK.md`), then verify it
+   (`verify.sh` on the dump) — this is your restore point.
+2. **Pin the previous release images** in `.env`
+   (`MINDPATTERN_API_IMAGE` / `MINDPATTERN_BACKUP_IMAGE` back to the
+   prior @sha256 references from the release env asset) and
+   `docker compose up -d`. The entrypoint's `alembic upgrade head` is a
+   no-op against the restored (older) schema.
+3. **Never `alembic downgrade`** against live data — the migrations are
+   expand-only where possible, but a downgrade path is NOT tested for
+   data preservation. Database restore is the rollback story.
+
+Long-term policy: prefer expand/contract migrations (add column, dual-
+write, drop later) so a rollback only needs step 2 — tracked as
+follow-up work.

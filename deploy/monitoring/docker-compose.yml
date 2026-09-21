@@ -17,6 +17,20 @@ services:
   prometheus:
     # PIN A DIGEST before production use (see README.md here). v3.x line.
     image: prom/prometheus:v3.4.1
+    # G-4 (2026-09-21 audit): the production hardening quartet,
+    # applied to the operator tooling too — these containers join
+    # the production network and read its metrics.
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     profiles: ["monitoring"]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -54,6 +68,21 @@ services:
   grafana:
     # PIN A DIGEST before production use (see README.md here).
     image: grafana/grafana:12.0.0
+    # G-4 (2026-09-21 audit): the production hardening quartet,
+    # applied to the operator tooling too — these containers join
+    # the production network and read its metrics.
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/lib/grafana
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     profiles: ["monitoring"]
     environment:
       GF_SECURITY_ADMIN_USER: admin
@@ -86,6 +115,20 @@ services:
     #   --profile monitoring --profile blackbox up -d
     # PIN A DIGEST before production use (see README.md here).
     image: prom/blackbox-exporter:v0.25.0
+    # G-4 (2026-09-21 audit): the production hardening quartet,
+    # applied to the operator tooling too — these containers join
+    # the production network and read its metrics.
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     profiles: ["blackbox"]
     networks: [mindpattern]
     restart: unless-stopped

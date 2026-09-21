@@ -15,7 +15,7 @@ import { api } from "../api/client";
 import { useSession } from "../store";
 import { useTheme } from "../theme";
 import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
-import { hasSeenOnboarding, recordOnboardingSeen } from "../onboarding";
+import { hasSeenOnboarding, loadOnboardingPanel, recordOnboardingSeen, saveOnboardingPanel } from "../onboarding";
 import { setReminderEnabled } from "../reminders";
 import { syncReminderSchedule } from "../reminderSync";
 import { t as tr } from "../strings";
@@ -68,6 +68,12 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
         if (!cancelled && seen) navigation.replace("Entry");
       })
       .catch(() => {});
+    // E-10 (2026-09-21): M-18's re-entry restored the screen but not the
+    // dismissed-panel position — resume where the user left off instead
+    // of restarting at panel 1.
+    void loadOnboardingPanel(PANELS.length).then((restored) => {
+      if (!cancelled && restored > 0) setIndex(restored);
+    });
     return () => {
       cancelled = true;
     };
@@ -150,6 +156,9 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
             ? () => void finish()
             : () => {
                 touchActivity();
+                // E-10 (2026-09-21): persist the position so a backgrounded
+                // onboarding resumes here (see loadOnboardingPanel above).
+                void saveOnboardingPanel(index + 1);
                 setIndex(index + 1);
               }
         }

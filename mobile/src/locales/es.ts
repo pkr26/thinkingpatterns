@@ -140,11 +140,11 @@ export const es: Record<string, string> = {
   "login.policyVarietyTitle": "La contraseña necesita más variedad",
   "login.policyMin": "Use al menos 12 caracteres — esta contraseña genera sus llaves de cifrado.",
   "login.policyVariety": "Use una frase de 16 caracteres, o 12+ caracteres de al menos tres tipos distintos.",
-  "login.policyCommon": "Esa contraseña es demasiado fácil de adivinar. Evita palabras comunes, caracteres repetidos y secuencias del teclado.",
+  "login.policyCommon": "Esa contraseña es demasiado fácil de adivinar. Evite palabras comunes, caracteres repetidos y secuencias del teclado.",
   "login.serverLabel": "Servidor: {server}",
   "login.serverA11y": "Dirección del servidor seleccionado",
   "login.serverChangedWarning":
-    "Este servidor es distinto al que usas normalmente. Verifica la dirección antes de escribir tu contraseña: tu contraseña es tu clave de cifrado y no hay forma de recuperarla.",
+    "Este servidor es distinto al que usa normalmente. Verifique la dirección antes de escribir su contraseña: su contraseña es su clave de cifrado y no hay forma de recuperarla.",
   "login.serverChangedA11y": "Aviso: la dirección del servidor cambió",
   "login.trustThisServer": "Confío en este servidor",  "login.policyHint":
     "Elija una contraseña de al menos 12 caracteres — una frase de 16 caracteres, o 12–15 caracteres de al menos tres tipos distintos.",
@@ -614,19 +614,19 @@ export const es: Record<string, string> = {
   "settings.llmBody": "Permitir enviar sus entradas (descifradas) a un servicio de IA externo para el análisis de patrones. Desactivado por defecto; se necesita su contraseña para cambiarlo.",
   "settings.llmA11y": "Permitir el análisis con IA de terceros",
   "settings.reauthDeleteTitle": "Escriba su contraseña para eliminar todo",
-  "settings.reauthBioTitle": "Escribe tu contraseña para activar el desbloqueo biométrico",
+  "settings.reauthBioTitle": "Escriba su contraseña para activar el desbloqueo biométrico",
   "settings.changePasswordLabel": "Cambiar contraseña",
   "settings.changePasswordCancel": "Cerrar cambiar contraseña",
-  "settings.changePasswordTitle": "Cambia tu contraseña",
+  "settings.changePasswordTitle": "Cambie su contraseña",
   "settings.changePasswordBody":
-    "Esto rota tu credencial de acceso Y vuelve a cifrar tu diario con una clave nueva: es el paso de recuperación si tu contraseña o clave se expuso alguna vez. Todos los dispositivos cerrarán sesión; los permisos de compartir activos se re-envuelven automáticamente.",
+    "Esto rota su credencial de acceso Y vuelve a cifrar su diario con una clave nueva: es el paso de recuperación si su contraseña o clave se expuso alguna vez. Todos los dispositivos cerrarán sesión; los permisos de compartir activos se re-envuelven automáticamente.",
   "settings.newPasswordPlaceholder": "Contraseña nueva (12+ caracteres)",
   "settings.newPasswordA11y": "Contraseña nueva",
   "settings.changePasswordButton": "Rotar claves e iniciar sesión de nuevo",
   "settings.rotateWorking": "Rotando…",
   "settings.rotateSuccessTitle": "Contraseña cambiada",
   "settings.rotateSuccessBody":
-    "Tu diario ahora está cifrado con tu nueva contraseña. Inicia sesión de nuevo en este dispositivo y en cualquier otro que uses.",
+    "Su diario ahora está cifrado con su nueva contraseña. Inicie sesión de nuevo en este dispositivo y en cualquier otro que use.",
   "settings.rotateFailedTitle": "No se pudo cambiar la contraseña",
   "settings.rotateWrongOld": "La contraseña actual no fue aceptada. No se cambió nada.",
   "settings.rotateRewrapFailed":

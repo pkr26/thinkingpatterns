@@ -73,7 +73,7 @@ import { InlineStatus, InlineStatusTone, NoticeChip } from "../components/Inline
 import { MainShell } from "../components/BottomNav";
 import { PROMPT_CHIPS, promptChipsFor } from "../promptChips";
 import { requestFailureCopy } from "../components/errors";
-import { t as tr, dateLocaleTag } from "../strings";
+import { getLocale, t as tr, dateLocaleTag } from "../strings";
 
 /** Keeps the encrypted payload comfortably under the server's ~1 MiB cap. */
 const MAX_ENTRY_CHARS = 100_000;
@@ -114,7 +114,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
    *  30-day ask completes finally announces itself. */
   const [patternsReady, setPatternsReady] = useState(false);
   /** Rotating gentle starters for blank-page days (never required). */
-  const [chips] = useState<string[]>(() => promptChipsFor(new Date()));
+  const [chips] = useState<string[]>(() => promptChipsFor(new Date(), 3, getLocale()));
   // Refs mirror what the unmount cleanup and the double-tap guard need —
   // state alone arrives a frame too late for both.
   const textRef = useRef(text);

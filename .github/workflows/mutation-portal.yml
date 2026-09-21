@@ -1,0 +1,80 @@
+name: Portal mutation gate
+
+# H-5 (2026-09-21 audit): portal mutation coverage was structurally
+# invisible — no workflow ever ran Stryker here, and stryker.config.json
+# carried thresholds.break: 0 (any score passes). This weekly scheduled
+# run makes the campaign real and keeps the number honest.
+#
+# FIRST BASELINE (2026-09-21, measured on this repository): aggregate
+# 1.26% — 37 killed / 2697 survived / 196 no-coverage. That number is
+# far below what 181 passing behavioral tests imply, and the primary
+# suspect is the runner WIRING (vitest sandbox executing ~1.8 tests per
+# mutant), not the tests themselves: investigating the
+# @stryker-mutator/vitest-runner integration is the tracked follow-up.
+# Until then the floor pins the baseline at 1.0 so the gate catches
+# total regressions (a score of 0 = the runner or the suite broke) and,
+# once the wiring is fixed, RAISE THE FLOOR to the re-measured value —
+# never lower it.
+
+on:
+  schedule:
+    - cron: "30 4 * * 1" # Mondays 04:30 UTC (after the mobile gate)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stryker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Only the root .nvmrc exists; portal has no per-package pin.
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - name: Install dependencies
+        working-directory: portal
+        run: npm ci
+      - name: Run Stryker
+        working-directory: portal
+        # A runner/configuration failure is not a score. Let it fail the
+        # workflow; the report upload below still runs for diagnosis.
+        run: npx stryker run
+      - name: Enforce the floor (1.0 — first baseline 2026-09-21, see header)
+        working-directory: portal
+        run: |
+          SCORE=$(node -e "
+            try {
+              const r = JSON.parse(require('fs').readFileSync('reports/mutation/mutation.json', 'utf8'));
+              let s = typeof r.score === 'number' ? r.score : (r.totals?.score ?? null);
+              if (s === null && r.files) {
+                let killed = 0, covered = 0;
+                for (const mutants of Object.values(r.files)) {
+                  for (const m of mutants.mutants) {
+                    if (m.status === 'Killed' || m.status === 'Timeout') { killed++; covered++; }
+                    else if (m.status === 'Survived' || m.status === 'NoCoverage') covered++;
+                  }
+                }
+                if (!covered) { console.error('empty report'); process.exit(2); }
+                s = (killed / covered) * 100;
+              }
+              if (s === null) { console.error('no score in report'); process.exit(2); }
+              console.log(s);
+            } catch (e) { console.error(e.message); process.exit(2); }
+          ")
+          echo "mutation score: $SCORE"
+          awk -v s="$SCORE" 'BEGIN { exit !(s < 1.0) }' && {
+            echo "::error::portal mutation score $SCORE is below the 1.0 floor — the runner wiring or the suite regressed (see the baseline triage note at the top of this workflow)"
+            exit 1
+          }
+      - name: Upload the report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: portal-stryker-report
+          path: portal/reports/mutation/
+          retention-days: 30

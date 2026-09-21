@@ -31,7 +31,33 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const key = (userId: string): string => `@mindpattern/onboarding_seen_${userId}`;
 
+// E-10 (2026-09-21): M-18's re-entry restored the SCREEN but the panel
+// index still restarted at 1 — a backgrounded user re-read everything
+// they had already dismissed. The index persists beside the seen flag
+// (single global key: only one onboarding runs at a time, and completion
+// or account deletion wipes it).
+const PANEL_INDEX_KEY = "@mindpattern/onboarding_panel";
+
 let pending = false;
+
+export async function saveOnboardingPanel(index: number): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PANEL_INDEX_KEY, String(index));
+  } catch {
+    // Storage pressure: the resume position is a nicety, never a crash —
+    // the fail-safe direction is showing a dismissed panel once more.
+  }
+}
+
+export async function loadOnboardingPanel(panelCount: number): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(PANEL_INDEX_KEY);
+    const parsed = Number.parseInt(raw ?? "0", 10);
+    return Number.isInteger(parsed) && parsed > 0 && parsed < panelCount ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
 
 /** Mirror of the persisted flag for the LAST account it was resolved for
  *  (null = not resolved yet in this process). */
@@ -76,10 +102,13 @@ export function onboardingSeenCached(userId: string): boolean | null {
 export async function recordOnboardingSeen(userId: string): Promise<void> {
   await AsyncStorage.setItem(key(userId), "1");
   seenMemo = { userId, seen: true };
+  // E-10 (2026-09-21): the resume position is meaningless once completed.
+  await AsyncStorage.removeItem(PANEL_INDEX_KEY).catch(() => {});
 }
 
 /** Account-deletion hygiene: the flag must not outlive its account. */
 export async function clearOnboardingSeen(userId: string): Promise<void> {
   await AsyncStorage.removeItem(key(userId));
+  await AsyncStorage.removeItem(PANEL_INDEX_KEY).catch(() => {});
   if (seenMemo?.userId === userId) seenMemo = null; // next read hits storage
 }

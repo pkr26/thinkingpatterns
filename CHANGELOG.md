@@ -6,6 +6,42 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Deep-audit Phase 2, waves 6–8: mobile polish, Spanish parity, ops maturity (2026-09-21)
+
+- **Spanish parity (E-3 High, E-8, D-7).** The pre-threshold baseline
+  loop is localized: `shared/generic_questions_es.json` (60 questions,
+  position-parity with the English pool, embedded in the app with
+  sync/invariant/parity tests) and a parallel Spanish prompt-chip pool —
+  both keyed off the device locale; usted register, and the six
+  remaining tú-form strings in the es catalog normalized. The three dead
+  multi-word ES sentiment-lexicon entries ("eterno es", "por eso",
+  "darme cuenta" — unreachable under per-token lookup) removed, mobile
+  lexicon regenerated.
+- **Mobile polish (E-9, E-10).** History is a windowed FlatList (header/
+  footer chrome preserved; far-offscreen rows unmount — up to 500
+  decrypted rows used to stay mounted forever), with the rnMock gaining
+  a FlatList stub. Calendar VoiceOver speaks human dates instead of raw
+  ISO strings; foregrounding refreshes activeDays (no more stale count
+  across midnight in an always-open app); onboarding resumes at the
+  persisted panel position instead of restarting at panel 1 (completing
+  the M-18 intent); the mobile README screens table lists
+  Measures/TherapistShare.
+- **Ops maturity (G-3..G-7, H-4, H-6).** Rollback procedure documented
+  (restore-point + image re-pin; never `alembic downgrade` live data);
+  the operator overlays (backup-offsite, monitoring) carry the
+  production hardening quartet (cap_drop ALL, no-new-privileges,
+  read_only + tmpfs); fetch mode defaults `restart: no` (the
+  restart-forever re-fetch trap); rclone excludes in-flight `.tmp`
+  dumps; json-file log rotation on every service; Trivy image scans in
+  the CI docker job and the release pipeline (fixable HIGH/CRITICAL
+  fail); `deploy/monitoring/verify.sh --production` enforces the
+  digest-pinned image contract (overlays fail until pinned); the weekly
+  backend mutation run enforces a surviving-mutant ceiling; mobile
+  coverage gains per-file floors for the security-critical modules
+  (crisisDetect 98, questionFeedback 90, strings 90, rotation 85,
+  aad/envelope/kdf 95); the release coverage gate runs on Python 3.14,
+  the production interpreter. Portal Stryker weekly gate follows.
+
 ### Deep-audit Phase 2, wave 5: portal polish (2026-09-21)
 
 The F-6 low-bundle, per item: the sensitive-caseload banner folds in

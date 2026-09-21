@@ -200,6 +200,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // offline queue. Ciphertext-only uploads — a locked vault is fine —
         // and flushQueueOnReconnect throttles foreground/background flaps.
         void flushQueueOnReconnect();
+        // E-10 (2026-09-21): an always-open app used to keep a stale
+        // activeDays count across midnight (it refreshed only at
+        // login/unlock and on insights loads). Foregrounding re-reads the
+        // server's count; the call fails closed to the last value offline.
+        void refreshActiveDays();
       }
     });
     return () => {

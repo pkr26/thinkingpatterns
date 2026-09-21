@@ -220,6 +220,19 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+      - name: Trivy vulnerability scan of both built images (2026-09-21 audit G-6)
+        # OS-package coverage pip-audit/npm cannot see (the backend image
+        # compiles asyncpg against live apt). Fixable HIGH/CRITICAL
+        # findings fail the job.
+        run: |
+          set -euo pipefail
+          for image in mindpattern-api:ci mindpattern-backup:ci; do
+            echo "trivy: scanning $image"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.61.0 image \
+              --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
+              --no-progress "$image"
+          done
       - name: Start the stack
         # --wait blocks until every service's healthcheck passes (the api
         # healthcheck is the same urllib probe the Dockerfile ships).

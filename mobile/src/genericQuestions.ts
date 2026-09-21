@@ -15,6 +15,7 @@
  */
 
 import { localDateISO } from "./moodLog";
+import type { Locale } from "./strings";
 
 /** One reflective question per baseline day (deterministic rotation). */
 export const GENERIC_QUESTIONS: readonly string[] = [
@@ -93,7 +94,84 @@ function seedFromDate(date: string): number {
 }
 
 /** The day's question for the given LOCAL calendar date (YYYY-MM-DD);
- *  defaults to today. */
-export function genericQuestionForDate(date: string = localDateISO()): string {
-  return GENERIC_QUESTIONS[seedFromDate(date) % GENERIC_QUESTIONS.length]!;
+ *  defaults to today. E-3 (2026-09-21 audit): the pre-threshold baseline
+ *  loop is localized — the Spanish pool (below) is position-parity with
+ *  the English one, so the same rotation picks the equivalent question. */
+export function genericQuestionForDate(
+  date: string = localDateISO(),
+  locale: Locale = "en",
+): string {
+  const pool = locale === "es" ? GENERIC_QUESTIONS_ES : GENERIC_QUESTIONS;
+  return pool[seedFromDate(date) % pool.length]!;
 }
+
+/** GENERIC_QUESTIONS_ES — embedded copy of shared/generic_questions_es.json
+ *  (E-3, 2026-09-21 audit: the entire 30-day baseline question loop used
+ *  to be English-only). Position-parity with the English pool: index i in
+ *  each pool is the same question. Invariants (pinned by test, including
+ *  the shared-file sync and the parity itself): every entry ends with "?",
+ *  and "debería" (advice language) never appears — the Spanish mirror of
+ *  the English "should" rule. Usted register, matching the app's Spanish
+ *  catalog. */
+export const GENERIC_QUESTIONS_ES: readonly string[] = [
+  "¿Qué ocupó la mayor parte de su mente hoy?",
+  "¿Qué se sintió diferente hoy en comparación con ayer?",
+  "¿Cuándo se sintió más usted mismo o usted misma hoy?",
+  "¿Qué pequeña cosa salió bien hoy?",
+  "¿Qué pensamiento se repitió hoy?",
+  "Si hoy tuviera un título, ¿cuál sería?",
+  "¿Qué se lleva consigo hacia mañana?",
+  "¿Qué notó hoy que suele pasar por alto?",
+  "¿Qué notó su cuerpo antes que su mente hoy?",
+  "¿Cuál fue el momento más tranquilo de su día?",
+  "¿Qué sonido recuerda de hoy?",
+  "¿Qué vio hoy que le gustaría volver a ver?",
+  "¿Qué le diría a un amigo que hubiera tenido su día?",
+  "¿Qué hizo hoy que le exigió esfuerzo?",
+  "¿Qué se perdonó hoy?",
+  "¿Qué haría que mañana fuera un 1% más amable con usted?",
+  "¿Qué tres cosas salieron más o menos bien hoy?",
+  "¿Quién hizo su día un poco más ligero hoy?",
+  "¿Hay algo que espera con ilusión?",
+  "¿Qué la confortó hoy?",
+  "¿Qué vale la pena conservar de hoy?",
+  "¿Qué fue lo que más le importó hoy?",
+  "¿Cuándo sintió que hoy tenía sentido?",
+  "¿Qué valor suyo apareció en algo que hizo hoy?",
+  "¿Qué le gustaría tener más en su vida?",
+  "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?",
+  "¿Qué emoción lo visitó más hoy?",
+  "¿Qué emoción lo sorprendió hoy?",
+  "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?",
+  "¿En quién pensó hoy?",
+  "¿Qué conversación se quedó con usted hoy?",
+  "¿Cuándo se sintió comprendido o comprendida hoy?",
+  "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?",
+  "¿Qué le dio energía hoy?",
+  "¿Qué lo agotó hoy?",
+  "¿A qué dijo no hoy?",
+  "¿Qué dejó ir hoy?",
+  "¿Qué parte del día se sintió más larga?",
+  "¿Cuándo estuvo más absorbido o absorbida en algo hoy?",
+  "¿Cómo sintió el ritmo de hoy?",
+  "¿Cuál fue la parte más difícil de hoy?",
+  "¿Qué atravesó hoy que se sintió pesado?",
+  "¿Qué está evitando, dicho con gentileza?",
+  "¿Qué preocupación se hizo más pequeña al escribirla?",
+  "¿Sobre qué tiene curiosidad ahora mismo?",
+  "¿Qué pregunta lleva rondándole últimamente?",
+  "¿Qué le gustaría recordar de esta época?",
+  "¿Qué pequeña cosa tiene curiosidad por intentar mañana?",
+  "¿Qué saboreó hoy y recuerda?",
+  "¿Dónde se sintió más a gusto hoy?",
+  "¿En qué lugar habría preferido estar hoy?",
+  "¿Qué se siente más como 'usted' en estos días?",
+  "¿Qué está cambiando en usted lenta y lentamente?",
+  "¿Qué se ha mantenido estable en usted últimamente?",
+  "Si hoy fuera un clima, ¿cuál habría sido?",
+  "¿Cómo sería mañana en un mundo ideal?",
+  "Si pudiera enviarse una nota esta mañana, ¿qué diría?",
+  "¿Qué hizo hoy puramente porque quería?",
+  "¿Qué le pidió hoy el día?",
+  "¿Por qué le agradece hoy a su yo del pasado?",
+];

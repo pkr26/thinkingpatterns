@@ -626,7 +626,6 @@ ABSOLUTIST_WORDS_ES: frozenset[str] = frozenset(
         "definitivo",
         "definitivamente",
         "constantemente",
-        "eterno es",
     }
 )
 
@@ -642,7 +641,6 @@ SENSE_WORDS_ES: frozenset[str] = frozenset(
         "causado",
         "efecto",
         "efectos",
-        "por eso",
         "consecuencia",
         "consecuencias",
         "resultado",
@@ -686,7 +684,6 @@ SENSE_WORDS_ES: frozenset[str] = frozenset(
         "reflexionar",
         "reflexioné",
         "reflexione",
-        "darme cuenta",
         "entero",
         "memoricé",
     }

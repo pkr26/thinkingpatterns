@@ -68,6 +68,32 @@ jobs:
         if: always()
         working-directory: backend
         run: mutmut results > mutmut-results.txt || true
+      - name: Enforce the surviving-mutant ceiling (2026-09-21 audit H-4)
+        # The artifact alone let ANY survivor count pass — mobile decayed
+        # 100 -> 82.7 under exactly this setup. Count survivors and fail
+        # above the ceiling. Ratchet the ceiling DOWN as survivors are
+        # killed; never raise it without a written reason.
+        env:
+          MAX_SURVIVING_MUTANTS: 25
+        run: |
+          python - <<'EOF'
+          import os, re, sys
+          text = open("mutmut-results.txt", encoding="utf-8", errors="replace").read()
+          # mutmut marks survivors with the suspicious emoji or the word
+          # "survived" per line; count both defensively.
+          survivors = sum(
+              1 for line in text.splitlines()
+              if "survived" in line.lower() or "🙂" in line
+          )
+          ceiling = int(os.environ["MAX_SURVIVING_MUTANTS"])
+          print(f"surviving mutants: {survivors} (ceiling {ceiling})")
+          if survivors > ceiling:
+              sys.exit(
+                  f"mutation floor breached: {survivors} surviving mutants > "
+                  f"{ceiling}. Kill them (see mutmut-results.txt) or document "
+                  "why the ceiling moves."
+              )
+          EOF
       - name: Upload mutmut results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

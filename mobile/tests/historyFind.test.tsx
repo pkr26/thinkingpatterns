@@ -110,12 +110,15 @@ describe("MoodCalendar", () => {
   it("tapping a journaled day selects it; tapping the selection again deselects", async () => {
     const onSelectDay = vi.fn();
     const root = await calendar({ onSelectDay });
+    // E-10 (2026-09-21): the label speaks a HUMAN date, not the raw ISO
+    // string VoiceOver used to read out ("2026 dash 09…").
     const journaled = root.root
       .findAll((n) => typeof n.props?.accessibilityLabel === "string")
       .map((n) => n.props.accessibilityLabel as string)
-      .find((label: string) => /^\d{4}-\d{2}-\d{2}, journaled/.test(label));
+      .find((label: string) => /, journaled$/.test(label) && !/\d{4}-\d{2}-\d{2}/.test(label));
     expect(journaled).toBeTruthy();
-    const day = journaled!.split(",")[0]!;
+    // The fixture journals 09-01 first; the label is its human rendering.
+    const day = "2026-09-01";
     // First tap selects the day's ISO date; the selection state re-renders
     // with "selected" and a second tap would pass null.
     const button = root.root
@@ -130,11 +133,12 @@ describe("MoodCalendar", () => {
     const root = await calendar({ onSelectDay, selectedDay: "2026-09-01" });
     const blank = root.root.findAll((n) => n.props?.accessibilityLabel === "not-a-real-label");
     expect(blank).toHaveLength(0);
-    // Every enabled day button carries an ISO accessibility label.
+    // Every enabled day button carries a human-date accessibility label
+    // (E-10: no raw ISO reaches VoiceOver anymore).
     const labels = root.root
       .findAll((n) => typeof n.props?.accessibilityLabel === "string")
       .map((n) => n.props.accessibilityLabel as string)
-      .filter((l) => /\d{4}-\d{2}-\d{2}/.test(l));
+      .filter((l) => /(, journaled|, no entry)$/.test(l) && !/\d{4}-\d{2}-\d{2}/.test(l));
     expect(labels.length).toBeGreaterThan(20);
     const blankDay = root.root.findAll(
       (n) => typeof n.props?.accessibilityLabel === "string" && n.props.accessibilityLabel.endsWith(", no entry") && typeof n.props?.onPress === "function",

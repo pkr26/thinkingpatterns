@@ -213,8 +213,8 @@ describe("HistoryScreen list", () => {
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     expect(api.listEntries).toHaveBeenCalledTimes(1);
-    const { ScrollView } = await import("react-native");
-    const scroll = root.root.findByType(ScrollView);
+    const { FlatList } = await import("react-native");
+    const scroll = root.root.findByType(FlatList);
     const rc = (scroll.props as { refreshControl: React.ReactElement }).refreshControl;
     await act(async () => {
       await (rc.props as { onRefresh: () => unknown }).onRefresh();

@@ -12,13 +12,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { GENERIC_QUESTIONS, genericQuestionForDate } from "../src/genericQuestions";
+import { GENERIC_QUESTIONS, GENERIC_QUESTIONS_ES, genericQuestionForDate } from "../src/genericQuestions";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const shared = JSON.parse(readFileSync(join(here, "..", "..", "shared", "generic_questions.json"), "utf8")) as {
   v: number;
   questions: string[];
 };
+// E-3 (2026-09-21): the Spanish pool is a first-class shared artifact now.
+const sharedEs = JSON.parse(
+  readFileSync(join(here, "..", "..", "shared", "generic_questions_es.json"), "utf8"),
+) as { v: number; questions: string[] };
 
 describe("shared/generic_questions.json parity", () => {
   it("embeds the pool exactly", () => {
@@ -58,5 +62,36 @@ describe("genericQuestionForDate rotation", () => {
     expect(GENERIC_QUESTIONS).toContain(genericQuestionForDate("2026-10-01"));
     // The default form (today) returns a pool member.
     expect(GENERIC_QUESTIONS).toContain(genericQuestionForDate());
+  });
+});
+
+describe("E-3 (2026-09-21): the Spanish baseline pool", () => {
+  it("embeds shared/generic_questions_es.json exactly", () => {
+    expect(sharedEs.v).toBe(1);
+    expect([...GENERIC_QUESTIONS_ES]).toEqual(sharedEs.questions);
+  });
+
+  it("is position-parity with the English pool (same rotation, same question)", () => {
+    expect(GENERIC_QUESTIONS_ES.length).toBe(GENERIC_QUESTIONS.length);
+  });
+
+  it("honors the content invariants: questions only, no advice language", () => {
+    for (const question of GENERIC_QUESTIONS_ES) {
+      expect(question.endsWith("?")).toBe(true);
+      expect(question.toLowerCase()).not.toContain("debería");
+      expect(question.toLowerCase()).not.toContain("deberías");
+    }
+  });
+
+  it("serves the Spanish pool for locale 'es' — deterministic and in-pool", () => {
+    for (let day = 1; day <= 30; day++) {
+      const date = `2026-09-${String(day).padStart(2, "0")}`;
+      const pick = genericQuestionForDate(date, "es");
+      expect(GENERIC_QUESTIONS_ES).toContain(pick);
+      expect(GENERIC_QUESTIONS).not.toContain(pick);
+      // Same date+index in both locales: the equivalent question.
+      const index = GENERIC_QUESTIONS.indexOf(genericQuestionForDate(date, "en"));
+      expect(GENERIC_QUESTIONS_ES.indexOf(pick)).toBe(index);
+    }
   });
 });
