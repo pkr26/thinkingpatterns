@@ -230,6 +230,56 @@ describe("MeasuresScreen", () => {
     }
   });
 
+  it("P3: the multi-instrument registry — GAD-7 and PHQ-2 semantics", async () => {
+    const {
+      INSTRUMENTS,
+      measureScore,
+      measureComplete,
+      measurePayload,
+      safetyItemEndorsed,
+      maxScoreForMeasure,
+    } = await import("../src/measures");
+    expect(INSTRUMENTS.gad7.items).toBe(7);
+    expect(INSTRUMENTS.phq2.items).toBe(2);
+    // Score ceilings clamp per instrument, never the phq9 scale.
+    expect(measureScore("gad7", [3, 3, 3, 3, 3, 3, 3])).toBe(21);
+    expect(measureScore("gad7", [2, 2, 2, 2, 2, 2, 2])).toBe(14);
+    expect(measureScore("phq2", [3, 3])).toBe(6);
+    expect(measureScore("phq2", [1, 2])).toBe(3);
+    // Completion gates per item count.
+    expect(measureComplete("gad7", [0, 0, 0, 0, 0, 0, 0])).toBe(true);
+    expect(measureComplete("gad7", [0, 0, 0, 0, 0, 0, null])).toBe(false);
+    expect(measureComplete("phq2", [0, 1])).toBe(true);
+    // Only the PHQ-9 carries a safety item.
+    expect(safetyItemEndorsed("gad7", [3, 3, 3, 3, 3, 3, 3])).toBe(false);
+    expect(safetyItemEndorsed("phq2", [3, 3])).toBe(false);
+    expect(safetyItemEndorsed("phq9", [0, 0, 0, 0, 0, 0, 0, 0, 1])).toBe(true);
+    // The payload names its instrument (the portal groups by it).
+    const gad = JSON.parse(measurePayload("gad7", [1, 1, 1, 1, 1, 1, 1], "2026-09-21"));
+    expect(gad).toEqual({ v: 1, measure: "gad7", score: 7, completed_at: "2026-09-21" });
+    const phq2 = JSON.parse(measurePayload("phq2", [2, 1], "2026-09-21"));
+    expect(phq2).toEqual({ v: 1, measure: "phq2", score: 3, completed_at: "2026-09-21" });
+    // History clamping is instrument-aware; unknown names skip.
+    expect(maxScoreForMeasure("gad7")).toBe(21);
+    expect(maxScoreForMeasure("phq2")).toBe(6);
+    expect(maxScoreForMeasure("future-instrument")).toBeNull();
+    expect(maxScoreForMeasure(42)).toBeNull();
+    // Every instrument's item copy exists in BOTH locale catalogs.
+    const { enCatalog, esCatalog } = await import("../src/strings");
+    for (const id of ["phq9", "gad7", "phq2"] as const) {
+      for (let i = 1; i <= INSTRUMENTS[id].items; i++) {
+        expect(enCatalog[`measures.${id}.item${i}`]?.length).toBeGreaterThan(10);
+        expect(esCatalog[`measures.${id}.item${i}`]?.length).toBeGreaterThan(10);
+      }
+      expect(enCatalog[`measures.select.${id}`]?.length).toBeGreaterThan(5);
+      expect(esCatalog[`measures.select.${id}`]?.length).toBeGreaterThan(5);
+    }
+    for (const v of [0, 1, 2, 3]) {
+      expect(enCatalog[`measures.option${v}`]?.length).toBeGreaterThan(3);
+      expect(esCatalog[`measures.option${v}`]?.length).toBeGreaterThan(3);
+    }
+  });
+
   it("phq9.ts owns structure only — display copy lives in the locale catalogs", async () => {
     // The item list still has exactly nine entries and the scorer, gates
     // and payload contract are untouched by the i18n move.

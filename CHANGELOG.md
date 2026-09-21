@@ -6,6 +6,39 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Deep-audit Phase 3 (2026-09-21): MBC depth, time-of-day, note history, the on-device protocol
+
+- **Measurement-based care depth.** GAD-7 (anxiety) and PHQ-2 (brief
+  depression core) join PHQ-9 through a multi-instrument registry
+  (mobile/src/measures.ts): one screen, one selector, the same
+  zero-knowledge measure path; per-instrument score ceilings, history
+  clamping, and en/es item copy. The portal labels the trend lines per
+  instrument. No interpretation, as ever.
+- **Time-of-day analysis (v2 channel).** The entry payload gains an
+  optional coarse writing-window bucket (morning/afternoon/evening/
+  night — never a clock time); ≥70% one window on a weekday narrows the
+  temporal card to "Sunday evening". Strict server validation, v1
+  corpora unchanged.
+- **Note edit history (clinic readiness).** Every changing note update
+  preserves the superseded blob as an immutable revision (new table,
+  migration b8f4e2a7c9d1); GET /therapist/notes/{id}/revisions serves
+  them ownership-scoped and audit-logged; the portal shows "edited —
+  view history" with decrypted prior texts.
+- **The on-device brain protocol.** POST /api/v1/insights/
+  local-recompute: client-encrypted state + patterns with state_seq
+  discipline and server-grounded analysis dates — no processing
+  session, no key shipment. The port plan and acceptance gate:
+  mobile/src/brain/PORT.md + shared/brain_vectors.json v2 full-engine
+  golden cases (calm/work-anxiety/Spanish corpora).
+- **Research + TEE design docs.** docs/IRB_STUDY_PROTOCOL.md (single-arm
+  usability study, zero-knowledge-consistent data handling,
+  comprehension benchmark as the published-claims gate) and
+  docs/TEE_ATTESTATION_DESIGN.md (client-verified attestation flow for
+  the interim server path).
+- Deferred (tracked): the TS port itself per PORT.md; multi-device sync;
+  multi-therapist organizations and handoff; clinician-configured
+  measure cadence.
+
 ### Deep-audit Phase 2, waves 6–8: mobile polish, Spanish parity, ops maturity (2026-09-21)
 
 - **Spanish parity (E-3 High, E-8, D-7).** The pre-threshold baseline

@@ -367,6 +367,28 @@ class TherapistNote(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class TherapistNoteRevision(Base):
+    """One superseded revision of a therapist note (Phase 3, 2026-09-21 —
+    the clinic-readiness "note edit history"). Written when an update
+    CHANGES the blob; the live row remains the current note. Ciphertext
+    under the SAME note AAD (client_note_id is stable across revisions),
+    therapist-private by construction like the note itself. Revisions die
+    with their note (CASCADE) and with the therapist's account."""
+
+    __tablename__ = "therapist_note_revisions"
+    __table_args__ = (
+        Index("ix_note_revisions_note_created", "note_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    note_id: Mapped[str] = mapped_column(
+        ForeignKey("therapist_notes.id", ondelete="CASCADE")
+    )
+    therapist_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    blob: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class AccessLog(Base):
     """Who touched whose shared data, when. Clinically expected metadata:
     the therapist-facing reads are auditable even though their CONTENT is

@@ -21,6 +21,21 @@ export interface EntryPayload {
   energy?: number;
   sleep?: number; // 1..5 quality rating
   tags?: string[];
+  /** Coarse local writing window (P3, 2026-09-21): "morning" | "afternoon"
+   *  | "evening" | "night". Deliberately a BUCKET, never a clock time —
+   *  the entry contract stays date-granular for privacy; the bucket is
+   *  enough for the "Sunday evening" analysis refinement. */
+  tod?: string;
+}
+
+/** The local-hour bucket for the entry payload's optional time-of-day
+ *  channel: 05-11 morning, 12-16 afternoon, 17-22 evening, else night.
+ *  Pure and total so tests pin the boundaries. */
+export function timeOfDayBucket(hour: number): "morning" | "afternoon" | "evening" | "night" {
+  if (hour >= 5 && hour < 12) return "morning";
+  if (hour >= 12 && hour < 17) return "afternoon";
+  if (hour >= 17 && hour < 23) return "evening";
+  return "night";
 }
 
 export function deriveKeys(password: string, salt: Buffer): Keys {
@@ -42,7 +57,12 @@ export function encryptEntry(
   text: string,
   createdAt: string,
   sentiment: number | null,
-  structured?: { energy?: number | null; sleep?: number | null; tags?: string[] },
+  structured?: {
+    energy?: number | null;
+    sleep?: number | null;
+    tags?: string[];
+    tod?: string;
+  },
   /** Content generation for the version-bound v2 AAD (audit fix M-2,
    *  2026-09-20): binds ("entry", userId, id, version) so a compromised
    *  server cannot pair a stale-but-valid ciphertext with a truthful
@@ -54,7 +74,11 @@ export function encryptEntry(
   // the text. A caller passing none emits the v1 shape byte-for-byte, so
   // older servers and exports behave identically.
   const payload: EntryPayload =
-    structured && (structured.energy != null || structured.sleep != null || (structured.tags ?? []).length > 0)
+    structured &&
+    (structured.energy != null ||
+      structured.sleep != null ||
+      (structured.tags ?? []).length > 0 ||
+      structured.tod != null)
       ? {
           v: 2,
           text,
@@ -63,6 +87,7 @@ export function encryptEntry(
           ...(structured.energy != null ? { energy: structured.energy } : {}),
           ...(structured.sleep != null ? { sleep: structured.sleep } : {}),
           ...((structured.tags ?? []).length > 0 ? { tags: structured.tags } : {}),
+          ...(structured.tod != null ? { tod: structured.tod } : {}),
         }
       : { v: 1, text, sentiment, created_at: createdAt };
   // Stryker disable StringLiteral

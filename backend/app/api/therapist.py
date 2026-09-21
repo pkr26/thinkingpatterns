@@ -54,6 +54,7 @@ from ..models import (
     Measure,
     PairingCode,
     TherapistNote,
+    TherapistNoteRevision,
     User,
     new_id,
     utcnow,
@@ -71,6 +72,7 @@ from ..schemas import (
     TherapistRegisterRequest,
     TokenResponse,
     TherapistAccessLogOut,
+    NoteRevisionOut,
     WrapKeyRotateRequest,
     entry_out,
 )
@@ -1563,6 +1565,18 @@ async def update_note(
         )
         changed = bytes(row.blob) != blob
         if changed:
+            # P3 (2026-09-21): the edit history — the SUPERSEDED blob is
+            # preserved as an immutable revision before the live row
+            # takes the new text. Same AAD (client_note_id is stable), so
+            # the portal decrypts revisions exactly like live notes.
+            session.add(
+                TherapistNoteRevision(
+                    note_id=row.id,
+                    therapist_id=user.id,
+                    blob=bytes(row.blob),
+                    created_at=utcnow(),
+                )
+            )
             row.blob = blob
             row.updated_at = utcnow()
         _audit(session, user, row.user_id, "update_note")
@@ -1575,6 +1589,67 @@ async def update_note(
         response = _note_out(row)
         await session.commit()
     return response
+
+
+@router.get(
+    "/notes/{note_id}/revisions",
+    response_model=list[NoteRevisionOut],
+    dependencies=[
+        Depends(require_sharing_enabled),
+        Depends(
+            make_rate_limiter("therapist-note-revisions", "read_rate_limit", "read_rate_window")
+        ),
+    ],
+)
+async def read_note_revisions(
+    note_id: str,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """The edit history of one of the therapist's OWN notes (P3,
+    2026-09-21 — clinic readiness). Revisions are the superseded blobs,
+    newest first, under the same note AAD the portal already uses for
+    live notes. Ownership-scoped: another therapist's note id is the
+    flat 404, and the read is audit-logged."""
+    row = (
+        (
+            await session.execute(
+                select(TherapistNote).where(
+                    TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        raise ApiError(status_code=404, detail="note not found", code="not_found")
+    revisions = (
+        (
+            await session.execute(
+                select(TherapistNoteRevision)
+                .where(
+                    TherapistNoteRevision.note_id == note_id,
+                    TherapistNoteRevision.therapist_id == user.id,
+                )
+                .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    _audit(session, user, row.user_id, "read_note_revisions")
+    await session.commit()
+    return [
+        NoteRevisionOut(
+            id=rev.id,
+            blob=base64.b64encode(bytes(rev.blob)).decode("ascii"),
+            created_at=rev.created_at,
+        )
+        for rev in revisions
+    ]
 
 
 @router.delete(

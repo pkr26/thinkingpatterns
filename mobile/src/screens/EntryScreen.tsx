@@ -46,7 +46,7 @@ import {
   View,
 } from "react-native";
 import { api, ApiError } from "../api/client";
-import { encryptEntry } from "../crypto/MindPatternCrypto";
+import { encryptEntry, timeOfDayBucket } from "../crypto/MindPatternCrypto";
 import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft } from "../store";
@@ -329,6 +329,9 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         energy: selectedEnergy,
         sleep: sleepQuality,
         tags: selectedTags,
+        // P3 (2026-09-21): the coarse local writing window — a bucket,
+        // never a clock time (the entry contract stays date-granular).
+        tod: timeOfDayBucket(new Date().getHours()),
       }, 1);
       // The local mood log powers the baseline-phase trend view; it is
       // device-only metadata, encrypted under the data key, and never

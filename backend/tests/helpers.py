@@ -61,17 +61,23 @@ class ClientEmulator:
         client_entry_id: str,
         sentiment: float | None = None,
         content_version: int | None = None,
+        tod: str | None = None,
     ) -> str:
         """Encrypt an entry payload. ``content_version=None`` reproduces the
         LEGACY v1 three-part AAD (pre-2026-09-20 blobs, and the shape every
         pre-existing test pins); an int produces the v2 version-bound AAD a
-        current client sends — mirroring the mobile app's migration ladder."""
+        current client sends — mirroring the mobile app's migration ladder.
+        ``tod`` (P3, 2026-09-21) rides the v2 payload's optional coarse
+        writing-window bucket exactly as the mobile app sends it."""
         payload = {
             "v": 1,
             "text": text,
             "sentiment": sentiment,
             "created_at": entry_date.isoformat(),
         }
+        if tod is not None:
+            payload["v"] = 2
+            payload["tod"] = tod
         if content_version is None:
             aad = crypto.entry_aad_v1(self.user_id or "", client_entry_id)
         else:
@@ -177,13 +183,19 @@ class ClientEmulator:
         client_entry_id: str | None = None,
         sentiment: float | None = None,
         content_version: int | None = None,
+        tod: str | None = None,
     ) -> dict:
         """POST an entry. ``content_version`` selects the v2 AAD generation
         (None = legacy v1 bytes, the pre-2026-09-20 contract older tests and
         older deployed clients produce) and rides the JSON body when set."""
         client_entry_id = client_entry_id or f"e-{entry_date.isoformat()}-{os.urandom(4).hex()}"
         blob = self.encrypt_entry(
-            text, entry_date, client_entry_id, sentiment, content_version=content_version
+            text,
+            entry_date,
+            client_entry_id,
+            sentiment,
+            content_version=content_version,
+            tod=tod,
         )
         body = {
             "client_entry_id": client_entry_id,

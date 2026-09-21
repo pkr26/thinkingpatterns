@@ -730,6 +730,28 @@ export const en: Record<string, string> = {
   "measures.phq9.option1": "Several days",
   "measures.phq9.option2": "More than half the days",
   "measures.phq9.option3": "Nearly every day",
+  // P3 (2026-09-21): the shared 0-3 frequency option labels — GAD-7 and
+  // PHQ-2 ride the same response scale (measures.optionN).
+  "measures.option0": "Not at all",
+  "measures.option1": "Several days",
+  "measures.option2": "More than half the days",
+  "measures.option3": "Nearly every day",
+  // P3 (2026-09-21): the instrument selector labels.
+  "measures.select.phq9": "PHQ-9 (depression, 9 items)",
+  "measures.select.gad7": "GAD-7 (anxiety, 7 items)",
+  "measures.select.phq2": "PHQ-2 (brief, 2 items)",
+  // GAD-7 (Spitzer et al. 2006) — same public-domain status and "over the
+  // last 2 weeks" stem as the PHQ-9.
+  "measures.gad7.item1": "Feeling nervous, anxious, or on edge",
+  "measures.gad7.item2": "Not being able to stop or control worrying",
+  "measures.gad7.item3": "Worrying too much about different things",
+  "measures.gad7.item4": "Trouble relaxing",
+  "measures.gad7.item5": "Being so restless that it is hard to sit still",
+  "measures.gad7.item6": "Becoming easily annoyed or irritable",
+  "measures.gad7.item7": "Feeling afraid, as if something awful might happen",
+  // PHQ-2: the two-item depression core of the PHQ-9.
+  "measures.phq2.item1": "Little interest or pleasure in doing things",
+  "measures.phq2.item2": "Feeling down, depressed, or hopeless",
 
   // -------------------------------------------------------- therapist share
   "share.codeNotFoundTitle": "Code not found",

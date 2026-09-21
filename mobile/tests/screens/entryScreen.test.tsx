@@ -315,7 +315,9 @@ describe("EntryScreen save pipeline", () => {
       "good day, calm evening",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       null,  // v3: no client sentiment — the server engine re-scores at analysis time
-      { energy: null, sleep: null, tags: [] },
+      // P3 (2026-09-21): the structured arg now carries the coarse local
+      // writing-window bucket alongside the optional channels.
+      { energy: null, sleep: null, tags: [], tod: expect.any(String) },
       1,     // M-2 (2026-09-20): first content generation, v2 version-bound AAD
     );
     expect(api.createEntry).toHaveBeenCalledTimes(1);

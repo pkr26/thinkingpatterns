@@ -1026,7 +1026,7 @@ describe("PatientView recorded measures (MBC, 2026-09-19)", () => {
     // L-76 (2026-09-20): the decrypted INSTRUMENT name renders beside its
     // readings — a bare number is only interpretable next to the scale
     // that produced it.
-    expect(rtr.textOf(root)).toContain("phq9: 2026-09-04: 14  ·  2026-09-11: 9");
+    expect(rtr.textOf(root)).toContain("PHQ-9 (depression): 2026-09-04: 14  ·  2026-09-11: 9");
     expect(rtr.textOf(root)).toContain("interpretation is yours");
   });
 
@@ -1241,7 +1241,7 @@ describe("audit fixes 2026-09-20", () => {
     // ALL 150 rows were fetched, decrypted, and counted — not a silent 60.
     expect(vi.mocked(mockedCrypto.decryptMeasure)).toHaveBeenCalledTimes(150);
     expect(rtr.textOf(root)).toContain("Recorded measures (150)");
-    expect(rtr.textOf(root)).toContain("phq9:");
+    expect(rtr.textOf(root)).toContain("PHQ-9 (depression):");
     // Newest reading renders; oldest is outside the 60-per-instrument window.
     expect(rtr.textOf(root)).toContain(`${dateFor(149)}: ${149 % 28}`);
     expect(rtr.textOf(root)).not.toContain(`${dateFor(0)}: 0`);
@@ -1270,8 +1270,8 @@ describe("audit fixes 2026-09-20", () => {
     );
     await rtr.flush();
     expect(rtr.textOf(root)).toContain("Recorded measures (4)");
-    expect(rtr.textOf(root)).toContain("phq9: ");
-    expect(rtr.textOf(root)).toContain("gad7: ");
+    expect(rtr.textOf(root)).toContain("PHQ-9 (depression): ");
+    expect(rtr.textOf(root)).toContain("GAD-7 (anxiety): ");
     expect(rtr.textOf(root)).not.toContain("not shown");
   });
 

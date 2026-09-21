@@ -471,6 +471,14 @@ export interface Note {
   updated_at: string;
 }
 
+/** One superseded revision of a note (P3, 2026-09-21): the prior blob
+ *  (same AAD as the live note) and when it was superseded. */
+export interface NoteRevision {
+  id: string;
+  blob: string;
+  created_at: string;
+}
+
 /** Notes have a larger item-count bound than evidence pages, but the server
  * still byte-truncates at 2 MiB and advertises continuation explicitly. */
 export const THERAPIST_NOTE_PAGE_SIZE = 100;
@@ -602,6 +610,8 @@ export const api = {
   },
   createNote: (userId: string, payload: { client_note_id: string; pattern_pid?: string | null; blob: string }) =>
     request<Note>("POST", `/therapist/patients/${encodeURIComponent(userId)}/notes`, payload),
+  noteRevisions: (noteId: string) =>
+    request<NoteRevision[]>("GET", `/therapist/notes/${encodeURIComponent(noteId)}/revisions`),
   updateNote: (noteId: string, blob: string) =>
     request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, { blob }),
   deleteNote: (noteId: string) => request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),

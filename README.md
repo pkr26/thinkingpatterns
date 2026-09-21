@@ -574,9 +574,26 @@ turn it back into readable files offline.
   `native-release-preflight` CI job enforces it via
   `mobile/tools/verify_native_release.mjs`. TLS certificate pinning
   remains native-project work; the checklist lives in `mobile/README.md`.
-- Time-of-day analysis (the "Sunday **evening**" refinement) requires a
-  client payload extension — the entry contract (`v:1`, date-only) is
-  versioned for exactly this.
+- Time-of-day analysis SHIPPED (Phase 3, 2026-09-21): the entry payload's
+  optional v2 channel carries a coarse LOCAL writing bucket
+  (`tod`: morning/afternoon/evening/night — a bucket, never a clock
+  time, so the contract stays date-granular for privacy). When a
+  weekday's theme-entries are ≥70% one window, the temporal card's
+  detail narrows to it ("Sunday **evening**"); mixed or v1 corpora keep
+  the flat weekday.
+
+## On-device analysis (Phase 3, 2026-09-21)
+
+`POST /api/v1/insights/local-recompute` is the escrow-closing protocol: a
+client that runs the deterministic brain ON-DEVICE ships its
+client-encrypted brain state and patterns payload (the same AAD
+contracts `GET /insights` serves) with a `base_state_seq` for optimistic
+concurrency; the server grounds the claimed analysis dates against the
+account's real entries, stores the blobs, and never sees the data key —
+no processing session exists on this path. The mobile port itself is
+tracked step-by-step in `mobile/src/brain/PORT.md`, with full-engine
+golden vectors in `shared/brain_vectors.json` (v2) as the acceptance
+gate. Interim server-path risk bounding: `docs/TEE_ATTESTATION_DESIGN.md`.
 
 ## Security & analysis hardening history
 

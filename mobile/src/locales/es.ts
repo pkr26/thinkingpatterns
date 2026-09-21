@@ -721,6 +721,27 @@ export const es: Record<string, string> = {
   "measures.phq9.option1": "Varios días",
   "measures.phq9.option2": "Más de la mitad de los días",
   "measures.phq9.option3": "Casi todos los días",
+  // P3 (2026-09-21): etiquetas compartidas de la escala de frecuencia 0-3.
+  "measures.option0": "Para nada",
+  "measures.option1": "Varios días",
+  "measures.option2": "Más de la mitad de los días",
+  "measures.option3": "Casi todos los días",
+  // P3 (2026-09-21): etiquetas del selector de instrumento.
+  "measures.select.phq9": "PHQ-9 (depresión, 9 ítems)",
+  "measures.select.gad7": "GAD-7 (ansiedad, 7 ítems)",
+  "measures.select.phq2": "PHQ-2 (breve, 2 ítems)",
+  // GAD-7 (Spitzer et al. 2006) — misma condición de dominio público y el
+  // mismo encabezado "en las últimas 2 semanas" que el PHQ-9.
+  "measures.gad7.item1": "Sentirse nervioso/a, ansioso/a o al límite",
+  "measures.gad7.item2": "No poder dejar de preocuparse o controlar las preocupaciones",
+  "measures.gad7.item3": "Preocuparse demasiado por diferentes cosas",
+  "measures.gad7.item4": "Dificultad para relajarse",
+  "measures.gad7.item5": "Estar tan inquieto/a que le cuesta quedarse sentado/a",
+  "measures.gad7.item6": "Irritarse o molestarse con facilidad",
+  "measures.gad7.item7": "Sentir miedo, como si algo terrible fuera a suceder",
+  // PHQ-2: el núcleo de dos ítems del PHQ-9.
+  "measures.phq2.item1": "Poco interés o placer en hacer las cosas",
+  "measures.phq2.item2": "Sentirse desanimado/a, deprimido/a o sin esperanza",
 
   // -------------------------------------------------------- therapist share
   "share.codeNotFoundTitle": "Código no encontrado",

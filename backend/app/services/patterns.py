@@ -181,6 +181,11 @@ class JournalEntry:
     energy: float | None = None  # [-1, 1]: drained → energized
     sleep_quality: int | None = None  # 1..5: rough → rested
     tags: tuple[str, ...] = ()  # short activity tags ("family", "run")
+    # P3 (2026-09-21): coarse LOCAL writing window ("morning"/"afternoon"/
+    # "evening"/"night") — a bucket, never a clock time. Powers the
+    # "Sunday evening" temporal refinement; None on v1 payloads (the
+    # engine behaves exactly as before).
+    tod: str | None = None
 
 
 @dataclass(frozen=True)

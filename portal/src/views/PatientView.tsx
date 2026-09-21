@@ -289,6 +289,10 @@ export function PatientView(props: {
   const [stats, setStats] = useState<{ avg_sentiment?: number; total_entries?: number; active_days?: number; first_date?: string; last_date?: string } | null>(null);
   /** Notes search filter (client-side: notes are already decrypted here). */
   const [noteQuery, setNoteQuery] = useState("");
+  /** P3 (2026-09-21): the note edit history — decrypted prior texts per
+   *  note id, loaded on demand from the revisions endpoint. */
+  const [history, setHistory] = useState<Record<string, string[]>>({});
+  const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   /** The note being edited (id + textarea buffer). */
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   /** Two-step delete (audit M-23, 2026-09-20): one stray click must never
@@ -504,6 +508,28 @@ export function PatientView(props: {
   }, [load]);
 
   const selectedPid = selected?.detail.pattern_pid ?? null;
+  const loadHistory = useCallback(
+    async (note: { id: string; client_note_id: string }) => {
+      if (!session || historyBusy) return;
+      setHistoryBusy(note.id);
+      try {
+        const revisions = await api.noteRevisions(note.id);
+        const texts: string[] = [];
+        for (const rev of revisions) {
+          texts.push(
+            await decryptNote(session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob),
+          );
+        }
+        setHistory((prev) => ({ ...prev, [note.id]: texts }));
+      } catch {
+        setHistory((prev) => ({ ...prev, [note.id]: [] }));
+      } finally {
+        setHistoryBusy(null);
+      }
+    },
+    [session, patient.user_id, historyBusy],
+  );
+
   const patternNotes = useMemo(
     () => notes.filter((n) => n.pattern_pid !== null && n.pattern_pid === selectedPid),
     [notes, selectedPid],
@@ -517,6 +543,18 @@ export function PatientView(props: {
    *  oldest-first, so each group keeps that order; only the last
    *  MEASURE_TREND_WINDOW readings render, with the remainder counted in
    *  `hidden` for the honest "+N earlier not shown" line. */
+  // P3 (2026-09-21): friendly instrument names for the MBC trend lines —
+  // PHQ-9 is joined by GAD-7 (anxiety) and PHQ-2 (brief screen). Scores
+  // are never interpreted; the label names the instrument only.
+  const measureLabel = (instrument: string): string =>
+    (
+      {
+        phq9: "PHQ-9 (depression)",
+        gad7: "GAD-7 (anxiety)",
+        phq2: "PHQ-2 (brief)",
+      } as Record<string, string>
+    )[instrument] ?? instrument;
+
   const measureGroups = useMemo(() => {
     if (!measures) return [] as { instrument: string; readings: MeasureReading[]; hidden: number }[];
     const byInstrument = new Map<string, MeasureReading[]>();
@@ -780,7 +818,7 @@ export function PatientView(props: {
         <Card title={`Recorded measures (${measures?.length ?? 0})`}>
           {measureGroups.map((group) => (
             <NoteText key={group.instrument}>
-              {group.instrument}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+              {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
             </NoteText>
           ))}
           {hiddenMeasureCount > 0 && (
@@ -1056,7 +1094,7 @@ ${tpl}` : tpl)}
             <h2 style={{ fontSize: 14, marginTop: 10 }}>Recorded measures</h2>
             {measureGroups.map((group) => (
               <p key={group.instrument} style={{ fontSize: 12, margin: "2px 0" }}>
-                {group.instrument}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+                {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
                 {group.hidden > 0 && ` · +${group.hidden} earlier not shown`}
               </p>
             ))}
@@ -1074,11 +1112,46 @@ ${tpl}` : tpl)}
         {(selected ? patternNotes : generalNotes).length > 0 && (
           <>
             <h2 style={{ fontSize: 14, marginTop: 10 }}>Therapist notes ({selected ? "this pattern" : "general"})</h2>
-            {(selected ? patternNotes : generalNotes).map((note) => (
-              <p key={note.id} style={{ fontSize: 12, borderTop: "1px solid #999", paddingTop: 4, whiteSpace: "pre-wrap" }}>
-                {dayOf(note.created_at)} — {note.text}
-              </p>
-            ))}
+            {(selected ? patternNotes : generalNotes).map((note) => {
+              const edited = note.updated_at > note.created_at;
+              const priorTexts = history[note.id];
+              return (
+                <div key={note.id} style={{ fontSize: 12, borderTop: "1px solid #999", paddingTop: 4 }}>
+                  <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                    {dayOf(note.created_at)} — {note.text}
+                    {edited && (
+                      <button
+                        type="button"
+                        onClick={() => void loadHistory(note)}
+                        disabled={historyBusy === note.id}
+                        style={{
+                          marginLeft: 8, fontSize: 11, color: "#555", background: "none",
+                          border: "none", textDecoration: "underline", cursor: "pointer", padding: 0,
+                        }}
+                      >
+                        {historyBusy === note.id
+                          ? "loading history…"
+                          : priorTexts === undefined
+                            ? "edited — view history"
+                            : "edited"}
+                      </button>
+                    )}
+                  </p>
+                  {priorTexts !== undefined && priorTexts.length > 0 && (
+                    <div style={{ margin: "4px 0 0 12px", color: "#666" }}>
+                      {priorTexts.map((text, i) => (
+                        <p key={i} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                          previous ({i + 1}): {text}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {priorTexts !== undefined && priorTexts.length === 0 && (
+                    <p style={{ margin: "2px 0 0 12px", color: "#666" }}>no earlier text recorded</p>
+                  )}
+                </div>
+              );
+            })}
           </>
         )}
         <p style={{ fontSize: 10, color: "#555", marginTop: 10 }}>

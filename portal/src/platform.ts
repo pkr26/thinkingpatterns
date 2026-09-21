@@ -13,7 +13,7 @@ export function printPage(): void {
 
 /** F-6 (2026-09-21): randomness goes through the seam for the same
  *  reason — views used to call bare crypto.getRandomValues. */
-export function randomBytes(length: number): Uint8Array {
+export function randomBytes(length: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(length);
   globalThis.crypto.getRandomValues(bytes);
   return bytes;

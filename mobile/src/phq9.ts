@@ -23,56 +23,50 @@
  * Spanish-locale patient gets Spanish copy on the most safety-adjacent
  * screen in the app. The instrument's semantics are language-invariant;
  * only their rendering is not.
+ *
+ * Phase 3 (2026-09-21): the structure moved into the multi-instrument
+ * registry (src/measures.ts — GAD-7 and PHQ-2 joined PHQ-9). These
+ * exports remain as the PHQ-9 view over it, so existing callers and
+ * tests are unchanged.
  */
+
+import { INSTRUMENTS, measureComplete, measurePayload, measureScore, safetyItemEndorsed } from "./measures";
 
 /** One structural item per PHQ-9 question (nine, in instrument order).
  *  The display copy resolves per locale at render time. */
-export const PHQ9_ITEMS: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+export const PHQ9_ITEMS: readonly number[] = Array.from(
+  { length: INSTRUMENTS.phq9.items },
+  (_, i) => i + 1,
+);
 
 /** The standard response option VALUES, "over the last 2 weeks" (0–3).
- *  Labels resolve per locale (measures.phq9.optionN). */
-export const PHQ9_OPTIONS: readonly { value: number }[] = [
-  { value: 0 },
-  { value: 1 },
-  { value: 2 },
-  { value: 3 },
-];
+ *  Labels resolve per locale (measures.optionN). */
+export const PHQ9_OPTIONS: readonly { value: number }[] = INSTRUMENTS.phq9.options.map(
+  (value) => ({ value }),
+);
 
 export const PHQ9_ITEM9_INDEX = 8;
 
 /** Sum of the nine responses (0–27). Unanswered items count as 0 — the
- * completion UI requires every item before submitting, so this leniency
- * only guards the scorer itself. */
+ *  completion UI requires every item before submitting, so this leniency
+ *  only guards the scorer itself. */
 export function phq9Score(responses: readonly (number | null)[]): number {
-  let total = 0;
-  for (let i = 0; i < PHQ9_ITEMS.length; i++) {
-    const value = responses[i];
-    if (typeof value === "number" && Number.isFinite(value)) {
-      total += Math.max(0, Math.min(3, Math.round(value)));
-    }
-  }
-  return Math.min(27, total);
+  return measureScore("phq9", responses);
 }
 
 /** True when the safety item (9) was endorsed at any level. Powers the
- * post-save support pointer — the score itself is never interpreted. */
+ *  post-save support pointer — the score itself is never interpreted. */
 export function phq9Item9Endorsed(responses: readonly (number | null)[]): boolean {
-  const value = responses[PHQ9_ITEM9_INDEX];
-  return typeof value === "number" && value > 0;
+  return safetyItemEndorsed("phq9", responses);
 }
 
 /** True when every item has a pick — the submit button's enabled gate. */
 export function phq9Complete(responses: readonly (number | null)[]): boolean {
-  return responses.length === PHQ9_ITEMS.length && responses.every((r) => typeof r === "number");
+  return measureComplete("phq9", responses);
 }
 
 /** The encrypted-payload contract (consumed by the therapist portal):
  * {"v":1,"measure":"phq9","score":N,"completed_at":ISO-date}. */
 export function phq9Payload(responses: readonly (number | null)[], completedAt: string): string {
-  return JSON.stringify({
-    v: 1,
-    measure: "phq9",
-    score: phq9Score(responses),
-    completed_at: completedAt,
-  });
+  return measurePayload("phq9", responses, completedAt);
 }

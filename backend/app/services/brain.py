@@ -201,6 +201,11 @@ ALPHA = 0.05
 TEMPORAL_MIN_N = 8
 TEMPORAL_MIN_DAY_K = 4  # per-weekday floor before a weekday is tested at all
 TEMPORAL_MIN_FRACTION = 0.35
+# P3 (2026-09-21): the temporal card's optional time-of-day narrowing
+# — at least this many tod-bearing entries on the weekday, with this
+# dominant fraction, before "Sunday" may become "Sunday evening".
+TEMPORAL_MIN_TOD_N = 3
+TEMPORAL_MIN_TOD_FRACTION = 0.7
 # A word in ~every entry is journaling boilerplate ("unique day", "ordinary
 # notes"), not a life topic — presence claims are capped from above too.
 TOPIC_PRESENCE_MAX_SHARE = 0.95
@@ -2148,6 +2153,26 @@ def _detect_themes(
         # p-values by up to the number of weekdays). update() keeps, per
         # theme, only the best SURVIVOR after correction.
         for weekday, k, fraction, pvalue, gate_ok in candidates:
+            # P3 (2026-09-21): the "Sunday EVENING" refinement. When the
+            # weekday's theme-entries carry the optional coarse
+            # writing-window bucket and one bucket dominates strongly, it
+            # rides the detail — a temporal card may say "Sunday evenings"
+            # instead of the flat weekday. Absent on v1 corpora (no tod
+            # channel) and when the writing times are genuinely mixed:
+            # the claim only narrows when the data actually supports it.
+            tod_detail: dict[str, str] = {}
+            tod_seen = [
+                e.tod
+                for e, _ in with_theme
+                if e.entry_date.weekday() == weekday and e.tod is not None
+            ]
+            if len(tod_seen) >= TEMPORAL_MIN_TOD_N:
+                dominant, dominant_k = max(
+                    ((bucket, tod_seen.count(bucket)) for bucket in set(tod_seen)),
+                    key=lambda pair: pair[1],
+                )
+                if dominant_k / len(tod_seen) >= TEMPORAL_MIN_TOD_FRACTION:
+                    tod_detail = {"time_of_day": dominant}
             signals.append(
                 _Signal(
                     pid=f"temporal:{theme}",
@@ -2157,6 +2182,7 @@ def _detect_themes(
                     pvalue=pvalue,
                     detail={
                         "day": DAY_NAMES[weekday],
+                        **tod_detail,
                         "day_count": k,
                         "day_fraction": round(fraction, 3),
                         "base_rate": round(weekday_days.get(weekday, 0) / total_days, 3),

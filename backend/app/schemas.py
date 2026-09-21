@@ -496,6 +496,30 @@ class NoteOut(BaseModel):
     updated_at: datetime
 
 
+class LocalRecomputeRequest(StrictRequestModel):
+    """Phase 3 (2026-09-21): the on-device analysis upload. A client that
+    ran the deterministic brain LOCALLY ships the two client-encrypted
+    blobs (brain state + patterns payload, same AAD contracts the app
+    already uses to decrypt what GET /insights serves) plus the analysis
+    date-scope it claims. The server never sees the data key — no
+    processing session exists on this path."""
+
+    base_state_seq: int  # the seq of the brain state the client built on
+    state_blob: str
+    patterns_blob: str
+    analysis_dates: list[str]
+
+
+class NoteRevisionOut(BaseModel):
+    """One superseded revision of a note (P3, 2026-09-21): the prior
+    blob (same AAD as the live note — client_note_id is stable) and the
+    moment it was superseded."""
+
+    id: str
+    blob: str
+    created_at: datetime
+
+
 class ShareRecord(BaseModel):
     """A sharing consent, as it travels in the account export: metadata
     only (who, when, status) — the wrapped key is the therapist's to

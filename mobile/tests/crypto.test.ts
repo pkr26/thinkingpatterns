@@ -264,6 +264,36 @@ describe("MindPatternCrypto payload helpers", () => {
     expect(payload).toEqual({ v: 1, text: "worried about work", sentiment: -0.5, created_at: "2026-09-01" });
   });
 
+  it("P3: the tod channel rides the v2 payload — a bucket, never a clock time", () => {
+    const { blobB64 } = encryptEntry(keys(), "user-9", "e-tod", "busy day at work", "2026-09-21", null, {
+      tod: "evening",
+    }, 1);
+    const payload = decryptEntry(keys(), "user-9", "e-tod", blobB64, 1);
+    expect(payload).toEqual({
+      v: 2,
+      text: "busy day at work",
+      sentiment: null,
+      created_at: "2026-09-21",
+      tod: "evening",
+    });
+    // Without the channel the wire shape stays byte-compatible v1.
+    const plain = encryptEntry(keys(), "user-9", "e-v1", "text", "2026-09-21", 0);
+    expect(decryptEntry(keys(), "user-9", "e-v1", plain.blobB64).v).toBe(1);
+  });
+
+  it("P3: timeOfDayBucket boundaries are pinned", async () => {
+    const { timeOfDayBucket } = await import("../src/crypto/MindPatternCrypto");
+    expect(timeOfDayBucket(4)).toBe("night");
+    expect(timeOfDayBucket(5)).toBe("morning");
+    expect(timeOfDayBucket(11)).toBe("morning");
+    expect(timeOfDayBucket(12)).toBe("afternoon");
+    expect(timeOfDayBucket(16)).toBe("afternoon");
+    expect(timeOfDayBucket(17)).toBe("evening");
+    expect(timeOfDayBucket(22)).toBe("evening");
+    expect(timeOfDayBucket(23)).toBe("night");
+    expect(timeOfDayBucket(0)).toBe("night");
+  });
+
   it("binds entries to (user, entry id): relocation fails authentication", () => {
     const { blobB64 } = encryptEntry(keys(), "user-9", "e-1", "text", "2026-09-01", 0);
     expect(() => decryptEntry(keys(), "user-OTHER", "e-1", blobB64)).toThrow(TamperError);

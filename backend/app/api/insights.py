@@ -55,6 +55,7 @@ from ..locks import UserLocks, lifecycle_locks
 from ..models import Consent, Entry, Insight, Measure, User, new_id, utcnow
 from ..schemas import (
     InsightsResponse,
+    LocalRecomputeRequest,
     ProcessingSessionRequest,
     ProcessingSessionResponse,
     QuestionResponse,
@@ -612,6 +613,12 @@ MAX_ANALYSIS_TOTAL_CHARS = 2_000_000  # per recompute; oldest text truncated fir
 # every recompute from then on.
 INNER_DATE_TOLERANCE_DAYS = 1
 
+# P3 (2026-09-21): the entry payload's optional coarse writing-window
+# bucket. A bucket, never a clock time — the contract stays date-granular
+# for privacy; this is exactly enough for the "Sunday evening" temporal
+# refinement.
+_TOD_BUCKETS = frozenset({"morning", "afternoon", "evening", "night"})
+
 # Payload-shape failures: the ciphertext authenticated but the plaintext is
 # semantically malformed (bad JSON, wrong types, impossible dates). Both the
 # primary run and the amnesia retry translate these to the same 400 — the
@@ -690,6 +697,13 @@ def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> lis
                 if cleaned_tag and cleaned_tag not in cleaned:
                     cleaned.append(cleaned_tag)
             tags = tuple(cleaned)
+        # P3 (2026-09-21): the coarse writing-window bucket. Strict like
+        # every other channel — an unknown bucket is client drift, and the
+        # honest answer is the same 400 the malformed-energy path gives.
+        tod_raw = payload.get("tod")
+        if tod_raw is not None:
+            if not isinstance(tod_raw, str) or tod_raw not in _TOD_BUCKETS:
+                raise ValueError("tod must be one of: " + ", ".join(sorted(_TOD_BUCKETS)))
         entries.append(
             JournalEntry(
                 text=text,
@@ -698,6 +712,7 @@ def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> lis
                 energy=energy,
                 sleep_quality=sleep_raw,
                 tags=tags,
+                tod=tod_raw,
             )
         )
     # Total-corpus budget: keep the most recent text (entries arrive in
@@ -1539,6 +1554,127 @@ async def recompute(
                 metrics.observe_llm(failed=enricher.last_error is not None)
         if lifecycle_entered:
             await lifecycle_guard.__aexit__(None, None, None)
+
+
+@router.post(
+    "/insights/local-recompute",
+    response_model=RecomputeResponse,
+    dependencies=[
+        Depends(make_rate_limiter("local-recompute", "processing_rate_limit", "processing_rate_window"))
+    ],
+)
+async def local_recompute(
+    body: LocalRecomputeRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Phase 3 (2026-09-21): the escrow-closing analysis upload.
+
+    A client that ran the deterministic brain ON-DEVICE (the port tracked
+    in mobile/src/brain/PORT.md) ships its two client-encrypted blobs —
+    the new brain state and the patterns payload, under the SAME AAD
+    contracts the app already uses to decrypt what GET /insights serves —
+    and the server stores them with the ordinary state_seq discipline.
+    NO processing session is opened and the data key never crosses the
+    wire: the server stays blind end to end, which is the entire point.
+
+    Trust posture, stated plainly: the patterns payload is patient-owned
+    content exactly like entries (client-authored, server-opaque). The
+    server-side engine's integrity work (FDR, replication gates) protects
+    the patient from flukes; it cannot protect them from their own client
+    any more than entry storage can — and the therapist only ever reads
+    what this patient's app produced. What the server DOES ground:
+    ``analysis_dates`` is intersected with the account's real entry dates
+    (a client cannot claim analysis of data that does not exist), the
+    count stays bounded, and ``base_state_seq`` is checked against the
+    latest brain row so a stale local run cannot silently clobber a
+    newer one (409 conflict; the client re-fetches and re-runs).
+    """
+    settings = request.app.state.settings
+    if body.base_state_seq < 0:
+        raise ApiError(status_code=422, detail="base_state_seq must be >= 0", code="validation_error")
+    if not 1 <= len(body.analysis_dates) <= 366:
+        raise ApiError(
+            status_code=422,
+            detail="analysis_dates must carry between 1 and 366 dates",
+            code="validation_error",
+        )
+    try:
+        state_blob = base64.b64decode(body.state_blob, validate=True)
+        patterns_blob = base64.b64decode(body.patterns_blob, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(
+            status_code=422, detail="state_blob and patterns_blob must be base64", code="validation_error"
+        ) from None
+    if not (
+        crypto.MIN_BLOB_SIZE <= len(state_blob) <= settings.max_user_blob_bytes
+        and crypto.MIN_BLOB_SIZE <= len(patterns_blob) <= settings.max_user_blob_bytes
+    ):
+        raise ApiError(
+            status_code=422,
+            detail="blobs must be within the storage size bounds",
+            code="validation_error",
+        )
+    parsed_days: set[date_type] = set()
+    for raw in body.analysis_dates:
+        try:
+            parsed_days.add(date_type.fromisoformat(raw))
+        except ValueError:
+            raise ApiError(
+                status_code=422, detail="analysis_dates must be ISO dates", code="validation_error"
+            ) from None
+
+    async with _recompute_locks.hold(f"insights:{user.id}"):
+        fresh_user = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh_user is None or not fresh_user.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        prior = await _latest_insight(session, fresh_user.id, "brain")
+        prior_seq = prior.state_seq if prior is not None else 0
+        if prior_seq != body.base_state_seq:
+            raise ApiError(
+                status_code=409,
+                detail="the stored brain state moved since this analysis ran",
+                code="conflict",
+            )
+        # Ground the claimed scope: only dates the account actually has.
+        real_dates = set(await _entry_dates(session, fresh_user.id))
+        grounded = parsed_days & real_dates
+        state_seq = prior_seq + 1
+        await _replace_insight(
+            session, fresh_user.id, "patterns", None, patterns_blob, state_seq=state_seq
+        )
+        await _replace_insight(
+            session, fresh_user.id, "brain", None, state_blob, state_seq=state_seq
+        )
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            if _is_fk_violation(exc):
+                raise ApiError(
+                    status_code=410,
+                    detail="account no longer exists",
+                    code="account_deleted",
+                ) from None
+            raise
+    return RecomputeResponse(
+        phase="insight",
+        active_days=len(real_dates),
+        streak=0,
+        days_remaining=0,
+        patterns_stored=len(grounded),
+        question_stored=False,
+        analyzer="local",
+        state_seq=state_seq,
+    )
 
 
 @router.get(

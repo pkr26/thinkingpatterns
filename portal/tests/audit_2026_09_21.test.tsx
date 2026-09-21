@@ -189,7 +189,7 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
     const printOnly = root.root.findAllByType("div").find((n) => n.props.className === "print-only");
     expect(printOnly).toBeTruthy();
     expect(deepText(printOnly!)).toContain("Recorded measures");
-    expect(deepText(printOnly!)).toContain("phq9: 2026-09-04: 14");
+    expect(deepText(printOnly!)).toContain("PHQ-9 (depression): 2026-09-04: 14");
   });
 
   it("FIX 16: multi-line notes and journal entries keep their line breaks on screen and in print", async () => {

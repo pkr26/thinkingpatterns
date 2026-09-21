@@ -29,13 +29,14 @@ import { useSession } from "../store";
 import { localDateISO } from "../moodLog";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import {
-  PHQ9_ITEMS,
-  PHQ9_OPTIONS,
-  PHQ9_ITEM9_INDEX,
-  phq9Complete,
-  phq9Item9Endorsed,
-  phq9Payload,
-} from "../phq9";
+  INSTRUMENTS,
+  MEASURE_IDS,
+  measureComplete,
+  measurePayload,
+  safetyItemEndorsed,
+  maxScoreForMeasure,
+  type MeasureId,
+} from "../measures";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
@@ -50,6 +51,7 @@ interface MeasureRow {
 }
 
 interface Reading {
+  instrument: string;
   date: string;
   score: number;
 }
@@ -68,9 +70,14 @@ function decryptReading(dataKey: Buffer, userId: string, row: MeasureRow): Readi
       Buffer.from(row.blob, "base64"),
       buildAad("measure", userId, row.client_measure_id),
     );
-    const parsed = JSON.parse(plain.toString("utf8")) as { score?: unknown };
+    const parsed = JSON.parse(plain.toString("utf8")) as { measure?: unknown; score?: unknown };
     if (typeof parsed.score !== "number" || !Number.isFinite(parsed.score)) return null;
-    return { date: row.measure_date, score: Math.max(0, Math.min(27, Math.round(parsed.score))) };
+    // P3 (2026-09-21): clamp per instrument — a phq2 row must never render
+    // on a phq9 scale. Unknown instrument names (future payloads) skip
+    // the row rather than mis-scale it.
+    const max = maxScoreForMeasure(parsed.measure);
+    if (max === null) return null;
+    return { instrument: String(parsed.measure), date: row.measure_date, score: Math.max(0, Math.min(max, Math.round(parsed.score))) };
   } catch {
     return null;
   }
@@ -83,10 +90,19 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** P3 (2026-09-21): which instrument is in progress — PHQ-9, GAD-7 or
+   *  PHQ-2 all ride this screen and the same encrypted measure path. */
+  const [active, setActive] = useState<MeasureId>("phq9");
+  const instrument = INSTRUMENTS[active];
   /** The in-progress questionnaire: one pick per item, null = unanswered. */
   const [responses, setResponses] = useState<Array<number | null>>(
-    () => PHQ9_ITEMS.map(() => null),
+    () => INSTRUMENTS.phq9.items !== null ? Array.from({ length: INSTRUMENTS.phq9.items }, () => null) : [],
   );
+  const switchInstrument = (id: MeasureId): void => {
+    touchActivity();
+    setActive(id);
+    setResponses(Array.from({ length: INSTRUMENTS[id].items }, () => null));
+  };
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
@@ -129,9 +145,9 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   }, [load]);
 
   const submit = async () => {
-    if (busy || !phq9Complete(responses)) return;
+    if (busy || !measureComplete(active, responses)) return;
     setBusy(true);
-    const item9 = phq9Item9Endorsed(responses);
+    const safetyFlagged = safetyItemEndorsed(active, responses);
     try {
       const userId = await api.getUserId();
       if (!userId) {
@@ -146,16 +162,16 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       const clientMeasureId = newMeasureId(today);
       const blob = encrypt(
         vault.get().dataKey,
-        Buffer.from(phq9Payload(responses, today), "utf8"),
+        Buffer.from(measurePayload(active, responses, today), "utf8"),
         buildAad("measure", userId, clientMeasureId),
       ).toString("base64");
       await api.createMeasure(clientMeasureId, blob, today);
-      setResponses(PHQ9_ITEMS.map(() => null));
+      setResponses(Array.from({ length: instrument.items }, () => null));
       showStatus(tr("measures.recordedStatus"), "ok");
       await load();
       // SAFETY: only after the response is safely stored. Same throttle
       // stamp and calm copy as the entry crisis dialog.
-      if (item9) {
+      if (safetyFlagged) {
         const flagged = await crisisDialogShownOn(userId, today).catch(() => false);
         if (!flagged) {
           await recordCrisisDialogShown(userId, today).catch(() => {});
@@ -213,7 +229,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
               {tr("measures.historyTitle")}
             </Text>
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-              {readings.map((r) => `${r.date}: ${r.score}`).join("   ·   ")}
+              {readings.map((r) => `${r.instrument} ${r.date}: ${r.score}`).join("   ·   ")}
             </Text>
           </View>
         )}
@@ -223,22 +239,55 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
           </Text>
         )}
 
+        {/* P3 (2026-09-21): the instrument selector — PHQ-9 (depression),
+            GAD-7 (anxiety) and PHQ-2 (brief screen) share this screen and
+            the same encrypted path. No interpretation, ever. */}
+        <View style={{ flexDirection: "row", gap: t.spacing.sm, flexWrap: "wrap" }}>
+          {MEASURE_IDS.map((id) => (
+            <TouchableOpacity
+              key={id}
+              style={[
+                styles.option,
+                {
+                  backgroundColor: active === id ? t.colors.primary : t.colors.card,
+                  borderRadius: t.radius.md,
+                  minHeight: t.minTouch,
+                },
+              ]}
+              onPress={() => switchInstrument(id)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active === id }}
+              accessibilityLabel={tr(`measures.select.${id}`)}
+            >
+              <Text
+                style={{
+                  color: active === id ? t.colors.onPrimary : t.colors.body,
+                  fontSize: t.type.meta.fontSize,
+                  textAlign: "center",
+                }}
+              >
+                {tr(`measures.select.${id}`)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <Text style={{ color: t.colors.text, fontSize: t.type.body.fontSize, fontWeight: "600" }}>
           {tr("measures.stemsHeader")}
         </Text>
-        {PHQ9_ITEMS.map((_item, index) => (
+        {Array.from({ length: instrument.items }, (_item, index) => (
           <View key={index} style={{ gap: t.spacing.sm }}>
             <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize }}>
-              {index + 1}. {tr(`measures.phq9.item${index + 1}`)}
-              {index === PHQ9_ITEM9_INDEX ? tr("measures.item9Note") : ""}
+              {index + 1}. {tr(`measures.${active}.item${index + 1}`)}
+              {instrument.safetyItemIndex === index ? tr("measures.item9Note") : ""}
             </Text>
             <View style={styles.optionRow} accessibilityLabel={tr("measures.questionA11y", { index: index + 1 })}>
-              {PHQ9_OPTIONS.map((option) => {
-                const selected = responses[index] === option.value;
-                const optionLabel = tr(`measures.phq9.option${option.value}`);
+              {instrument.options.map((value) => {
+                const selected = responses[index] === value;
+                const optionLabel = tr(instrument.optionKey(value));
                 return (
                   <TouchableOpacity
-                    key={option.value}
+                    key={value}
                     style={[
                       styles.option,
                       {
@@ -249,7 +298,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
                     onPress={() => {
                       touchActivity();
                       const next = [...responses];
-                      next[index] = option.value;
+                      next[index] = value;
                       setResponses(next);
                     }}
                     accessibilityRole="radio"
@@ -276,7 +325,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         <PrimaryButton
           label={tr("measures.recordButton")}
           onPress={submit}
-          disabled={!phq9Complete(responses)}
+          disabled={!measureComplete(active, responses)}
           busy={busy}
         />
         <InlineStatus message={status} tone={statusTone} />
