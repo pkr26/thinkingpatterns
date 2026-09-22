@@ -50,6 +50,7 @@ from ..models import User
 from ..schemas import LoginRequest, RegisterRequest, SaltLookupRequest, SaltResponse, TokenResponse
 from ..security.kdf import hkdf_sha256
 from ..security.tokens import issue_token
+from ..security.totp import unwrap_secret, verify_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -294,6 +295,45 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
             )
+        # Optional therapist second factor (2026-09-21 audit C-2/F-4,
+        # delivered 2026-09-22). Checked only AFTER the password verifier,
+        # so a TOTP-enabled account never reveals whether the password was
+        # the wrong half. A missing code is a distinct, machine-readable
+        # answer (totp_required) so the portal can render the code field
+        # without knowing the account type up front.
+        if user.totp_enabled:
+            code = (body.totp_code or "").strip()
+            if not code:
+                raise ApiError(
+                    status_code=401,
+                    detail="totp code required",
+                    code="totp_required",
+                )
+            settings = request.app.state.settings
+            secret = unwrap_secret(user.totp_secret, settings.token_secret)
+            matched = (
+                verify_code(secret, code) if secret is not None else None
+            )  # unwrap failure = fail closed: no second factor, no token
+            replayed = (
+                user.totp_last_counter is not None and matched is not None
+                and matched <= user.totp_last_counter
+            )
+            if matched is None or replayed:
+                raise ApiError(
+                    status_code=401,
+                    detail="invalid totp code",
+                    code="totp_code_invalid",
+                )
+            # Replay fence: persist the consumed timestep. Two logins with
+            # the same code inside the drift window race this UPDATE — the
+            # second read may still see the old counter; the login rate
+            # limit bounds that residual, documented in SECURITY_RESIDUALS.
+            await session.execute(
+                update(User)
+                .where(User.id == user.id, User.totp_enabled.is_(True))
+                .values(totp_last_counter=matched)
+            )
+            await session.commit()
         return _issue(request, user)
 
 

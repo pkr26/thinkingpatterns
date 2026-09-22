@@ -404,8 +404,14 @@ async def list_measures(
         # Set it even for an empty or terminal page: the client stores this
         # exact snapshot marker before deciding whether to continue.
         response.headers[MEASURES_REVISION_HEADER] = str(revision)
-        if has_more:
+        if has_more and result:
             # A continuation is always exactly the number of rows the
             # caller received — clients can reject malformed continuations.
+            # The `and result` guard mirrors the therapist entries/notes
+            # reads (final verification 2026-09-22): an absent header is the
+            # sole end-of-results signal, so an empty page must never
+            # advertise a non-advancing continuation. Unreachable today —
+            # a concurrent delete bumps the revision and the fence above
+            # turns the page into 409 collection_changed first.
             response.headers["X-Next-Offset"] = str(offset + len(result))
     return result

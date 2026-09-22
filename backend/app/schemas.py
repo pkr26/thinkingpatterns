@@ -46,6 +46,10 @@ class RegisterRequest(StrictRequestModel):
 class LoginRequest(StrictRequestModel):
     username: str = Field(pattern=USERNAME_PATTERN)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    # Optional therapist second factor (2026-09-22). Absent on the first
+    # attempt; the server answers 401 totp_required when the account has
+    # TOTP enabled, and the client re-sends with this field filled.
+    totp_code: str | None = Field(default=None, min_length=6, max_length=6)
 
 
 class TokenResponse(BaseModel):
@@ -175,6 +179,31 @@ class CredentialRotateRequest(StrictRequestModel):
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
     new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
     new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+
+
+class TotpSetupRequest(StrictRequestModel):
+    """Begin optional therapist TOTP enrollment (2026-09-21 audit C-2/F-4,
+    delivered 2026-09-22). Verifier-re-authenticated like every credential
+    lifecycle action: a stolen bearer must not be able to arm a second
+    factor on the account. The returned secret is PENDING until the
+    confirm endpoint proves the authenticator holds it."""
+
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+
+
+class TotpConfirmRequest(StrictRequestModel):
+    """Enable (or disable) TOTP by proving possession of the authenticator."""
+
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class TotpSetupResponse(BaseModel):
+    # base32, exactly what an authenticator app takes for manual entry.
+    secret_base32: str
+    # otpauth:// URI for apps that accept it; the portal renders both as
+    # copyable text (no QR dependency).
+    otpauth_uri: str
 
 
 class LlmConsentRequest(StrictRequestModel):
@@ -339,6 +368,9 @@ class TherapistMeResponse(BaseModel):
     display_name: str
     wrap_pub_key: str
     wrap_key_blob: str
+    # Additive (2026-09-22): lets the security panel show the honest TOTP
+    # state without a probing round-trip. Existing clients ignore it.
+    totp_enabled: bool = False
 
 
 class WrapKeyRotateRequest(StrictRequestModel):

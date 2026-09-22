@@ -87,8 +87,12 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
+      # Final verification 2026-09-22: /var/lib/grafana was ALSO listed here
+      # while the named volume below mounts the same destination — one mount
+      # shadows the other, and the tmpfs winning would silently discard
+      # grafana.db on every recreate. The named volume owns /var/lib/grafana
+      # (persistence); the tmpfs covers scratch only.
       - /tmp
-      - /var/lib/grafana
     logging:
       driver: json-file
       options:

@@ -34,7 +34,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import update
-from sqlalchemy.orm.exc import StaleDataError
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from app.api import account as account_module
 from app.api.measures import MEASURE_PAGE_BLOB_BYTES
@@ -505,6 +505,65 @@ async def test_rewrap_maps_stale_consent_to_404(client, app):
     )
     wrap = patient_wrap_for(emu, th.wrap_pub_key, th.user_id or "")
     session = _VanishingConsentSession(user, fake_consent, SimpleNamespace())
+    with pytest.raises(ApiError) as excinfo:
+        await consents_module.rewrap_consent(
+            consent_id=granted["body"]["id"],
+            body=consents_module.ConsentRewrapRequest(**wrap),
+            request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+            user=user,
+            session=session,
+            x_account_verifier=emu.auth_key_b64,
+        )
+    assert excinfo.value.status_code == 404
+    assert excinfo.value.code == "not_found"
+
+
+async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
+    """Final verification 2026-09-22: the A-5 fix mapped the StaleDataError
+    around the rewrap commit, but the post-commit `refresh` kept a narrower
+    500 window — a therapist deletion cascade can land between a successful
+    commit and the reload (ObjectDeletedError). Same flat 404."""
+    from app.api import consents as consents_module
+
+    class _RefreshVanishingSession(_VanishingConsentSession):
+        deleted_error = None  # set by the test after loading a real consent
+
+        async def commit(self):
+            pass  # the UPDATE lands…
+
+        async def refresh(self, *_a, **_k):
+            raise self.deleted_error  # …then the cascade deletes the row
+
+    emu = ClientEmulator("rewrap-refresh-race", "deep-password")
+    await emu.register(client)
+    th = TherapistEmulator("rewrap-refresh-race-dr", "pw-therapist")
+    await th.register(client)
+    granted = await _grant(client, emu, th)
+
+    user = await _real_user(app, emu)
+    # ObjectDeletedError formats its message from a real ORM instance
+    # state, so load the actual consent row to build one.
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm.attributes import instance_state
+
+    from app.models import Consent as ConsentModel
+
+    async with app.state.sessionmaker() as db:
+        real_consent = (
+            (await db.execute(sa_select(ConsentModel).where(ConsentModel.id == granted["body"]["id"])))
+            .scalars()
+            .first()
+        )
+    assert real_consent is not None
+    fake_consent = SimpleNamespace(
+        id=granted["body"]["id"],
+        user_id=emu.user_id,
+        therapist_id=th.user_id,
+        status="active",
+    )
+    wrap = patient_wrap_for(emu, th.wrap_pub_key, th.user_id or "")
+    session = _RefreshVanishingSession(user, fake_consent, SimpleNamespace())
+    session.deleted_error = ObjectDeletedError(instance_state(real_consent))
     with pytest.raises(ApiError) as excinfo:
         await consents_module.rewrap_consent(
             consent_id=granted["body"]["id"],

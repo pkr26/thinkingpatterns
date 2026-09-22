@@ -17,9 +17,12 @@ INDEPENDENT_AUDIT_ROUND_2_2026-09-21.md) and pins the fixed behavior:
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
+from pathlib import Path
 
 from app.services import brain, patterns
+from app.services import sentiment_lexicon_es as _MODULE
 from app.services.patterns import JournalEntry
 from app.services.sentiment_lexicon_es import INTENSIFIERS_ES, VADER_BASE_ES
 
@@ -208,6 +211,20 @@ class TestPerTokenLexiconKeys:
         for dead in ("eterno es", "por eso", "darme cuenta"):
             assert dead not in VADER_BASE_ES
             assert dead not in brain.SENTIMENT_LEXICON
+
+    def test_es_function_words_carry_no_duplicate_literals(self):
+        # Final verification 2026-09-22 (D-7 residue): the round-1/round-2
+        # purge cleaned the dead multi-word keys but left five duplicate
+        # literals in LANGUAGE_FUNCTION_WORDS_ES ("que", "cuando", "donde",
+        # "quien", "otros" — each twice). A frozenset collapses them at
+        # runtime, so this is source hygiene only; the invariant keeps the
+        # shipped on-device copy free of dead weight.
+        source = Path(_MODULE.__file__).read_text(encoding="utf-8")
+        start = source.index("LANGUAGE_FUNCTION_WORDS_ES")
+        body = source[start : source.index(")", start)]
+        tokens = re.findall(r'"([^"\n]+)"', body)
+        duplicates = sorted({t for t in tokens if tokens.count(t) > 1})
+        assert duplicates == [], duplicates
 
     def test_single_word_siblings_survived_the_purge(self):
         # The purge removed only multi-word keys: the graded single-word

@@ -7,10 +7,12 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     String,
     UniqueConstraint,
@@ -139,6 +141,18 @@ class User(Base):
     # accepted. A runtime provider/policy change makes old consent inert
     # until the user explicitly re-consents.
     llm_consent_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Optional therapist second factor (2026-09-21 audit C-2/F-4, delivered
+    # 2026-09-22). totp_secret is AES-256-GCM-wrapped under an HKDF subkey
+    # of the server token_secret (never plaintext at rest — a dumped
+    # database must not hand over the second factor). totp_enabled is
+    # deliberately NULLABLE with no server_default: NULL/absent means "not
+    # enrolled", so the migration is a plain nullable add on every engine
+    # and the schema-parity gate stays trivially true. totp_last_counter
+    # pins the newest timestep already consumed (replay fence: a code is a
+    # bearer proof, valid once inside its drift window).
+    totp_secret: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    totp_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    totp_last_counter: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Entry(Base):

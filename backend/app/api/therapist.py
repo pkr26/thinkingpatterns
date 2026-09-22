@@ -384,6 +384,7 @@ async def therapist_me(
         display_name=user.display_name or user.username,
         wrap_pub_key=user.wrap_pub_key or "",
         wrap_key_blob=base64.b64encode(bytes(user.wrap_key_blob or b"")).decode("ascii"),
+        totp_enabled=user.totp_enabled is True,
     )
 
 

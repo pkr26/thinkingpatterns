@@ -5,15 +5,21 @@ name: Portal mutation gate
 # carried thresholds.break: 0 (any score passes). This weekly scheduled
 # run makes the campaign real and keeps the number honest.
 #
-# FIRST BASELINE (2026-09-21, measured on this repository): aggregate
-# 1.26% — 37 killed / 2697 survived / 196 no-coverage. That number is
-# far below what 181 passing behavioral tests imply, and the primary
-# suspect is the runner WIRING (vitest sandbox executing ~1.8 tests per
-# mutant), not the tests themselves: investigating the
-# @stryker-mutator/vitest-runner integration is the tracked follow-up.
-# Until then the floor pins the baseline at 1.0 so the gate catches
-# total regressions (a score of 0 = the runner or the suite broke) and,
-# once the wiring is fixed, RAISE THE FLOOR to the re-measured value —
+# WIRING FIXED 2026-09-22 (final-verification remediation): the
+# @stryker-mutator/vitest-runner 10 + vitest 5 combination silently ran
+# ZERO tests per mutant (mutants all "survived"; first baseline 1.26%).
+# Re-verified locally: even a body-emptied buildAad survived. The runner
+# is now Stryker's COMMAND runner — a fresh `vitest run` process per
+# mutant, no shared module graph to go stale (validated scoped: aad.ts
+# 0% → 100%). Mutate scope is the security/contract-critical modules
+# (crypto.ts, aad.ts, api.ts, platform.ts), mirroring the mobile
+# per-file-floor philosophy; full-suite-per-mutant at concurrency 1
+# keeps the inPlace file rewriting safe (~20-25 min).
+#
+# MEASURED BASELINE (2026-09-22, this repository): aggregate 74.10% —
+# 652 killed / 3 timeout / 229 survived (aad 100.00, crypto 81.18,
+# api 74.16, platform 53.27). The floor sits at 70.0: below the measured
+# value only by a small churn margin — raise it when the score rises,
 # never lower it.
 
 on:
@@ -44,7 +50,7 @@ jobs:
         # A runner/configuration failure is not a score. Let it fail the
         # workflow; the report upload below still runs for diagnosis.
         run: npx stryker run
-      - name: Enforce the floor (1.0 — first baseline 2026-09-21, see header)
+      - name: Enforce the floor (70.0 — measured baseline 74.10, 2026-09-22; see header)
         working-directory: portal
         run: |
           SCORE=$(node -e "
@@ -67,8 +73,8 @@ jobs:
             } catch (e) { console.error(e.message); process.exit(2); }
           ")
           echo "mutation score: $SCORE"
-          awk -v s="$SCORE" 'BEGIN { exit !(s < 1.0) }' && {
-            echo "::error::portal mutation score $SCORE is below the 1.0 floor — the runner wiring or the suite regressed (see the baseline triage note at the top of this workflow)"
+          awk -v s="$SCORE" 'BEGIN { exit !(s < 70.0) }' && {
+            echo "::error::portal mutation score $SCORE is below the 70.0 floor (measured baseline 74.10 on 2026-09-22) — mutants survived that the suite used to kill"
             exit 1
           }
       - name: Upload the report artifact

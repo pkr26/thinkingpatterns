@@ -58,6 +58,13 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
   const [error, setError] = useState("");
   const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
   const [sharingPolicyError, setSharingPolicyError] = useState("");
+  // Optional therapist TOTP (2026-09-22): the server answers 401
+  // totp_required AFTER the password half validated; this form then shows
+  // the code field and re-sends the full login with it. The password stays
+  // in state across that boundary only — the retry needs it to re-derive
+  // the verifier (it is wiped on every non-TOTP outcome).
+  const [totpNeeded, setTotpNeeded] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
 
   // The official portal is deliberately same-origin only. A user-editable
   // HTTPS endpoint can be an attacker server: it could choose a salt and
@@ -73,7 +80,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
   // Audit fix 18 (2026-09-21): the fields live in a real <form>, so Enter
   // submits. These guards mirror the submit buttons' disabled logic — an
   // incomplete form stays inert instead of firing a doomed request.
-  const canSignIn = Boolean(username && password && baseUrl);
+  const canSignIn = Boolean(username && password && baseUrl && (!totpNeeded || /^\d{6}$/.test(totpCode)));
   const canRegister = Boolean(username && password && password2 && !passwordError && baseUrl && sharingAvailable === true);
 
   // Never guess that a random server can create a clinician account.  The
@@ -98,12 +105,13 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
     return () => { cancelled = true; };
   }, [mode, baseUrl]);
 
-  const signIn = async () => {
+  const signIn = async (code?: string) => {
     setBusy(true);
     setError("");
     let portalKeys: PortalKeys | undefined;
     let derivedKeys: Awaited<ReturnType<typeof derivePortalKeys>> | undefined;
     let transferred = false;
+    let keepPassword = false;
     try {
       const { salt } = await auth.saltFor(baseUrl, username);
       const saltBytes = fromBase64(salt);
@@ -122,7 +130,12 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       // for this request — derived here at the send from the raw bytes, which
       // are wiped the moment the request is built (the success path below
       // transfers the other keys without the final wipe).
-      const token = await auth.login(baseUrl, username, toBase64(derivedKeys.authKey));
+      const token = await auth.login(
+        baseUrl,
+        username,
+        toBase64(derivedKeys.authKey),
+        code === undefined ? undefined : code,
+      );
       derivedKeys.authKey.fill(0);
       if (token.role !== "therapist") {
         throw new ApiError(403, "this is a patient account — the portal is for therapist accounts");
@@ -134,11 +147,27 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       await props.onReady(portalKeys, token, baseUrl);
       transferred = true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "sign-in failed");
+      if (err instanceof ApiError && err.code === "totp_required") {
+        // The password half validated; the account wants its second factor.
+        setTotpNeeded(true);
+        keepPassword = true;
+        setError("Enter the 6-digit code from your authenticator app.");
+      } else if (err instanceof ApiError && err.code === "totp_code_invalid" && totpNeeded) {
+        // Still inside the TOTP stage: the password was right, only the
+        // code was wrong/stale/consumed — let the user try the next code
+        // without retyping the password.
+        keepPassword = true;
+        setError("That code was wrong or already used — enter the current one.");
+      } else {
+        setError(err instanceof Error ? err.message : "sign-in failed");
+      }
     } finally {
       // Password strings cannot be overwritten in JavaScript, but removing
       // them from component state promptly keeps them out of a live form.
-      setPassword("");
+      // Exception: while the TOTP stage is armed the retry needs the
+      // password to re-derive the verifier — it is cleared the moment the
+      // stage ends (success, non-TOTP error, or leaving the form).
+      if (!keepPassword) setPassword("");
       if (!transferred) {
         wipeKeys(portalKeys ?? derivedKeys);
         clearSession();
@@ -224,7 +253,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
     event.preventDefault();
     if (busy) return;
     if (mode === "login") {
-      if (canSignIn) void signIn();
+      if (canSignIn) void signIn(totpNeeded ? totpCode : undefined);
     } else if (canRegister) {
       void register();
     }
@@ -244,6 +273,15 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
             )}
             {mode === "login" && <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />}
             <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
+            {mode === "login" && totpNeeded && (
+              <Field
+                label="Authenticator code"
+                value={totpCode}
+                onChange={(value) => setTotpCode(value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="123456"
+                autoComplete="one-time-code"
+              />
+            )}
             {mode === "register" && (
               <Field label="Repeat password" value={password2} onChange={setPassword2} type="password" autoComplete="new-password" />
             )}
@@ -291,13 +329,17 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
             <ErrorBanner message={error} />
             {mode === "login" ? (
               <>
-                <Button label={busy ? "Signing in…" : "Sign in"} onPress={signIn} disabled={busy || !canSignIn} />
-                <Button label="Create a therapist account instead" small onPress={() => { setMode("register"); setError(""); }} disabled={busy} />
+                <Button
+                  label={busy ? "Signing in…" : totpNeeded ? "Verify code" : "Sign in"}
+                  onPress={() => void signIn(totpNeeded ? totpCode : undefined)}
+                  disabled={busy || !canSignIn}
+                />
+                <Button label="Create a therapist account instead" small onPress={() => { setMode("register"); setError(""); setTotpNeeded(false); setTotpCode(""); }} disabled={busy} />
               </>
             ) : (
               <>
                 <Button label={busy ? "Creating…" : "Create account"} onPress={register} disabled={busy || !canRegister} />
-                <Button label="Back to sign in" small onPress={() => { setMode("login"); setError(""); }} disabled={busy} />
+                <Button label="Back to sign in" small onPress={() => { setMode("login"); setError(""); setTotpNeeded(false); setTotpCode(""); }} disabled={busy} />
               </>
             )}
             <Note>

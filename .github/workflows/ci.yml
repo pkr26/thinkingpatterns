@@ -223,13 +223,15 @@ jobs:
       - name: Trivy vulnerability scan of both built images (2026-09-21 audit G-6)
         # OS-package coverage pip-audit/npm cannot see (the backend image
         # compiles asyncpg against live apt). Fixable HIGH/CRITICAL
-        # findings fail the job.
+        # findings fail the job. The scanner itself is digest-pinned
+        # (final verification 2026-09-22) to match the repo's no-mutable-ref
+        # policy; re-pin deliberately, like the deploy images.
         run: |
           set -euo pipefail
           for image in mindpattern-api:ci mindpattern-backup:ci; do
             echo "trivy: scanning $image"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-              aquasec/trivy:0.61.0 image \
+              aquasec/trivy:0.61.0@sha256:6967db29ce5294d054121e94b3cb1262de858af63b4547bb1bade66a4306f2e4 image \
               --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
               --no-progress "$image"
           done

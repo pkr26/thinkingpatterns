@@ -63,7 +63,10 @@ export function Card(props: { children: ReactNode; deep?: boolean; title?: strin
       }}
     >
       {props.title && (
-        <h3 style={{ margin: 0, color: theme.text, fontSize: 15, fontWeight: 600 }}>{props.title}</h3>
+        // h2 (2026-09-22, audit H-9c jest-axe suite): a Card title is a
+        // view-level section directly under the page heading — the old h3
+        // made every view skip a heading level (axe heading-order).
+        <h2 style={{ margin: 0, color: theme.text, fontSize: 15, fontWeight: 600 }}>{props.title}</h2>
       )}
       {props.children}
     </section>

@@ -973,6 +973,36 @@ export function PatientView(props: {
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <span style={{ color: theme.muted, fontSize: 11 }}>{dayOf(note.created_at)}</span>
               <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
+              {/* Final-verification 2026-09-22: the note edit history used to
+                  be reachable ONLY from a button inside this screen's hidden
+                  print-only block — invisible on screen, unclickable on
+                  paper.  The affordance lives HERE, in the interactive
+                  notes card; the printed summary renders whatever history
+                  was loaded but never anything clickable. */}
+              {note.updated_at > note.created_at && (
+                <Button
+                  label={
+                    historyBusy === note.id
+                      ? "Loading history…"
+                      : history[note.id] === undefined
+                        ? "View history"
+                        : "Hide history"
+                  }
+                  small
+                  onPress={() => {
+                    if (history[note.id] !== undefined) {
+                      setHistory((prev) => {
+                        const next = { ...prev };
+                        delete next[note.id];
+                        return next;
+                      });
+                      return;
+                    }
+                    void loadHistory(note);
+                  }}
+                  disabled={busy || historyBusy === note.id}
+                />
+              )}
               <Button
                 label={confirmDeleteId === note.id ? "Confirm delete" : "Delete"}
                 small
@@ -994,6 +1024,26 @@ export function PatientView(props: {
                 </span>
               )}
             </div>
+            {(() => {
+              const priorTexts = history[note.id];
+              if (priorTexts === undefined) return null;
+              if (priorTexts.length === 0) {
+                return (
+                  <p style={{ margin: "6px 0 0 12px", fontSize: 12, color: theme.muted }}>
+                    no earlier text recorded
+                  </p>
+                );
+              }
+              return (
+                <div style={{ margin: "6px 0 0 12px", fontSize: 12, color: theme.muted }}>
+                  {priorTexts.map((text, i) => (
+                    <p key={i} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                      previous ({i + 1}): {text}
+                    </p>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         ))}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
@@ -1119,22 +1169,15 @@ ${tpl}` : tpl)}
                 <div key={note.id} style={{ fontSize: 12, borderTop: "1px solid #999", paddingTop: 4 }}>
                   <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>
                     {dayOf(note.created_at)} — {note.text}
+                    {/* Final-verification 2026-09-22: this summary is paper —
+                        it must never carry a clickable affordance (the old
+                        "view history" button here was both unreachable on
+                        screen, inside display:none, and dead on paper).
+                        The edited marker is plain text; prior revisions
+                        print only when the therapist loaded them from the
+                        interactive notes card above. */}
                     {edited && (
-                      <button
-                        type="button"
-                        onClick={() => void loadHistory(note)}
-                        disabled={historyBusy === note.id}
-                        style={{
-                          marginLeft: 8, fontSize: 11, color: "#555", background: "none",
-                          border: "none", textDecoration: "underline", cursor: "pointer", padding: 0,
-                        }}
-                      >
-                        {historyBusy === note.id
-                          ? "loading history…"
-                          : priorTexts === undefined
-                            ? "edited — view history"
-                            : "edited"}
-                      </button>
+                      <span style={{ marginLeft: 8, fontSize: 11, color: "#555" }}>edited</span>
                     )}
                   </p>
                   {priorTexts !== undefined && priorTexts.length > 0 && (

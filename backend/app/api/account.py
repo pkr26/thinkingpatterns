@@ -28,7 +28,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_regular_user, require_user
+from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
 from ..models import AccessLog, Consent, Entry, Insight, Measure, User, utcnow
 from ..schemas import (
@@ -40,6 +40,9 @@ from ..schemas import (
     LlmConsentResponse,
     PatientAccessLogOut,
     ShareRecord,
+    TotpConfirmRequest,
+    TotpSetupRequest,
+    TotpSetupResponse,
     entry_out,
 )
 from .auth import (
@@ -48,6 +51,13 @@ from .auth import (
     _auth_limiter,
     auth_work_slot,
     hash_verifier_off_loop,
+)
+from ..security.totp import (
+    generate_secret,
+    otpauth_uri,
+    unwrap_secret,
+    verify_code,
+    wrap_secret,
 )
 from .measures import _measure_out
 from ..services import llm
@@ -868,3 +878,174 @@ async def delete_account(
             await session.execute(delete(Entry).where(Entry.user_id == user.id))
             await session.execute(delete(User).where(User.id == user.id))
             await session.commit()
+
+
+# --- Optional therapist TOTP (2026-09-21 audit C-2/F-4, delivered 2026-09-22) --------
+#
+# Therapist accounts read PHI-adjacent data with a password + scrypt
+# verifier and previously no second factor. Enrollment is a three-step
+# contract mirroring the credential-rotation flow: (1) verifier-
+# re-authenticated setup stores a PENDING wrapped secret and shows it to
+# the therapist exactly once; (2) enable proves the authenticator holds it
+# and arms the login check; (3) disable re-proves both halves and clears
+# everything. Patients stay password-only by design — the mobile client
+# has no TOTP surface, so setup is therapist-gated and a patient token
+# answers 403.
+
+
+@router.post(
+    "/totp/setup",
+    response_model=TotpSetupResponse,
+    dependencies=[
+        Depends(make_rate_limiter("account-totp", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def totp_setup(
+    body: TotpSetupRequest,
+    request: Request,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+):
+    """Arm a PENDING TOTP secret (nothing is enforced at login yet).
+
+    The secret is returned in the clear exactly once, wrapped at rest
+    immediately, and re-shown never. While an enrollment is ENABLED this
+    answers 409: re-arming must go through disable, which requires a live
+    code — otherwise an attacker holding only the password half could
+    strip the factor by re-running setup and logging in password-only
+    (the exact threat the factor exists for). A lost authenticator is the
+    documented operator path (clear users.totp_* by hand).
+    """
+    if user.totp_enabled:
+        raise ApiError(
+            status_code=409,
+            detail="totp already enabled — disable it (code required) before re-arming",
+            code="version_conflict",
+        )
+    await _require_verifier(user, body.verifier, request)
+    raw_secret, secret_b32 = generate_secret()
+    wrapped = wrap_secret(raw_secret, request.app.state.settings.token_secret)
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        # One transaction: pending secret recorded, enrollment disarmed
+        # until confirm, replay fence reset, audit row persisted.
+        await session.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(totp_secret=wrapped, totp_enabled=None, totp_last_counter=None)
+        )
+        session.add(
+            AccessLog(
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="totp_setup",
+            )
+        )
+        await session.commit()
+    return TotpSetupResponse(
+        secret_base32=secret_b32,
+        otpauth_uri=otpauth_uri(secret_b32, user.username),
+    )
+
+
+@router.post(
+    "/totp/enable",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-totp", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def totp_enable(
+    body: TotpConfirmRequest,
+    request: Request,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+):
+    """Confirm enrollment by presenting a code from the PENDING secret."""
+    await _require_verifier(user, body.verifier, request)
+    settings = request.app.state.settings
+    secret = unwrap_secret(user.totp_secret, settings.token_secret)
+    matched = verify_code(secret, code=body.code) if secret is not None else None
+    if matched is None:
+        raise ApiError(
+            status_code=403, detail="invalid totp code", code="totp_code_invalid"
+        )
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        # Guarded update: only arms when the stored secret is still the one
+        # this code was checked against (a concurrent re-setup wins and
+        # leaves enrollment pending for a fresh confirm).
+        result = await session.execute(
+            update(User)
+            .where(User.id == user.id, User.totp_secret == user.totp_secret)
+            .values(totp_enabled=True, totp_last_counter=matched)
+        )
+        if result.rowcount != 1:
+            raise ApiError(
+                status_code=409,
+                detail="totp setup changed, confirm again",
+                code="version_conflict",
+            )
+        session.add(
+            AccessLog(
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="totp_enable",
+            )
+        )
+        await session.commit()
+
+
+@router.post(
+    "/totp/disable",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-totp", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def totp_disable(
+    body: TotpConfirmRequest,
+    request: Request,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+):
+    """Turn TOTP off: verifier (password half) + code (authenticator half).
+
+    Both halves on purpose: with only the verifier, a phished password
+    strips the factor it exists to gate; with only the code, a stolen
+    bearer plus shoulder-surfed code disarms it. A LOST authenticator is
+    an operator action (clear users.totp_* by hand) — this system has no
+    account recovery by design, and the registration screen says so.
+    """
+    if not user.totp_enabled:
+        raise ApiError(
+            status_code=404, detail="totp not enabled", code="not_found"
+        )
+    await _require_verifier(user, body.verifier, request)
+    settings = request.app.state.settings
+    secret = unwrap_secret(user.totp_secret, settings.token_secret)
+    matched = verify_code(secret, code=body.code) if secret is not None else None
+    replayed = (
+        user.totp_last_counter is not None
+        and matched is not None
+        and matched <= user.totp_last_counter
+    )
+    if matched is None or replayed:
+        raise ApiError(
+            status_code=403, detail="invalid totp code", code="totp_code_invalid"
+        )
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        await session.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(totp_secret=None, totp_enabled=None, totp_last_counter=None)
+        )
+        session.add(
+            AccessLog(
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="totp_disable",
+            )
+        )
+        await session.commit()

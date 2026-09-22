@@ -221,10 +221,28 @@ safe procedure:
 
 1. **Restore the database from a pre-migration dump** (the one thing that
    actually reverses a migration). Take a manual dump BEFORE any deploy
-   that includes new migrations:
-   `docker compose exec backup backup.sh` (or the off-site fetch path in
-   `docs/INCIDENT_RUNBOOK.md`), then verify it
-   (`verify.sh` on the dump) — this is your restore point.
+   that includes new migrations — the backup image has no one-shot dump
+   script (its dump loop IS the compose entrypoint), so exec the same
+   pipeline the service itself runs, then verify the artifact before you
+   rely on it (final verification 2026-09-22: the previous text named a
+   nonexistent `backup.sh` and pointed at the monitoring `verify.sh`):
+   ```bash
+   docker compose --profile backups exec backup sh -ceu '
+     umask 077
+     stamp=$(date -u +%Y%m%dT%H%M%SZ)
+     out="/backups/mindpattern-$stamp.dump.enc"; tmp="$out.tmp"
+     PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+       | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -out "$tmp"
+     mindpattern-backup-mac write "$tmp" "$out.hmac.tmp"
+     mv "$out.hmac.tmp" "$out.hmac"; mv "$tmp" "$out"   # sidecar first, ciphertext last
+     mindpattern-backup-mac verify "$out"
+   '
+   ```
+   This is your restore point. For a dump that lives off-site, fetch it
+   with the authenticated path in `docs/INCIDENT_RUNBOOK.md` (machine-
+   tested by `backend/scripts/rehearse_restore.sh --remote`), and exercise
+   a full throwaway restore any time with
+   `BACKUP_KEY=… bash backend/scripts/rehearse_restore.sh`.
 2. **Pin the previous release images** in `.env`
    (`MINDPATTERN_API_IMAGE` / `MINDPATTERN_BACKUP_IMAGE` back to the
    prior @sha256 references from the release env asset) and

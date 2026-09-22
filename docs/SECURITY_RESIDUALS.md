@@ -32,11 +32,14 @@ changes, and before any v2 security review.
 Hardening the audit plan asked for that shipped as "next" rather than v1,
 recorded here so they are not silently dropped (audit round 2, F-6):
 
-- **Optional TOTP/MFA for therapist accounts** (AUDIT_2026-09-21.md
-  Phase 2 workstream 2). Deferred, not delivered: therapist login remains
-  password + scrypt verifier, with no second factor. Standing controls:
-  verifier-gated re-auth for every sensitive action (credential and
-  wrap-key rotation), per-IP/per-username rate limits, epoch invalidation
-  of all bearers on credential change, and a fully audited access trail
-  (`GET /therapist/access-log`). A phished password remains the residual
-  this list cannot bound — revisit before any multi-therapist-org work.
+- **Optional TOTP/MFA for therapist accounts** — DELIVERED 2026-09-22
+  (final-verification remediation; see the README security section for
+  the full contract). Remaining, deliberately accepted residuals:
+  (1) a code replay inside one 30 s timestep can win a
+  read-check-then-persist race across workers (the login rate limit
+  bounds it; single-use outside that window is enforced);
+  (2) the wrapped secret is keyed to the server `token_secret`, so
+  rotating that secret invalidates enrollments — the same documented
+  caveat as the decoy salts (operators must also clear `users.totp_*`);
+  (3) a lost authenticator is an operator database action (no recovery
+  flow, by the no-account-recovery design).

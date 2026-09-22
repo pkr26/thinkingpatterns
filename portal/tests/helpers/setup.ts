@@ -19,25 +19,31 @@ const makeStorage = (store: Map<string, string>) => ({
 // synthesize events (e.g. a persisted pageshow) without a DOM.
 const listeners = new Map<string, Set<(event: unknown) => void>>();
 
-Object.defineProperty(globalThis, "window", {
-  configurable: true,
-  value: {
-    location: { origin: "http://localhost:5173" },
-    addEventListener: (type: string, listener: (event?: unknown) => void) => {
-      if (!listeners.has(type)) listeners.set(type, new Set());
-      listeners.get(type)!.add(listener as (event: unknown) => void);
+// The shim is for the DEFAULT node environment only. The jest-axe a11y
+// suite (audit H-9c, delivered 2026-09-22) runs under
+// `@vitest-environment jsdom`, where a REAL window exists — installing the
+// shim there would replace it and break DOM rendering + axe.
+if (typeof (globalThis as { window?: unknown }).window === "undefined") {
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { origin: "http://localhost:5173" },
+      addEventListener: (type: string, listener: (event?: unknown) => void) => {
+        if (!listeners.has(type)) listeners.set(type, new Set());
+        listeners.get(type)!.add(listener as (event: unknown) => void);
+      },
+      removeEventListener: (type: string, listener: (event?: unknown) => void) => {
+        listeners.get(type)?.delete(listener as (event: unknown) => void);
+      },
+      dispatchEvent: (event: { type: string }) => {
+        for (const listener of listeners.get(event.type) ?? []) {
+          listener(event);
+        }
+        return true;
+      },
+      print: () => undefined,
+      localStorage: makeStorage(mem),
+      sessionStorage: makeStorage(sessionMem),
     },
-    removeEventListener: (type: string, listener: (event?: unknown) => void) => {
-      listeners.get(type)?.delete(listener as (event: unknown) => void);
-    },
-    dispatchEvent: (event: { type: string }) => {
-      for (const listener of listeners.get(event.type) ?? []) {
-        listener(event);
-      }
-      return true;
-    },
-    print: () => undefined,
-    localStorage: makeStorage(mem),
-    sessionStorage: makeStorage(sessionMem),
-  },
-});
+  });
+}

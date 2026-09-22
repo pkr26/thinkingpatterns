@@ -27,9 +27,15 @@ bash redteam/run_all.sh
 | `mutation_campaign_2026-09-19/` | — | round 3: 62 mutants over backend infrastructure — authorization & access control, database/ORM, boundaries & business logic, error handling & transactions, cache & invalidation, rate limiting & concurrency (adds `pin_check.py`, the hand-verification driver that re-applies each mutant against its pin) |
 | `run_pr_mutation_gate.py` | — | per-PR gate: re-applies every behavioral mutant whose target file is in the diff (wired in `.github/workflows/mutation-pr.yml` with a bounded diff-scoped mutmut job) |
 
-Generated at runtime (gitignored): `results/*.json` verdicts and per-campaign `results/`. Tracked fixtures: `aad_corpus.json`, `crisis_corpus.json`
-(promote both into the main suites as regression fixtures). Everything runs
-against throwaway in-process or localhost servers; nothing leaves the machine.
+Generated at runtime (gitignored): `results/*.json` verdicts and per-campaign
+`results/`. Tracked fixtures: `aad_corpus.json`, `crisis_corpus.json` — both
+PROMOTED (final verification 2026-09-22; the stale TODO here said otherwise):
+their cases live on as `aad_edge_cases` in `shared/vectors.json` and
+`redteam_corpus` in `shared/crisis_phrases.json`, replayed by the backend,
+mobile, and portal main suites in per-push CI. The tracked files themselves
+are refreshed only deliberately (regenerate into `results/corpus/`, diff, then
+copy over). Everything runs against throwaway in-process or localhost
+servers; nothing leaves the machine.
 
 Harness health notes (2026-09-18 round 2): the shared `make_settings` now
 uses a per-process temp FILE sqlite (in-memory gave every pool connection

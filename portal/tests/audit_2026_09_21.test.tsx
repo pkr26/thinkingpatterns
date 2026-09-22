@@ -278,7 +278,7 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
     await flush();
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(mockedAuth.saltFor).toHaveBeenCalledWith(expect.any(String), "drportal");
-    expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", expect.any(String));
+    expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", expect.any(String), undefined);
     expect(onReady).toHaveBeenCalled();
   });
 

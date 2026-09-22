@@ -242,9 +242,11 @@ jobs:
 
   image:
     # A private-to-the-workflow candidate tag is pushed once, then this exact
-    # manifest-list digest is pulled by production-integration. Release tags
-    # are attached by the tag-push steps later in THIS `image` job (there is
-    # no separate `release-image-tags` job) without rebuilding.
+    # manifest-list digest is pulled by production-integration. This job
+    # attaches NO human-facing release tags (final verification 2026-09-22:
+    # the old comment described tag-push steps that do not exist) — the
+    # deployment contract is digest-only: repo@sha256 references exposed in
+    # the release env asset, consumed verbatim by deploy/README.md.
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -315,7 +317,8 @@ jobs:
         # 2026-09-21 audit G-6: OS-package coverage the dependency audits
         # (pip-audit/npm) cannot see. Scan the BUILT candidates by tag
         # (pre-digest, same bytes); HIGH/CRITICAL findings with a fix
-        # available fail the release.
+        # available fail the release. The scanner itself is digest-pinned
+        # (final verification 2026-09-22), matching the ci.yml docker job.
         run: |
           set -euo pipefail
           for image in \
@@ -323,7 +326,7 @@ jobs:
             "${{ steps.candidate-tags.outputs.backup_tag }}"; do
             echo "trivy: scanning $image"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-              aquasec/trivy:0.61.0 image \
+              aquasec/trivy:0.61.0@sha256:6967db29ce5294d054121e94b3cb1262de858af63b4547bb1bade66a4306f2e4 image \
               --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
               --no-progress "$image"
           done

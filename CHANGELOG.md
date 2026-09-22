@@ -6,6 +6,92 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Final-verification remediation (2026-09-22): all residual gaps closed
+
+Follow-up to the final independent verification
+(`INDEPENDENT_AUDIT_FINAL_VERIFICATION_2026-09-22.md`): the three new
+defects found during verification, the D-7 residue, every documented
+deferral (TOTP, jest-axe, real portal mutation floor), and the
+doc-drift bundle. Each fix carries its regression test where testable:
+
+- **Portal note-edit-history was unreachable** (verification defect 1):
+  the only "view history" trigger lived inside the hidden print-only
+  block — invisible on screen, unclickable on paper; its tests passed
+  only because react-test-renderer ignores CSS. The affordance now
+  renders in the INTERACTIVE notes card ("View history" → inline prior
+  revisions, toggleable), and the printed summary carries only a
+  non-interactive "edited" marker plus whatever history was loaded. The
+  P3 tests drive the reachable button and pin that no `edited`-labeled
+  button exists anywhere.
+- **Rollback runbook step 1 was unexecutable** (verification defect 2):
+  `deploy/README.md` pointed at a nonexistent `backup.sh` and the
+  monitoring `verify.sh`. Replaced with the real one-shot pipeline the
+  backup service itself runs (pg_dump | openssl enc |
+  `mindpattern-backup-mac write`, sidecar-first publication, then
+  `mindpattern-backup-mac verify`), plus the off-site fetch and
+  rehearsal pointers.
+- **Grafana mounted tmpfs AND a named volume at `/var/lib/grafana`**
+  (verification defect 3): one mount shadows the other — the tmpfs
+  winning would silently discard `grafana.db` on every recreate. The
+  named volume owns the path; tmpfs covers `/tmp` only.
+- **Optional therapist TOTP shipped** (audit C-2/F-4, was a documented
+  deferral): RFC 6238 (SHA-1, 6 digits, 30 s ±1 step). Verifier-gated
+  three-step enrollment (`POST /account/totp/setup` → `enable` →
+  `disable`; therapist tokens only), the secret AES-256-GCM-wrapped at
+  rest under an HKDF subkey of the server `token_secret`, login answers
+  `401 totp_required`/`totp_code_invalid`, every accepted code is
+  single-use (persisted consumed-timestep replay fence), and re-running
+  setup while ENABLED is a 409 so a phished password cannot strip the
+  factor. Portal: LoginView code step (the password survives only
+  inside the TOTP stage) and a full enrollment/disable section in
+  Account security. Migration `d4e5f6a7b8c9` (three nullable columns);
+  `backend/tests/test_totp.py` (5 tests) +
+  `portal/tests/totp_2026_09_22.test.tsx` (4 tests); README error-code
+  list and SECURITY_RESIDUALS updated (deferral closed, accepted
+  residuals documented).
+- **Portal jest-axe a11y suite delivered** (audit H-9c/F-6j, was
+  deferred): `jest-axe` + `jsdom` dev dependencies;
+  `tests/a11y.test.tsx` mounts every view (LoginView both modes,
+  PatientsView caseload + account-security panel, PatientView chart)
+  into a real DOM and asserts zero axe violations. It immediately found
+  real violations — every Card title rendered `h3` straight under the
+  page `h1` (heading-order skips) — fixed by promoting Card titles to
+  `h2` (visuals unchanged) and demoting the PatientsView group labels
+  to `h3`. The node-window shim in the shared setup no longer clobbers
+  a real DOM window.
+- **Portal mutation gate is real now** (audit H-5, was near-vacuous):
+  root cause found and reproduced — `@stryker-mutator/vitest-runner`
+  10 + vitest 5 silently ran ZERO tests per mutant (a body-emptied
+  `buildAad` "survived"; 0.00 tests/mutant, 1.26% baseline). Switched
+  to Stryker's command runner (a fresh `vitest run` process per mutant
+  — no shared module graph to go stale; validated scoped: aad.ts 0% →
+  100%), scoped `mutate` to the security/contract modules
+  (crypto/aad/api/platform, mirroring the mobile per-file-floor
+  philosophy). Full re-measured baseline: **74.10%** (652 killed /
+  3 timeout / 229 survived; aad 100.00, crypto 81.18, api 74.16,
+  platform 53.27) — `thresholds.break` and the weekly workflow floor
+  raised 1.0 → **70.0**. `tests/securityConfig.test.ts` skips its
+  out-of-package nginx read inside a mutation sandbox.
+- **D-7 residue:** the five duplicate literals in
+  `LANGUAGE_FUNCTION_WORDS_ES` (`que`, `cuando`, `donde`, `quien`,
+  `otros`) removed — 185 literals → 180, zero behavior change (the
+  frozenset collapsed them anyway) — with a no-duplicates invariant
+  test next to the whitespace one.
+- **Rewrap post-commit refresh race** (the narrow 500 window
+  verification flagged beyond A-5): `ObjectDeletedError` from the
+  post-commit `session.refresh` now maps to the same flat 404 as the
+  commit-stage race, with a mock-race regression test.
+- **Contract cosmetic:** the patient measures read now uses the same
+  `has_more and rows` continuation guard as the three therapist reads
+  (an empty page must never advertise a non-advancing offset;
+  unreachable today behind the revision fence, pinned for symmetry).
+- **Doc drift:** stale "promote both" TODO in `redteam/README.md` (the
+  promotion shipped), the release.yml comment describing nonexistent
+  tag-push steps (deployment is digest-only),
+  `deploy/monitoring/prometheus.yml`'s pre-pinning comment, and the
+  Trivy scanner image is now digest-pinned in both workflows
+  (`@sha256:6967db29…`, resolved from Docker Hub).
+
 ### Independent-audit round 3 remediation (2026-09-22): NEW-1..NEW-4 + low-bundle residuals closed
 
 Follow-up to the third independent verification pass (re-audit of

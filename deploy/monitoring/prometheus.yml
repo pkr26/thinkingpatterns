@@ -1,11 +1,12 @@
 # Prometheus scrape configuration for the MindPattern API.
 #
-# OPERATOR TOOLING — this file and the images in docker-compose.yml next to
-# it are deliberately OUTSIDE the digest-pinned production contract in
-# deploy/README.md. The production docker-compose.yml only runs
-# @sha256-pinned release images; this stack is opt-in, version-tagged, and
-# must have its digests resolved and pinned before production use (see
-# deploy/monitoring/README.md, "Digest pinning").
+# OPERATOR TOOLING — this stack is opt-in but carries the SAME digest
+# discipline as production (final verification 2026-09-22: this comment
+# still described the pre-pinning state). The production docker-compose.yml
+# runs @sha256-pinned release images; every image in the monitoring
+# docker-compose.yml is repo:tag@sha256-pinned too, and `verify.sh
+# --production` (run in CI's monitoring-verify job) fails a dropped digest
+# (see deploy/monitoring/README.md, "Digest pinning").
 #
 # TARGET WIRING
 #   `api:8000` is the compose-internal service DNS name — the same network

@@ -369,12 +369,16 @@ describe("NEW-3/F.4: change password", () => {
   });
 
   it("a current password that cannot unlock the stored blob fails before any PUT", async () => {
-    mockedApi.me.mockResolvedValueOnce({
+    // Queued TWICE: the TOTP status effect consumes the first me() when
+    // the panel opens (2026-09-22), changePassword the second.
+    const hostileMe = () => ({
       username: "drportal",
       display_name: "Dr. Portal",
       wrap_pub_key: "P".repeat(124),
       wrap_key_blob: "SEALED-BY-ANOTHER-ACCOUNT",
     });
+    mockedApi.me.mockResolvedValueOnce(hostileMe());
+    mockedApi.me.mockResolvedValueOnce(hostileMe());
     const root = await render(
       <PatientsView displayName="Dr. Portal" session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />,
     );
@@ -516,12 +520,12 @@ describe("NEW-3/F.4: rotate sharing key (compromise)", () => {
   });
 });
 
-describe("P3 (2026-09-21): note edit history in the printed summary", () => {
+describe("P3 (2026-09-21): note edit history in the interactive card + printed summary", () => {
   const editedNotesPage = {
     notes: [
       // Unedited: no history affordance may exist for this row.
       { id: "note-8", client_note_id: "c8", pattern_pid: null, blob: "LIVEBLOB", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-10T00:00:00Z" },
-      // Edited (updated_at > created_at): the "view history" button shows.
+      // Edited (updated_at > created_at): the "View history" button shows.
       { id: "note-9", client_note_id: "c9", pattern_pid: null, blob: "LIVEBLOB", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-12T00:00:00Z" },
     ],
     nextOffset: null,
@@ -540,13 +544,17 @@ describe("P3 (2026-09-21): note edit history in the printed summary", () => {
       { id: "r2", blob: "REV2", created_at: "2026-09-12T00:00:00Z" },
     ]);
     const root = await renderChart();
-    // Exactly one history affordance — the edited note's.
+    // Exactly one history affordance — the edited note's, in the
+    // INTERACTIVE notes card (final-verification 2026-09-22: the old
+    // affordance lived only inside the hidden print-only block, so the
+    // feature was unreachable in a real browser).
+    expect(buttonByLabel(root, "View history")).toBe(true);
     const historyButtons = root.root.findAllByType("button").filter((n) =>
-      n.children.join("").includes("view history"));
+      n.children.join("").includes("history"));
     expect(historyButtons).toHaveLength(1);
     expect(mockedApi.noteRevisions).not.toHaveBeenCalled();
 
-    await press(root, "edited — view history");
+    await press(root, "View history");
     await flush(8);
     // The revisions endpoint is keyed by the server note id…
     expect(mockedApi.noteRevisions).toHaveBeenCalledWith("note-9");
@@ -555,18 +563,24 @@ describe("P3 (2026-09-21): note edit history in the printed summary", () => {
     const blobs = mockedCrypto.decryptNote.mock.calls.map((c) => c[c.length - 1]);
     expect(blobs).toContain("REV1");
     expect(blobs).toContain("REV2");
-    // …and the printed summary renders them in order.
+    // …the interactive card renders them in order…
     const text = textOf(root);
     expect(text).toContain("previous (1): earlier draft one");
     expect(text).toContain("previous (2): earlier draft two");
-    // Once loaded, the affordance collapses to "edited".
-    expect(buttonByLabel(root, "edited — view history")).toBe(false);
+    // …and the printed summary renders them WITHOUT gaining anything
+    // clickable — the paper block stays non-interactive.
+    expect(root.root.findAllByType("button").some((n) => n.children.join("").includes("edited"))).toBe(false);
+    // Once loaded, the affordance toggles to Hide and clears on press.
+    await press(root, "Hide history");
+    await flush(2);
+    expect(textOf(root)).not.toContain("previous (1): earlier draft one");
+    expect(buttonByLabel(root, "View history")).toBe(true);
   });
 
   it("degrades a failed revisions fetch to the honest empty history", async () => {
     mockedApi.noteRevisions.mockRejectedValueOnce(new Error("revisions down"));
     const root = await renderChart();
-    await press(root, "edited — view history");
+    await press(root, "View history");
     await flush(8);
     expect(textOf(root)).toContain("no earlier text recorded");
   });

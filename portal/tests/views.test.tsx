@@ -165,7 +165,7 @@ describe("LoginView", () => {
     await press(root, "Sign in");
     await flush();
     expect(mockedAuth.saltFor).toHaveBeenCalled();
-    expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", expectedVerifier);
+    expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", expectedVerifier, undefined);
     expect([...authKey]).toEqual(new Array(32).fill(0));
     expect(onReady).toHaveBeenCalledWith(
       expect.objectContaining({ username: "drportal", userId: "therapist-1" }),
@@ -393,14 +393,14 @@ describe("PatientsView", () => {
  *  so tests open a specific card by title fragment instead of position. */
 async function openCard(root: Awaited<ReturnType<typeof render>>, titlePart: string): Promise<void> {
   for (let attempt = 0; attempt < 8; attempt++) {
-    const titles = root.root.findAllByType("h3").map((n) => String(n.props.children)).join("|");
+    const titles = root.root.findAllByType("h2").map((n) => String(n.props.children)).join("|");
     if (titles.includes(titlePart)) return;
     const buttons = root.root.findAllByType("button").filter((n) => joinedLabel(n) === "See the evidence");
     const target = buttons[attempt];
     if (!target) break;
     await act(async () => { target.props.onClick(); });
     await flush();
-    const nowTitles = root.root.findAllByType("h3").map((n) => String(n.props.children)).join("|");
+    const nowTitles = root.root.findAllByType("h2").map((n) => String(n.props.children)).join("|");
     if (!nowTitles.includes(titlePart)) {
       const back = root.root.findAllByType("button").find((n) => joinedLabel(n) === "Back to all patterns");
       if (back) {
@@ -881,7 +881,7 @@ describe("PatientView 2026-09-17 wave", () => {
   it("review ordering puts the sensitive card first", async () => {
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
-    const titles = root.root.findAllByType("h3").map((n) => String(n.props.children));
+    const titles = root.root.findAllByType("h2").map((n) => String(n.props.children));
     const sensitiveIdx = titles.findIndex((t) => t.includes("A difficult thought"));
     expect(sensitiveIdx).toBeGreaterThanOrEqual(0);
     // The first pattern-titled card in the list is the sensitive one.

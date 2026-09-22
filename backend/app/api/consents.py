@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.exc import StaleDataError
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
@@ -533,7 +533,15 @@ async def rewrap_consent(
             # the honest answer is the same flat 404 the read paths give,
             # never a 500.
             raise ApiError(status_code=404, detail="consent not found", code="not_found") from None
-        await session.refresh(consent)
+        try:
+            await session.refresh(consent)
+        except ObjectDeletedError:
+            # Final verification 2026-09-22: the commit above can race the
+            # same concurrent therapist deletion — the UPDATE landed, the
+            # cascade then removed the row before this reload. The grant is
+            # gone either way; the honest answer stays the flat 404, never
+            # a 500.
+            raise ApiError(status_code=404, detail="consent not found", code="not_found") from None
         return _consent_out(consent, therapist)
 
 

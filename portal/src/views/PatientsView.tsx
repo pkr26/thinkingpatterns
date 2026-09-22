@@ -105,6 +105,14 @@ export function PatientsView(props: {
    *  forfeits recovery, exactly like the no-recovery warning at
    *  registration (audit F-4). */
   const [interruptedSaltB64, setInterruptedSaltB64] = useState<string | null>(null);
+  // --- Optional TOTP second factor (2026-09-21 audit C-2/F-4, 2026-09-22) ---
+  // totpStatus: null = not yet asked, then the server's answer via /me
+  // once the panel opens. totpPending holds the setup response — the
+  // secret is shown exactly once, until confirmed or the panel closes.
+  const [totpStatus, setTotpStatus] = useState<boolean | null>(null);
+  const [totpPending, setTotpPending] = useState<{ secretBase32: string; otpauthUri: string } | null>(null);
+  const [totpPw, setTotpPw] = useState("");
+  const [totpCode, setTotpCode] = useState("");
 
   /** Same derivation as the sign-in path, with the same P-1 hygiene: the
    *  salt bytes and master never outlive this function; only the returned
@@ -301,6 +309,94 @@ export function PatientsView(props: {
       setSecBusy(false);
     }
   };
+
+  // --- Optional TOTP second factor (2026-09-22) ---------------------------------
+  // Every action is verifier-gated server-side; locally the same P-1
+  // hygiene as the flows above: derive, send the b64 verifier once, wipe.
+
+  /** Derive the login verifier from the just-typed password (never from
+   *  anything cached — the whole point is proving password knowledge). */
+  const totpVerifierFor = async (): Promise<string> => {
+    if (!props.session) throw new Error("not signed in");
+    const base = normalizeBaseUrl(currentOrigin());
+    if (!base) throw new Error("this portal must be served from its configured secure origin");
+    const { salt } = await auth.saltFor(base, props.session.username);
+    const keys = await deriveFor(totpPw, salt);
+    const verifierB64 = toBase64(keys.authKey);
+    wipeKeySet(keys);
+    return verifierB64;
+  };
+
+  const totpStart = async () => {
+    if (secBusy || !props.session || !totpPw) return;
+    setSecBusy(true);
+    setSecError("");
+    setSecNotice("");
+    try {
+      const verifier = await totpVerifierFor();
+      const setup = await api.totpSetup(verifier);
+      setTotpPending({ secretBase32: setup.secret_base32, otpauthUri: setup.otpauth_uri });
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : "could not start two-factor setup");
+    } finally {
+      setTotpPw("");
+      setTotpCode("");
+      setSecBusy(false);
+    }
+  };
+
+  const totpEnableConfirm = async () => {
+    if (secBusy || !props.session || !totpPending || !totpPw || !/^\d{6}$/.test(totpCode)) return;
+    setSecBusy(true);
+    setSecError("");
+    setSecNotice("");
+    try {
+      const verifier = await totpVerifierFor();
+      await api.totpEnable(verifier, totpCode);
+      setTotpStatus(true);
+      setTotpPending(null);
+      setSecNotice(
+        "Two-factor authentication is on: sign-in now asks for a 6-digit code from your authenticator. Keep a backup of the secret somewhere safe — a lost authenticator needs an operator to clear.",
+      );
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : "could not enable two-factor");
+    } finally {
+      setTotpPw("");
+      setTotpCode("");
+      setSecBusy(false);
+    }
+  };
+
+  const totpDisableConfirm = async () => {
+    if (secBusy || !props.session || !totpPw || !/^\d{6}$/.test(totpCode)) return;
+    setSecBusy(true);
+    setSecError("");
+    setSecNotice("");
+    try {
+      const verifier = await totpVerifierFor();
+      await api.totpDisable(verifier, totpCode);
+      setTotpStatus(false);
+      setSecNotice("Two-factor authentication is off. Sign-in is password-only again.");
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : "could not disable two-factor");
+    } finally {
+      setTotpPw("");
+      setTotpCode("");
+      setSecBusy(false);
+    }
+  };
+
+  // Ask the server for the honest state the first time the panel opens
+  // (the collapsed panel derives and sends nothing).
+  useEffect(() => {
+    if (!securityOpen || totpStatus !== null || !props.session) return;
+    let cancelled = false;
+    api.me()
+      .then((me) => { if (!cancelled) setTotpStatus(me.totp_enabled === true); })
+      .catch(() => { if (!cancelled) setTotpStatus(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [securityOpen, props.session]);
 
   const loadAudit = useCallback(() => {
     setAuditError("");
@@ -527,7 +623,7 @@ export function PatientsView(props: {
         </div>
       )}
 
-      <h2 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>ACTIVE</h2>
+      <h3 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>ACTIVE</h3>
       {activeAll.length > 1 && (
         <div style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <Button label={scanning ? "Scanning caseload…" : "Scan caseload for triage"} small onPress={() => void scanCaseload()} disabled={scanning} />
@@ -617,7 +713,7 @@ export function PatientsView(props: {
 
       {stopped.length > 0 && (
         <>
-          <h2 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>STOPPED SHARING</h2>
+          <h3 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>STOPPED SHARING</h3>
           {stopped.map((patient) => (
             <Card key={patient.user_id} deep>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -759,7 +855,102 @@ export function PatientsView(props: {
                 disabled={secBusy || !props.session || !compConfirmed || !compCurrent}
               />
             </div>
-            <Button label="Hide account security" small onPress={() => setSecurityOpen(false)} disabled={secBusy} />
+            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+              <strong style={{ color: theme.text, fontSize: 13 }}>Two-factor authentication (authenticator app)</strong>
+              {totpStatus === null && (
+                <Note role="status">Checking this account&apos;s two-factor status…</Note>
+              )}
+              {totpStatus === false && !totpPending && (
+                <>
+                  <Note>
+                    Optional second factor for sign-in: after it is enabled, your password AND a 6-digit
+                    code from an authenticator app are both required. Disabling it later needs both
+                    halves again — and a lost authenticator has no self-service recovery (operator
+                    action only), matching this portal&apos;s no-recovery design.
+                  </Note>
+                  <Field label="Current password (to authorize setup)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
+                  <Button
+                    label={secBusy ? "Starting…" : "Set up authenticator"}
+                    small
+                    onPress={() => void totpStart()}
+                    disabled={secBusy || !props.session || !totpPw}
+                  />
+                </>
+              )}
+              {totpPending && (
+                <>
+                  <Note tone="warn">
+                    Enter this secret in your authenticator app NOW — it is shown exactly once and
+                    never again. Two-factor only takes effect after you confirm a code below.
+                  </Note>
+                  <p
+                    aria-label="Authenticator secret (manual entry)"
+                    style={{ fontFamily: "monospace", color: theme.text, fontSize: 14, wordBreak: "break-all", margin: 0, letterSpacing: 1 }}
+                  >
+                    {totpPending.secretBase32}
+                  </p>
+                  <p
+                    aria-label="otpauth URI for apps that accept it"
+                    style={{ fontFamily: "monospace", color: theme.muted, fontSize: 11, wordBreak: "break-all", margin: 0 }}
+                  >
+                    {totpPending.otpauthUri}
+                  </p>
+                  <Field label="Current password (to authorize setup)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
+                  <Field
+                    label="6-digit code from the app"
+                    value={totpCode}
+                    onChange={(value) => setTotpCode(value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="123456"
+                    autoComplete="one-time-code"
+                  />
+                  <Button
+                    label={secBusy ? "Enabling…" : "Enable two-factor"}
+                    small
+                    onPress={() => void totpEnableConfirm()}
+                    disabled={secBusy || !props.session || !totpPw || !/^\d{6}$/.test(totpCode)}
+                  />
+                </>
+              )}
+              {totpStatus === true && (
+                <>
+                  <Note tone="ok" role="status">
+                    Enabled — sign-in requires your password and a current 6-digit code.
+                  </Note>
+                  <Note tone="danger">
+                    Turning two-factor off needs your password AND a current code. If the authenticator
+                    is lost, only an operator can clear it — there is no self-service recovery.
+                  </Note>
+                  <Field label="Current password (to disable two-factor)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
+                  <Field
+                    label="6-digit code (to disable two-factor)"
+                    value={totpCode}
+                    onChange={(value) => setTotpCode(value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="123456"
+                    autoComplete="one-time-code"
+                  />
+                  <Button
+                    label={secBusy ? "Disabling…" : "Disable two-factor"}
+                    small
+                    danger
+                    onPress={() => void totpDisableConfirm()}
+                    disabled={secBusy || !props.session || !totpPw || !/^\d{6}$/.test(totpCode)}
+                  />
+                </>
+              )}
+            </div>
+            <Button
+              label="Hide account security"
+              small
+              onPress={() => {
+                setSecurityOpen(false);
+                // The pending secret is shown-once material: closing the
+                // panel discards it (a fresh setup mints a fresh secret).
+                setTotpPending(null);
+                setTotpPw("");
+                setTotpCode("");
+              }}
+              disabled={secBusy}
+            />
           </>
         )}
         <ErrorBanner message={secError} />

@@ -278,8 +278,15 @@ export const auth = {
   meta: (baseUrl: string) => authRequest<ServerMeta>(baseUrl, "GET", "/meta"),
   saltFor: (baseUrl: string, username: string) =>
     authRequest<{ salt: string }>(baseUrl, "POST", "/auth/salt", { username }),
-  login: (baseUrl: string, username: string, verifierB64: string) =>
-    authRequest<TokenResponse>(baseUrl, "POST", "/auth/login", { username, verifier: verifierB64 }),
+  login: (baseUrl: string, username: string, verifierB64: string, totpCode?: string) =>
+    authRequest<TokenResponse>(
+      baseUrl,
+      "POST",
+      "/auth/login",
+      totpCode === undefined
+        ? { username, verifier: verifierB64 }
+        : { username, verifier: verifierB64, totp_code: totpCode },
+    ),
   registerTherapist: (
     baseUrl: string,
     payload: {
@@ -309,6 +316,8 @@ export interface TherapistMe {
   display_name: string;
   wrap_pub_key: string;
   wrap_key_blob: string;
+  /** Additive (2026-09-22): honest TOTP state for the security panel. */
+  totp_enabled?: boolean;
 }
 
 /** One row of the therapist's own action history (2026-09-21 audit B-4):
@@ -646,4 +655,20 @@ export const api = {
       { wrap_pub_key: wrapPubKeyB64, wrap_key_blob: wrapKeyBlobB64 },
       { "X-Account-Verifier": verifierB64 },
     ),
+  /** Optional therapist TOTP (2026-09-21 audit C-2/F-4, delivered
+   *  2026-09-22). Three-step enrollment, all verifier-gated: setup arms a
+   *  PENDING secret and shows it exactly once; enable proves the
+   *  authenticator holds it; disable requires the verifier AND a fresh
+   *  code (so neither a phished password nor a stolen bearer strips the
+   *  factor). See the README security section for the full contract. */
+  totpSetup: (verifierB64: string) =>
+    request<{ secret_base32: string; otpauth_uri: string }>(
+      "POST",
+      "/account/totp/setup",
+      { verifier: verifierB64 },
+    ),
+  totpEnable: (verifierB64: string, code: string) =>
+    request<null>("POST", "/account/totp/enable", { verifier: verifierB64, code }),
+  totpDisable: (verifierB64: string, code: string) =>
+    request<null>("POST", "/account/totp/disable", { verifier: verifierB64, code }),
 };

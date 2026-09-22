@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "MindPattern therapist portal \u2014 zero-knowledge read access to shared patient patterns.",
+  "description": "MindPattern therapist portal — zero-knowledge read access to shared patient patterns.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -25,6 +25,8 @@
     "@types/react-test-renderer": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^5.0.1",
+    "jest-axe": "^11.0.0",
+    "jsdom": "^30.1.1",
     "react-test-renderer": "19.1.0",
     "typescript": "^5.6.0",
     "vite": "^6.0.0",
