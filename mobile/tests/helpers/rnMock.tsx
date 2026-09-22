@@ -82,6 +82,9 @@ export const StyleSheet = {
 
 export const Platform = {
   OS: "ios" as const,
+  // A modern device by default; tests that need an older system (e.g. the
+  // healthkit iOS-18 capability gate) assign a different Version.
+  Version: 18.5,
   select: <T,>(opts: { ios?: T; android?: T; native?: T; default?: T }): T =>
     opts.ios ?? opts.native ?? (opts.default as T),
 };

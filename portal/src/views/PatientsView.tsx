@@ -2,13 +2,31 @@
  * Patients: the therapist's consented patient list, the pairing-code
  * generator (how a new patient connects), and the honest empty/revoked
  * states. Selecting an active patient opens the pattern view.
+ *
+ * NEW-3 / F.4 (2026-09-22): the "Account security" panel surfaces the
+ * backend's verifier-gated rotation routes (PUT /therapist/wrap-key,
+ * PUT /account/credential) — password change, interrupted-change
+ * recovery, and compromise rotation of the sharing key.
  */
 import { useCallback, useEffect, useState } from "react";
-import { api, type AccessLogRow, type Patient } from "../api";
-import { decryptCaseloadSummary, decryptInsights, keyFingerprint, unwrapPatientDataKey } from "../crypto";
+import { api, auth, ApiError, type AccessLogRow, type Patient } from "../api";
+import {
+  decryptCaseloadSummary,
+  decryptInsights,
+  deriveMasterKey,
+  derivePortalKeys,
+  fromBase64,
+  generateTherapistKeyPair,
+  keyFingerprint,
+  openSealedPrivateKey,
+  sealPrivateKeyForUpload,
+  toBase64,
+  unwrapPatientDataKey,
+} from "../crypto";
 import type { Bytes, CaseloadSummary } from "../crypto";
-import { visitAnchorStore } from "../platform";
-import { Button, Card, ErrorBanner, Note, theme } from "../ui";
+import { currentOrigin, randomBytes, visitAnchorStore } from "../platform";
+import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
+import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
 import type { PortalSession } from "./PatientView";
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
@@ -25,9 +43,19 @@ export interface CaseloadScanRow {
   lastReviewed: string | null;
 }
 
+/** The full password-derived key set, held only for the duration of one
+ * Account-security action and zeroized the moment it ends (the LoginView
+ * wipeKeys idiom — audit P-1: the verifier never outlives its send). */
+type PortalKeySet = Awaited<ReturnType<typeof derivePortalKeys>>;
+
 export function PatientsView(props: {
   onOpen: (patient: Patient) => void;
   onSignOut: () => void;
+  /** NEW-3 / F.4 (2026-09-22): fired after a successful password change —
+   *  the credential rotation killed every bearer (including this one), so
+   *  App locks the whole session down with the "all sessions ended"
+   *  notice. Falls back to the plain sign-out path when not supplied. */
+  onSessionsEnded?: () => void;
   displayName: string;
   session?: PortalSession;
 }): React.JSX.Element {
@@ -54,6 +82,225 @@ export function PatientsView(props: {
   const [auditRows, setAuditRows] = useState<AccessLogRow[] | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [auditError, setAuditError] = useState("");
+
+  // --- Account security (NEW-3 / F.4, 2026-09-22) -----------------------------
+  // Collapsed by default like the access-history panel above: nothing is
+  // derived, fetched, or sent until the therapist asks for it.
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [secBusy, setSecBusy] = useState(false);
+  const [secError, setSecError] = useState("");
+  const [secNotice, setSecNotice] = useState("");
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [recCurrent, setRecCurrent] = useState("");
+  const [recIntended, setRecIntended] = useState("");
+  const [compCurrent, setCompCurrent] = useState("");
+  const [compConfirmed, setCompConfirmed] = useState(false);
+  /** The fresh salt of a password change whose wrap-key PUT landed but
+   *  whose credential PUT failed — the interrupted-change window. The
+   *  stored blob is sealed under (intended-new password + THIS salt), so
+   *  the salt is the only thing that makes the intended-new KEK
+   *  re-derivable and the account repairable. Memory only: a page reload
+   *  forfeits recovery, exactly like the no-recovery warning at
+   *  registration (audit F-4). */
+  const [interruptedSaltB64, setInterruptedSaltB64] = useState<string | null>(null);
+
+  /** Same derivation as the sign-in path, with the same P-1 hygiene: the
+   *  salt bytes and master never outlive this function; only the returned
+   *  zeroizable subkey arrays do. */
+  const deriveFor = async (password: string, saltB64: string): Promise<PortalKeySet> => {
+    const saltBytes = fromBase64(saltB64);
+    let master: Awaited<ReturnType<typeof deriveMasterKey>> | null = null;
+    try {
+      master = await deriveMasterKey(password, saltBytes);
+      return await derivePortalKeys(master);
+    } finally {
+      saltBytes.fill(0);
+      master?.fill(0);
+    }
+  };
+
+  const wipeKeySet = (...sets: Array<PortalKeySet | null | undefined>): void => {
+    for (const set of sets) {
+      set?.authKey.fill(0);
+      set?.wrapKek.fill(0);
+      set?.noteKey.fill(0);
+    }
+  };
+
+  /** The FINAL credential PUT is the one request whose failure strands the
+   *  account in the re-wrapped window, so transient faults get up to three
+   *  retries — network-unreachable (status 0) and 5xx only. A 403 is the
+   *  server rejecting the current verifier: retrying it is pointless and
+   *  burns the shared auth rate limit. */
+  const putCredentialWithRetry = async (
+    verifierB64: string,
+    newSaltB64: string,
+    newVerifierB64: string,
+  ): Promise<void> => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await api.rotateCredential(verifierB64, newSaltB64, newVerifierB64);
+        return;
+      } catch (err) {
+        const status = err instanceof ApiError ? err.status : -1;
+        if (attempt >= 3 || (status !== 0 && status < 500)) throw err;
+      }
+    }
+  };
+
+  const changePassword = async () => {
+    if (secBusy || !props.session) return;
+    if (pwNew !== pwConfirm) {
+      setSecError("the two new passwords do not match");
+      return;
+    }
+    // Same policy the registration form enforces (F-4 register copy).
+    const policy = passwordPolicyError(pwNew);
+    if (policy) {
+      setSecError(policy);
+      return;
+    }
+    setSecBusy(true);
+    setSecError("");
+    setSecNotice("");
+    let currentKeys: PortalKeySet | null = null;
+    let newKeys: PortalKeySet | null = null;
+    let pkcs8: Bytes | null = null;
+    try {
+      const base = normalizeBaseUrl(currentOrigin());
+      if (!base) throw new Error("this portal must be served from its configured secure origin");
+      const username = props.session.username;
+      const { salt } = await auth.saltFor(base, username);
+      currentKeys = await deriveFor(pwCurrent, salt);
+      // P-1: the verifier string is derived here, at the send, from the
+      // raw bytes — which are wiped the moment the string exists.
+      const verifierB64 = toBase64(currentKeys.authKey);
+      currentKeys.authKey.fill(0);
+      // F-6: through the platform seam; exactly the register payload's
+      // 16-byte salt shape.
+      const newSaltBytes = randomBytes(16);
+      const newSaltB64 = toBase64(newSaltBytes);
+      try {
+        newKeys = await deriveFor(pwNew, newSaltB64);
+      } finally {
+        newSaltBytes.fill(0);
+      }
+      const newVerifierB64 = toBase64(newKeys.authKey);
+      newKeys.authKey.fill(0);
+      const me = await api.me();
+      // Ordering contract (backend rotate_wrap_key docstring): re-wrap the
+      // SAME private key under the NEW password's KEK FIRST, while both
+      // passwords are derivable, THEN rotate the login credential.
+      pkcs8 = await openSealedPrivateKey(currentKeys.wrapKek, me.wrap_key_blob, username);
+      if (!pkcs8) {
+        throw new Error("the current password did not unlock your stored sharing key — nothing was changed");
+      }
+      const resealedBlob = await sealPrivateKeyForUpload(newKeys.wrapKek, pkcs8, username);
+      await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob);
+      try {
+        await putCredentialWithRetry(verifierB64, newSaltB64, newVerifierB64);
+      } catch (err) {
+        // The interrupted-change window: the blob is now sealed under the
+        // NEW password while the sign-in credential is unchanged. Retain
+        // the new salt so the recovery form below can re-derive the
+        // intended-new KEK — the only state that keeps the account
+        // repairable (see interruptedSaltB64).
+        setInterruptedSaltB64(newSaltB64);
+        throw new Error(
+          `the password change did not complete (${err instanceof Error ? err.message : "credential rotation failed"}) — `
+            + "your sharing key is now wrapped under the NEW password while your sign-in password is unchanged. "
+            + "Recover it with “Recover sharing key” below BEFORE leaving this page.",
+        );
+      }
+      // Success: the server bumped the token epoch — every bearer,
+      // including this session's, is dead. Lock down through the same
+      // path as sign-out so no key material outlives the credential.
+      setSecNotice("Password changed. Every session — including this one — has ended; sign in with your new password.");
+      if (props.onSessionsEnded) props.onSessionsEnded();
+      else props.onSignOut();
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : "could not change the password");
+    } finally {
+      wipeKeySet(currentKeys, newKeys);
+      pkcs8?.fill(0);
+      // Password strings cannot be overwritten in JavaScript; dropping
+      // them from the live form promptly is the available hygiene.
+      setPwCurrent("");
+      setPwNew("");
+      setPwConfirm("");
+      setSecBusy(false);
+    }
+  };
+
+  const recoverSharingKey = async () => {
+    if (secBusy || !props.session || !interruptedSaltB64) return;
+    setSecBusy(true);
+    setSecError("");
+    setSecNotice("");
+    let currentKeys: PortalKeySet | null = null;
+    let intendedKeys: PortalKeySet | null = null;
+    let pkcs8: Bytes | null = null;
+    try {
+      const base = normalizeBaseUrl(currentOrigin());
+      if (!base) throw new Error("this portal must be served from its configured secure origin");
+      const username = props.session.username;
+      const { salt } = await auth.saltFor(base, username);
+      currentKeys = await deriveFor(recCurrent, salt);
+      const verifierB64 = toBase64(currentKeys.authKey);
+      currentKeys.authKey.fill(0);
+      intendedKeys = await deriveFor(recIntended, interruptedSaltB64);
+      const me = await api.me();
+      pkcs8 = await openSealedPrivateKey(intendedKeys.wrapKek, me.wrap_key_blob, username);
+      if (!pkcs8) {
+        throw new Error("the second password did not unlock the stored sharing key — nothing was changed; check the password you were changing to");
+      }
+      const resealedBlob = await sealPrivateKeyForUpload(currentKeys.wrapKek, pkcs8, username);
+      await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob);
+      setInterruptedSaltB64(null);
+      setSecNotice("Sharing key recovered — it is sealed under your current sign-in password again. Your sign-in password never changed; you can retry the password change.");
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : "could not recover the sharing key");
+    } finally {
+      wipeKeySet(currentKeys, intendedKeys);
+      pkcs8?.fill(0);
+      setRecCurrent("");
+      setRecIntended("");
+      setSecBusy(false);
+    }
+  };
+
+  const rotateSharingKey = async () => {
+    if (secBusy || !props.session || !compConfirmed) return;
+    setSecBusy(true);
+    setSecError("");
+    setSecNotice("");
+    let currentKeys: PortalKeySet | null = null;
+    try {
+      const base = normalizeBaseUrl(currentOrigin());
+      if (!base) throw new Error("this portal must be served from its configured secure origin");
+      const username = props.session.username;
+      const { salt } = await auth.saltFor(base, username);
+      currentKeys = await deriveFor(compCurrent, salt);
+      const verifierB64 = toBase64(currentKeys.authKey);
+      currentKeys.authKey.fill(0);
+      // A genuinely FRESH keypair sealed under the CURRENT password's KEK
+      // — nothing derived from the possibly-compromised old key is reused.
+      const pair = await generateTherapistKeyPair(currentKeys.wrapKek, username);
+      await api.rotateWrapKey(verifierB64, pair.publicKeySpkiB64, pair.wrapKeyBlobB64);
+      setSecNotice(
+        "Sharing key rotated. Existing grants stay readable only after each patient re-wraps their data key via the pairing fingerprint path; grants that never re-wrap are intentionally lost — retiring the compromised key is the point. Until you sign out, this tab still holds the old key in memory, so not-yet-re-wrapped grants may keep opening here.",
+      );
+    } catch (err) {
+      setSecError(err instanceof Error ? err.message : "could not rotate the sharing key");
+    } finally {
+      wipeKeySet(currentKeys);
+      setCompCurrent("");
+      setCompConfirmed(false);
+      setSecBusy(false);
+    }
+  };
 
   const loadAudit = useCallback(() => {
     setAuditError("");
@@ -421,6 +668,104 @@ export function PatientsView(props: {
         {auditError && (
           <Note tone="danger" role="status">
             {auditError}
+          </Note>
+        )}
+      </Card>
+
+      {/* NEW-3 / F.4 (2026-09-22): the backend's verifier-gated rotation
+          routes existed and were tested server-side, but no portal surface
+          reached them — a therapist could not change a password, repair an
+          interrupted change, or retire a compromised sharing key. Collapsed
+          by default like the access-history panel: nothing is derived,
+          fetched, or sent until asked for. */}
+      <Card title="Account security" deep>
+        {!securityOpen ? (
+          <div>
+            <Button label="Show account security" small onPress={() => setSecurityOpen(true)} />
+            <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
+              Change your password, recover your sharing key after an interrupted change, or rotate a
+              compromised sharing key — nothing runs until you ask.
+            </span>
+          </div>
+        ) : (
+          <>
+            <div>
+              <strong style={{ color: theme.text, fontSize: 13 }}>Change password</strong>
+              <Note>
+                Your sharing key is re-wrapped under the new password first, then the login credential is
+                rotated — on success every session, including this one, is signed out. There is still no
+                password reset: keep the new password in a password manager.
+              </Note>
+              <Field label="Current password" value={pwCurrent} onChange={setPwCurrent} type="password" autoComplete="current-password" />
+              <Field label="New password" value={pwNew} onChange={setPwNew} type="password" autoComplete="new-password" />
+              <Field label="Repeat new password" value={pwConfirm} onChange={setPwConfirm} type="password" autoComplete="new-password" />
+              <Button
+                label={secBusy ? "Changing…" : "Change password"}
+                small
+                onPress={() => void changePassword()}
+                disabled={secBusy || !props.session || !pwCurrent || !pwNew || !pwConfirm}
+              />
+            </div>
+            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+              <strong style={{ color: theme.text, fontSize: 13 }}>Recover sharing key</strong>
+              <Note>
+                Repairs an interrupted password change: if the change failed after the sharing key was
+                re-wrapped, this seals the same key back under the password you actually sign in with, so
+                the account opens normally again.
+              </Note>
+              {interruptedSaltB64 ? (
+                <Note tone="warn">
+                  An interrupted change from this tab is repairable right now — do it before closing or
+                  reloading this page.
+                </Note>
+              ) : (
+                <Note>
+                  No interrupted change is remembered in this tab. After a reload the re-wrapped key is
+                  not recoverable — an account with no recovery path stays that way (audit F-4).
+                </Note>
+              )}
+              <Field label="Current password (the one you sign in with)" value={recCurrent} onChange={setRecCurrent} type="password" autoComplete="current-password" />
+              <Field label="The password you were changing to" value={recIntended} onChange={setRecIntended} type="password" autoComplete="off" />
+              <Button
+                label={secBusy ? "Recovering…" : "Recover sharing key"}
+                small
+                onPress={() => void recoverSharingKey()}
+                disabled={secBusy || !props.session || !interruptedSaltB64 || !recCurrent || !recIntended}
+              />
+            </div>
+            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
+              <strong style={{ color: theme.text, fontSize: 13 }}>Rotate sharing key (suspected compromise)</strong>
+              <Note>
+                Publishes a brand-new sharing keypair sealed under your current password. Existing grants
+                stay readable only after each patient re-wraps their data key via the pairing fingerprint
+                path; grants that never re-wrap are intentionally lost — retiring the compromised key is
+                the point. Your notes are unaffected: they are sealed under your password, not this key.
+              </Note>
+              <Field label="Current password (to authorize rotation)" value={compCurrent} onChange={setCompCurrent} type="password" autoComplete="current-password" />
+              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: theme.muted, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={compConfirmed}
+                  onChange={(e) => setCompConfirmed(e.target.checked)}
+                  aria-label="Confirm sharing-key rotation"
+                />
+                I understand that grants from patients who never re-wrap are intentionally lost.
+              </label>
+              <Button
+                label={secBusy ? "Rotating…" : "Rotate sharing key"}
+                small
+                danger
+                onPress={() => void rotateSharingKey()}
+                disabled={secBusy || !props.session || !compConfirmed || !compCurrent}
+              />
+            </div>
+            <Button label="Hide account security" small onPress={() => setSecurityOpen(false)} disabled={secBusy} />
+          </>
+        )}
+        <ErrorBanner message={secError} />
+        {secNotice && (
+          <Note tone="ok" role="status">
+            {secNotice}
           </Note>
         )}
       </Card>

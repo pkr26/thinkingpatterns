@@ -1,11 +1,15 @@
 # Monitoring stack (operator tooling)
 
-This directory is **operator tooling, deliberately outside the digest-pinned
-production contract**. The production `docker-compose.yml` runs only
-immutable `@sha256` release images verified by `deploy/README.md`; this
-stack ships mutable version tags instead, because operator tooling must not
-weaken that contract. Resolve and pin digests before production use —
-nothing here is covered by the release verification flow.
+This directory is **operator tooling, deliberately outside the release-env
+image contract**. The production `docker-compose.yml` consumes only the
+immutable `@sha256` release references verified by `deploy/README.md`; this
+stack holds its images in the same `repo:tag@sha256:…` pinned form (since
+2026-09-22, audit G-7/NEW-4) but in this directory, not a release asset —
+operator tooling must not weaken that contract, and it is not covered by
+the release verification flow. `verify.sh --production` machine-checks the
+pins (see "Verify" below), and CI (`ci.yml`, `monitoring-verify` job) runs
+that assertion on every push; re-pin only deliberately ("Digest pinning"
+below).
 
 ## What it is
 
@@ -181,31 +185,49 @@ stats, request rate by status family, recompute p50/p95 via
 `backend/app/metrics.py` the same way it grounds alerts.yml, so a panel
 referencing a metric the API stopped exporting fails the drift gate.
 
-## Digest pinning (before production use)
+## Digest pinning (deliberate re-pins only)
 
-The production contract pins image digests; this stack must reach the same
-bar before it runs in production. For each image in
-`docker-compose.yml` here:
+Every image in this directory's `docker-compose.yml` — and
+`deploy/backup-offsite/`'s `rclone/rclone` — is pinned at
+`repo:tag@sha256:…` (resolved 2026-09-22, audit G-7/NEW-4: the former
+"pin before production" TODO was unenforced, and one referenced tag,
+`rclone/rclone:v1.69.1`, did not even exist on Docker Hub — a latent
+pull-time failure). An upgrade is a deliberate edit that replaces the tag
+AND the digest together:
 
 ```bash
-docker buildx imagetools inspect prom/prometheus:v3.4.1   # or: docker manifest inspect
-# copy the manifest-list sha256 digest, then pin it in this file:
-#   image: prom/prometheus:v3.4.1@sha256:<64-hex>
+docker buildx imagetools inspect prom/prometheus:<new-tag>   # or: docker manifest inspect
+# copy the manifest-list sha256 digest, then edit the file:
+#   image: prom/prometheus:<new-tag>@sha256:<64-hex>
+bash deploy/monitoring/verify.sh --production   # must still pass
 ```
 
-Pin `grafana/grafana`, `prom/blackbox-exporter`, and (in
-`deploy/backup-offsite/`) `rclone/rclone` the same way, and re-resolve on
-every deliberate upgrade — exactly the discipline the `db` service's
-comment in the production compose file describes. Until then, treat this
-stack as dev/staging tooling.
+`verify.sh --production` fails any image line that is not
+`repo:tag@sha256:<64-hex>` (or a required-env `${VAR:?}` form with no
+mutable default) across the production compose and both overlays, and the
+`monitoring-verify` job in `.github/workflows/ci.yml` runs the same
+assertion on every push — a dropped or stale digest fails the build, not
+the deploy. Re-resolve on every deliberate upgrade — exactly the
+discipline the `db` service's comment in the production compose file
+describes.
 
 ## Verify
 
 ```bash
-bash deploy/monitoring/verify.sh
+bash deploy/monitoring/verify.sh                # YAML + structure + grounding
+bash deploy/monitoring/verify.sh --production    # …and the digest-pin contract
 ```
 
 Runs promtool when installed and always the YAML/structure/metric-grounding
 pass via the repo virtualenv (`../../.venv/bin/python`, needs PyYAML;
 falls back to any `python3` with PyYAML). Exit 0/1 honestly; prints exactly
 what was checked and which metrics each alert uses.
+
+`--production` (audit G-7/NEW-4) additionally asserts the digest-pinning
+contract: every `image:` line in the production `docker-compose.yml`, this
+directory's overlay, and `deploy/backup-offsite/`'s overlay must be either
+`repo:tag@sha256:<64-hex>` or a required-env `${VAR:?…}` reference with no
+mutable default — any floating tag fails. Run it before any production use
+of these overlays and after every re-pin; CI's `monitoring-verify` job
+(`.github/workflows/ci.yml`) runs both modes on every push, so a dropped
+digest fails the build rather than a later `compose pull`.

@@ -6,6 +6,107 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Independent-audit round 3 remediation (2026-09-22): NEW-1..NEW-4 + low-bundle residuals closed
+
+Follow-up to the third independent verification pass (re-audit of
+AUDIT_2026-09-21.md remediation at `64a99e1`). Every open item fixed,
+each with its regression test:
+
+- **NEW-1, the weekly mutation ceiling could never trip.** The
+  surviving-mutant counter in `mutation.yml` counted *lines* containing
+  "survived", but mutmut 2.4.4 prints ONE grouped header —
+  `Survived 🙁 (500)` — so 500 real survivors parsed as 1 and the
+  ceiling of 25 was unreachable. The parser now sums the header's own
+  `(N)` (per-line counting survives only as a fallback for formats
+  without a header). New tests in
+  `backend/tests/test_audit_round3_2026_09_22.py` execute the ACTUAL
+  python block extracted from `mutation.yml` against byte-faithful
+  grouped results: 500 survivors must fail, a healthy 3 passes, and the
+  F-7 refuse-unparseable guard still fires. The workflow header's stale
+  "survivors do not fail the run" sentence is corrected too.
+- **NEW-2, the HealthKit mirror was permanently inert.**
+  `react-native-health@1.19.0` (the newest published) links and
+  autolinks but predates iOS 18 — its native module exposes no
+  `requestAuthorization`/`saveStateOfMind`, so the
+  `src/healthkit.ts` seam always read "too old". Shipped
+  `ios/MindPattern/HealthBridge/RCTAppleHealthKit+MindPatternStateOfMind.m`:
+  a category on the pod's module implementing exactly the seam's
+  documented contract (three promise-based methods,
+  `@available(iOS 18.0, *)`-gated, `HKStateOfMindKindDailyMood` writes
+  with the discrete -2..2 valence, write-only — `readTypes:nil` — API
+  spellings pinned against Apple's documentation JSON). The HealthKit
+  entitlement (`MindPattern.entitlements`) is declared and signed by
+  both target configurations; `verify:native-release` grew from 5 to 9
+  checks (FLAG_SECURE, adjustResize, entitlement signing, bridge
+  presence + contract surface); `tests/healthBridge.pins.test.ts` pins
+  the same facts in the ordinary suite; `healthKitCapability()` now
+  answers "requires iOS 18 or later" on older devices instead of
+  blaming the module. Honest limit: no Xcode exists on the authoring
+  machine, so the ObjC is CI-preflight- and source-pinned but not
+  compile-verified here (same caveat class as the 2026-09-21 native
+  projects).
+- **NEW-3, therapist rotation was unreachable from the portal.** New
+  "Account security" panel in PatientsView (the access-history idiom):
+  **Change password** (fetch salt → derive current keys → fresh salt →
+  derive new keys → open the wrap blob with the current KEK → re-seal
+  under the new KEK → `PUT /therapist/wrap-key` → `PUT /account/credential`
+  with up-to-3 retries on network/5xx only → sign out; every derived
+  byte zeroized), **Recover sharing key** (repairs the
+  interrupted-change window: the blob is under the intended-new KEK
+  while the credential never moved — re-seals under the current one),
+  and **Rotate sharing key (compromise)** (fresh keypair,
+  confirm-gated, with the backend docstring's "intentionally lost"
+  copy). `crypto.ts` gains `openSealedPrivateKey` (fail-closed decrypt
+  counterpart of `sealPrivateKeyForUpload`, returning caller-owned
+  PKCS#8). `TherapistMe.wrap_key_blob` was already exposed. The
+  previously untested note-edit-history UI is now covered. Portal:
+  191 → 211 tests, typecheck clean.
+- **NEW-4, `verify.sh --production` existed but was enforced nowhere.**
+  The four overlay images are pinned to digests (re-verified against
+  the Docker Hub registry API): monitoring prometheus/grafana/blackbox
+  + offsite rclone — the offsite compose's `rclone/rclone:v1.69.1` tag
+  turned out not to exist on Docker Hub at all (a latent pull-time
+  failure; tags are unprefixed — now `1.69.1@sha256:600f…`). The
+  monitoring-verify CI job now runs `verify.sh --production` as its own
+  step (a mutable ref fails the build), the promtool extraction uses
+  the same digest-pinned image, and both READMEs document the
+  deliberate-re-pin policy.
+- **Consent-revival cap gap (B-5 residual).** Re-granting a REVOKED
+  consent skipped the ACTIVE-only grant-cap checks entirely — a patient
+  at the cap could exceed it by one via revival. Revivals now count;
+  a wrap REFRESH of an already-active row (which adds no live grant)
+  still passes. Two API-level tests.
+- **Foreign-store cap direction (D-1 hardening).** `_stored_from_dict`
+  truncated over-cap evidence/qualification lists to the OLDEST N days
+  while every merge path keeps the NEWEST N — a hand-edited store with
+  >60 dates would silently lose its high-water mark and reopen the
+  replication-bypass shape D-1 fixed. Load now keeps the newest window.
+- **A-8 wording.** Middleware-SYNTHESIZED envelopes (429/413/400/408/
+  500) on the deprecated `/api` mount now carry the `Deprecation`
+  header, so README's "every response it serves" is true without
+  qualification. The README error-code list also documents the
+  `error` unmapped-status fallback, and the CI completeness gate now
+  matches dict-literal `"code": "..."` envelopes (middleware,
+  exception handlers) in addition to `code="..."` kwargs.
+- **H.9d convention documented + ratcheted.** The "no slow markers on
+  security pins" rule is written down where markers are registered
+  (backend/pyproject.toml) and enforced by a test that freezes the
+  grandfathered slow set to the two crypto-pin files — a new slow
+  marker anywhere else fails the suite instead of silently removing a
+  pin from every mutation campaign.
+- **Ops/doc residuals.** The incident runbook's `NEWEST` selection now
+  mirrors `rehearse_restore.sh --remote` exactly (newest-first over
+  `*.dump.enc`, `.hmac` sidecar required, fails loudly when nothing
+  qualifies); the rollback paragraph's wrong justification is corrected
+  (the hazard is the NEW image auto-upgrading before the rollback
+  decision, and an old image lacks the new migration files outright);
+  redteam.yml's "eight FINDING verdicts" comment is now count-agnostic;
+  the e_crisis/a_crypto harnesses regenerate their corpora into
+  gitignored `redteam/results/corpus/` instead of dirtying tracked
+  files at runtime (committed fixtures stay read-only inputs for
+  f_mobile); mobile README documents the Podfile.lock-not-committed
+  first-build step and the HealthBridge.
+
 ### Independent-audit round 2 remediation (2026-09-21): F-1..F-12 closed
 
 Follow-up to the second independent audit

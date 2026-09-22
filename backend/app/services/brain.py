@@ -2136,8 +2136,8 @@ def _stored_from_dict(raw: Any, pid: str) -> StoredPattern | None:
         last_qualified=iso_or_none(raw.get("last_qualified")) or "",
         occurrences=occurrences,
         state=state,
-        qualification_days=qualification_days[:QUALIFICATION_DAYS_CAP],
-        evidence_dates=evidence_dates[:EVIDENCE_DATES_CAP],
+        qualification_days=qualification_days[-QUALIFICATION_DAYS_CAP:],
+        evidence_dates=evidence_dates[-EVIDENCE_DATES_CAP:],
         feedback=feedback,
         detail=detail,
     )

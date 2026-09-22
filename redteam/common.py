@@ -38,6 +38,21 @@ sys.path.insert(0, str(BACKEND / "app"))
 RESULTS = Path(__file__).resolve().parent / "results"
 RESULTS.mkdir(exist_ok=True)
 
+# H.9a (2026-09-21 audit): regenerated corpora (e_crisis's crisis corpus,
+# a_crypto's AAD vectors) are RUNTIME OUTPUT, not verdict rows, so they go
+# in this SUBDIRECTORY of results/ — every results/*.json consumer
+# (run_all.sh's summary, the redteam.yml gate, the mutation campaigns'
+# snapshot/restore) globs NON-recursively and parses each file as a verdict
+# list, so a corpus dropped at results/*.json would crash them with
+# KeyError. The committed redteam/crisis_corpus.json and
+# redteam/aad_corpus.json stay read-only fixtures (replayed by
+# mobile/redteam/f_mobile.test.ts; hash-pinned by the mutation campaigns)
+# — a harness run used to clobber them in place, dirtying the git tree on
+# every run. Refresh a fixture deliberately, only when a corpus or engine
+# change is intended, by diffing and copying from here.
+CORPUS_RESULTS = RESULTS / "corpus"
+CORPUS_RESULTS.mkdir(exist_ok=True)
+
 RESULTS_BUFFER: list[dict[str, str]] = []
 
 

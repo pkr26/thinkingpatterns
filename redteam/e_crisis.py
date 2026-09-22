@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 
-from common import RESULTS, guard, run, section, verdict
+from common import CORPUS_RESULTS, RESULTS, guard, run, section, verdict
 
 # The canonical corpus + required verdicts — one source of truth with the
 # main suites (editing redteam/crisis_corpus.json alone changes nothing).
@@ -33,7 +33,16 @@ def e1_python_engine() -> None:
         rows.append({"technique": row["technique"], "sample": row["sample"],
                      "intent": row["intent"], "dialog": dialog, "suppress": suppress,
                      "want_dialog": row["dialog"], "want_suppress": row["suppress"]})
-    (RESULTS.parent / "crisis_corpus.json").write_text(json.dumps(rows, indent=1))
+    # H.9a (2026-09-21 audit): the regenerated corpus is runtime OUTPUT and
+    # goes under the untracked results/corpus/ — NOT back over the committed
+    # redteam/crisis_corpus.json, which is a read-only fixture replayed by
+    # mobile/redteam/f_mobile.test.ts (E1-TS) and was clobbered by this very
+    # write on every run, dirtying the git tree. The verdicts below are
+    # computed from `rows` in memory, so redirecting the write cannot change
+    # them; f_mobile keeps gating on the committed fixture, refreshed only
+    # deliberately (diff, then copy results/corpus/crisis_corpus.json over
+    # redteam/crisis_corpus.json) when a corpus or engine change is intended.
+    (CORPUS_RESULTS / "crisis_corpus.json").write_text(json.dumps(rows, indent=1))
 
     crisis_rows = [r for r in rows if r["intent"] == "crisis"]
     bypass = [r for r in crisis_rows if not r["suppress"]]

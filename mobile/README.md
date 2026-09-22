@@ -114,7 +114,9 @@ cd ios && bundle install && bundle exec pod install && cd ..
 Restore is the same: un-archive the previously generated `ios/` and
 `android/` and re-run `pod install`. Never hand-edit the generated
 projects beyond the hardening steps below — keep the diff small enough to
-re-apply after a regeneration.
+re-apply after a regeneration. `Podfile.lock` is not committed — a fresh
+clone must run `pod install` before the first iOS build (the committed
+Gemfile pins the bundler environment; the lock lands per-machine).
 
 ### 2. iOS hardening checklist
 
@@ -295,11 +297,26 @@ access-control flags — shipped on 2026-09-19 (`src/biometricUnlock.ts`,
 `src/healthkit.ts` is the Apple Health **State of Mind** seam, built on
 the same capability-probe pattern as `nativeFeatures.ts`: it probes for a
 `react-native-health` native module and degrades to "unavailable" — never
-a crash — while the repo is JS-only. When the module links, the seam goes
-live with no further JS changes. v1 scope is **write-only**: each
+a crash — when the bridge is absent. v1 scope is **write-only**: each
 explicit mood check-in (a tap on the mood row, never the text-derived
 estimate) can be mirrored OUT to the Health app when the per-account
 `mirrorMoodToHealth` preference is ON (default OFF, Settings toggle,
 honest disclosure copy). MindPattern never reads anything from Health.
 The native-module contract (methods the bridge must expose) is documented
 in the module header of `src/healthkit.ts`.
+
+The bridge itself is
+`ios/MindPattern/HealthBridge/RCTAppleHealthKit+MindPatternStateOfMind.m`
+(2026-09-22 audit round 3): `react-native-health@1.19.0` — the newest
+published version — links and autolinks but predates iOS 18 and carries
+**no State of Mind path** (`initHealthKit`/`isAvailable`/`getAuthStatus`
+only), so the category adds exactly the three contract methods onto the
+pod's module, promise-based, `@available(iOS 18.0, *)`-gated, writing
+`HKStateOfMindKindDailyMood` samples with the discrete -2..2 valence.
+The HealthKit entitlement (`ios/MindPattern/MindPattern.entitlements`,
+signed by both target configurations) is required for any of it to run.
+`npm run verify:native-release` fails if the bridge file, its three
+exported methods, the entitlement, or the pbxproj wiring regresses, and
+`tests/healthBridge.pins.test.ts` pins the same facts in the ordinary
+mobile suite. On iOS < 18 the capability honestly reports
+"requires iOS 18 or later".

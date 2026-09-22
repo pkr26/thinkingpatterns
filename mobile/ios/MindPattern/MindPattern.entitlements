@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+		HealthKit entitlement (2026-09-22, independent-audit NEW-2): the
+		State-of-Mind bridge (MindPattern/HealthBridge/) writes daily-mood
+		samples. WRITE-ONLY posture: the app never requests read access and
+		the bridge never queries samples back — mirrors mobile/src/healthkit.ts.
+		No background-delivery entitlement: writes ride the explicit
+		check-in save path only.
+	-->
+	<key>com.apple.developer.healthkit</key>
+	<true/>
+</dict>
+</plist>

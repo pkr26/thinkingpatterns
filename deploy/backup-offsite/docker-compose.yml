@@ -28,14 +28,21 @@
 #   docker compose -f docker-compose.yml -f deploy/backup-offsite/docker-compose.yml \
 #     --profile backups --profile backups-offsite up -d backup backup-offsite
 #
-# The rclone image tag below is a mutable VERSION TAG (operator tooling);
-# resolve and pin its digest before production use:
-#   docker buildx imagetools inspect rclone/rclone:v1.69.1
-#   image: rclone/rclone:v1.69.1@sha256:<64-hex>
+# The rclone image below is pinned in the same repo:tag@sha256:... form as
+# the release contract (2026-09-22, audit G-7/NEW-4) — including a TAG
+# REPAIR: the previously referenced rclone/rclone:v1.69.1 DOES NOT EXIST
+# on Docker Hub (rclone tags are unprefixed; 1.69.1 and v1.69-stable exist,
+# v1.69.1 does not), a latent PULL-TIME failure no render-only check could
+# see — `up` would have failed only at the moment the overlay was first
+# needed. Upgrades are DELIBERATE re-pins of tag AND digest together:
+#   docker buildx imagetools inspect rclone/rclone:<new-tag>
+#   image: rclone/rclone:<new-tag>@sha256:<64-hex>
+# `bash ../monitoring/verify.sh --production` asserts the @sha256 half, and
+# CI (ci.yml, monitoring-verify job) runs that same assertion on every push.
 services:
   backup-offsite:
     profiles: ["backups-offsite"]
-    image: rclone/rclone:v1.69.1
+    image: rclone/rclone:1.69.1@sha256:600f51856285df1ae5d91c8bb2682cbbe31bf109ebeeef9ecead6ca8c0ff6138
     environment:
       # rclone remote:destination spec, e.g. s3-offsite:mindpattern/backups
       # (the remote must exist in BACKUP_OFFSITE_RCLONE_CONFIG).

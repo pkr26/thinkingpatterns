@@ -19,9 +19,15 @@ or proxy settings. Keep those in an owner-only file outside the checkout.
 ## Operator tooling (opt-in, outside the release contract)
 
 Two directories add opt-in operator capabilities without weakening the
-digest-pinned contract above — both ship version-tagged images on purpose
-and include a documented digest-pinning step (`docker buildx imagetools
-inspect` → pin `@sha256:…`) for use in production:
+digest-pinned contract above — both pin their overlay images to the same
+`repo:tag@sha256:…` form as the release contract (2026-09-22, audit
+G-7/NEW-4; the overlays' former mutable tags — one of which,
+`rclone/rclone:v1.69.1`, did not exist on Docker Hub at all — are now
+pinned), and upgrades are deliberate re-pins (`docker buildx imagetools
+inspect` → replace tag and digest together). CI enforces this:
+`deploy/monitoring/verify.sh --production`, run by the `monitoring-verify`
+job in `.github/workflows/ci.yml`, fails any mutable image reference in
+the production compose or either overlay:
 
 - `deploy/monitoring/` — Prometheus + optional Grafana/blackbox stack
   (profile-gated compose file of its own), alert rules grounded in the
@@ -207,8 +213,11 @@ adapting this configuration.
 ## Rollback (2026-09-21 audit G-3)
 
 The entrypoint auto-upgrades on every boot (`alembic upgrade head`), so a
-rollback is NOT "redeploy the old image and boot it" — the old image's
-entrypoint would run today's migrations anyway. The safe procedure:
+rollback is NOT "redeploy the old image and boot it": the NEW image has
+already auto-upgraded the schema before any rollback decision is made, and
+an old image — lacking the new migration files — can neither apply nor
+undo them; booting it against the upgraded schema is not a rollback. The
+safe procedure:
 
 1. **Restore the database from a pre-migration dump** (the one thing that
    actually reverses a migration). Take a manual dump BEFORE any deploy

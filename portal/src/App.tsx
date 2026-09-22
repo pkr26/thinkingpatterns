@@ -217,6 +217,12 @@ export function App(): React.JSX.Element {
       onSignOut={() => {
         lockDown("Signed out. Your in-memory keys were cleared.");
       }}
+      // NEW-3 / F.4 (2026-09-22): a successful password change killed every
+      // bearer (the server bumps the token epoch), so the lock-down notice
+      // says why the user is suddenly back at the sign-in screen.
+      onSessionsEnded={() => {
+        lockDown("Password changed. Every session — including this one — has ended; sign in with your new password.");
+      }}
     />
   );
 }

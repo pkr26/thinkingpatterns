@@ -354,6 +354,37 @@ describe("authenticated requests", () => {
     });
   });
 
+  it("NEW-3/F.4: PUTs the credential rotation with the current verifier and fresh material", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    await expect(api.rotateCredential("CUR-V==", "NEW-SALT==", "NEW-V==")).resolves.toBeNull();
+    const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/account/credential");
+    expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
+    // Exactly the register payload's shape: current proof + 16-byte salt +
+    // 32-byte verifier, all base64.
+    expect(JSON.parse(init.body as string)).toEqual({
+      verifier: "CUR-V==",
+      new_salt: "NEW-SALT==",
+      new_verifier: "NEW-V==",
+    });
+  });
+
+  it("NEW-3/F.4: PUTs the wrap-key rotation behind the X-Account-Verifier header", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    await expect(api.rotateWrapKey("CUR-V==", "PUB==", "BLOB==")).resolves.toBeNull();
+    const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/therapist/wrap-key");
+    expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
+    expect((init.headers as Record<string, string>)["X-Account-Verifier"]).toBe("CUR-V==");
+    // The body is the register payload's shape; the password proof rides
+    // the header, never the body.
+    expect(JSON.parse(init.body as string)).toEqual({ wrap_pub_key: "PUB==", wrap_key_blob: "BLOB==" });
+  });
+
   it("handles 204 No Content and network failure", async () => {
     setSession("tok-1", "https://api.example.com");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));

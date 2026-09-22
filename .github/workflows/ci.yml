@@ -371,17 +371,30 @@ jobs:
         # runtime set the contract-gates job installs (PyYAML rides along).
         run: python -m pip install --require-hashes -r backend/requirements.lock.txt
       - name: Put promtool on PATH
-        # Same version tag deploy/monitoring/docker-compose.yml ships, so
-        # the semantic check validates the rules against the Prometheus the
-        # stack actually runs; extracting the binary from the image avoids a
-        # second, unpinned download path.
+        # Same image deploy/monitoring/docker-compose.yml ships (tag AND
+        # digest, pinned 2026-09-22 audit G-7/NEW-4), so the semantic check
+        # validates the rules against the exact Prometheus the stack runs;
+        # extracting the binary from the pinned image avoids a second,
+        # unpinned download path.
         run: |
-          docker create --name promtool-copy prom/prometheus:v3.4.1
+          docker create --name promtool-copy prom/prometheus:v3.4.1@sha256:9abc6cf6aea7710d163dbb28d8eeb7dc5baef01e38fa4cd146a406dd9f07f70d
           docker cp promtool-copy:/bin/promtool /usr/local/bin/promtool
           docker rm promtool-copy >/dev/null
           promtool --version
       - name: Monitoring stack verify (YAML + structure + grounding + promtool)
         run: bash deploy/monitoring/verify.sh
+      - name: Monitoring digest-pin assertion (--production)
+        # Audit G-7/NEW-4 (2026-09-22): the operator overlays' images are
+        # pinned at repo:tag@sha256 in the same commit, and this step makes
+        # the pin POLICY, not convention — verify.sh --production fails any
+        # mutable image ref in the production compose or either overlay, so
+        # a dropped/stale digest fails the build instead of surfacing at a
+        # 3am `compose pull`. Deliberately a SEPARATE step from the plain
+        # verify above so a failure attributes to the pinning contract, not
+        # to YAML/grounding drift. Re-pins happen as explicit edits of tag
+        # AND digest together (deploy/monitoring/README.md, "Digest
+        # pinning").
+        run: bash deploy/monitoring/verify.sh --production
       - name: Shellcheck every shell script (error severity)
         run: shellcheck --severity=error $(find . -name '*.sh' -not -path '*/node_modules/*')
 
@@ -412,6 +425,10 @@ jobs:
         # COMPLETE (audit A-4: it had silently gone stale). Collect every
         # `code="..."` literal under backend/app plus the status-default
         # envelope map in deps.py and require each to appear in README.md.
+        # 2026-09-22 audit round 3: middleware/exception-handler envelopes
+        # are built as dict LITERALS (`"code": "..."`), not ApiError
+        # kwargs — the first gate iteration's single regex was blind to
+        # that whole class. Match both shapes.
         run: |
           python - <<'EOF'
           import re
@@ -422,7 +439,11 @@ jobs:
 
           codes = set()
           for path in sorted(backend.rglob("*.py")):
-              codes |= set(re.findall(r'code="([a-z0-9_]+)"', path.read_text(encoding="utf-8")))
+              text = path.read_text(encoding="utf-8")
+              codes |= set(re.findall(r'code="([a-z0-9_]+)"', text))
+              # Dict-literal envelopes (middleware _RATE_LIMITED & friends,
+              # exception handlers): same [a-z0-9_] charset, quoted keys.
+              codes |= set(re.findall(r'"code"\s*:\s*"([a-z0-9_]+)"', text))
           deps = (backend / "deps.py").read_text(encoding="utf-8")
           defaults = re.search(r"DEFAULT_ERROR_CODES[^{]*\{(.*?)\}", deps, re.S)
           assert defaults, "DEFAULT_ERROR_CODES map not found in backend/app/deps.py"

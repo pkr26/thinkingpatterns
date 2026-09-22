@@ -616,4 +616,34 @@ export const api = {
     request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, { blob }),
   deleteNote: (noteId: string) => request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),
   newPairingCode: () => request<{ code: string; expires_in: number }>("POST", "/therapist/pairing-codes"),
+  /** Audit NEW-3 / F.4 (2026-09-22): PUT /account/credential — rotate the
+   *  LOGIN credential (backend schemas.CredentialRotateRequest). Verifier-
+   *  gated on the CURRENT password's derived verifier, so a stolen bearer
+   *  cannot swap the credential and lock the real user out; new_salt and
+   *  new_verifier carry the register payload's shapes (16 and 32 raw
+   *  bytes, base64). The server bumps the token epoch on success, so every
+   *  bearer — this session's included — dies with the 204: the caller must
+   *  sign the user out immediately after and say why. */
+  rotateCredential: (verifierB64: string, newSaltB64: string, newVerifierB64: string) =>
+    request<null>(
+      "PUT",
+      "/account/credential",
+      { verifier: verifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64 },
+    ),
+  /** Audit NEW-3 / F.4 (2026-09-22): PUT /therapist/wrap-key — re-publish
+   *  the sharing keypair (backend schemas.WrapKeyRotateRequest). The proof
+   *  of password knowledge rides the X-Account-Verifier header (the body
+   *  stays the register payload's {wrap_pub_key, wrap_key_blob} shape).
+   *  Three callers: the password change re-seals the SAME private key
+   *  under the new password-derived KEK (ordering contract: this FIRST,
+   *  while both passwords are derivable, THEN rotateCredential), the
+   *  recovery form undoes that window, and the compromise rotation
+   *  publishes a genuinely fresh keypair. */
+  rotateWrapKey: (verifierB64: string, wrapPubKeyB64: string, wrapKeyBlobB64: string) =>
+    request<null>(
+      "PUT",
+      "/therapist/wrap-key",
+      { wrap_pub_key: wrapPubKeyB64, wrap_key_blob: wrapKeyBlobB64 },
+      { "X-Account-Verifier": verifierB64 },
+    ),
 };

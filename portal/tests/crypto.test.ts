@@ -21,6 +21,7 @@ import {
   encrypt,
   encryptNote,
   generateTherapistKeyPair,
+  openSealedPrivateKey,
   sealPrivateKeyForUpload,
   TamperError,
   unlockWrapPrivateKey,
@@ -316,6 +317,67 @@ describe("therapist key custody", () => {
     } finally {
       failureInput.restore();
     }
+  });
+});
+
+// NEW-3 / F.4 (2026-09-22): the re-wrapping counterpart of the seal — a
+// password change must open the stored blob back to raw DER so the SAME
+// private key can be sealed under the new password-derived KEK.
+describe("openSealedPrivateKey (rotation re-wrap)", () => {
+  it("round-trips seal -> open to the identical PKCS#8 bytes", async () => {
+    const kek = crypto.getRandomValues(new Uint8Array(32));
+    const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+    const identical = pkcs8.slice();
+    const sealed = await sealPrivateKeyForUpload(kek, pkcs8, "drportal");
+    expectWiped(pkcs8); // the seal consumed its input, as pinned above
+
+    const opened = await openSealedPrivateKey(kek, sealed, "drportal");
+    expect(opened).not.toBeNull();
+    // The caller owns the returned DER: byte-identical to what was sealed
+    // (and its own responsibility to zeroize — see the wipe test below).
+    expect(Buffer.compare(Buffer.from(opened!), Buffer.from(identical))).toBe(0);
+    opened!.fill(0);
+  });
+
+  it("fails closed to null on a wrong KEK — never a throw, never plaintext", async () => {
+    const rightKek = crypto.getRandomValues(new Uint8Array(32));
+    const wrongKek = crypto.getRandomValues(new Uint8Array(32));
+    const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+    const sealed = await sealPrivateKeyForUpload(rightKek, pkcs8, "drportal");
+    await expect(openSealedPrivateKey(wrongKek, sealed, "drportal")).resolves.toBeNull();
+  });
+
+  it("fails closed to null for another account's blob, bad base64, and a short blob", async () => {
+    const kek = crypto.getRandomValues(new Uint8Array(32));
+    const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+    const sealed = await sealPrivateKeyForUpload(kek, pkcs8, "drportal");
+    // AAD binds the blob to the username: a blob served for another
+    // account must not unlock here.
+    await expect(openSealedPrivateKey(kek, sealed, "someone-else")).resolves.toBeNull();
+    await expect(openSealedPrivateKey(kek, "not!!base64!!", "drportal")).resolves.toBeNull();
+    await expect(openSealedPrivateKey(kek, "AAAA", "drportal")).resolves.toBeNull();
+  });
+
+  it("hands the plaintext DER to the caller un-wiped, then a re-seal round-trips through it", async () => {
+    // The full password-change custody chain with two independent KEKs:
+    // open under the OLD wrap KEK, re-seal under the NEW one, open again.
+    const oldKek = crypto.getRandomValues(new Uint8Array(32));
+    const newKek = crypto.getRandomValues(new Uint8Array(32));
+    const kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+    const identical = pkcs8.slice();
+    const stored = await sealPrivateKeyForUpload(oldKek, pkcs8, "drportal");
+
+    const opened = await openSealedPrivateKey(oldKek, stored, "drportal");
+    expect(opened).not.toBeNull();
+    expect([...opened!].every((b) => b === 0)).toBe(false); // not pre-wiped: the caller must seal or scrub it
+    const reSealed = await sealPrivateKeyForUpload(newKek, opened!, "drportal");
+    const reopened = await openSealedPrivateKey(newKek, reSealed, "drportal");
+    expect(Buffer.compare(Buffer.from(reopened!), Buffer.from(identical))).toBe(0);
+    reopened!.fill(0);
   });
 });
 

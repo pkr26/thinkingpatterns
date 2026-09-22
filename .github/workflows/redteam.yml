@@ -15,10 +15,12 @@ name: Red-team campaigns
 # run_all.sh itself always exits 0 — it prints a summary — so the gate
 # below parses the same redteam/results/*.json files the summary reads.
 #
-# DOCUMENTED RESIDUALS: eight FINDING verdicts are standing, reviewed
-# attack residuals the 2026-09-21 audit explicitly accepted for v1 (see
-# AUDIT_2026-09-21.md Part C's "documented residuals" and the README
-# security notes). They are allowlisted BELOW THE GATE with their
+# DOCUMENTED RESIDUALS: the standing FINDING verdicts — enumerated, with
+# their written defenses, in the DOCUMENTED_RESIDUALS set inside the gate
+# below (never counted in prose, so this comment cannot go stale again) —
+# are reviewed attack residuals the 2026-09-21 audit explicitly accepted
+# for v1 (see AUDIT_2026-09-21.md Part C's "documented residuals" and the
+# README security notes). They are allowlisted BELOW THE GATE with their
 # defenses, so the weekly signal is REGRESSION — any NEW finding, or an
 # allowlisted id disappearing (fixed!), fails or flags the run. The list
 # must never grow silently: adding an id requires the written defense in

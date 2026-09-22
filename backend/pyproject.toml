@@ -57,6 +57,17 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-q"
+# CONVENTION (2026-09-21 audit H.9d, documented 2026-09-22 round 3): the
+# `slow` marker exists ONLY for the byte-for-byte cross-platform crypto
+# pins that genuinely need minutes (600k-iteration KDF, fixed-nonce
+# encrypt vectors). Those slow pins are grandfathered into the marker by
+# tests/test_audit_round3_2026_09_22.py, which fails if any OTHER test
+# file acquires a slow marker — a slow-marked test never runs inside the
+# mutation campaigns (scripts/mutmut_runner.sh deselects -m 'not slow'),
+# so silently marking a security pin slow would remove it from exactly
+# the runs that guard the code it pins. Add fast shape/round-trip pins
+# instead; if a new test truly needs the marker, move the grandfathered
+# set forward deliberately in that ratchet test.
 markers = ["slow: slow tests excluded from mutation-testing runs"]
 
 [tool.mutmut]

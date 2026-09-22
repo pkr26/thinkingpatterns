@@ -79,6 +79,40 @@ user-configurable API host.
   overwrite raw wrap/note key bytes where JavaScript permits it, and remove
   locally stored visit-date metadata.
 
+## Account security panel
+
+The patients screen carries an on-demand "Account security" panel
+(collapsed by default — nothing is derived, fetched, or sent until it is
+opened) that surfaces the backend's verifier-gated rotation routes:
+
+- **Change password** (`PUT /api/v1/therapist/wrap-key`, then
+  `PUT /api/v1/account/credential`). The ordering is the backend's
+  contract: the sharing key is first re-sealed (same private key) under
+  the NEW password-derived KEK while both passwords are derivable, then
+  the login credential rotates (`{verifier, new_salt, new_verifier}`,
+  16-byte salt / 32-byte verifier, base64). The final PUT is retried up
+  to three times on network/5xx because its failure strands the account
+  in the re-wrapped window. On success the server bumps the token epoch,
+  so the portal immediately locks the session with a "every session —
+  including this one — has ended" notice. Every derived key byte is
+  zeroized when the flow ends.
+- **Recover sharing key** repairs the interrupted-change window: if the
+  wrap-key PUT landed but the credential PUT failed, the same key is
+  opened with the intended-new password and re-sealed under the current
+  sign-in password. The repair needs the failed change's fresh salt,
+  which the panel retains in memory only — after a page reload the
+  re-wrapped key is unrecoverable (the account still has no recovery
+  path).
+- **Rotate sharing key (suspected compromise)** publishes a genuinely
+  fresh keypair (`generateTherapistKeyPair` under the current KEK).
+  Existing grants stay readable only after each patient re-wraps via the
+  pairing fingerprint path; grants that never re-wrap are intentionally
+  lost. Requires the current password and an explicit confirmation.
+
+All three actions re-authenticate with the current password's derived
+verifier (`X-Account-Verifier` for the wrap-key route); a stolen bearer
+token alone can reach none of them.
+
 ## Crypto contracts
 
 All crypto is WebCrypto and pinned byte-for-byte against

@@ -81,14 +81,23 @@ prefer that shape for recovery.
 
 ## Digest pinning
 
-The `rclone/rclone:v1.69.1` tag is mutable operator tooling. Before
-production use, pin it exactly like the production contract pins its
-images:
+The image is pinned at `rclone/rclone:1.69.1@sha256:600f…6138` (2026-09-22,
+audit G-7/NEW-4) — including a tag repair: the previously documented
+`rclone/rclone:v1.69.1` DOES NOT EXIST on Docker Hub (rclone tags are
+unprefixed; `1.69.1` and `v1.69-stable` exist, `v1.69.1` does not), a
+latent pull-time failure that would have surfaced only the first time the
+overlay was needed. Upgrades are deliberate re-pins of tag AND digest
+together:
 
 ```bash
-docker buildx imagetools inspect rclone/rclone:v1.69.1
-# then edit this file:  image: rclone/rclone:v1.69.1@sha256:<64-hex>
+docker buildx imagetools inspect rclone/rclone:<new-tag>
+# then edit this file:  image: rclone/rclone:<new-tag>@sha256:<64-hex>
+bash ../monitoring/verify.sh --production
 ```
+
+`deploy/monitoring/verify.sh --production` fails this file on any mutable
+image reference, and CI's `monitoring-verify` job
+(`.github/workflows/ci.yml`) runs that assertion on every push.
 
 ## Recovery when the HOST is gone
 

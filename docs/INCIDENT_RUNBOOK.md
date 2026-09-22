@@ -173,9 +173,18 @@ compose stack are all lost):
    `$NEWEST` is the bare FILE NAME: `/srv/restore` is the HOST path, the
    containers see the same directory mounted at `/restore`, so every
    in-container reference must be `/restore/$NEWEST` (the rehearsal script
-   machine-tests exactly this shape):
+   machine-tests exactly this shape). Select ONLY the dump — never its
+   `.hmac` sidecar — and only a dump that HAS its sidecar: newest-first
+   over `mindpattern-*.dump.enc`, skipping any candidate without the
+   matching `.hmac` (a dump without its sidecar is never a restorable
+   backup). This is the exact selection
+   `backend/scripts/rehearse_restore.sh` performs in `--remote` mode:
    ```bash
-   NEWEST=$(basename "$(ls -1t /srv/restore/mindpattern-*.dump.enc | head -n 1)")
+   NEWEST=""
+   for f in $(ls -1t /srv/restore/mindpattern-*.dump.enc); do
+     [ -f "$f.hmac" ] && { NEWEST=$(basename "$f"); break; }
+   done
+   [ -n "$NEWEST" ] || { echo "no authenticated mindpattern-*.dump.enc (+ .hmac) in /srv/restore" >&2; exit 1; }
    docker run --rm -v /srv/restore:/restore -e BACKUP_KEY \
      --entrypoint mindpattern-backup-mac "$BACKUP_IMAGE" verify "/restore/$NEWEST"
    docker run --rm -i -v /srv/restore:/restore -e BACKUP_KEY \

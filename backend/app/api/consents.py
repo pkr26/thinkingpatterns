@@ -339,14 +339,18 @@ async def grant_consent(
                 .scalars()
                 .first()
             )
-            if existing is None:
-                # These counts are inside the therapist->patient lock order,
-                # so concurrent standard grants cannot race past either cap.
-                # Check before consuming the single-use code: after revoking
-                # an old relationship, the patient can retry the same still-
-                # live code rather than asking the clinician for a new one.
-                # ACTIVE only (2026-09-21 audit B-5) — revoked history must
-                # not consume grant capacity.
+            # These counts are inside the therapist->patient lock order,
+            # so concurrent standard grants cannot race past either cap.
+            # Check before consuming the single-use code: after revoking
+            # an old relationship, the patient can retry the same still-
+            # live code rather than asking the clinician for a new one.
+            # ACTIVE only (2026-09-21 audit B-5) — revoked history must
+            # not consume grant capacity. Revivals count too (2026-09-22
+            # audit round 3): re-activating a revoked row adds a live
+            # grant exactly like a new one and must not slip past either
+            # cap; only a re-grant of an ALREADY-active row (a wrap
+            # refresh) adds nothing and skips the checks.
+            if existing is None or existing.status != "active":
                 patient_count = int(
                     (
                         await session.execute(

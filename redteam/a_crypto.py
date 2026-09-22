@@ -17,7 +17,7 @@ import time
 from datetime import date
 
 from common import (
-    RESULTS,
+    CORPUS_RESULTS,
     auth_headers,
     derive_keys,
     guard,
@@ -236,9 +236,18 @@ def a6_aad_corpus() -> None:
     ]
     out = [{"name": name, "parts": parts, "aad_hex": build_aad(*parts).hex()}
            for name, parts in cases]
-    (RESULTS.parent / "aad_corpus.json").write_text(json.dumps(out, indent=1))
+    # H.9a (2026-09-21 audit): the regenerated vectors are runtime OUTPUT
+    # and go under the untracked results/corpus/ — NOT back over the
+    # committed redteam/aad_corpus.json, which is a read-only fixture
+    # replayed by mobile/redteam/f_mobile.test.ts (A6-TS: TS build_aad vs
+    # these aad_hex values) and was clobbered by this very write on every
+    # run, dirtying the git tree. Refresh the fixture only deliberately
+    # (diff, then copy results/corpus/aad_corpus.json over
+    # redteam/aad_corpus.json) when the canonicalization contract changes.
+    (CORPUS_RESULTS / "aad_corpus.json").write_text(json.dumps(out, indent=1))
     verdict("A6.corpus-generated", "INFO",
-            f"{len(out)} edge-case AAD vectors written to redteam/aad_corpus.json; "
+            f"{len(out)} edge-case AAD vectors written to redteam/results/corpus/aad_corpus.json "
+            f"(committed redteam/aad_corpus.json stays the read-only fixture the TS side replays); "
             f"verdict comes from the TS-side comparison (mobile redteam spec)")
 
 

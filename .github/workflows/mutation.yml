@@ -4,10 +4,11 @@ name: Mutation testing
 # backend security + services cores means running the test suite once per
 # mutant — far too slow for pull-request feedback, so PRs are gated by the
 # coverage floors in ci.yml instead, and this workflow is the scheduled
-# deep check. Surviving mutants do NOT fail the run (`--CI` exits non-zero
-# only on fatal errors); the artifact is the deliverable. Triage survivors
-# against the pins in backend/tests/ (mutation-pin suites) and pin or
-# document each one.
+# deep check. `mutmut run --CI` exits non-zero only on fatal errors, so the
+# surviving-mutant ceiling step below parses the results and fails the run
+# above MAX_SURVIVING_MUTANTS. The artifact is the deliverable for triage:
+# Triage survivors against the pins in backend/tests/ (mutation-pin
+# suites) and pin or document each one.
 #
 # The .mutmut-cache directory is cached between runs so a campaign that
 # exceeds one job's time budget resumes where it stopped instead of
@@ -140,11 +141,23 @@ jobs:
                   f"for in mutmut-results.txt, below the MUTANTS_MIN_PROCESSED "
                   f"floor of {floor}."
               )
-          # mutmut marks survivors with the suspicious emoji or the word
-          # "survived" per line; count both defensively.
-          survivors = sum(
+          # mutmut 2.4.4's `mutmut results` prints ONE grouped status
+          # header — "Survived 🙁 (N)" — followed by filename groups and
+          # bare id-range lines that carry no status word. Counting lines
+          # that CONTAIN "survived" therefore always yields 1 (2026-09-22
+          # audit round 3, NEW-1): a 500-survivor campaign parsed as 1 and
+          # could never breach the ceiling. The header's own "(N)" is the
+          # survivor count; the per-line count survives only as a fallback
+          # for a hypothetical per-mutant listing format (where the header
+          # would be absent).
+          header_survivors = [
+              int(m.group(1))
+              for m in (re.search(r"(?i)^survived[^(\n]*\((\d+)\)", line) for line in lines)
+              if m
+          ]
+          survivors = sum(header_survivors) if header_survivors else sum(
               1 for line in lines
-              if "survived" in line.lower() or "🙂" in line
+              if "survived" in line.lower() or "🙂" in line or "🙁" in line
           )
           ceiling = int(os.environ["MAX_SURVIVING_MUTANTS"])
           print(f"surviving mutants: {survivors} (ceiling {ceiling})")

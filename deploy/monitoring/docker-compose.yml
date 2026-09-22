@@ -1,10 +1,17 @@
-# OPERATOR TOOLING — deliberately OUTSIDE the digest-pinned production
-# contract (deploy/README.md). The production docker-compose.yml runs only
-# immutable @sha256 release images; this file intentionally ships VERSION
-# TAGS because operator tooling must not weaken that contract. Before
-# production use, resolve and pin each digest — see README.md here,
-# "Digest pinning" (docker buildx imagetools inspect / docker manifest
-# inspect, then image: repo:tag@sha256:...).
+# OPERATOR TOOLING — deliberately OUTSIDE the release-env image contract
+# (deploy/README.md): the production docker-compose.yml consumes only the
+# immutable @sha256 release references from the release env asset, and these
+# services are opted into separately. Since 2026-09-22 (audit G-7/NEW-4)
+# every image below is pinned in the same repo:tag@sha256:... form as that
+# contract, resolved from the registry and held HERE rather than in a
+# release asset — operator tooling must not weaken the bar, and a re-pull
+# now reproduces the exact bytes forever. Upgrades are therefore DELIBERATE
+# re-pins: resolve the new tag's digest (README.md here, "Digest pinning" —
+# docker buildx imagetools inspect / docker manifest inspect, or the Docker
+# Hub tags API), replace tag AND digest together, and run
+# `bash verify.sh --production`; CI (ci.yml, monitoring-verify job) asserts
+# the same contract on every push, so a dropped or stale @sha256 half fails
+# the build, not the 3am deploy.
 #
 # Nothing here starts with a plain `up`: prometheus + grafana are gated
 # behind the `monitoring` profile, the blackbox probe behind `blackbox`
@@ -15,8 +22,10 @@
 
 services:
   prometheus:
-    # PIN A DIGEST before production use (see README.md here). v3.x line.
-    image: prom/prometheus:v3.4.1
+    # Pinned 2026-09-22 (audit G-7/NEW-4): repo:tag@sha256 — v3.x line.
+    # Re-pin deliberately (README.md here, "Digest pinning"); verify.sh
+    # --production (and CI's monitoring-verify job) fail a dropped digest.
+    image: prom/prometheus:v3.4.1@sha256:9abc6cf6aea7710d163dbb28d8eeb7dc5baef01e38fa4cd146a406dd9f07f70d
     # G-4 (2026-09-21 audit): the production hardening quartet,
     # applied to the operator tooling too — these containers join
     # the production network and read its metrics.
@@ -66,8 +75,10 @@ services:
     # (loopback only — same rule as the api service in the production file).
 
   grafana:
-    # PIN A DIGEST before production use (see README.md here).
-    image: grafana/grafana:12.0.0
+    # Pinned 2026-09-22 (audit G-7/NEW-4): repo:tag@sha256. Re-pin
+    # deliberately (README.md here, "Digest pinning"); verify.sh
+    # --production (and CI's monitoring-verify job) fail a dropped digest.
+    image: grafana/grafana:12.0.0@sha256:263cbefd5d9b179893c47c415daab4da5c1f3d6770154741eca4f45c81119884
     # G-4 (2026-09-21 audit): the production hardening quartet,
     # applied to the operator tooling too — these containers join
     # the production network and read its metrics.
@@ -116,8 +127,10 @@ services:
     # OPTIONAL uptime probe of /readyz. Enable together with the
     # mindpattern-blackbox scrape job in prometheus.yml:
     #   --profile monitoring --profile blackbox up -d
-    # PIN A DIGEST before production use (see README.md here).
-    image: prom/blackbox-exporter:v0.25.0
+    # Pinned 2026-09-22 (audit G-7/NEW-4): repo:tag@sha256. Re-pin
+    # deliberately (README.md here, "Digest pinning"); verify.sh
+    # --production (and CI's monitoring-verify job) fail a dropped digest.
+    image: prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa086a02fc7fcd8dcdbc4b7b35cc30cdee860fdc6a19dd8b208d63e
     # G-4 (2026-09-21 audit): the production hardening quartet,
     # applied to the operator tooling too — these containers join
     # the production network and read its metrics.

@@ -510,6 +510,43 @@ export async function sealPrivateKeyForUpload(
   }
 }
 
+/** Open a sealed wrap_key_blob back to the RAW PKCS#8 bytes — the decrypt
+ * counterpart of sealPrivateKeyForUpload, added with the verifier-gated
+ * rotation surface (audit NEW-3 / F.4, 2026-09-22). unlockWrapPrivateKey
+ * deliberately returns a NON-extractable handle, which is right for
+ * unwrapping grants and wrong for re-wrapping custody: a password change
+ * must re-seal the SAME private key under the new password-derived KEK,
+ * and a non-extractable handle cannot be re-exported. This function
+ * returns the DER bytes and makes the caller their custodian — feed them
+ * straight into sealPrivateKeyForUpload (which consumes and wipes them)
+ * and fill(0) them on every failure path. A wrong KEK, a blob sealed for
+ * another username (AAD binds the account), or a corrupt/truncated
+ * envelope fails CLOSED to null: never a throw, and never plaintext the
+ * caller did not ask to own. */
+export async function openSealedPrivateKey(
+  wrapKek: Bytes,
+  keyBlobB64: string,
+  username: string,
+): Promise<Bytes | null> {
+  const { buildAad } = await import("./aad");
+  let encrypted: Bytes | null = null;
+  try {
+    encrypted = unb64(keyBlobB64);
+    return await decrypt(
+      wrapKek,
+      encrypted,
+      buildAad(THERAPIST_KEY_CONTEXT, username),
+    );
+  } catch {
+    // Wrong password-derived KEK or a relocated/corrupt blob: there is no
+    // re-wrappable key here, and the caller's only sane reaction is its
+    // error path — null keeps TamperError flattening out of every caller.
+    return null;
+  } finally {
+    zeroize(encrypted);
+  }
+}
+
 /** Generate this therapist's P-256 wrap keypair AND seal the private half
  * for upload in the same call (audit fix P-1, 2026-09-20). The raw PKCS#8
  * exists only as a zeroized byte buffer inside this function — its base64

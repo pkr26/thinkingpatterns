@@ -240,6 +240,7 @@ class HardeningMiddleware:
         send,
         raw_headers: list[tuple[bytes, bytes]],
         retry_after: int,
+        legacy: bool = False,
     ) -> None:
         # Same envelope and Retry-After contract as cache._limit_response;
         # this copy exists because that helper builds an HTTPException for
@@ -252,6 +253,7 @@ class HardeningMiddleware:
             _RATE_LIMITED,
             raw_headers=raw_headers,
             extra_headers=[(b"retry-after", str(max(1, retry_after)).encode("ascii"))],
+            legacy=legacy,
         )
 
     async def __call__(self, scope, receive, send):
@@ -261,6 +263,11 @@ class HardeningMiddleware:
 
         # --- 1. Cheap content-length rejection, before anything is read ----
         raw_headers = scope.get("headers", [])
+        # 2026-09-22 audit round 3 (A-8 wording): middleware-SYNTHESIZED
+        # responses (429/413/400/408/500 below) carry the same legacy-mount
+        # Deprecation header the app-path injection adds, so "every response
+        # the deprecated /api mount serves" is true without qualification.
+        legacy_api = _is_legacy_api_path(scope.get("path", ""))
         headers = {k.lower(): v for k, v in raw_headers}
         direct_peer_is_trusted = self._direct_peer_is_trusted(scope)
         trusted_forwarding = self.trust_proxy_headers and direct_peer_is_trusted
@@ -317,7 +324,7 @@ class HardeningMiddleware:
             value for name, value in raw_headers if name.lower() == b"transfer-encoding"
         ]
         if len(content_lengths) > 1:
-            await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers)
+            await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api)
             return
         # A request may use either a length OR chunked transfer coding, never
         # both. The ASGI server normally normalizes legitimate HTTP/1.1
@@ -325,12 +332,12 @@ class HardeningMiddleware:
         # reject all other transfer-coding chains rather than making this
         # layer disagree with an upstream proxy about message boundaries.
         if content_lengths and transfer_encodings:
-            await self._send_simple(send, 400, _BAD_FRAMING, raw_headers=raw_headers)
+            await self._send_simple(send, 400, _BAD_FRAMING, raw_headers=raw_headers, legacy=legacy_api)
             return
         if transfer_encodings and (
             len(transfer_encodings) != 1 or transfer_encodings[0].lower() != b"chunked"
         ):
-            await self._send_simple(send, 400, _BAD_FRAMING, raw_headers=raw_headers)
+            await self._send_simple(send, 400, _BAD_FRAMING, raw_headers=raw_headers, legacy=legacy_api)
             return
         content_length = content_lengths[0] if content_lengths else None
         declared_length: int | None = None
@@ -343,14 +350,14 @@ class HardeningMiddleware:
                 if not content_length or any(
                     byte < ord("0") or byte > ord("9") for byte in content_length
                 ):
-                    await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers)
+                    await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api)
                     return
                 declared_length = int(content_length)
                 if declared_length > self.max_body_bytes:
-                    await self._send_simple(send, 413, _OVERSIZE_BODY, raw_headers=raw_headers)
+                    await self._send_simple(send, 413, _OVERSIZE_BODY, raw_headers=raw_headers, legacy=legacy_api)
                     return
             except ValueError:
-                await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers)
+                await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api)
                 return
 
         # --- 2. Bound-and-replay the COMPLETE body before dispatch ----------
@@ -382,12 +389,12 @@ class HardeningMiddleware:
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                await self._send_simple(send, 408, _BODY_TIMEOUT, raw_headers=raw_headers)
+                await self._send_simple(send, 408, _BODY_TIMEOUT, raw_headers=raw_headers, legacy=legacy_api)
                 return
             try:
                 message = await asyncio.wait_for(receive(), timeout=remaining)
             except TimeoutError:
-                await self._send_simple(send, 408, _BODY_TIMEOUT, raw_headers=raw_headers)
+                await self._send_simple(send, 408, _BODY_TIMEOUT, raw_headers=raw_headers, legacy=legacy_api)
                 return
             buffered.append(message)
             if message["type"] == "http.disconnect":
@@ -399,7 +406,7 @@ class HardeningMiddleware:
                 break
             seen += len(message.get("body", b""))
             if seen > self.max_body_bytes:
-                await self._send_simple(send, 413, _OVERSIZE_BODY, raw_headers=raw_headers)
+                await self._send_simple(send, 413, _OVERSIZE_BODY, raw_headers=raw_headers, legacy=legacy_api)
                 return
             if not message.get("more_body", False):
                 break
@@ -437,7 +444,7 @@ class HardeningMiddleware:
                     window = getattr(rate_settings, check.window_attr)
                     result = rate_counter.check(f"{check.bucket}:{rate_key}", window)
                     if result.count >= limit:
-                        await self._reject_over_limit(send, raw_headers, result.retry_after)
+                        await self._reject_over_limit(send, raw_headers, result.retry_after, legacy=legacy_api)
                         return
 
         async def limited_receive():
@@ -504,6 +511,7 @@ class HardeningMiddleware:
                     400,
                     _NESTED_BODY,
                     raw_headers=raw_headers,
+                    legacy=legacy_api,
                 )
             return
         except Exception:
@@ -520,7 +528,7 @@ class HardeningMiddleware:
                 # signal alive during exactly the crash loops that matter.
                 if self._status_observer is not None:
                     self._status_observer(500)
-                await self._send_simple(send, 500, _INTERNAL, raw_headers=raw_headers)
+                await self._send_simple(send, 500, _INTERNAL, raw_headers=raw_headers, legacy=legacy_api)
             return
 
     async def _send_simple(
@@ -530,6 +538,7 @@ class HardeningMiddleware:
         body: bytes,
         raw_headers: list[tuple[bytes, bytes]] | None = None,
         extra_headers: list[tuple[bytes, bytes]] | None = None,
+        legacy: bool = False,
     ) -> None:
         headers = [(b"content-type", b"application/json"), *SECURITY_HEADERS]
         if raw_headers is not None:
@@ -538,6 +547,10 @@ class HardeningMiddleware:
             headers.extend(self._cors_extra_headers(raw_headers))
         if extra_headers:
             headers.extend(extra_headers)
+        if legacy:
+            # A-8/round-3: synthesized envelopes on the deprecated unversioned
+            # /api mount carry the same Deprecation header app responses do.
+            headers.append((b"deprecation", b"true"))
         await send(
             {
                 "type": "http.response.start",
