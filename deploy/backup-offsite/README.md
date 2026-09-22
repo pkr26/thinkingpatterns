@@ -69,6 +69,16 @@ remote path, credentials, and bucket reachability at once; the healthcheck
 overlay **layered with the main file** — alone it would create an empty
 project volume and copy nothing.
 
+**Restart policy (audit round 2 F-10).** The service defaults to
+`restart: no` via `BACKUP_OFFSITE_RESTART` — the push loop keeps itself
+alive in-process, so a restart policy adds nothing for it. If you do set
+`BACKUP_OFFSITE_RESTART=unless-stopped` (or `always`) for the push loop,
+**never combine it with `BACKUP_OFFSITE_MODE=fetch`**: fetch is a one-shot
+container by design, and a restart policy would re-run it forever,
+hammering the remote. The runbook's fetch path uses
+`docker compose run --rm`, which carries no restart policy at all —
+prefer that shape for recovery.
+
 ## Digest pinning
 
 The `rclone/rclone:v1.69.1` tag is mutable operator tooling. Before

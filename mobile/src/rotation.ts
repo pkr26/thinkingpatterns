@@ -185,6 +185,16 @@ export async function rotatePassword(input: {
     try {
       await api.rotateCredential(oldVerifierB64, newSaltB64, newVerifierB64);
     } catch (err) {
+      // Audit round 2 (2026-09-21) F-4: the failure path must self-clean for
+      // the same reason the success path below does — the SERVER-side state
+      // has already moved (stage 3 rekeyed every blob to the new key), so the
+      // OLD data key this vault still holds is dead. An entry written in the
+      // window before the user retries would be sealed under a key nothing
+      // can decrypt with, and the biometric wrap would keep RESTORING that
+      // dead key after every unlock. Constraint: mirror the success-path
+      // idiom exactly (lock first, then best-effort wrap removal).
+      vault.lock();
+      await disableBiometricUnlock(userId).catch(() => {});
       return {
         ok: false,
         stage: "credential",
@@ -201,6 +211,13 @@ export async function rotatePassword(input: {
       const session = await api.login(username, newVerifierB64);
       await api.setSession(String(session.token), String(session.user_id), username);
     } catch (err) {
+      // Audit round 2 (2026-09-21) F-4: same constraint as the credential
+      // stage above — the server has rekeyed the blobs AND retired the old
+      // login credential, so the vault's OLD data key must not survive a
+      // failed re-login (local writes would seal under a dead key; the wrap
+      // would keep restoring it). Lock + best-effort wrap drop, then report.
+      vault.lock();
+      await disableBiometricUnlock(userId).catch(() => {});
       return {
         ok: false,
         stage: "relogin",

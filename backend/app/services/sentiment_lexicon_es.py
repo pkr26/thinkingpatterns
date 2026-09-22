@@ -23,6 +23,15 @@ VADER register (informal, first-person journal prose).
 from __future__ import annotations
 
 # Graded sentiment, -4..+4 (the engine's SENTIMENT_SCALE maps ±4 → ±1).
+#
+# CONSTRAINT (audit round 2, 2026-09-21, F-5): both consumers of this map
+# are PER-TOKEN lookups (the engine's `_word_valence` / topic eligibility
+# consult single tokens and their word forms), so a key must never contain
+# whitespace — a multi-word key can never match and is dead weight shipped
+# to the on-device port. Phrase-level readings belong to the negation /
+# intensifier window mechanisms, not to the key. A test pins this
+# invariant; "eterno es", "por eso" and "darme cuenta" were removed for
+# exactly this reason by the round-1 audit.
 VADER_BASE_ES: dict[str, float] = {
     # --- positive: happiness/contentment ---
     "feliz": 2.8,
@@ -40,7 +49,6 @@ VADER_BASE_ES: dict[str, float] = {
     "dichoso": 2.4,
     "encantado": 2.6,
     "encantada": 2.6,
-    "encantado de": 3.0,
     "ilusionado": 2.2,
     "ilusionada": 2.2,
     "ilusión": 2.0,
@@ -65,17 +73,14 @@ VADER_BASE_ES: dict[str, float] = {
     "serenidad": 2.4,
     "relajado": 2.4,
     "relajada": 2.4,
-    "relajado me siento": 2.6,
     "descansado": 2.0,
     "descansada": 2.0,
-    "en paz": 2.8,
     "paz": 2.2,
     "cómodo": 1.8,
     "comodo": 1.8,
     "cómoda": 1.8,
     "comoda": 1.8,
     "agusto": 1.6,
-    "a gusto": 1.8,
     "bien": 1.6,
     "estupendo": 2.8,
     "estupenda": 2.8,
@@ -131,7 +136,6 @@ VADER_BASE_ES: dict[str, float] = {
     "adorable": 2.6,
     "enamorado": 3.2,
     "enamorada": 3.2,
-    "te quiero": 3.0,
     "amado": 2.6,
     "amada": 2.6,
     # --- positive: pride/achievement ---
@@ -181,7 +185,6 @@ VADER_BASE_ES: dict[str, float] = {
     "riendo": 2.4,
     "reír": 2.4,
     "reir": 2.4,
-    "me río": 2.6,
     "bromeando": 1.8,
     "jugué": 2.0,
     "jugue": 2.0,
@@ -219,7 +222,6 @@ VADER_BASE_ES: dict[str, float] = {
     "entendido": 2.0,
     "entendida": 2.0,
     "quererme": 2.2,
-    "me quieren": 2.4,
     # --- negative: sadness ---
     "triste": -2.6,
     "tristes": -2.4,
@@ -258,7 +260,6 @@ VADER_BASE_ES: dict[str, float] = {
     "lágrimas": -2.4,
     "lagrimas": -2.4,
     "dolido": -2.4,
-    "dolido me": -2.6,
     "doler": -2.0,
     "duele": -2.4,
     "dolerme": -2.4,
@@ -280,9 +281,7 @@ VADER_BASE_ES: dict[str, float] = {
     "desesperacion": -3.2,
     "desesperanzado": -2.8,
     "desesperanzada": -2.8,
-    "sin esperanza": -3.2,
     "desesperanza": -3.0,
-    "desánimo profundo": -3.0,
     "agotado": -2.4,
     "agotada": -2.4,
     "agotamiento": -2.4,
@@ -347,7 +346,6 @@ VADER_BASE_ES: dict[str, float] = {
     "preocupada": -2.2,
     "preocupación": -2.2,
     "preocupacion": -2.2,
-    "preocupación me": -2.4,
     "miedo": -2.6,
     "temor": -2.6,
     "temiendo": -2.4,
@@ -357,11 +355,9 @@ VADER_BASE_ES: dict[str, float] = {
     "aterrorizada": -3.2,
     "pánico": -3.0,
     "panico": -3.0,
-    "pánico me": -3.2,
     "angustia": -3.0,
     "angustiado": -3.0,
     "angustiada": -3.0,
-    "angustiado me": -3.2,
     "inquieto": -1.8,
     "inquieta": -1.8,
     "inquietud": -2.0,
@@ -376,7 +372,6 @@ VADER_BASE_ES: dict[str, float] = {
     "agobiado": -2.8,
     "agobiada": -2.8,
     "agobio": -2.6,
-    "agobiado me": -3.0,
     "sobrepasado": -2.6,
     "sobrepasada": -2.6,
     "desbordado": -2.6,
@@ -420,7 +415,6 @@ VADER_BASE_ES: dict[str, float] = {
     "resentimiento": -2.4,
     "resentido": -2.4,
     "resentida": -2.4,
-    "furia me": -3.2,
     "colérico": -2.8,
     "colerico": -2.8,
     "cólera": -2.6,
@@ -431,13 +425,8 @@ VADER_BASE_ES: dict[str, float] = {
     "cansado": -1.8,
     "cansada": -1.8,
     "cansancio": -2.0,
-    "cansado me": -2.2,
-    "agotado me": -2.6,
     "fatigado": -2.0,
     "fatiga": -1.8,
-    "dormí mal": -2.2,
-    "dormi mal": -2.2,
-    "sin dormir": -2.4,
     "insomnio": -2.6,
     "desvelado": -2.0,
     "pesado": -1.6,
@@ -450,7 +439,6 @@ VADER_BASE_ES: dict[str, float] = {
     "nauseas": -2.0,
     "dolor": -2.2,
     "doloroso": -2.2,
-    "me duele": -2.4,
     "enfermo": -2.4,
     "enferma": -2.4,
     "enfermedad": -2.4,
@@ -505,8 +493,6 @@ VADER_BASE_ES: dict[str, float] = {
     "discutimos": -2.0,
     "lío": -1.6,
     "lio": -1.6,
-    "lío me": -1.8,
-    "desastre me": -3.0,
     "vergüenza": -2.4,
     "verguenza": -2.4,
     "avergonzado": -2.2,
@@ -524,7 +510,6 @@ VADER_BASE_ES: dict[str, float] = {
     "perdido": -2.0,
     "perdida": -2.0,
     "pérdida": -2.4,
-    "perdida de": -2.6,
     "fallo": -2.0,
     "fallé": -2.2,
     "falle": -2.2,
@@ -532,15 +517,12 @@ VADER_BASE_ES: dict[str, float] = {
     "error": -1.8,
     "equivocado": -2.0,
     "equivocada": -2.0,
-    "me equivoqué": -2.2,
-    "me equivoque": -2.2,
     "duda": -1.6,
     "dudas": -1.6,
     "confundido": -1.8,
     "confundida": -1.8,
     "confuso": -1.6,
     "confusa": -1.6,
-    "perdido me": -2.2,
     "descontrolado": -2.2,
     "impotente": -2.6,
     "indefenso": -2.6,
@@ -569,7 +551,9 @@ NEGATORS_ES: frozenset[str] = frozenset(
     }
 )
 
-# Spanish intensifiers (scale the next sentiment word).
+# Spanish intensifiers (scale the next sentiment word). Same per-token
+# constraint as VADER_BASE_ES above: the walk consults the PREVIOUS TOKEN,
+# so keys containing whitespace can never match (F-5).
 INTENSIFIERS_ES: dict[str, float] = {
     "muy": 1.4,
     "tan": 1.2,
@@ -591,7 +575,6 @@ INTENSIFIERS_ES: dict[str, float] = {
     "hiper": 1.5,
     "algo": 0.75,
     "ligeramente": 0.75,
-    "un poco": 0.8,
     "medio": 0.8,
     "medía": 0.8,
 }

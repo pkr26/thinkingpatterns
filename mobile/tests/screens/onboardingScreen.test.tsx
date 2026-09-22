@@ -1,7 +1,8 @@
 /**
  * OnboardingScreen: three calm panels shown once after registration, the
  * privacy-policy link on the encryption panel, the no-reset + 13+
- * acknowledgments, the completion write, and the already-seen escape hatch.
+ * acknowledgments, the completion write, the already-seen escape hatch, and
+ * the E-10 panel-resume position.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -230,5 +231,43 @@ describe("OnboardingScreen reminder opt-in (panel 1)", () => {
     // The row still toggles visually; completion is unaffected.
     await pressLabel(root, "Continue");
     expect(textOf(root)).toContain("2 of 3");
+  });
+});
+
+describe("E-10 panel resume (audit round 2, 2026-09-21, F-11)", () => {
+  // Constraint: a backgrounded/restarted onboarding resumes where the user
+  // left off — the screen restores the stored index on mount and persists
+  // index+1 on advance; completion wipes the position (never an out-of-range
+  // "3", never a replay for a finished account).
+  const PANEL_KEY = "@mindpattern/onboarding_panel";
+
+  it("mounting with a stored panel index starts at that panel", async () => {
+    await storage.setItem(PANEL_KEY, "1"); // a previous session advanced once
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("2 of 3");
+    expect(textOf(root)).not.toContain("1 of 3");
+  });
+
+  it("an out-of-range stored index is ignored — the flow starts at panel 1", async () => {
+    await storage.setItem(PANEL_KEY, "3");
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("1 of 3");
+  });
+
+  it("advancing persists index+1, and completing clears the position", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    expect(await storage.getItem(PANEL_KEY)).toBeNull();
+    await pressLabel(root, "Continue");
+    await flush();
+    expect(await storage.getItem(PANEL_KEY)).toBe("1");
+    await pressLabel(root, "Continue");
+    await flush();
+    expect(await storage.getItem(PANEL_KEY)).toBe("2");
+    await pressLabel(root, "I understand — start writing");
+    await flush();
+    expect(await storage.getItem(PANEL_KEY)).toBeNull();
   });
 });

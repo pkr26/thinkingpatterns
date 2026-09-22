@@ -2483,8 +2483,19 @@ def _detect_themes(
                 buckets.setdefault(e.entry_date, []).append(s)
             return [sum(v) / len(v) for _, v in sorted(buckets.items())]
 
-        moods_with = _day_means(with_theme)
-        moods_without = _day_means(without_theme)
+        # Audit round 2 (2026-09-21) F-3: the D-3 rule on the association
+        # side. Budget truncation blanks text but keeps client tags, so a
+        # blanked entry still joins its theme group above (the tag is a
+        # real activity signal for prevalence/cadence) — but with no text
+        # and no explicit mood tag it carries zero mood evidence, and its
+        # fabricated 0.0 residual must stay out of the mood groups. A
+        # blanked entry WITH a mood tag is the user's own report and stays.
+        mood_with_theme = [(e, s) for e, s in with_theme if e.text or e.sentiment is not None]
+        mood_without_theme = [
+            (e, s) for e, s in without_theme if e.text or e.sentiment is not None
+        ]
+        moods_with = _day_means(mood_with_theme)
+        moods_without = _day_means(mood_without_theme)
         if len(moods_without) >= MOOD_MIN_PER_SIDE:
             delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
             effect = statsig.cohens_d(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
@@ -2558,9 +2569,16 @@ def _detect_links(
     themes = sorted({t for theme_set in day_themes.values() for t in theme_set})
     for theme in themes:
         exposed_pairs = [(prev, cur) for prev, cur in transitions if theme in day_themes[prev]]
-        exposed = [day_residuals[cur] for _, cur in exposed_pairs]
+        # Audit round 2 (2026-09-21) F-3: a theme day conferred by TAGS on
+        # blank truncated entries has no mood residual to read (D-3 kept
+        # those days out of the mood series). The exposure stays real, but
+        # an outcome day without mood evidence measures nothing — skip it
+        # rather than KeyError (or fabricate a value) for an unmeasured day.
+        exposed = [day_residuals[cur] for _, cur in exposed_pairs if cur in day_residuals]
         unexposed = [
-            day_residuals[cur] for prev, cur in transitions if theme not in day_themes[prev]
+            day_residuals[cur]
+            for prev, cur in transitions
+            if theme not in day_themes[prev] and cur in day_residuals
         ]
         if len(exposed) < LINK_MIN_PER_SIDE or len(unexposed) < LINK_MIN_PER_SIDE:
             continue
@@ -2569,7 +2587,9 @@ def _detect_links(
         _, pvalue = statsig.welch_test(exposed, unexposed, variance_floor=MOOD_SD_FLOOR, lag1=lag1)
         gap1 = sum(1 for prev, cur in exposed_pairs if (cur - prev).days == 1)
         gap2 = len(exposed_pairs) - gap1
-        outcome_days = [cur for _, cur in exposed_pairs]
+        # Evidence follows what was MEASURED (see the F-3 filter above):
+        # unmeasured outcome days back no part of the claim.
+        outcome_days = [cur for _, cur in exposed_pairs if cur in day_residuals]
         signals.append(
             _Signal(
                 pid=f"link:{theme}",
@@ -4445,7 +4465,14 @@ def update(
     else:
         history[-1] = [_iso(today), surfaced_pids]
 
-    sentiments = [s for _, _, _, s in per_entry]
+    # Audit round 2 (2026-09-21) F-2: the D-3 rule for the reported average
+    # — an entry with NO text and NO explicit mood tag is a corpus-budget
+    # truncation or empty submit carrying zero mood evidence, and averaging
+    # its fabricated neutral 0.0 pulled "average reading" (portal) toward
+    # the middle. Tagged entries keep counting: the user's own report.
+    sentiments = [
+        s for entry, _, _, s in per_entry if entry.text or entry.sentiment is not None
+    ]
     stats = {
         "total_entries": len(per_entry),
         # Honesty signal (2026-09-19): the detected analysis language;

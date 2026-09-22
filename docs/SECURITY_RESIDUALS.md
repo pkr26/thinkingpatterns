@@ -26,3 +26,17 @@ changes, and before any v2 security review.
 | `F2.http-key-shipment` | f_mobile | The data key crosses the wire to `/processing/sessions` — the documented v1 server-side-analysis trade-off (README security note #2): single-use, TLS in production, memory-only, destroyed on consumption. The harness runs cleartext localhost by construction. |
 | `H1.metadata-inference` | h_privacy | The server holds per-entry dates and sizes (metadata inference) — documented in README security note #7; content stays opaque. |
 | `G3.tracked-secrets` | g_infra | The tracked-secrets hygiene rule matches any git-tracked path ending in `.env`, which catches `mobile/ios/.xcode.env` — the React Native Xcode template that resolves `NODE_BINARY` for script phases. It is REQUIRED to be versioned (the per-developer override is the unversioned `.xcode.env.local`), contains no credential, key, or connection string (only `export NODE_BINARY=$(command -v node)`), and was inspected line-by-line when registered. Re-review if that file ever grows anything beyond the NODE_BINARY export. |
+
+## Tracked deferrals (not harness FINDINGs)
+
+Hardening the audit plan asked for that shipped as "next" rather than v1,
+recorded here so they are not silently dropped (audit round 2, F-6):
+
+- **Optional TOTP/MFA for therapist accounts** (AUDIT_2026-09-21.md
+  Phase 2 workstream 2). Deferred, not delivered: therapist login remains
+  password + scrypt verifier, with no second factor. Standing controls:
+  verifier-gated re-auth for every sensitive action (credential and
+  wrap-key rotation), per-IP/per-username rate limits, epoch invalidation
+  of all bearers on credential change, and a fully audited access trail
+  (`GET /therapist/access-log`). A phished password remains the residual
+  this list cannot bound — revisit before any multi-therapist-org work.

@@ -93,9 +93,9 @@ MAX_WRAPPED_KEY_BYTES = 256
 # normal clinician still has room for a practical caseload.  Revoked rows are
 # included in the RETAINED LIST: they carry disclosure history and
 # therapist-note continuity. The CAPS below count ACTIVE grants only
-# (2026-09-21 audit B-5): revoked rows impose no ongoing load, and an
-# all-rows cap locked a patient out of sharing forever after 100
-# grant/revoke cycles with ONE therapist.
+# (2026-09-21 audit B-5; round 2 F-9 extended the rule to the LIST cap):
+# revoked rows impose no ongoing load, and an all-rows cap locked a patient
+# out of sharing forever after 100 grant/revoke cycles with ONE therapist.
 MAX_CONSENTS_PER_PATIENT = 100
 MAX_PATIENTS_PER_THERAPIST = 100
 _b64_error = (binascii.Error, ValueError)
@@ -205,25 +205,42 @@ async def list_consents(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
+    # Round 2 audit fix F-9 (2026-09-21): the CAP must count ACTIVE consents
+    # only, mirroring the grant path's B-5 rule — revoked rows impose no
+    # ongoing load, and counting them 413'd the share screen for a patient
+    # with 100+ historical (revoked) therapists even though nothing was
+    # being shared. The retained HISTORY below is still returned in full
+    # (disclosure record + the "stopped on" rows the mobile screen renders);
+    # it is bounded by DISTINCT therapists via the unique (patient,
+    # therapist) pair, each a therapist account that had to exist, so it
+    # cannot be manufactured by row churn the way grant/revoke cycles can.
+    active_count = int(
+        (
+            await session.execute(
+                select(func.count(Consent.id)).where(
+                    Consent.user_id == user.id,
+                    Consent.status == "active",
+                )
+            )
+        ).scalar_one()
+    )
+    # An imported or manually-created legacy account beyond the durable cap
+    # gets a loud error rather than a truncated list a mobile client would
+    # mistake for complete sharing state.
+    if active_count > MAX_CONSENTS_PER_PATIENT:
+        raise ApiError(
+            status_code=413,
+            detail="sharing history exceeds the supported list size",
+            code="payload_too_large",
+        )
     rows = (
         await session.execute(
             select(Consent, User)
             .join(User, Consent.therapist_id == User.id)
             .where(Consent.user_id == user.id)
             .order_by(Consent.granted_at.desc())
-            # Preserve the established complete-list contract.  An imported
-            # or manually-created legacy account beyond the durable cap gets
-            # a loud error rather than a truncated list a mobile client would
-            # mistake for complete sharing state.
-            .limit(MAX_CONSENTS_PER_PATIENT + 1)
         )
     ).all()
-    if len(rows) > MAX_CONSENTS_PER_PATIENT:
-        raise ApiError(
-            status_code=413,
-            detail="sharing history exceeds the supported list size",
-            code="payload_too_large",
-        )
     return [_consent_out(consent, therapist) for consent, therapist in rows]
 
 

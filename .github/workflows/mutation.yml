@@ -68,21 +68,82 @@ jobs:
         if: always()
         working-directory: backend
         run: mutmut results > mutmut-results.txt || true
-      - name: Enforce the surviving-mutant ceiling (2026-09-21 audit H-4)
+      - name: Enforce the surviving-mutant ceiling (2026-09-21 audits H-4 + F-7)
         # The artifact alone let ANY survivor count pass — mobile decayed
         # 100 -> 82.7 under exactly this setup. Count survivors and fail
         # above the ceiling. Ratchet the ceiling DOWN as survivors are
         # killed; never raise it without a written reason.
+        #
+        # F-7: "Collect results" runs `mutmut results ... || true`, so a
+        # crashed campaign or a corrupt cache can still hand this step an
+        # empty or error-only file — which would count as 0 survivors and
+        # pass the ceiling vacuously. Assert the results are real before
+        # judging them.
+        working-directory: backend
         env:
           MAX_SURVIVING_MUTANTS: 25
+          # Floor on mutants the results file actually accounts for (the
+          # "(N)" counts mutmut's status headers carry). Default 1 = "at
+          # least one verified mutant": mutmut 2.4.4's `mutmut results`
+          # prints one grouped status header per status — never one line
+          # per mutant, and killed mutants are not listed at all — and no
+          # real results sample exists in-repo to calibrate a higher
+          # default against, so a larger one could brick the gate on a
+          # healthy campaign. Raise it only against a measured run.
+          MUTANTS_MIN_PROCESSED: "1"
         run: |
           python - <<'EOF'
           import os, re, sys
           text = open("mutmut-results.txt", encoding="utf-8", errors="replace").read()
+          lines = text.splitlines()
+
+          # Completeness (F-7): recognize every mutant-status marker
+          # mutmut 2.4.4 can emit. `mutmut results` prints grouped
+          # headers — "Survived 🙂 (N)", "Timed out ⏰ (N)",
+          # "Suspicious 🤔 (N)", "Untested/skipped (N)" — while the run
+          # legend / plain-text modes use the words and emoji below
+          # (killed 🎉, survived 🙁, timeout ⏰, suspicious 🤔, skipped 🔇).
+          # A file containing none of these is not a campaign report.
+          status_words = ("survived", "killed", "timed out", "timeout",
+                          "suspicious", "skipped", "untested")
+          status_emoji = ("🙂", "🙁", "🎉", "⏰", "🤔", "🔇")
+          status_lines = [
+              line for line in lines
+              if any(w in line.lower() for w in status_words)
+              or any(e in line for e in status_emoji)
+          ]
+          if not status_lines:
+              sys.exit(
+                  "mutmut results missing or unparseable — campaign "
+                  "incomplete; refusing to pass vacuously (audit F-7): no "
+                  "recognizable mutant-status lines in mutmut-results.txt. "
+                  "Check the mutmut run step and the .mutmut-cache before "
+                  "trusting this gate."
+              )
+          # Sum the "(N)" counts the status headers carry: the mutants the
+          # results file actually accounts for. Killed mutants are never
+          # listed, so this undercounts a healthy campaign — keep the
+          # floor conservative (see MUTANTS_MIN_PROCESSED above).
+          accounted = sum(
+              int(m.group(1))
+              for m in (re.search(r"\((\d+)\)", line) for line in status_lines)
+              if m
+          )
+          floor = int(os.environ["MUTANTS_MIN_PROCESSED"])
+          print(
+              f"status lines: {len(status_lines)}, "
+              f"mutants accounted for: {accounted} (floor {floor})"
+          )
+          if accounted < floor:
+              sys.exit(
+                  f"campaign incomplete: only {accounted} mutants accounted "
+                  f"for in mutmut-results.txt, below the MUTANTS_MIN_PROCESSED "
+                  f"floor of {floor}."
+              )
           # mutmut marks survivors with the suspicious emoji or the word
           # "survived" per line; count both defensively.
           survivors = sum(
-              1 for line in text.splitlines()
+              1 for line in lines
               if "survived" in line.lower() or "🙂" in line
           )
           ceiling = int(os.environ["MAX_SURVIVING_MUTANTS"])

@@ -11,6 +11,9 @@
  *          differs from the pinned origin; setSession refuses non-server
  *          account ids.
  *   H-1  — rotatePassword orchestration against a mocked server.
+ *   F-4  — rotation failure paths self-clean (audit round 2, 2026-09-21):
+ *          a credential- or relogin-stage failure after the server rekeyed
+ *          still locks the vault and drops the biometric wrap.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -107,6 +110,11 @@ import {
 import { api, ApiError } from "../src/api/client";
 import { decryptEntry, encryptEntry } from "../src/crypto/MindPatternCrypto";
 import { rotatePassword } from "../src/rotation";
+import { vault } from "../src/vault";
+import { enableBiometricUnlock, hasBiometricUnlock } from "../src/biometricUnlock";
+import * as Keychain from "react-native-keychain";
+
+const keychainMock = Keychain as unknown as { __reset: () => void };
 
 const DATA_KEY = Buffer.alloc(32, 9);
 const USER = "0123456789abcdef0123456789abcdef";
@@ -115,6 +123,8 @@ beforeEach(() => {
   store.clear();
   apiState.failAt = null;
   apiState.consents = [];
+  keychainMock.__reset();
+  vault.lock();
 });
 
 // --- M-1: rollback guard -----------------------------------------------------
@@ -309,5 +319,56 @@ describe("rotatePassword (H-1/M-3)", () => {
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.reason).toBe("already-rotated-unverifiable");
+  });
+});
+
+// --- Audit round 2 (2026-09-21) F-4: failure paths must self-clean -----------
+
+describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)", () => {
+  // Constraint under test: stages 5/6 fail only AFTER the server rekeyed the
+  // blobs (stage 3). The vault's OLD data key is dead server-side from that
+  // point — returning {ok:false} while it stays unlocked (or while the
+  // biometric wrap can still restore it) would seal any entry written in the
+  // retry window under a key nothing can decrypt with.
+  async function unlockWithWrap(): Promise<void> {
+    vault.unlock({
+      masterKey: Buffer.alloc(32, 1),
+      authKey: Buffer.alloc(32, 2),
+      dataKey: Buffer.alloc(32, 3),
+    });
+    // A wrap sealed under the OLD data key — exactly the stale-key hazard.
+    await enableBiometricUnlock(USER, Buffer.alloc(32, 7));
+    expect(vault.isUnlocked()).toBe(true);
+    expect(await hasBiometricUnlock(USER)).toBe(true);
+  }
+
+  it("a credential-stage failure locks the vault and drops the biometric wrap before returning ok:false", async () => {
+    await unlockWithWrap();
+    apiState.failAt = "credential"; // rotateCredential rejects (503)
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: "correct old password",
+      newPassword: "a strong new passphrase 42!",
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.stage).toBe("credential");
+    expect(vault.isUnlocked()).toBe(false);
+    expect(await hasBiometricUnlock(USER)).toBe(false);
+  });
+
+  it("a relogin-stage failure locks the vault and drops the biometric wrap before returning ok:false", async () => {
+    await unlockWithWrap();
+    apiState.failAt = "relogin"; // login rejects (network unreachable)
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: "correct old password",
+      newPassword: "a strong new passphrase 42!",
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.stage).toBe("relogin");
+    expect(vault.isUnlocked()).toBe(false);
+    expect(await hasBiometricUnlock(USER)).toBe(false);
   });
 });

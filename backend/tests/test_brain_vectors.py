@@ -52,6 +52,26 @@ def test_stats_vectors_match_the_live_engine():
         assert statsig.fisher_z_difference_p(r1, n1, r2, n2) == expected
 
 
+def test_full_engine_update_vectors_match_the_live_engine():
+    """Audit round 2 (2026-09-21) F-1: the `updates` section — the Phase-3
+    acceptance gate for the on-device port — was pinned by no test on
+    either platform. Re-run the generator's corpus-building + engine-update
+    logic in-process (the exact importable code path
+    `python scripts/gen_brain_vectors.py` uses) and require equality with
+    the committed JSON, float-for-float after the script's 9-decimal
+    rounding: a hand-edit or an engine regression in the full-engine cases
+    now fails here instead of passing silently."""
+    from scripts import gen_brain_vectors
+
+    payload = json.loads(VECTORS.read_text())
+    # The json round-trip normalizes tuples to lists exactly as the
+    # script's own serialization does; float equality survives repr's
+    # shortest round-trip, so a last-bit engine drift fails here.
+    regenerated = json.loads(json.dumps(gen_brain_vectors.build_update_cases()))
+    assert [c["name"] for c in regenerated] == [c["name"] for c in payload["updates"]]
+    assert regenerated == payload["updates"]
+
+
 def test_lexicon_artifact_matches_the_live_engine():
     """The dumped lexicon (shared + the mobile TS copy) must equal what the
     Python engine actually consults — a drifted artifact is a silent

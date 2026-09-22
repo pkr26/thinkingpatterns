@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -108,32 +109,16 @@ STAT_CASES = {
 }
 
 
-def main() -> None:
-    sentiment_vectors = []
-    # Tokenized EXACTLY as the engine does (2026-09-20 audit): the
-    # engine's own fold + WORD_RE, imported — not hand-copied. A hand copy
-    # silently drifts the day one side changes tokenization, and every
-    # vector would then pin the drift instead of catching it.
-    from app.services.patterns import WORD_RE  # noqa: PLC0415 — engine seam
+def build_update_cases() -> list[dict]:
+    """The three FULL-ENGINE golden cases (Phase 3, 2026-09-21) — the
+    contract the on-device port must satisfy (mobile/src/brain/PORT.md).
 
-    for text in TEXT_CASES:
-        tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
-        tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
-        pa, na = brain.sentiment_components(tokens)
-        sentiment_vectors.append(
-            {
-                "text": text,
-                "score": brain.sentiment_score(tokens),
-                "pa": round(pa, 6),
-                "na": round(na, 6),
-            }
-        )
-
-    # Phase 3 (2026-09-21): FULL-ENGINE golden cases — the contract the
-    # on-device port must satisfy (mobile/src/brain/PORT.md). Each case is
-    # a deterministic corpus; the expected output serializes the surfaced
-    # cards AND the complete new state (patterns sorted by pid, floats
-    # rounded to 9 decimals so JSON comparison is exact on both platforms).
+    Each case is a deterministic corpus; the expected output serializes
+    the surfaced cards AND the complete new state (patterns sorted by
+    pid, floats rounded to 9 decimals so JSON comparison is exact on both
+    platforms). Importable so the backend parity test can re-run the
+    exact generation path in-process (audit round 2, 2026-09-21, F-1).
+    """
     from app.services.patterns import JournalEntry
 
     def _serialize_pattern(record) -> dict:
@@ -180,16 +165,15 @@ def main() -> None:
             ],
         }
 
-    t0 = __import__("datetime").date(2026, 8, 2)
-    td = __import__("datetime").timedelta
+    t0 = date(2026, 8, 2)
     calm_corpus = [
-        JournalEntry("felt calm and grateful today", t0 + td(days=i)) for i in range(30)
+        JournalEntry("felt calm and grateful today", t0 + timedelta(days=i)) for i in range(30)
     ]
     work_corpus = []
     for week in range(6):
-        work_corpus.append(JournalEntry("anxious about work", t0 + td(weeks=week)))
+        work_corpus.append(JournalEntry("anxious about work", t0 + timedelta(weeks=week)))
         for d in range(1, 7):
-            work_corpus.append(JournalEntry("felt calm and grateful today", t0 + td(weeks=week, days=d)))
+            work_corpus.append(JournalEntry("felt calm and grateful today", t0 + timedelta(weeks=week, days=d)))
     # Spanish twin of the work corpus (70 days / 10 work weekdays): the
     # ES theme lexicon must drive the same candidate machinery from Spanish
     # text — this case is the golden pin for the on-device port's Spanish
@@ -197,23 +181,46 @@ def main() -> None:
     spanish_corpus = []
     for week in range(10):
         spanish_corpus.append(
-            JournalEntry("muy ansioso por el trabajo otra vez", t0 + td(weeks=week))
+            JournalEntry("muy ansioso por el trabajo otra vez", t0 + timedelta(weeks=week))
         )
         for d in range(1, 7):
             spanish_corpus.append(
-                JournalEntry("me sentí tranquilo y agradecido", t0 + td(weeks=week, days=d))
+                JournalEntry("me sentí tranquilo y agradecido", t0 + timedelta(weeks=week, days=d))
             )
-    update_vectors = [
-        {"name": "calm-30d", "case": _update_case(calm_corpus, t0 + td(days=30))},
-        {"name": "weekly-work-anxiety", "case": _update_case(work_corpus, t0 + td(weeks=6))},
-        {"name": "spanish-mixed", "case": _update_case(spanish_corpus, t0 + td(weeks=10))},
+    return [
+        {"name": "calm-30d", "case": _update_case(calm_corpus, t0 + timedelta(days=30))},
+        {"name": "weekly-work-anxiety", "case": _update_case(work_corpus, t0 + timedelta(weeks=6))},
+        {"name": "spanish-mixed", "case": _update_case(spanish_corpus, t0 + timedelta(weeks=10))},
     ]
 
-    payload = {
+
+def build_payload() -> dict:
+    """The complete brain_vectors.json payload, in-memory."""
+    sentiment_vectors = []
+    # Tokenized EXACTLY as the engine does (2026-09-20 audit): the
+    # engine's own fold + WORD_RE, imported — not hand-copied. A hand copy
+    # silently drifts the day one side changes tokenization, and every
+    # vector would then pin the drift instead of catching it.
+    from app.services.patterns import WORD_RE  # noqa: PLC0415 — engine seam
+
+    for text in TEXT_CASES:
+        tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
+        tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
+        pa, na = brain.sentiment_components(tokens)
+        sentiment_vectors.append(
+            {
+                "text": text,
+                "score": brain.sentiment_score(tokens),
+                "pa": round(pa, 6),
+                "na": round(na, 6),
+            }
+        )
+
+    return {
         "v": 2,
         "note": "generated by backend/scripts/gen_brain_vectors.py — regenerate on engine change",
         "sentiment": sentiment_vectors,
-        "updates": update_vectors,
+        "updates": build_update_cases(),
         "stats": {
             "erfc": [[z, math.erfc(z)] for z in STAT_CASES["erfc"]],
             "pearson": [[xs, ys, brain._pearson(xs, ys)] for xs, ys in STAT_CASES["pearson"]],
@@ -223,10 +230,14 @@ def main() -> None:
             ],
         },
     }
+
+
+def main() -> None:
+    payload = build_payload()
     OUT.write_text(json.dumps(payload, indent=1) + "\n")
     print(
-        f"wrote {OUT}: {len(sentiment_vectors)} sentiment vectors, "
-        f"{len(update_vectors)} full-engine update cases, "
+        f"wrote {OUT}: {len(payload['sentiment'])} sentiment vectors, "
+        f"{len(payload['updates'])} full-engine update cases, "
         f"{len(payload['stats']['erfc'])} erfc, "
         f"{len(payload['stats']['pearson'])} pearson, "
         f"{len(payload['stats']['fisher_z'])} fisher-z"

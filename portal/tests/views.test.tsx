@@ -1360,3 +1360,173 @@ describe("audit fixes 2026-09-20", () => {
     expect(textOf(root)).not.toContain("read higher on days 'family' appears");
   });
 });
+
+// --- Audit round 2 (2026-09-21): F-8 banner fold + F-11 unpinned fixes --------
+
+describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
+  // The scan/sort bar (and therefore any scan) only exists for a caseload
+  // of 2+, so every case pairs its target with a quiet second patient.
+  // Every once-queue below is fully consumed — a stray payload leaks into
+  // the next test's scan (clearAllMocks does not clear once-queues).
+  const calmScan = {
+    stats: { patterns: [
+      { kind: "temporal", label: "quiet", occurrences: 3, confidence: 0.4, detail: { pattern_pid: "t:quiet", evidence_dates: [] } },
+    ] },
+  };
+  const sensitiveScan = {
+    stats: { patterns: [
+      { kind: "recurring_phrase", label: "heavy", occurrences: 2, confidence: 0.5, detail: { sensitive: true, pattern_pid: "r:heavy", evidence_dates: [] } },
+    ] },
+  };
+  const second = { ...patient, user_id: "user-2", username: "patientb" };
+  const view = async (pts: unknown[]) => {
+    mockedApi.patients.mockResolvedValueOnce(pts as never);
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    return root;
+  };
+
+  it("a FAILED scan does not hide the summary's sensitive flag from the banner", async () => {
+    vi.mocked(mockedCrypto.decryptCaseloadSummary)
+      .mockResolvedValueOnce({ patterns: 4, sensitive: true, newest: "2026-09-18", forDate: "2026-09-19" });
+    mockedApi.patientInsights.mockRejectedValueOnce(new Error("revoked mid-scan"));
+    vi.mocked(mockedCrypto.decryptInsights).mockResolvedValueOnce(calmScan as never);
+    const root = await view([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+      second,
+    ]);
+    expect(textOf(root)).toContain("1 of your patients has a sensitive card");
+    await press(root, "Scan caseload for triage");
+    await flush(8);
+    // The target's scan failed (patterns -1): the banner must keep counting
+    // the server summary's flag, exactly like the per-row display does.
+    expect(textOf(root)).toContain("1 of your patients has a sensitive card");
+    expect(textOf(root)).toContain("4 patterns as of 2026-09-19");
+  });
+
+  it("a successful scan that finds a sensitive card raises the banner over a calm summary", async () => {
+    vi.mocked(mockedCrypto.decryptCaseloadSummary)
+      .mockResolvedValueOnce({ patterns: 4, sensitive: false, newest: "2026-09-18", forDate: "2026-09-19" });
+    vi.mocked(mockedCrypto.decryptInsights)
+      .mockResolvedValueOnce(sensitiveScan as never)
+      .mockResolvedValueOnce(calmScan as never);
+    const root = await view([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+      second,
+    ]);
+    expect(textOf(root)).not.toContain("sensitive card");
+    await press(root, "Scan caseload for triage");
+    await flush(8);
+    expect(textOf(root)).toContain("1 of your patients has a sensitive card");
+  });
+
+  it("a successful scan that finds nothing sensitive drops the banner over a stale sensitive summary", async () => {
+    vi.mocked(mockedCrypto.decryptCaseloadSummary)
+      .mockResolvedValueOnce({ patterns: 4, sensitive: true, newest: "2026-09-18", forDate: "2026-09-19" });
+    vi.mocked(mockedCrypto.decryptInsights)
+      .mockResolvedValueOnce(calmScan as never)
+      .mockResolvedValueOnce(calmScan as never);
+    const root = await view([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+      second,
+    ]);
+    expect(textOf(root)).toContain("1 of your patients has a sensitive card");
+    await press(root, "Scan caseload for triage");
+    await flush(8);
+    expect(textOf(root)).not.toContain("of your patients");
+  });
+
+  it("a patient known only from a scan row still counts toward the banner", async () => {
+    vi.mocked(mockedCrypto.decryptInsights)
+      .mockResolvedValueOnce(sensitiveScan as never)
+      .mockResolvedValueOnce(calmScan as never);
+    const root = await view([{ ...patient }, second]);
+    expect(textOf(root)).not.toContain("sensitive card");
+    await press(root, "Scan caseload for triage");
+    await flush(8);
+    // No summary ever decrypted; the scan row is the only evidence.
+    expect(textOf(root)).toContain("1 of your patients has a sensitive card");
+  });
+});
+
+describe("PatientsView caseload ordering (audit round 2, 2026-09-21, F-11)", () => {
+  const threePatients = [
+    { ...patient, username: "patienta", granted_at: "2026-09-10T10:00:00Z" },
+    { ...patient, user_id: "user-2", username: "patientb", granted_at: "2026-09-01T10:00:00Z" },
+    { ...patient, user_id: "user-3", username: "patientc", granted_at: "2026-09-05T10:00:00Z" },
+  ];
+  const namesInOrder = (root: Awaited<ReturnType<typeof render>>): string[] => {
+    const text = textOf(root);
+    return ["patienta", "patientb", "patientc"].sort((a, b) => text.indexOf(a) - text.indexOf(b));
+  };
+  const chooseSort = async (root: Awaited<ReturnType<typeof render>>, value: string): Promise<void> => {
+    const select = root.root.find((n: { props?: Record<string, unknown> }) => n.props?.["aria-label"] === "Sort patients");
+    await act(async () => { (select.props.onChange as (e: { target: { value: string } }) => void)({ target: { value } }); });
+    await flush();
+  };
+
+  it("newest-share default, username ordering, and scan-based triage ordering all render in their order", async () => {
+    mockedApi.patients.mockResolvedValueOnce(threePatients);
+    // Scan payloads in patients-array order: a → 2 calm, b → 1 sensitive, c → 6 calm.
+    vi.mocked(mockedCrypto.decryptInsights)
+      .mockResolvedValueOnce({ stats: { patterns: [
+        { kind: "temporal", label: "a1", occurrences: 2, confidence: 0.4, detail: { pattern_pid: "t:a1", evidence_dates: [] } },
+        { kind: "temporal", label: "a2", occurrences: 2, confidence: 0.4, detail: { pattern_pid: "t:a2", evidence_dates: [] } },
+      ] } } as never)
+      .mockResolvedValueOnce({ stats: { patterns: [
+        { kind: "recurring_phrase", label: "s1", occurrences: 1, confidence: 0.5, detail: { sensitive: true, pattern_pid: "r:s1", evidence_dates: [] } },
+      ] } } as never)
+      .mockResolvedValueOnce({
+        stats: {
+          patterns: [1, 2, 3, 4, 5, 6].map((i) => (
+            { kind: "temporal", label: `c${i}`, occurrences: 1, confidence: 0.4, detail: { pattern_pid: `t:c${i}`, evidence_dates: [] } }
+          )),
+        },
+      } as never);
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    // Default: newest share first → a (09-10), c (09-05), b (09-01).
+    expect(namesInOrder(root)).toEqual(["patienta", "patientc", "patientb"]);
+
+    await chooseSort(root, "username");
+    expect(namesInOrder(root)).toEqual(["patienta", "patientb", "patientc"]);
+
+    await chooseSort(root, "triage");
+    // No scan yet: triage falls back to newest-share order.
+    expect(namesInOrder(root)).toEqual(["patienta", "patientc", "patientb"]);
+
+    await press(root, "Scan caseload for triage");
+    await flush(8);
+    // With the scan: sensitive b first, then c (6 unreviewed) over a (2) —
+    // a different order than every branch above, so the sort truly fired.
+    expect(namesInOrder(root)).toEqual(["patientb", "patientc", "patienta"]);
+  });
+});
+
+describe("PatientView per-context note drafts (audit round 2, 2026-09-21, F-11)", () => {
+  const draftValue = (root: Awaited<ReturnType<typeof render>>, placeholder: string): string | undefined =>
+    root.root.findAllByType("textarea").find((n) => n.props.placeholder === placeholder)?.props.value;
+
+  it("general and pattern-anchored drafts stay isolated across context switches", async () => {
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await typeTextarea(root, "Note about this patient…", "general draft");
+    expect(draftValue(root, "Note about this patient…")).toBe("general draft");
+
+    await openCard(root, "temporal — work");
+    // The pattern composer starts clean: general text never leaks in.
+    expect(draftValue(root, "Note about this pattern…")).toBe("");
+    await typeTextarea(root, "Note about this pattern…", "pattern draft");
+
+    await press(root, "Back to all patterns");
+    // Back in the general context, the general draft survived the round trip.
+    expect(draftValue(root, "Note about this patient…")).toBe("general draft");
+
+    await openCard(root, "temporal — work");
+    expect(draftValue(root, "Note about this pattern…")).toBe("pattern draft");
+  });
+});

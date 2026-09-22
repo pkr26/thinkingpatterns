@@ -1,7 +1,7 @@
 /**
  * src/onboarding.ts: the memory-only pending flag (one-shot per
  * registration) and the persisted per-account seen flag (the keyConsent
- * idiom — wiped on account deletion).
+ * idiom — wiped on account deletion), plus the E-10 panel-resume position.
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -13,7 +13,11 @@ const {
   recordOnboardingSeen,
   clearOnboardingSeen,
   onboardingSeenCached,
+  saveOnboardingPanel,
+  loadOnboardingPanel,
 } = await import("../src/onboarding");
+
+const PANEL_KEY = "@mindpattern/onboarding_panel";
 
 beforeEach(() => {
   storage.__reset();
@@ -110,5 +114,42 @@ describe("M-18: the persisted-flag mirror (render-time gate input)", () => {
     }
     // The mirror is untouched by the failure.
     expect(onboardingSeenCached(A)).toBe(true);
+  });
+});
+
+describe("E-10 panel persistence (audit round 2, 2026-09-21, F-11)", () => {
+  // Constraint: the resume position is a nicety that must never widen into
+  // an out-of-bounds index — a tampered/stale value fails toward showing a
+  // dismissed panel once more, never toward skipping or crashing.
+  const PANEL_COUNT = 3;
+
+  it("round-trips the saved panel index", async () => {
+    await saveOnboardingPanel(1);
+    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(1);
+    await saveOnboardingPanel(2);
+    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(2);
+  });
+
+  it("never adopts an out-of-bounds or malformed stored index — the flow restarts at panel 1", async () => {
+    for (const bad of ["3", "99", "0", "-1", "abc", ""]) {
+      await storage.setItem(PANEL_KEY, bad);
+      expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+    }
+    // Absent key (the common case): panel 1.
+    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+  });
+
+  it("completion clears the resume position — it is meaningless once done", async () => {
+    await saveOnboardingPanel(1);
+    await recordOnboardingSeen("panel-user-c");
+    expect(await storage.getItem(PANEL_KEY)).toBeNull();
+    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+  });
+
+  it("account deletion clears the resume position with the seen flag", async () => {
+    await saveOnboardingPanel(1);
+    await clearOnboardingSeen("panel-user-d");
+    expect(await storage.getItem(PANEL_KEY)).toBeNull();
+    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
   });
 });

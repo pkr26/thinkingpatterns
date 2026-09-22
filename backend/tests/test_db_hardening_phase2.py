@@ -2,6 +2,7 @@
 (B-3/B-5/B-6/B-7): server-side pool timeouts, batched rekey updates
 (covered end-to-end by the rotation pin suite), active-only consent caps,
 the dropped prefix notes index, and the steady-state pairing-code sweep.
+Round 2 (2026-09-21) F-9: the consent LIST cap counts ACTIVE rows only.
 """
 
 from __future__ import annotations
@@ -14,7 +15,14 @@ from sqlalchemy import select
 import app.main as main_mod
 from app.api import consents as consents_module
 from app.config import Settings
-from app.models import Consent, PairingCode, utcnow
+from app.models import (
+    ROLE_THERAPIST,
+    Consent,
+    PairingCode,
+    User,
+    new_id,
+    utcnow,
+)
 from tests.helpers import ClientEmulator, TherapistEmulator, patient_wrap_for
 
 
@@ -114,6 +122,79 @@ async def test_revoked_consents_do_not_consume_the_therapist_cap(client, app, mo
         client, code, lookup["body"]["wrap_pub_key"], lookup["body"]["therapist_id"]
     )
     assert granted["status"] == 201, granted
+
+
+# --- Round 2 F-9: the LIST cap counts ACTIVE consents only ---------------------------
+
+
+async def test_revoked_history_does_not_trip_the_list_cap(client, app):
+    """Audit round 2 (2026-09-21) F-9.
+
+    GET /consents used to count ALL rows toward MAX_CONSENTS_PER_PATIENT,
+    so a patient with 100 revoked former therapists got a 413 load failure
+    on the share screen even with one live share — the read side had not
+    followed B-5's ACTIVE-only counting rule. The real cap (100) is used
+    un-monkeypatched: 101 total rows is exactly the shape that used to 413.
+    """
+    patient = ClientEmulator("listcap-p", "deep-password")
+    await patient.register(client)
+    # Consents are unique per (patient, therapist), so the history needs
+    # distinct therapist rows — 100 of them, all revoked. The therapist
+    # users are flushed BEFORE the consent rows reference them (SQLite
+    # checks FKs per statement).
+    former_ids: list[str] = []
+    async with app.state.sessionmaker() as session:
+        for i in range(100):
+            therapist_id = new_id()
+            former_ids.append(therapist_id)
+            session.add(
+                User(
+                    id=therapist_id,
+                    username=f"listcap-former-{i}",
+                    salt="c2FsdA==",
+                    verifier=b"v",
+                    scrypt_salt=b"s",
+                    role=ROLE_THERAPIST,
+                    display_name="Former therapist",
+                    wrap_pub_key="not-used-by-this-test",
+                )
+            )
+        await session.flush()
+        for i, therapist_id in enumerate(former_ids):
+            session.add(
+                Consent(
+                    user_id=patient.user_id,
+                    therapist_id=therapist_id,
+                    status="revoked",
+                    granted_at=utcnow() - timedelta(days=i + 1),
+                    revoked_at=utcnow() - timedelta(days=i),
+                    ephemeral_pub="not-used-by-this-test",
+                    wrapped_key=b"r" * 96,
+                    disclosure="d1",
+                )
+            )
+        await session.commit()
+
+    clinician = TherapistEmulator("listcap-dr", "deep-password")
+    await clinician.register(client)
+    code = await clinician.create_pairing_code(client)
+    lookup = await patient.pairing_lookup(client, code)
+    granted = await patient.grant_consent(
+        client, code, lookup["body"]["wrap_pub_key"], lookup["body"]["therapist_id"]
+    )
+    assert granted["status"] == 201, granted
+
+    listed = await client.get("/api/consents", headers=patient.headers)
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()
+    # The one ACTIVE share is served, not a 413 load failure.
+    active = [c for c in rows if c["status"] == "active"]
+    assert len(active) == 1
+    assert active[0]["therapist_id"] == clinician.user_id
+    # The revoked history is RETAINED in full (the complete-list contract:
+    # disclosure record + the "stopped on" rows the mobile screen renders),
+    # never silently truncated now that it no longer counts toward the cap.
+    assert len(rows) == 101
 
 
 # --- B-7: dead pairing codes are swept even with an idle therapist --------------------

@@ -129,7 +129,11 @@ Spanish, language-gated per corpus (an English word never reads Spanish
 text and vice versa — "son las cinco" mints no family theme), so
 temporal/mood_correlation/link cards fire for Spanish journals from
 Spanish words; the golden vectors' `spanish-mixed` case pins the behavior
-for the on-device port. What stays English-only today: person-name
+for the on-device port. The gating is per analysis corpus, not per entry:
+one language verdict covers the whole window, so a genuinely mixed-language
+journal mines themes with the winning language only — minority-language
+entries contribute no theme words (a disclosed sensitivity limit, never
+cross-language contamination). What stays English-only today: person-name
 anchoring — English is the only orthography where the mid-sentence
 capitalization heuristic means what it says. English wins every
 lexicon collision by merge order; `stats.language` carries the detection

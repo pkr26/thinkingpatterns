@@ -708,6 +708,46 @@ describe("reconnect flush wiring", () => {
   });
 });
 
+describe("foreground activeDays refresh (E-10, audit round 2, 2026-09-21, F-11)", () => {
+  // Constraint: an always-open app must not keep a stale activeDays count
+  // across midnight — the "active" branch of the AppState listener re-reads
+  // the server's count (refreshActiveDays), exactly like it flushes the
+  // queue above. Nothing else in the provider calls api.insights.
+  it("foregrounding re-reads the server's active-days count; backgrounding does not", async () => {
+    vi.mocked(api.insights).mockResolvedValue({ active_days: 41 } as never);
+    const root = await render(
+      <SessionProvider>
+        <Probe />
+      </SessionProvider>,
+    );
+    await flush();
+    expect(textOf(root)).toBe("loggedOut|false|0|30"); // nothing fetched yet
+
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    await act(async () => {
+      listener("active");
+    });
+    await flush();
+    expect(api.insights).toHaveBeenCalledTimes(1);
+    expect(textOf(root)).toBe("loggedOut|false|41|30");
+
+    // Backgrounding never refreshes; the next foreground adopts the rolled-
+    // forward count, not a cached one.
+    vi.mocked(api.insights).mockResolvedValue({ active_days: 42 } as never);
+    await act(async () => {
+      listener("background");
+    });
+    await flush();
+    expect(api.insights).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      listener("active");
+    });
+    await flush();
+    expect(api.insights).toHaveBeenCalledTimes(2);
+    expect(textOf(root)).toBe("loggedOut|false|42|30");
+  });
+});
+
 describe("draft stash survival", () => {
   // The draft stash must survive vault.lock() — a background transition
   // unmounts the editor, and the unsent text waits for re-unlock.

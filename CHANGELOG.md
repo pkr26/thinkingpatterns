@@ -6,6 +6,98 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Independent-audit round 2 remediation (2026-09-21): F-1..F-12 closed
+
+Follow-up to the second independent audit
+(INDEPENDENT_AUDIT_ROUND_2_2026-09-21.md) — every finding fixed, each with
+its regression test:
+
+- **F-1, the full-engine golden vectors were unpinned.** No test covered
+  `shared/brain_vectors.json`'s `updates` section (the three full-engine
+  corpora that are the acceptance gate for the on-device port).
+  `backend/scripts/gen_brain_vectors.py` is refactored into importable
+  builders and `test_brain_vectors.py` now regenerates the `updates`
+  payload in-process and asserts it equals the committed JSON
+  float-for-float — a hand-edit or engine regression in the full-engine
+  vectors now fails the suite.
+- **F-2/F-3, the truncated-entry fabrication class survived two paths the
+  D-3 fix missed.** `stats.avg_sentiment` (and the legacy analyzer's
+  copy) averaged blanked entries as neutral 0.0 — rendered to therapists
+  as "average reading"; mood-correlation theme residuals likewise scored
+  tag-only blanked entries 0.0. Both now apply the D-3 predicate
+  (blank text with no explicit mood tag contributes no mood value; tagged
+  entries still count). While fixing the residual path, a latent crash
+  was found and closed: a theme day conferred only by tags on blank
+  entries raised `KeyError` in `_detect_links` (a 500 on recompute);
+  outcome days without mood evidence are now skipped as unmeasured.
+- **F-4, rotation failure paths left the vault on the old key.** If the
+  credential rotation or the re-login fails after the server already
+  rekeyed, `rotatePassword` now locks the vault and drops the biometric
+  wrap before returning `{ok:false}` — the C-1 "self-completing rotation"
+  guarantee now holds on failure paths too (an entry can no longer be
+  sealed under the dead old key while the vault sits unlocked).
+- **F-5, the dead multi-word Spanish lexicon class.** 28 keys containing
+  spaces (e.g. "sin esperanza", "sin dormir", "me duele") could never
+  match under per-token lookup; removed, with a new invariant test
+  forbidding whitespace in every per-token-consumed lexicon map (this
+  would have caught all 30 dead entries including the audit's original
+  three). `shared/brain_lexicon.json` + the mobile lexicon regenerated;
+  the golden vectors stayed byte-identical (dead keys never matched).
+- **F-6, TOTP deferral registered.** Optional TOTP/MFA for therapist
+  accounts (audit Phase 2 workstream 2) was silently dropped from the
+  wave-1 deliverables; it is now recorded as a tracked deferral in
+  docs/SECURITY_RESIDUALS.md (verifier-gated re-auth, rate limits and
+  access logging remain the standing controls).
+- **F-7, the mutation gate could pass vacuously.** If `mutmut results`
+  produced empty or error-only output, the survivor ceiling counted zero
+  survivors and passed. The gate now asserts the results file carries
+  recognizable mutant-status lines and a minimum processed-mutants floor
+  before judging the ceiling. (Fixing this surfaced that the ceiling step
+  also lacked `working-directory: backend` — the old check could never
+  have run; both fixed.)
+- **F-8, the portal banner fold let a failed scan hide a sensitive
+  summary.** A scan row with `patterns: -1` (revoked mid-scan, dead key)
+  unconditionally overrode a server summary flagging sensitivity — an
+  in-session undercount of the safety banner. A successful scan still
+  wins; a failed scan now falls back to the summary, matching the per-row
+  display; the fold has its first tests (plus caseload-ordering and
+  per-context note-draft pins).
+- **F-9, revoked history no longer trips the consent list cap.** The
+  grant path counted active consents only (Phase 2 B-5), but
+  `GET /consents` counted every historical row — 100 revoked former
+  therapists made the share screen fail to load. The cap now counts
+  ACTIVE consents; the retained history (unique per therapist) still
+  lists for disclosure.
+- **F-10, claim wording and operator docs squared with behavior.** The
+  CHANGELOG's "cannot be replayed across recomputes" now states the
+  bounded ~48h window it actually is; the feedback AAD comment states the
+  client seals the UTC day; `BACKUP_OFFSITE_RESTART` (default `no`, and
+  never combine it with `MODE=fetch`) is documented in the offsite
+  overlay README; the README's Spanish section now states the per-corpus
+  (not per-entry) language gating for mixed-language journals.
+- **F-11, previously untested fixes pinned.** New regression tests for
+  the rekey executemany batch form (130 entries → exactly 2 batched
+  UPDATE executions per the 100-row batching), the rekey-preserves-
+  `content_version` half of the A-1 pin, onboarding panel persistence,
+  the foreground `activeDays` refresh wiring, portal note-draft context
+  isolation, and the caseload ordering branches.
+
+- **F-12 (found during remediation), the C3 date-backdating red-team
+  verdict was timezone-flaky.** The full re-run surfaced a tenth FINDING:
+  `C3.date-backdating` reported the ±1-day grace window shifted by one
+  day. Not a product change — the harness anchored its date offsets to
+  the machine's LOCAL `date.today()` while the entry-date contract
+  (entries.py, audit fix L-5) is server-UTC ±1; on this UTC-7 machine
+  after 17:00 local the two diverge and the verdict flips (UTC CI runners
+  never see it). The harness now anchors to server-UTC; verified BLOCKED
+  at the same local hour that produced the false FINDING.
+
+Verified: backend pytest green (1,323 tests), mobile 1581/1581 and portal
+191/191 suites green (mobile +10, portal +6 tests), probe_brain 9/9,
+crypto vectors pass, brain vectors regenerate deterministically
+(byte-identical), monitoring verify passes, red-team gate green with all
+9 residuals registered.
+
 ### Independent-audit remediation (2026-09-21): V-1..V-4 closed
 
 Follow-up to the independent verification audit
@@ -184,8 +276,11 @@ deferred (new dev dependency).
   daily sweep, not only opportunistically inside code mint.
 - **Crypto residuals (C-5/C-6/C-7).** The feedback-blob AAD now carries
   the seal date (client seals under its local UTC date; the server
-  accepts today-or-yesterday), so a blob captured by a hostile server
-  cannot be replayed across recomputes. `MINDPATTERN_DECOY_SECRET`
+  accepts today-or-yesterday), so a blob captured by a hostile server is
+  dead from the second day after sealing — the acceptance is a bounded
+  ~48-hour clock-skew window (unlimited replays inside it, question
+  ranking only, recomputes client-initiated), not an absolute
+  replay-proof seal. `MINDPATTERN_DECOY_SECRET`
   decouples unknown-username decoy salts from token-secret rotation.
   The therapist-pairing fingerprint check is now an action: the grant
   dialog proceeds only through an explicit "fingerprints match" tap;

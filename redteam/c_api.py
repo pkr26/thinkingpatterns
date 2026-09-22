@@ -117,6 +117,13 @@ async def c2_resource_exhaustion() -> None:
 
 async def c3_logic_abuse() -> None:
     section("C3: business-logic abuse")
+    # Audit round 2 (2026-09-21) F-12: the entry-date contract is anchored to
+    # SERVER-UTC today +/-1 grace day (entries.py, audit fix L-5). Anchoring
+    # these offsets to the machine's local date.today() diverges from UTC by
+    # one day outside business hours on UTC-offset machines (this one is
+    # UTC-7: after 17:00 local the window shifts and the verdict flips to a
+    # false FINDING). UTC runners never saw it.
+    utc_today = datetime.now(timezone.utc).date()
     app = await make_app(make_settings(entries_rate_limit=1000))
     async with make_client(app) as client:
         u = await register_user(client, "c3_user", "pw-c3", iterations=1000)
@@ -126,7 +133,7 @@ async def c3_logic_abuse() -> None:
         results = {}
         for offset, name in [(-2, "past-2"), (-1, "past-1"), (0, "today"),
                              (1, "future-1"), (2, "future-2")]:
-            d = (date.today() + timedelta(days=offset)).isoformat()
+            d = (utc_today + timedelta(days=offset)).isoformat()
             blob = encrypt_entry(u["data_key"], u["user_id"], f"e-c3-{name}", "t", d)
             results[name] = (await client.post("/api/v1/entries", headers=h, json={
                 "client_entry_id": f"e-c3-{name}", "blob": blob, "entry_date": d})).status_code
@@ -140,7 +147,7 @@ async def c3_logic_abuse() -> None:
         h2 = auth_headers(u2["token"])
         for i in range(40):
             offset = -1 if i % 2 == 0 else 0
-            d = (date.today() + timedelta(days=offset)).isoformat()
+            d = (utc_today + timedelta(days=offset)).isoformat()
             blob = encrypt_entry(u2["data_key"], u2["user_id"], f"e-inf-{i}", "t", d)
             await client.post("/api/v1/entries", headers=h2, json={
                 "client_entry_id": f"e-inf-{i}", "blob": blob, "entry_date": d})
@@ -153,7 +160,7 @@ async def c3_logic_abuse() -> None:
                 f"cannot be inflated through the ±1d grace")
 
         # Delete + recreate the same entry id
-        d = date.today().isoformat()
+        d = utc_today.isoformat()
         blob = encrypt_entry(u["data_key"], u["user_id"], "e-c3-dup", "v1", d)
         await client.post("/api/v1/entries", headers=h,
                           json={"client_entry_id": "e-c3-dup", "blob": blob, "entry_date": d})

@@ -118,15 +118,18 @@ export function PatientsView(props: {
     return () => { cancelled = true; };
   }, [props.session, patients]);
 
-  /** F-6 (2026-09-21): the sensitive-caseload banner folds in the FRESHER
-   *  manual scan rows — a summary can lag a scan that just found a
-   *  sensitive card (and vice versa: per patient, whichever exists latest
-   *  wins; a scan row always outranks the summary it supersedes). */
+  /** F-6 (2026-09-21) + audit round 2 F-8: the sensitive-caseload banner
+   *  folds in the manual scan rows — a SUCCESSFUL scan (patterns >= 0)
+   *  outranks the server summary for the rest of the session; a FAILED
+   *  scan (patterns === -1) proves nothing and falls back to the summary,
+   *  matching the per-row count display below. Scan rows carry no
+   *  scan-time timestamp, so precedence is positional (the scan ran this
+   *  session, after the summary's as-of date), not clock-compared. */
   const sensitiveCount = Array.from(
     new Set([...Object.keys(summaries), ...Object.keys(scan ?? {})]),
   ).filter((uid) => {
     const row = scan?.[uid];
-    if (row) return row.sensitive === true;
+    if (row && row.patterns >= 0) return row.sensitive === true;
     return summaries[uid]?.sensitive === true;
   }).length;
 

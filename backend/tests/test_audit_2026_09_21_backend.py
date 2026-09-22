@@ -15,6 +15,14 @@ Each test names its finding (audit IDs from AUDIT_2026-09-21.md):
 * A-8: the legacy /api mount served no Deprecation header; an analysis
   budget too small to load a single entry silently overwrote stored
   patterns with an empty-corpus recompute instead of refusing.
+
+Round 2 (2026-09-21), F-11 backend test gaps:
+
+* F-11a: the rekey path's executemany UPDATE batching (B-3) was unpinned —
+  reverting to per-row UPDATEs passed every existing test.
+* F-11b: the A-1 test pinned collection_changed only; the entry-PUT
+  optimistic-concurrency half (a correct successor content_version must
+  still be accepted after a rekey) was unpinned.
 """
 
 from __future__ import annotations
@@ -113,6 +121,174 @@ async def test_rekey_advances_entries_and_measures_revision(client):
     )
     assert stale_measures.status_code == 409
     assert stale_measures.json()["code"] == "collection_changed"
+
+
+# --- Round 2 F-11a: rekey blob UPDATEs stay batched (executemany) --------------------
+
+
+class _CountingRekeySession:
+    """Proxies one rekey session, counting every UPDATE round-trip against
+    the three blob tables. A batched executemany is ONE execute() however
+    many rows it re-encrypts; the per-row form B-3 replaced was one awaited
+    UPDATE per row inside the single open transaction."""
+
+    _BLOB_TABLES = ("entries", "insights", "measures")
+
+    def __init__(self, real, counts):
+        self._real = real
+        self._counts = counts
+
+    async def execute(self, statement, *args, **kwargs):
+        table = getattr(getattr(statement, "table", None), "name", "")
+        if table in self._BLOB_TABLES:
+            self._counts[table] += 1
+        return await self._real.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _RekeyExecutionCounter:
+    """Wraps the app sessionmaker so sessions opened during the rekey
+    request itself are the counting ones (the route reads
+    ``app.state.sessionmaker`` per request)."""
+
+    def __init__(self, real, counts):
+        self._real = real
+        self._counts = counts
+
+    def __call__(self):
+        real_cm = self._real()
+        outer = self
+
+        class _CM:
+            async def __aenter__(self):
+                return _CountingRekeySession(await real_cm.__aenter__(), outer._counts)
+
+            async def __aexit__(self, *exc):
+                return await real_cm.__aexit__(*exc)
+
+        return _CM()
+
+
+async def test_rekey_blob_updates_are_batched_not_per_row(client, app):
+    """Audit round 2 (2026-09-21) F-11a: nothing pinned B-3's executemany
+    batching — a revert to per-row UPDATEs passed every existing test."""
+    import math
+
+    from app.api.insights import REKEY_BATCH_ROWS
+    from app.models import Entry
+
+    emu = ClientEmulator("rekey-batch", "deep-password")
+    await emu.register(client)
+    # Past one batch: enough rows to force a second id-keyset page. Seeded
+    # directly because the property under test is statement-shaped, not
+    # client-flow-shaped; blobs are real client-shaped ciphertext since the
+    # rekey authenticates EVERY stored blob under the old key.
+    total = REKEY_BATCH_ROWS + 30
+    async with app.state.sessionmaker() as session:
+        session.add_all(
+            Entry(
+                user_id=emu.user_id,
+                client_entry_id=f"rk-batch-{i}",
+                blob=base64.b64decode(
+                    emu.encrypt_entry(
+                        f"batch day {i}",
+                        TODAY - timedelta(days=i % 28),
+                        f"rk-batch-{i}",
+                    )
+                ),
+                entry_date=TODAY - timedelta(days=i % 28),
+                content_version=1,
+            )
+            for i in range(total)
+        )
+        await session.commit()
+
+    # One measure so the measures rewrite branch runs too (same shape as
+    # the A-1 test above).
+    from app.security import crypto
+
+    measure_blob = crypto.encrypt(
+        emu.data_key,
+        json.dumps({"v": 1, "measure": "phq9", "score": 8}).encode("utf-8"),
+        crypto.build_aad("measure", emu.user_id or "", "rk-batch-m-1"),
+    )
+    created = await client.post(
+        "/api/measures",
+        headers=emu.headers,
+        json=_measure_payload("rk-batch-m-1", measure_blob, TODAY),
+    )
+    assert created.status_code == 201, created.text
+
+    # Open both processing sessions BEFORE wrapping the sessionmaker so the
+    # counter sees only the rekey transaction's own statements.
+    old_token = await emu.open_processing_session(client)
+    new_key = bytes(range(32))
+    new_token = await emu.open_processing_session_for(client, new_key)
+
+    counts = {"entries": 0, "insights": 0, "measures": 0}
+    real_sessionmaker = app.state.sessionmaker
+    app.state.sessionmaker = _RekeyExecutionCounter(real_sessionmaker, counts)
+    try:
+        response = await client.post(
+            "/api/processing/rekey",
+            headers={
+                **emu.headers,
+                "X-Processing-Token": old_token,
+                "X-New-Processing-Token": new_token,
+                "X-Account-Verifier": emu.auth_key_b64,
+            },
+        )
+    finally:
+        app.state.sessionmaker = real_sessionmaker
+
+    # The rekey itself must have succeeded and re-encrypted everything.
+    assert response.status_code == 200, response.text
+    assert response.json()["entries"] == total
+    assert response.json()["measures"] == 1
+
+    # One UPDATE round-trip per REKEY_BATCH_ROWS batch per table: the
+    # per-row form would execute `total` (130) entries UPDATEs.
+    assert counts["entries"] == math.ceil(total / REKEY_BATCH_ROWS)
+    assert counts["measures"] == 1
+    assert counts["insights"] == 0  # no insight rows: no update execution
+
+
+# --- Round 2 F-11b: rekey preserves the entry-PUT version ladder ---------------------
+
+
+async def test_rekey_preserves_content_version_for_the_next_replace(client):
+    """Audit round 2 (2026-09-21) F-11b: the A-1 pin covered
+    collection_changed only. The PUT half — a replacement carrying the
+    correct successor content_version must still be accepted after a
+    rekey: the rekey rewrites blobs, never the version ladder whose
+    version_conflict check (entries.py) guards entry replacement."""
+    emu = ClientEmulator("rekey-put", "deep-password")
+    await emu.register(client)
+    created = await emu.create_entry(
+        client, "before rotation", TODAY, client_entry_id="rk-put-1", content_version=1
+    )
+    assert created["content_version"] == 1
+
+    old_key = emu.data_key
+    new_key = bytes(range(5, 37))
+    result = await emu.rekey(client, old_key, new_key)
+    assert result["entries"] == 1
+    # The client seals under the new generation from here on, exactly like
+    # the app after POST /processing/rekey.
+    emu.data_key = new_key
+
+    # Correct successor version: 200 (a rekey that clobbered content_version
+    # would turn this into a 409 version_conflict).
+    replaced = await emu.replace_entry(
+        client, "rk-put-1", "edited after rotation", TODAY, content_version=2
+    )
+    assert replaced["content_version"] == 2
+    # The replaced blob is genuine new-generation ciphertext: v2 AAD bound
+    # to version 2, decryptable with the new key.
+    body = emu.decrypt_entry(replaced["blob"], "rk-put-1", 2)
+    assert body["text"] == "edited after rotation"
 
 
 # --- A-2: export insight pagination keeps every queued chunk ------------------------

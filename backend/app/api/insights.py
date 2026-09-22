@@ -1241,9 +1241,10 @@ async def recompute(
                 # 2026-09-21 audit C-5: the AAD carries the seal DATE, so a
                 # blob captured by a hostile server cannot be replayed
                 # across recomputes — an old tap set can no longer re-rank
-                # questions forever. The client seals under its LOCAL date;
-                # today-or-yesterday tolerance (UTC) keeps an honest blob
-                # sealed near midnight from failing its recompute.
+                # questions forever. The client seals the UTC day (its
+                # toISOString date, not the device's local calendar); the
+                # today-or-yesterday tolerance keeps an honest blob sealed
+                # near UTC midnight from failing its recompute.
                 blob_bytes = _decode_b64(feedback_blob, "feedback_blob")
                 matching_aad = None
                 for candidate_day in (today, today - timedelta(days=1)):
