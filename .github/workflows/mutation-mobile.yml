@@ -13,11 +13,25 @@ name: Mobile mutation gate
 # thinner mutation coverage than the 99-era corpus. The audit-fix wave
   # re-ran the FULL gate (24m, report artifact under
   # mobile/reports/mutation/): 81.21 aggregate, with
-# offlineQueue.ts lifted 67.9 -> 87.4 by restored behavior tests on the
-# way. The floor now pins TODAY's honest level so any further decay fails
-# loudly; raise it back toward 99 file-by-file (crisisDetect 66.3,
-# questionFeedback 63.8, strings 63.2, moodLog 75.9 are the largest
-# gaps) rather than resetting it wholesale.
+  # offlineQueue.ts lifted 67.9 -> 87.4 by restored behavior tests on the
+  # way. The floor pins the honest level so any further decay fails
+  # loudly; raise it file-by-file (crisisDetect, questionFeedback,
+  # strings, moodLog were the largest gaps) rather than resetting it
+  # wholesale.
+#
+# FRONTEND CAMPAIGN 2026-09-22 (mutation_campaign_2026-09-22_frontend):
+# first full-tree run since 2026-09-15 — 15,990 mutants (was 4,356),
+# fresh baseline 83.86% (crypto modules 100%; screens and the crisis
+# matcher tables hold the gap). The campaign's 22 pins lifted the
+# safety/contract modules (crisisDetect 64.4->76.0, measures 76.8->89.4,
+# entryVersions 67.4->76.4, rotation 47.8->80.1; 102 mutant-by-mutant
+# verified kills, zero regressions) — see the campaign REPORT.md for the
+# per-file residual map. Floor raised 81.0 -> 84.0 across the campaign's two
+# rounds: the fresh level minus a churn margin, per the same discipline as the 09-18 re-baseline. NOTE:
+# a full run is no longer minutes-scale — 15,990 mutants measured ~3.5 h
+# locally (16 min for crisisDetect alone scoped), so the job timeout is
+# 240m; local scoped runs must pass ONE --mutate flag (repeats do not
+# accumulate).
 
 on:
   schedule:
@@ -30,7 +44,9 @@ permissions:
 jobs:
   stryker:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Full-tree scope since 2026-09-22: 15,990 mutants measured ~3.5 h
+    # locally; CI at concurrency 2 should land well under this bound.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -47,7 +63,7 @@ jobs:
         # A runner/configuration failure is not a score.  Let it fail the
         # workflow; the report upload below still runs for diagnosis.
         run: npx stryker run
-      - name: Enforce the floor (81.0 — re-baselined 2026-09-18, see triage below)
+      - name: Enforce the floor (84.0 — full-tree fresh baseline ~84.8 on 2026-09-22 after the campaign's two pin rounds; see triage note at the top)
         working-directory: mobile
         run: |
           # Stryker's JSON schema carries the score under .score (0..100) in
@@ -74,8 +90,8 @@ jobs:
             } catch (e) { console.error(e.message); process.exit(2); }
           ")
           echo "mutation score: $SCORE"
-          awk -v s="$SCORE" 'BEGIN { exit !(s < 81.0) }' && {
-            echo "::error::mobile mutation score $SCORE is below the 81.0 floor — triage survivors and pin them (see the re-baseline triage note at the top of this workflow for the discipline)"
+          awk -v s="$SCORE" 'BEGIN { exit !(s < 84.0) }' && {
+            echo "::error::mobile mutation score $SCORE is below the 84.0 floor (full-tree fresh level ~84.8 on 2026-09-22) — triage survivors and pin them (see the re-baseline triage note at the top of this workflow for the discipline)"
             exit 1
           }
       - name: Upload the report artifact

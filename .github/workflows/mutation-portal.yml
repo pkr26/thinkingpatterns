@@ -8,19 +8,25 @@ name: Portal mutation gate
 # WIRING FIXED 2026-09-22 (final-verification remediation): the
 # @stryker-mutator/vitest-runner 10 + vitest 5 combination silently ran
 # ZERO tests per mutant (mutants all "survived"; first baseline 1.26%).
-# Re-verified locally: even a body-emptied buildAad survived. The runner
-# is now Stryker's COMMAND runner — a fresh `vitest run` process per
+# The runner is Stryker's COMMAND runner — a fresh `vitest run` process per
 # mutant, no shared module graph to go stale (validated scoped: aad.ts
-# 0% → 100%). Mutate scope is the security/contract-critical modules
-# (crypto.ts, aad.ts, api.ts, platform.ts), mirroring the mobile
-# per-file-floor philosophy; full-suite-per-mutant at concurrency 1
-# keeps the inPlace file rewriting safe (~20-25 min).
+# 0% → 100%).
 #
-# MEASURED BASELINE (2026-09-22, this repository): aggregate 74.10% —
-# 652 killed / 3 timeout / 229 survived (aad 100.00, crypto 81.18,
-# api 74.16, platform 53.27). The floor sits at 70.0: below the measured
-# value only by a small churn margin — raise it when the score rises,
-# never lower it.
+# FRONTEND CAMPAIGN 2026-09-22 (mutation_campaign_2026-09-22_frontend):
+# the mutate scope widened from the four contract modules to ALL of src —
+# the views (where four audit-remediation waves landed) had never been
+# measured with the working runner. Fresh full-src baseline 3,549 mutants /
+# 55.68%; the campaign's two pin rounds (tests/
+# mutation_2026_09_22_frontend*.pins.test.tsx + _round2) lifted it to 65.65%
+# with 348 mutant-by-mutant verified kills. The
+# remaining gap is documented in the campaign REPORT.md: style/theme
+# literals, environment-limited equivalents, and view copy fragments.
+# concurrency 2 is safe here: Stryker 10 selects the active mutant via the
+# __STRYKER_ACTIVE_MUTANT__ env var, so parallel vitest processes mutate
+# independently. The 45 s mutant budget (suite baseline ~1.4 s) bounds the
+# infinite-loop mutants the views produce — each used to burn 120 s.
+# The floor sits at 65.0: below the measured 65.65 only by a small churn
+# margin — raise it when the score rises, never lower it.
 
 on:
   schedule:
@@ -33,7 +39,9 @@ permissions:
 jobs:
   stryker:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Full-src scope (2026-09-22): 3,549 mutants at concurrency 2 measured
+    # ~45-100 min depending on machine; the previous 90 was the 4-file scope.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -50,7 +58,7 @@ jobs:
         # A runner/configuration failure is not a score. Let it fail the
         # workflow; the report upload below still runs for diagnosis.
         run: npx stryker run
-      - name: Enforce the floor (70.0 — measured baseline 74.10, 2026-09-22; see header)
+      - name: Enforce the floor (65.0 — measured 65.65 on 2026-09-22 over ALL of src after the campaign's two pin rounds; see header)
         working-directory: portal
         run: |
           SCORE=$(node -e "
@@ -73,8 +81,8 @@ jobs:
             } catch (e) { console.error(e.message); process.exit(2); }
           ")
           echo "mutation score: $SCORE"
-          awk -v s="$SCORE" 'BEGIN { exit !(s < 70.0) }' && {
-            echo "::error::portal mutation score $SCORE is below the 70.0 floor (measured baseline 74.10 on 2026-09-22) — mutants survived that the suite used to kill"
+          awk -v s="$SCORE" 'BEGIN { exit !(s < 65.0) }' && {
+            echo "::error::portal mutation score $SCORE is below the 65.0 floor (measured 65.65 on 2026-09-22, full-src scope after the campaign's two pin rounds) — mutants survived that the suite used to kill"
             exit 1
           }
       - name: Upload the report artifact

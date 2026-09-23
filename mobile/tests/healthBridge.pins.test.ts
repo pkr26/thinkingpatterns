@@ -100,10 +100,17 @@ describe("HealthKit State-of-Mind native bridge (NEW-2)", () => {
 });
 
 describe("healthkit.ts capability gates on iOS 18 (NEW-2)", () => {
-  it("source pins the version check next to the module probe", () => {
-    const src = read("src/healthkit.ts");
-    expect(src).toContain("Platform.OS === \"ios\"");
-    expect(src).toMatch(/Platform\.Version/);
-    expect(src).toMatch(/version < 18/);
-  });
+  // Stryker rewrites src/* in place during a mutation run (every literal
+  // wrapped in a mutant ternary), so exact-text layout pins cannot hold
+  // against the instrumented file. This pin guards the SHIPPED source, not
+  // mutant behavior — it steps aside until the tree is restored.
+  const src = read("src/healthkit.ts");
+  it.skipIf(/stryMutAct_|__stryker__/.test(src))(
+    "source pins the version check next to the module probe",
+    () => {
+      expect(src).toContain('Platform.OS === "ios"');
+      expect(src).toMatch(/Platform\.Version/);
+      expect(src).toMatch(/version < 18/);
+    },
+  );
 });

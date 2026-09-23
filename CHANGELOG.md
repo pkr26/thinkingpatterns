@@ -6,6 +6,55 @@ All notable changes to this project are documented here. Format follows
 
 ## Unreleased
 
+### Frontend mutation campaign (2026-09-22): fresh full-scope Stryker over portal + mobile
+
+Both frontends re-measured from scratch on the current tree
+(`redteam/mutation_campaign_2026-09-22_frontend/`), covering everything the
+four audit-remediation waves added since the last campaigns:
+
+- **Round 2 (same day)**: 30 more pin tests closed the deepest killable
+  survivors — URL-policy arms, error taxonomy, derive-path wipes, the
+  windowless platform seams, the idle-lock event matrix, the ui theme/tone
+  contracts, crisisDetect's trail/orphan/mask/folded arms, and the
+  MoodCalendar mood-dot semantics — 114 further verified kills (campaign
+  total **494 across 122 pin tests, zero regressions**), portal to 65.65%
+  (floor 65) and mobile to ~84.8% (floor 84). The report carries a
+  per-class equivalent-mutant ledger documenting why 100% is not reachable
+  (pre-lowercased regex flags, identity expressions, inequality-only
+  counters, environment-baked MODE/DEV, backstopped channels).
+- **Portal: all of `src` measured with the working command runner for the
+  first time** — 3,549 mutants, fresh baseline 55.68% (the round-2 1.41%
+  number came from the broken vitest-runner wiring; the scoped 74.10% baseline
+  covered only the four contract modules). 70 survivor pins added
+  (`tests/mutation_2026_09_22_frontend.pins.test.tsx` + the App-shell
+  companion): api transport/pagination contracts (timeout deadline, session
+  replacement, signed-64 revision ceiling, canonical continuation corpus),
+  crypto sanitization windows (F-6 score boundaries via an independently
+  constructed caseload-summary oracle), TOTP stage discipline and input
+  sanitization, review ordering, collection-restart bounds, key-zeroization
+  across every flow, note/search/delete machinery, the 10-minute idle lock,
+  and the platform/UI seams. **278 mutant-by-mutant verified kills, zero new
+  survivors, aggregate 55.68% → 64.80%**; the weekly gate's scope widened to
+  match with the floor honestly re-based at 64.0. Remaining survivors are
+  triaged in the campaign REPORT (style/theme literals,
+  environment-limited equivalents, view copy fragments).
+- **Mobile: first full run since 2026-09-15** — 15,990 mutants over the
+  current tree (was 4,356), fresh baseline **83.86%** with the crypto
+  modules still at 100%. The campaign found and fixed a gate-breaking
+  test first: `healthBridge.pins.test.ts`'s NEW-2 source-text pin dies under
+  whole-tree Stryker instrumentation, which would have failed the weekly
+  gate's dry run from its next execution; the pin now steps aside while the
+  file is instrumented and still enforces the shipped source in every normal
+  run. 22 survivor pins added (`tests/mutation_2026_09_22_frontend.pins.test.ts`)
+  over the safety/contract modules — the crisis matcher's complete
+  homoglyph/leet folding tables and normalization pipeline, the measure
+  registry's scoring/validation contracts, the entry-version monotonicity
+  mirror, and the password-rotation stage/reason map — with **102
+  mutant-by-mutant verified kills, zero regressions** (crisisDetect
+  64.4→76.0%, measures 76.8→89.4%, entryVersions 67.4→76.4%, rotation
+  47.8→80.1%). The weekly floor moved 81 → 83 (fresh level minus margin);
+  screen-level residuals are mapped per file in the campaign REPORT.
+
 ### Final-verification remediation (2026-09-22): all residual gaps closed
 
 Follow-up to the final independent verification

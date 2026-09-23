@@ -6,10 +6,8 @@
   },
   "inPlace": true,
   "mutate": [
-    "src/crypto.ts",
-    "src/aad.ts",
-    "src/api.ts",
-    "src/platform.ts"
+    "src/**/*.ts",
+    "src/**/*.tsx"
   ],
   "coverageAnalysis": "off",
   "reporters": [
@@ -18,10 +16,10 @@
     "json"
   ],
   "thresholds": {
-    "break": 70
+    "break": 65
   },
-  "timeoutMS": 120000,
-  "concurrency": 1,
+  "timeoutMS": 45000,
+  "concurrency": 2,
   "tempDirName": "stryker-tmp",
   "allowConsoleColors": false
 }
