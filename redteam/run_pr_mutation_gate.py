@@ -33,6 +33,7 @@ HARNESS_GLOBS = (
     "mutation_campaign_2026-09-18/harness.py",
     "mutation_campaign_2026-09-18_round2/harness.py",
     "mutation_campaign_2026-09-19/harness.py",
+    "mutation_campaign_2026-09-22/harness.py",
 )
 
 # Genuine survivors that are deliberately unpinned, with the report section

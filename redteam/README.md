@@ -25,6 +25,7 @@ bash redteam/run_all.sh
 | `mutation_campaign_2026-09-18/` | — | behavioral mutation campaign: 36 mutants over the non-negotiables (campaign report preserved in git history) |
 | `mutation_campaign_2026-09-18_round2/` | — | round 2: 70 mutants over brain round 2, threshold, crypto contracts, crisis, ops, idiographic isolation, sync queue, and REDTEAM-AS-ORACLE (mutate a control, check these harnesses notice) — which found and fixed the harness rot below |
 | `mutation_campaign_2026-09-19/` | — | round 3: 62 mutants over backend infrastructure — authorization & access control, database/ORM, boundaries & business logic, error handling & transactions, cache & invalidation, rate limiting & concurrency (adds `pin_check.py`, the hand-verification driver that re-applies each mutant against its pin) |
+| `mutation_campaign_2026-09-22/` | — | round 4: 52 mutants over the deep-audit surfaces rounds 1-3 never saw — TOTP second factor, measures/MBC pagination & revision contract, note edit history, entry content versioning, time-of-day + Spanish parity, audit-trail read path; 18 genuine survivors, all pinned (see its `REPORT.md`) |
 | `run_pr_mutation_gate.py` | — | per-PR gate: re-applies every behavioral mutant whose target file is in the diff (wired in `.github/workflows/mutation-pr.yml` with a bounded diff-scoped mutmut job) |
 
 Generated at runtime (gitignored): `results/*.json` verdicts and per-campaign
