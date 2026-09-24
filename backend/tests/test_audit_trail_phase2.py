@@ -95,7 +95,7 @@ async def test_access_log_cursor_pagination_is_complete_and_unduplicated(client,
                     actor_id=patient.user_id,
                     actor_role="user",
                     user_id=patient.user_id,
-                    action=f"grant",
+                    action="grant",
                     at=base - timedelta(seconds=10 - i),
                 )
             )
