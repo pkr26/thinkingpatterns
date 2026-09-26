@@ -157,4 +157,33 @@ export const CRISIS_BENIGN_COMPOUNDS: readonly string[] = [
   "自杀预防",
   "prevencion del suicidio",
   "prevencion de suicidio",
+  // 2026-09-26 audit follow-up (corpus false positives): the H-1
+  // additions fired the dialog tier on everyday Spanish — grooming
+  // ("me quiero cortar el pelo" = I want a haircut), building navigation
+  // ("no hay salida de emergencia" = no emergency exit), common sports
+  // injuries ("me lastimo la rodilla"), and colloquial slipping-away
+  // ("desaparecer de la fiesta"). Benign-compound masking is the
+  // engine's designed mechanism for this class ("suicide squad" has the
+  // same standing); enumerated body-part masks keep the recall of the
+  // bare self-harm phrasings. Post-fold spellings.
+  "cortar el pelo",
+  "cortarme el pelo",
+  "cortar la barba",
+  "cortarme la barba",
+  "cortar las unas",
+  "cortarme las unas",
+  "no hay salida de emergencia",
+  "salida de emergencia",
+  "no hay salida hacia el mar",
+  "desaparecer de la fiesta",
+  "desaparecer de las redes",
+  "me lastimo el dedo",
+  "me lastimo la rodilla",
+  "me lastimo el tobillo",
+  "me lastimo el pie",
+  "me lastimo la mano",
+  "me lastimo el brazo",
+  "me lastimo la cabeza",
+  "me lastimo la espalda",
+  "me lastimo la pierna",
 ];

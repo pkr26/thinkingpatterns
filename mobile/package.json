@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@react-native-community/cli": "20.2.0",
+    "@react-native/babel-preset": "0.87.1",
     "@react-native/metro-config": "0.87.1",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",

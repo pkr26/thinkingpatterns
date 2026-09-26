@@ -92,6 +92,12 @@ const HOMOGLYPHS: Record<string, string> = {
   "\u03b7": "n", "\u03c9": "w",
   "\u03c2": "s", "\u03c3": "s", // final/regular sigma: "s"-shaped
   "\u03f2": "c",                // lunate sigma: crescent, impersonates "c"
+  // 2026-09-26 audit follow-up (N-4): the backend map gained these two
+  // s-impersonators (no NFKC fold exists for either); the TS engines had
+  // not been mirrored, so "ʂuicide" folded server-side but fired no
+  // client dialog. Pinned by the shared dialog_fires fixtures.
+  "\u0282": "s",                // ʂ s with hook
+  "\u1d74": "s",                // ᵴ s with middle tilde
 };
 
 /** Leet substitutions applied ONLY between two letters ("k1ll" -> "kill"
@@ -179,7 +185,10 @@ function normalizePrePunct(text: string): string {
   let out = text
     .toLowerCase()
     .replace(INVISIBLE, "")
-    .replace(/[\u0131\u0250-\u02ff\u0370-\u052f]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
+    .replace(/[\u0131\u0250-\u02ff\u1d00-\u1d7f\u0370-\u052f]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
+    // 2026-09-26 audit follow-up (N-4): the lookup class must cover the
+// Phonetic Extensions block (U+1D00-1D7F) - U+1D74 sat in the map
+// but outside the class, so the entry could never fire.
     .normalize("NFKC")
     .replace(/\u2019/g, "'");
   out = foldLatinMarks(out);

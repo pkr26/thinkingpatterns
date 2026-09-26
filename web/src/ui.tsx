@@ -5,6 +5,7 @@
  * portal's kit with a patient theme (WEB_PLAN P1.5).
  */
 import type { ReactNode } from "react";
+import { t } from "./strings";
 
 export const theme = {
   bg: "#f5f7fa",
@@ -170,16 +171,18 @@ export function ErrorBanner({ message }: { message: string }): React.JSX.Element
 /** App chrome: sticky header (product name + the crisis entry point that
  *  must be one interaction from every screen — WEB_PLAN P8.1, present
  *  from day one) and the responsive content column from index.html's
- *  breakpoint skeleton. */
+ *  breakpoint skeleton. 2026-09-26 audit follow-up (B-5): this chrome is
+ *  on EVERY screen, so its copy (skip link, crisis button) resolves
+ *  through t() — safety-visible text must not be hardcoded English. */
 export function AppFrame(props: { title: string; onCrisis: () => void; children: ReactNode }): React.JSX.Element {
   return (
     <>
       {/* The skip link is the first tabbable element; visual users never
           see it until it has focus (keyboard a11y floor, P8.3). */}
-      <a href="#app-content" style={{ position: "absolute", left: -9999, top: 0, background: theme.card, color: theme.text, padding: "8px 12px", zIndex: 100 }}>Skip to content</a>
+      <a href="#app-content" style={{ position: "absolute", left: -9999, top: 0, background: theme.card, color: theme.text, padding: "8px 12px", zIndex: 100 }}>{t("nav.skipToContent")}</a>
       <header className="app-header">
         <h1 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: theme.text }}>{props.title}</h1>
-        <Button label="Get help" onPress={props.onCrisis} small />
+        <Button label={t("nav.getHelp")} onPress={props.onCrisis} small />
       </header>
       <main className="app-main" id="app-content">{props.children}</main>
     </>

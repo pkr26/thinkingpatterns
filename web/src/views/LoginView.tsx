@@ -188,7 +188,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
 
   return (
     <Card title={mode === "signin" ? t("login.webSignInTitle") : t("login.webRegisterTitle")}>
-      <Field label={t("login.webUsername")} value={username} onChange={setUsername} autoComplete="username" placeholder="e.g. quiet.morning" />
+      <Field label={t("login.webUsername")} value={username} onChange={setUsername} autoComplete="username" placeholder={t("login.webUsernamePlaceholder")} />
       <Field label={t("login.webPassword")} value={password} onChange={setPassword} type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
       {mode === "register" && (
         <>

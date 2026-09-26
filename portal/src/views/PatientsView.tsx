@@ -27,7 +27,7 @@ import type { Bytes, CaseloadSummary } from "../crypto";
 import { currentOrigin, randomBytes, visitAnchorStore } from "../platform";
 import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
-import type { PortalSession } from "./PatientView";
+import { verifyInsightsGeneration, type PortalSession } from "./PatientView";
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
 
@@ -526,6 +526,11 @@ export function PatientsView(props: {
                 props.session.publicKeyB64,
               );
               const payload = await decryptInsights(dataKey, patient.user_id, summary.blob);
+              // 2026-09-26 audit follow-up (portal N-1): the same
+              // freshness guard the chart applies — a replayed older blob
+              // must degrade this row to the error marker, not feed stale
+              // triage data into the sensitive-first sort.
+              verifyInsightsGeneration(patient.user_id, payload.state_seq, summary.state_seq);
               const surfaced = payload.stats.patterns ?? [];
               row.patterns = surfaced.length;
               row.sensitive = surfaced.some((p) => p.detail.sensitive === true);

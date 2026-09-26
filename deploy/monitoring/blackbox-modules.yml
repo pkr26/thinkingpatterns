@@ -8,8 +8,11 @@
 # re-declares ONLY the modules this stack uses:
 #
 #   http_2xx — the optional /readyz probe job in prometheus.yml. Kept
-#     byte-equivalent to the stock module (plain HTTP 2xx check) so
-#     enabling this file changes nothing about that probe.
+#     equivalent to the stock module (2026-09-26 audit follow-up: the
+#     first cut claimed byte-equivalence but omitted the stock module's
+#     `timeout: 5s` and `preferred_ip_protocol: ip4` — the http prober
+#     defaults to ip6, which can change resolution behavior on dual-stack
+#     hosts). Both settings now match the pinned exporter's stock config.
 #   tls — TCP connect with TLS, for the cert-expiry probe job. This module
 #     exists so probe_ssl_earliest_cert_expiry is populated for the public
 #     origins; insecure_skip_verify is deliberate and REQUIRED here: a
@@ -23,6 +26,9 @@
 modules:
   http_2xx:
     prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
   tls:
     prober: tcp
     tcp:

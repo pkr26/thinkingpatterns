@@ -8,16 +8,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ListedConsent } from "../api/client";
-import { deriveMasterKey, toBase64, zeroize, type Bytes } from "../crypto/core";
+import { decrypt, deriveMasterKey, toBase64, fromBase64, zeroize, type Bytes } from "../crypto/core";
+import { buildAad } from "../crypto/aad";
 import { decryptEntry } from "../crypto/patient";
 import { wrapDataKeyForTherapist } from "../crypto/sharing";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { rebindEntryVersions, forgetAllEntryVersions } from "../entryVersions";
 import { requeueRejected, rejectedEntries, queueLength, clearQueue } from "../offlineQueue";
 import { downloadTextFile, localStore, randomBytes } from "../platform";
-import { clearMoodLog } from "../moodLog";
-import { clearFeedback } from "../questionFeedback";
-import { clearMutedPids } from "../patternMutes";
+import { clearMoodLog, rewrapMoodLog } from "../moodLog";
+import { clearFeedback, rewrapFeedback } from "../questionFeedback";
+import { clearMutedPids, readMutedPids, writeMutedPids } from "../patternMutes";
 import { forgetAnalysisGeneration } from "../stateSeqGuard";
 import { t } from "../strings";
 import { vault } from "../vault";
@@ -25,18 +26,35 @@ import { Button, Card, ErrorBanner, Field, Note } from "../ui";
 
 /** Resume-ladder step (H-4/M-W2, audit 2026-09-26 — port of mobile
  *  rotation.ts newKeyReadsJournal): can the CANDIDATE new key decrypt at
- *  least one live entry? Proves a rekey_key_mismatch means "already
+ *  least one live blob? Proves a rekey_key_mismatch means "already
  *  rekeyed by an earlier attempt with THIS password" rather than "wrong
- *  key", so the flow may continue from the rewrap stage. An empty journal
- *  trivially verifies — there is nothing to mismatch. */
+ *  key", so the flow may continue from the rewrap stage.
+ *
+ *  2026-09-26 audit follow-up B-2: the rekey also moves MEASURES and
+ *  insights, so an EMPTY journal must not trivially verify — a user with
+ *  a PHQ-9 history but zero entries would otherwise "verify", complete
+ *  the credential rotation, and silently orphan every stored measure
+ *  under the attempt-1 key. An empty journal probes one measure row
+ *  instead; both empty trivially verifies (nothing to mismatch). */
 async function newKeyReadsJournal(userId: string, newDataKey: Bytes): Promise<boolean> {
   try {
     const page = await api.listEntriesPage({ limit: 1, offset: 0 });
-    if (page.entries.length === 0) return true;
-    const entry = page.entries[0]!;
-    if (typeof entry.blob !== "string") return false;
+    if (page.entries.length > 0) {
+      const entry = page.entries[0]!;
+      if (typeof entry.blob !== "string") return false;
+      try {
+        await decryptEntry(newDataKey, userId, entry.client_entry_id, entry.blob, entry.content_version ?? undefined);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    const measures = await api.listMeasuresPage({ offset: 0 });
+    if (measures.measures.length === 0) return true;
+    const row = measures.measures[0]!;
+    if (typeof row.blob !== "string" || typeof row.client_measure_id !== "string") return false;
     try {
-      await decryptEntry(newDataKey, userId, entry.client_entry_id, entry.blob, entry.content_version ?? undefined);
+      await decrypt(newDataKey, fromBase64(row.blob), buildAad("measure", userId, row.client_measure_id));
       return true;
     } catch {
       return false;
@@ -46,6 +64,19 @@ async function newKeyReadsJournal(userId: string, newDataKey: Bytes): Promise<bo
     return false;
   }
 }
+
+/** 2026-09-26 audit follow-up B-1: the pending rotation salt, persisted
+ *  LOCALLY before the rekey attempt and cleared only on full completion.
+ *  The first M-W2 cut drew a fresh random salt per attempt, so a retry
+ *  after a post-rekey failure derived DIFFERENT keys — the resume ladder
+ *  could never verify and the user dead-ended at "repeat the password
+ *  change to finish it", an instruction that always failed. Reusing the
+ *  pending salt makes the retry derive the same keys as the attempt that
+ *  rekeyed the corpus, so the ladder actually fires. The salt is public
+ *  material (the server stores it in the clear after rotation); it is
+ *  inert without the password and is wiped by deletion's mindpattern.*
+ *  prefix sweep. */
+const pendingSaltKey = (userId: string): string => `mindpattern.rotatePendingSalt.${userId}`;
 
 export function SettingsView(props: { onLockdown: (notice: string) => void }): React.JSX.Element {
   const [llm, setLlm] = useState<{ available: boolean; enabled: boolean } | null>(null);
@@ -186,14 +217,25 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
     let newKeys: PatientKeys | null = null;
     let serverMovedToNewKey = false;
     try {
-      const newSalt = randomBytes(16);
+      // B-1 (2026-09-26 audit follow-up): reuse a PENDING salt from an
+      // earlier attempt that died at/after its rekey, so this retry
+      // derives the same keys that already encrypted the corpus — that is
+      // what makes the rekey_key_mismatch resume ladder below reachable
+      // in production. A fresh draw per attempt (the first cut) could
+      // never verify, dead-ending the user on "repeat the password change
+      // to finish it" — an instruction that always failed.
+      const pendingB64 = localStore.get(pendingSaltKey(owner));
+      const newSalt = pendingB64 ? fromBase64(pendingB64) : randomBytes(16);
       const newSaltB64 = toBase64(newSalt);
+      localStore.set(pendingSaltKey(owner), newSaltB64);
       newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt));
 
+      // Const alias: keeps TS's non-null narrowing inside the closures below.
+      const newKey = newKeys;
       let oldB64 = "";
       for (const byte of old.dataKey) oldB64 += String.fromCharCode(byte);
       let newB64 = "";
-      for (const byte of newKeys.dataKey) newB64 += String.fromCharCode(byte);
+      for (const byte of newKey.dataKey) newB64 += String.fromCharCode(byte);
       const oldSession = await api.openProcessingSession(btoa(oldB64));
       const newSession = await api.openProcessingSession(btoa(newB64));
       try {
@@ -203,10 +245,17 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
         if (err instanceof ApiError && err.code === "rekey_key_mismatch") {
           // Resume ladder (mobile rotation.ts:131-152): a previous attempt
           // already moved the blobs to a new key. Continue ONLY if the key
-          // we are about to make current can actually read the journal;
+          // we are about to make current can actually read the corpus;
           // otherwise the honest stop — never a false "NOTHING changed".
-          if (!(await newKeyReadsJournal(owner, newKeys.dataKey))) {
-            setError(t("settings.rotateAlreadyRotated"));
+          if (!(await newKeyReadsJournal(owner, newKey.dataKey))) {
+            // B-3 (2026-09-26 audit follow-up): the corpus is provably
+            // under a key this vault cannot read (an earlier attempt's
+            // different password, or a transient probe failure). By the
+            // H-4 rule the session must NOT keep writing under the dead
+            // old key — lock down with the honest "sign in with the
+            // password from that earlier change" copy. A plain banner
+            // over live keys was the data-loss shape H-4 exists to close.
+            props.onLockdown(t("settings.rotateAlreadyRotated"));
             return;
           }
           serverMovedToNewKey = true; // idempotent completion from rewrap on
@@ -217,22 +266,50 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
 
       // Re-wrap every active grant to the therapists' CURRENT public keys
       // (the old wraps open the old data key, which is now dead).
-      const consents: ListedConsent[] = await api.listConsents();
+      // B-4 (2026-09-26 audit follow-up): one grant's rewrap failing (or
+      // the listing itself) must not abort the rotation — the corpus and
+      // credential have already moved, so aborting here manufactured the
+      // unrecoverable half-rotated state. Mobile parity (rotation.ts
+      // stage 4): collect the failures, complete the flow, surface them
+      // in the completion notice; the patient re-grants via pairing.
+      const rewrapFailures: string[] = [];
+      let consents: ListedConsent[] = [];
+      try {
+        consents = await api.listConsents();
+      } catch {
+        rewrapFailures.push("(could not list sharing grants)");
+      }
       for (const consent of consents) {
         if (consent.status !== "active" || !consent.therapist_wrap_pub_key) continue;
-        const wrap = await wrapDataKeyForTherapist(newKeys.dataKey, consent.therapist_wrap_pub_key, owner, consent.therapist_id);
-        await api.rewrapConsent(consent.id, wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(old.authKey));
+        try {
+          const wrap = await wrapDataKeyForTherapist(newKey.dataKey, consent.therapist_wrap_pub_key, owner, consent.therapist_id);
+          await api.rewrapConsent(consent.id, wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(old.authKey));
+        } catch {
+          rewrapFailures.push(consent.display_name || consent.username);
+        }
       }
 
-      await api.rotateCredential(toBase64(old.authKey), newSaltB64, toBase64(newKeys.authKey));
-      await rebindEntryVersions(owner, old.dataKey, newKeys.dataKey).catch(() => forgetAllEntryVersions(owner));
-      // Mobile rotation parity: the mood log, question feedback, and
-      // pattern mutes are sealed under the OLD data key — clear them (each
-      // rebuilds on next use under the new key).
-      await clearMoodLog(owner).catch(() => undefined);
-      await clearFeedback(owner).catch(() => undefined);
-      await clearMutedPids(owner).catch(() => undefined);
-      props.onLockdown(t("settings.rotateSuccessNotice"));
+      await api.rotateCredential(toBase64(old.authKey), newSaltB64, toBase64(newKey.authKey));
+      // Full completion: the pending rotation salt has done its job.
+      localStore.remove(pendingSaltKey(owner));
+      await rebindEntryVersions(owner, old.dataKey, newKey.dataKey).catch(() => forgetAllEntryVersions(owner));
+      // 2026-09-26 audit follow-up (B-7): the mood log, question
+      // feedback, and pattern mutes are sealed under the OLD data key —
+      // REWRAP each under the new key so the user's trend history and mute
+      // choices survive the password change (the first cut cleared them;
+      // mobile parity in kind, not in loss). Any rewrap failure falls back
+      // to the old clear-on-rotate: a readable-empty store beats a store
+      // sealed under a key nothing will derive again.
+      await rewrapMoodLog(old.dataKey, newKey.dataKey, owner).catch(() => clearMoodLog(owner).catch(() => undefined));
+      await rewrapFeedback(old.dataKey, newKey.dataKey, owner).catch(() => clearFeedback(owner).catch(() => undefined));
+      await readMutedPids(old.dataKey, owner)
+        .then((pids) => writeMutedPids(newKey.dataKey, owner, pids))
+        .catch(() => clearMutedPids(owner).catch(() => undefined));
+      props.onLockdown(
+        rewrapFailures.length > 0
+          ? t("settings.rotateSuccessPartialNotice", { count: rewrapFailures.length })
+          : t("settings.rotateSuccessNotice"),
+      );
     } catch (err) {
       if (serverMovedToNewKey) {
         // H-4(a): the server-side corpus is ALREADY under the new key (this

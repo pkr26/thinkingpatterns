@@ -283,7 +283,11 @@ export function resetInsightsFreshness(): void {
   insightsHighWater.clear();
 }
 
-function verifyInsightsGeneration(
+/** 2026-09-26 audit follow-up (portal N-1): exported for the caseload
+ *  scan — PatientsView.decryptInsights consumes the SAME blobs and was
+ *  left unguarded, so a server replaying an older valid blob still fed
+ *  stale triage data (sensitive-first sort, sensitive banner) there. */
+export function verifyInsightsGeneration(
   userId: string,
   payloadSeq: unknown,
   echoedSeq: number,

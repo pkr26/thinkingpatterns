@@ -66,6 +66,7 @@ export const es: Record<string, string> = {
   "nav.getHelp": "Ayuda",
   "nav.a11y": "Navegación principal",
   "nav.getHelpA11y": "Buscar ayuda — recursos de crisis",
+  "nav.skipToContent": "Saltar al contenido",
   "buttons.needHelp": "¿Necesita ayuda ahora? Recursos de crisis",
 
   // -------------------------------------------------------------- calendar
@@ -934,6 +935,7 @@ export const es: Record<string, string> = {
   "login.webSignInTitle": "Iniciar sesión",
   "login.webRegisterTitle": "Cree su diario",
   "login.webUsername": "Usuario",
+  "login.webUsernamePlaceholder": "p. ej. manana-tranquila",
   "login.webPassword": "Contraseña",
   "login.webConfirm": "Confirmar contraseña",
   "login.webRegisterNote": "12+ caracteres (16+, o tres tipos de caracteres, la mantienen fuerte). Si la olvida, nadie podrá recuperarla — de eso se trata.",
@@ -1033,6 +1035,7 @@ export const es: Record<string, string> = {
   "settings.pwTooShort": "Nueva contraseña: al menos 12 caracteres.",
   "settings.pwMismatch": "Las dos contraseñas nuevas no coinciden.",
   "settings.rotateSuccessNotice": "Contraseña cambiada. Todas las sesiones — incluida la app móvil — fueron cerradas. Inicie sesión de nuevo con su nueva contraseña.",
+  "settings.rotateSuccessPartialNotice": "Contraseña cambiada. Todas las sesiones — incluida la app móvil — fueron cerradas; inicie sesión de nuevo con su nueva contraseña. No se pudo recifrar el compartido con {count} terapeuta(s) — vuelva a compartir desde la pantalla de emparejamiento la próxima vez que se conecte con ellos.",
   "settings.rotateMovedLockdown": "El recifrado se completó, pero un paso posterior falló — el servidor ya movió su diario a la nueva llave, así que esta sesión se bloqueó: inicie sesión de nuevo y repita el cambio de contraseña para terminarlo.",
   "settings.rotateAlreadyRotated": "Su diario ya fue recifrado con otra contraseña nueva en un intento anterior — ahora no se cambió nada. Inicie sesión con la contraseña de aquel cambio.",
   "settings.rotateFailed": "No se pudo cambiar la contraseña.",

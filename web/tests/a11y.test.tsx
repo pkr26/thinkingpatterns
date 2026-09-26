@@ -38,6 +38,7 @@ import { encryptEntry } from "../src/crypto/patient";
 import { encrypt, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import { vault } from "../src/vault";
+import { t } from "../src/strings";
 import { resetTestState, stubFetch, installSession } from "./helpers/api";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 
@@ -115,6 +116,19 @@ describe("jest-axe over the views", () => {
 
   it("the app shell (boot state) has no critical violations", async () => {
     const html = await renderA11y(<App />);
+    await expectNoCriticalViolations(html);
+  });
+
+  // 2026-09-26 audit follow-up (B-5): the crisis chrome button's label is
+  // now locale-resolved (t("nav.getHelp")) — whatever the active catalog
+  // returns must BE the button's accessible name, and the axe floor still
+  // holds with it.
+  it("the crisis entry point keeps a catalog-resolved accessible name in the chrome", async () => {
+    const html = await renderA11y(<App />);
+    const button = html.querySelector("header button");
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toBe(t("nav.getHelp"));
+    expect(button?.textContent?.length ?? 0).toBeGreaterThan(0);
     await expectNoCriticalViolations(html);
   });
 });

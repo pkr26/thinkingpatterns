@@ -314,16 +314,33 @@ for db_rel in sorted((base / "grafana" / "dashboards").glob("*.json")):
 # cert expiry) resolves against THIS file, so a typo'd module name must
 # fail here rather than as a 400 on the targets page at 3am.
 bb = load("blackbox-modules.yml")
+declared_modules: set[str] = set()
 if isinstance(bb, dict):
     modules = bb.get("modules")
     if not isinstance(modules, dict) or not modules:
         errors.append("blackbox-modules.yml: modules must be a non-empty mapping")
     else:
+        declared_modules = set(modules)
         for mname, module in modules.items():
             if not isinstance(module, dict) or not module.get("prober"):
                 errors.append(f"blackbox-modules.yml: module {mname!r} needs a prober")
 else:
     errors.append("blackbox-modules.yml: not a module mapping (expected modules:)")
+# 2026-09-26 audit follow-up: the module-shape check above promised that
+# "a typo'd module name must fail here" but never looked at prometheus.yml.
+# Cross-check every module the scrape config NAMES — in live jobs AND in
+# the documented (commented) optional jobs, since those lines are what an
+# operator un-comments — against the declared module set. The scan is over
+# the raw file text precisely so commented jobs are covered too.
+prom_text = (base / "prometheus.yml").read_text(encoding="utf-8")
+named = set(re.findall(r"module:\s*\[([A-Za-z0-9_]+)\]", prom_text))
+for mname in sorted(named):
+    if mname not in declared_modules:
+        errors.append(
+            f"prometheus.yml names module {mname!r} which blackbox-modules.yml does NOT declare"
+        )
+if named:
+    print(f"verify: prometheus.yml module references grounded: {', '.join(sorted(named))}")
 
 for rel in [
     "docker-compose.yml",

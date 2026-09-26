@@ -145,7 +145,7 @@ or emulator), recorded as dated notes.
 | P5 | Multi-device sync engine & cross-client interop | ✅ done 2026-09-25 | M2 |
 | P6 | Analysis surfaces (insights, question, recompute) | ✅ done 2026-09-25 | M2 |
 | P7 | Measures, sharing, settings (full parity) | ✅ done 2026-09-25; E2E-verified 2026-09-26 | M2 |
-| P8 | Safety, i18n, accessibility | ✅ done 2026-09-25 | M3 |
+| P8 | Safety, i18n, accessibility | ✅ done 2026-09-25; i18n genuinely closed 2026-09-26 (M-W5) | M3 |
 | P9 | Security & mutation campaigns, web + mobile | ✅ infra+harnesses 2026-09-25; campaign RUNS queued (deferral note below) | M3 |
 | P10 | Deploy, release pipeline, docs | ✅ done 2026-09-25; E2E-verified 2026-09-26 | M3 |
 

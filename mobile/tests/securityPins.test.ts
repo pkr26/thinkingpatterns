@@ -61,7 +61,7 @@ vi.mock("../src/api/client", async (importOriginal) => {
     api: {
       getCachedSalt: async () => apiState.cachedSalt,
       saltFor: async () => ({ salt: apiState.cachedSalt }),
-      cacheSalt: async () => {},
+      cacheSalt: vi.fn(async () => {}),
       openProcessingSession: async (key: string) => ({ session_token: `tok-${key.slice(0, 6)}` }),
       rekeyStoredData: vi.fn(async () => {
         if (apiState.failAt === "rekey") {
@@ -81,6 +81,7 @@ vi.mock("../src/api/client", async (importOriginal) => {
       },
       setSession: async () => {},
       listEntriesPage: vi.fn(async () => ({ entries: [], nextOffset: null, revision: null })),
+      listMeasuresPage: vi.fn(async () => []),
       getEntry: async () => {
         throw new ApiError(404, "entry not found", "not_found");
       },
@@ -120,7 +121,7 @@ import {
   resetEntryVersionMirrors,
 } from "../src/entryVersions";
 import { api, ApiError } from "../src/api/client";
-import { decryptEntry, encryptEntry } from "../src/crypto/MindPatternCrypto";
+import { decryptEntry, deriveKeysAsync, encryptEntry } from "../src/crypto/MindPatternCrypto";
 import { rotatePassword } from "../src/rotation";
 import { vault } from "../src/vault";
 import { enableBiometricUnlock, hasBiometricUnlock } from "../src/biometricUnlock";
@@ -305,7 +306,7 @@ describe("rotatePassword (H-1/M-3)", () => {
     if (!outcome.ok) expect(outcome.stage).toBe("verify");
   });
 
-  it("continues an interrupted rotation when the blobs are already under the new key", async () => {
+  it("continues an interrupted rotation — the retry REUSES the pending salt and reads a v2-bound journal (B-1)", async () => {
     // First attempt: rekey succeeded, credential rotation failed.
     apiState.failAt = "credential";
     const first = await rotatePassword({
@@ -315,8 +316,23 @@ describe("rotatePassword (H-1/M-3)", () => {
       newPassword: "a strong new passphrase 42!",
     });
     expect(first.ok).toBe(false);
-    // Retry: rekey now answers rekey_key_mismatch; the flow verifies the new
-    // key reads the journal (empty here → trivially true) and finishes.
+    // The dying attempt persisted its salt — the corpus is now under
+    // (newPassword, that salt). A FRESH draw on retry (the old behavior)
+    // could never read it back.
+    const pendingKey = `mindpattern.rotatePendingSalt.${USER}`;
+    const saltB64 = store.get(pendingKey);
+    expect(typeof saltB64).toBe("string");
+    // Derive that exact generation and place a v2-AAD-bound journal row:
+    // the ladder's probe must pass the row's content_version through
+    // (every entry since M-2 is v2-bound; the old probe tried only the
+    // legacy three-part AAD and always failed).
+    const keys = await deriveKeysAsync("a strong new passphrase 42!", Buffer.from(saltB64 as string, "base64"));
+    const row = encryptEntry({ dataKey: keys.dataKey }, USER, "e-b1", "resumed", "2026-09-20", null, undefined, 2);
+    vi.mocked(api.listEntriesPage).mockResolvedValueOnce({
+      entries: [{ id: "i", client_entry_id: "e-b1", blob: row.blobB64, entry_date: "2026-09-20", received_at: "r", content_version: 2 }],
+      nextOffset: null,
+      revision: null,
+    } as never);
     apiState.failAt = null;
     vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
       new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
@@ -328,6 +344,63 @@ describe("rotatePassword (H-1/M-3)", () => {
       newPassword: "a strong new passphrase 42!",
     });
     expect(second.ok).toBe(true);
+    // Full completion clears the pending salt.
+    expect(store.has(pendingKey)).toBe(false);
+  });
+
+  it("B-2: an empty journal does not trivially verify while measures sit under the foreign key", async () => {
+    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
+      new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
+    );
+    // The rekey also moved the PHQ-9 history — the probe must fall through
+    // to a measure row and refuse to resume on it.
+    const { buildAad, encrypt } = await import("../src/crypto/envelope");
+    const foreign = encrypt(Buffer.alloc(32, 1), Buffer.from('{"v":1}'), buildAad("measure", USER, "m-f")).toString("base64");
+    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce([
+      { blob: foreign, client_measure_id: "m-f" },
+    ] as never);
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: "correct old password",
+      newPassword: "a strong new passphrase 42!",
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.reason).toBe("already-rotated-unverifiable");
+  });
+
+  it("B-2: an empty journal with measures under the SAME pending salt resumes and completes", async () => {
+    // Seed the pending salt the interrupted attempt would have left, then
+    // encrypt the measure row under exactly that generation.
+    const salt = Buffer.alloc(16, 3);
+    store.set(`mindpattern.rotatePendingSalt.${USER}`, salt.toString("base64"));
+    const keys = await deriveKeysAsync("a strong new passphrase 42!", salt);
+    const { buildAad, encrypt } = await import("../src/crypto/envelope");
+    const readable = encrypt(keys.dataKey, Buffer.from('{"v":1,"measure":"phq9","score":5}'), buildAad("measure", USER, "m-r")).toString("base64");
+    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
+      new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
+    );
+    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce([
+      { blob: readable, client_measure_id: "m-r" },
+    ] as never);
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: "correct old password",
+      newPassword: "a strong new passphrase 42!",
+    });
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("B-2 follow-up: a cacheSalt failure after re-login is best-effort — the rotation still self-completes", async () => {
+    vi.mocked(api.cacheSalt).mockRejectedValueOnce(new Error("disk full") as never);
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: "correct old password",
+      newPassword: "a strong new passphrase 42!",
+    });
+    expect(outcome.ok).toBe(true);
   });
 
   it("fails honestly when the retry's new password cannot read an already-rotated journal", async () => {
@@ -350,6 +423,9 @@ describe("rotatePassword (H-1/M-3)", () => {
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.reason).toBe("already-rotated-unverifiable");
+    // B-3 (web twin): the corpus is under a key this vault cannot read —
+    // the old data key is dead, so the vault must not stay open on it.
+    expect(vault.isUnlocked()).toBe(false);
   });
 
   // 2026-09-26 audit H-2: the flow used to draw its fresh salt from

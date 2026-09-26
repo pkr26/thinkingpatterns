@@ -1202,17 +1202,13 @@ class TestAuditAndCascades:
         response = await client.request("DELETE", "/api/therapist/account", headers=th.headers)
         assert response.status_code == 422
 
-    async def test_therapist_account_delete_is_gated_while_sharing_is_disabled(self, client, app):
-        """2026-09-26 audit (LOW, batch item e): the deletion route now
-        carries the same require_sharing_enabled dependency as every other
-        therapist route — deps.py's fail-closed posture (a disabled
-        deployment must not expose ANY sharing-surface route, flat 404).
-
-        The 2026-09-21 exception (deletion deliberately reachable during a
-        feature shutdown so a therapist could self-erase) is retired: an
-        operator disabling sharing re-enables it (or deletes the account
-        by SQL per the runbook) to service the erasure request. The
-        deletion route works again the moment sharing is re-enabled.
+    async def test_therapist_account_delete_survives_a_sharing_shutdown(self, client, app):
+        """2026-09-26 audit follow-up (deletion-availability reversal):
+        self-erasure is NOT a sharing surface. A feature shutdown must
+        block sharing (pairing 404s) while the therapist can still delete
+        their own account — restoring the 2026-09-21 guarantee that the
+        audit's LOW batch item e had inadvertently retired (a gated delete
+        during shutdown stranded right-to-erasure behind a feature flag).
         """
         th = TherapistEmulator("drshutdown", "pw")
         await th.register(client)
@@ -1221,25 +1217,16 @@ class TestAuditAndCascades:
         assert (
             await client.post("/api/therapist/pairing-codes", headers=th.headers)
         ).status_code == 404
-        gated = await client.request(
+        erased = await client.request(
             "DELETE",
             "/api/therapist/account",
             headers={**th.headers, "X-Account-Verifier": th.auth_key_b64},
         )
-        assert gated.status_code == 404
-        assert gated.json()["code"] == "not_found"
-        # The account is untouched while gated; re-enabling the feature
-        # restores the self-service erasure path.
+        assert erased.status_code == 204
+        # The account is gone. /me is itself feature-gated, so re-enable
+        # sharing first — the deleted credential must then 401 (the 404
+        # would be the feature gate, not the user lookup).
         app.state.settings.therapist_sharing_enabled = True
-        response = await client.request(
-            "DELETE",
-            "/api/therapist/account",
-            headers={**th.headers, "X-Account-Verifier": th.auth_key_b64},
-        )
-        assert response.status_code == 204
-        # Sharing is re-enabled here, so /me reaches auth and answers the
-        # deleted-account 401 (the old test's 404 was the feature gate
-        # itself, not the user lookup).
         assert (await client.get("/api/therapist/me", headers=th.headers)).status_code == 401
 
     async def test_export_carries_share_records(self, client):

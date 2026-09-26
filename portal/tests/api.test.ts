@@ -372,6 +372,9 @@ describe("authenticated requests", () => {
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
     expect(init.credentials).toBe("omit");
+    // 2026-09-26 follow-up (portal N-2): the audit doc's keepalive — a
+    // logout fired at sign-out survives the tab closing mid-fetch.
+    expect(init.keepalive).toBe(true);
   });
 
   it("M-P1: logout does NOT ride the session abort controller — clearSession cannot kill it", async () => {

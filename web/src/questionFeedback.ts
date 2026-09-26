@@ -61,6 +61,22 @@ async function readPending(dataKey: Bytes, userId: string): Promise<FeedbackEven
   }
 }
 
+/** 2026-09-26 audit follow-up (B-7): rotation REWRAPS the pending
+ *  feedback queue under the incoming data key instead of clearing it.
+ *  A failure propagates so the rotation falls back to the old clear. */
+export async function rewrapFeedback(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
+  const pending = await readPending(oldKey, userId);
+  if (pending.length === 0) return;
+  let payload: Uint8Array<ArrayBuffer> | null = new TextEncoder().encode(JSON.stringify(pending.slice(-MAX_PENDING)));
+  try {
+    const blob = await encrypt(newKey, payload, buildAad("feedback-local", userId));
+    await kv.setItem(key(userId), toBase64(blob));
+  } finally {
+    zeroize(payload);
+    payload = null;
+  }
+}
+
 /** Record one tap (fire-and-forget friendly). */
 export async function recordFeedbackTap(dataKey: Bytes, userId: string, pid: string, resonated: boolean): Promise<void> {
   await appendEvent(dataKey, userId, { pid, resonated });

@@ -27,6 +27,7 @@
  */
 import { api, ApiError } from "./api/client";
 import { decryptEntry, deriveKeysAsync } from "./crypto/MindPatternCrypto";
+import { buildAad, decrypt } from "./crypto/envelope";
 import { engine } from "./crypto/engine";
 import { wrapDataKeyForTherapist } from "./crypto/sharing";
 import { zeroize } from "./crypto/kdf";
@@ -37,6 +38,7 @@ import { clearUnlockProof } from "./unlockProof";
 import { verifyPasswordForVault } from "./reauth";
 import { vault } from "./vault";
 import { disableBiometricUnlock } from "./biometricUnlock";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /** 16 random bytes — the KDF salt size shared with registration.
  *  2026-09-26 audit H-2: the entropy now comes from the app's CSPRNG seam
@@ -69,23 +71,92 @@ export type RotationOutcome =
       detail?: string;
     };
 
-/** Can the NEW key decrypt at least one live entry? (Retry ladder step:
+/** Can the NEW key decrypt at least one live blob? (Retry ladder step:
  * proves a rekey_key_mismatch means "already rekeyed", not "wrong key".)
- * An empty journal trivially verifies — there is nothing to mismatch. */
+ *
+ * 2026-09-26 audit follow-ups:
+ *  - B-1(mobile): the entry probe now passes the row's content_version —
+ *    every entry saved since M-2 (2026-09-20) is v2-AAD-bound, so the
+ *    legacy three-part-AAD-only retry read FALSE for any real journal and
+ *    the ladder dead-ended "already-rotated-unverifiable" even with the
+ *    correct key. (The web port written the same day got this right.)
+ *  - B-2: an EMPTY journal no longer trivially verifies — the rekey also
+ *    moved MEASURES, so the probe falls through to one measure row; both
+ *    empty trivially verifies (nothing to mismatch). Without this, a user
+ *    with a PHQ-9 history but zero entries would "verify", complete the
+ *    credential rotation, and silently orphan every stored measure. */
 async function newKeyReadsJournal(userId: string, newDataKey: Buffer): Promise<boolean> {
   try {
     const page = await api.listEntriesPage({ limit: 1, offset: 0 });
-    if (page.entries.length === 0) return true;
-    const entry = page.entries[0]!;
-    if (typeof entry.blob !== "string") return false;
+    if (page.entries.length > 0) {
+      const entry = page.entries[0]!;
+      if (typeof entry.blob !== "string") return false;
+      try {
+        decryptEntry(
+          { dataKey: newDataKey },
+          userId,
+          entry.client_entry_id,
+          entry.blob,
+          entry.content_version ?? undefined,
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    const measures = (await api.listMeasuresPage(1, 0)) as Array<{
+      blob?: unknown;
+      client_measure_id?: unknown;
+    }>;
+    if (!Array.isArray(measures) || measures.length === 0) return true;
+    const row = measures[0]!;
+    if (typeof row.blob !== "string" || typeof row.client_measure_id !== "string") return false;
     try {
-      decryptEntry({ dataKey: newDataKey }, userId, entry.client_entry_id, entry.blob);
+      decrypt(newDataKey, Buffer.from(row.blob, "base64"), buildAad("measure", userId, row.client_measure_id));
       return true;
     } catch {
       return false;
     }
   } catch {
     return false;
+  }
+}
+
+/** B-1 (2026-09-26 audit follow-up): the pending rotation salt, persisted
+ * locally BEFORE the rekey attempt and cleared only on full completion.
+ * The ladder above can only verify when the retry derives the SAME keys
+ * as the attempt that rekeyed the corpus — a fresh random salt per
+ * attempt (the previous behavior) made the rekey_key_mismatch resume
+ * path unreachable in production. The salt is public material (the
+ * server stores it in the clear after rotation); it is inert without
+ * the password. Keyed by user so a shared device never crosses accounts. */
+const pendingSaltKey = (userId: string) => `mindpattern.rotatePendingSalt.${userId}`;
+
+async function loadPendingSalt(userId: string): Promise<Buffer | null> {
+  try {
+    const b64 = await AsyncStorage.getItem(pendingSaltKey(userId));
+    if (!b64) return null;
+    const salt = Buffer.from(b64, "base64");
+    return salt.length === 16 ? salt : null;
+  } catch {
+    return null;
+  }
+}
+
+async function storePendingSalt(userId: string, salt: Buffer): Promise<void> {
+  try {
+    await AsyncStorage.setItem(pendingSaltKey(userId), salt.toString("base64"));
+  } catch {
+    // Best-effort: without persistence the retry draws a fresh salt and
+    // the ladder honestly refuses — degraded, never wrong.
+  }
+}
+
+async function clearPendingSalt(userId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(pendingSaltKey(userId));
+  } catch {
+    // Nothing to recover — a stale non-secret salt is inert.
   }
 }
 
@@ -134,7 +205,13 @@ export async function rotatePassword(input: {
 
   try {
     oldKeys = await deriveKeysAsync(oldPassword, Buffer.from(saltB64, "base64"));
-    const newSalt = freshSalt();
+    // B-1: reuse the PENDING salt from an attempt that died at/after its
+    // rekey, so this retry derives the same keys that already encrypted
+    // the corpus — that is what makes the mismatch ladder above
+    // reachable. Only a first attempt (or one that died before its rekey
+    // could move anything) draws fresh entropy.
+    const newSalt = (await loadPendingSalt(userId)) ?? freshSalt();
+    await storePendingSalt(userId, newSalt);
     newKeys = await deriveKeysAsync(newPassword, newSalt);
     newSaltB64 = newSalt.toString("base64");
     newVerifierB64 = newKeys.authKey.toString("base64");
@@ -151,6 +228,14 @@ export async function rotatePassword(input: {
         // new key. Continue ONLY if the key we are about to make current
         // can actually read the journal.
         if (!(await newKeyReadsJournal(userId, newKeys!.dataKey))) {
+          // B-3 (web twin, 2026-09-26 follow-up): the corpus is provably
+          // under a key this vault cannot read. The OLD data key still in
+          // the vault is dead for every stored blob — a new entry sealed
+          // under it now would be permanently undecryptable, and the
+          // biometric wrap would keep restoring the dead key. Same F-4
+          // self-clean as the later stages: lock, best-effort wrap drop.
+          vault.lock();
+          await disableBiometricUnlock(userId).catch(() => {});
           return {
             ok: false,
             stage: "rekey",
@@ -241,7 +326,16 @@ export async function rotatePassword(input: {
         reason: err instanceof ApiError ? "server" : "offline",
       };
     }
-    await api.cacheSalt(username, newSaltB64);
+    // B-2(audit follow-up, post-relogin hole): cacheSalt is a local CACHE
+    // of public material — best-effort only. It used to sit un-caught
+    // between the successful re-login and the vault lock: a throw there
+    // returned a typed "verify/offline" failure while the server had
+    // ALREADY rekeyed the blobs and retired the old credential, leaving
+    // the vault unlocked on the dead OLD data key — the exact F-4
+    // data-loss shape this flow's later stages each guard against.
+    await api.cacheSalt(username, newSaltB64).catch(() => {});
+    // Full completion: the pending rotation salt has done its job.
+    await clearPendingSalt(userId);
 
     // Data-key-bound local caches: rebind what survives a key change
     // (entry-version marks), clear what must be re-created on next use

@@ -163,6 +163,43 @@ async def test_h6_revisions_consume_the_chart_byte_budget(client, monkeypatch):
     assert refused.json()["code"] == "blob_quota_exceeded"
 
 
+async def test_h6_note_bytes_count_once_per_chart_not_once_per_revision(
+    client, monkeypatch
+):
+    """2026-09-26 audit follow-up (quota fan-out): the chart byte budget
+    sums the LIVE note blob once, no matter how many revisions sit beside
+    it. The first H-6 cut summed note bytes across the revision outer
+    join, so a note with N revisions was charged ~2N blobs while the real
+    footprint is N+1 — edited charts hit the byte cap at roughly half the
+    budget and a revision-capped note could never be edited again.
+
+    Budget here fits live + exactly 3 preserved revisions (blob×4). Under
+    the fan-out math edit v3 already refuses (2×3 blobs > 4); under the
+    corrected math v1-v3 fit and only v4 — whose history genuinely
+    overflows — refuses."""
+    from app.api import therapist as therapist_api
+
+    therapist, patient, note = await _note_fixture(client, "fanout")
+    blob_len = len(base64.b64decode(note["blob"]))
+    monkeypatch.setattr(therapist_api, "MAX_NOTE_BYTES_PER_PATIENT", blob_len * 4)
+
+    for version in range(1, 4):  # v1..v3: live + 3 preserved == budget
+        edited = await client.patch(
+            f"/api/therapist/notes/{note['id']}",
+            headers=therapist.headers,
+            json={"blob": therapist.encrypt_note(patient, "h6-note", f"v{version}")},
+        )
+        assert edited.status_code == 200, f"edit v{version} must fit: {edited.text}"
+
+    overflow = await client.patch(
+        f"/api/therapist/notes/{note['id']}",
+        headers=therapist.headers,
+        json={"blob": therapist.encrypt_note(patient, "h6-note", "v4")},
+    )
+    assert overflow.status_code == 413, overflow.text
+    assert overflow.json()["code"] == "blob_quota_exceeded"
+
+
 # =========================================================================
 # H-7 — the patient-list cap counts ACTIVE consents only
 # =========================================================================
@@ -224,30 +261,41 @@ async def test_h7_list_cap_counts_active_consents_only(client, app):
 # =========================================================================
 
 
-async def _stale_auth_user(app, user_id: str):
+async def _stale_auth_user(app, session, user_id: str):
     """The M-B1 race: load the auth-time ORM snapshot, then commit a
     concurrent logout (epoch bump) AFTER it — the request continues with
     a bearer whose epoch is now retired.
 
-    The UPDATE runs with synchronize_session=False: SQLAlchemy's default
-    "evaluate" strategy would apply ``token_epoch + 1`` to the loaded
-    snapshot in memory, silently re-arming the stale object with the NEW
-    epoch (expire_on_commit never gets a chance to matter)."""
+    2026-09-26 audit follow-up N-3: the snapshot MUST be attached to the
+    route's own session. Production loads the request user through the
+    FastAPI get_session dependency, so the identity map holds it and
+    _require_verifier's ``populate_existing`` re-read REFRESHES it in
+    place. The first cut of these tests loaded the snapshot in a closed
+    (detached) session, where the refresh is a no-op — green tests that
+    could not see the capture-after-proof ordering bug (N-2) they existed
+    to pin. Attached, an epoch fence that reads ``user.token_epoch`` after
+    the proof would adopt the post-bump epoch and these tests fail loudly.
+
+    The bump UPDATE runs on a SEPARATE session with
+    synchronize_session=False: SQLAlchemy's default "evaluate" strategy
+    would apply ``token_epoch + 1`` to the loaded snapshot in memory,
+    silently re-arming the stale object with the NEW epoch
+    (expire_on_commit never gets a chance to matter)."""
     from app.models import User
 
-    async with app.state.sessionmaker() as session:
-        stale = await session.get(User, user_id)
-        assert stale is not None
-        pre_bump_epoch = stale.token_epoch
-        await session.execute(
+    stale = await session.get(User, user_id)
+    assert stale is not None
+    pre_bump_epoch = stale.token_epoch
+    async with app.state.sessionmaker() as bumper:
+        await bumper.execute(
             update(User)
             .where(User.id == user_id)
             .values(token_epoch=pre_bump_epoch + 1)
             .execution_options(synchronize_session=False)
         )
-        await session.commit()
-        assert stale.token_epoch == pre_bump_epoch, "the snapshot must stay pre-rotation"
-        return stale
+        await bumper.commit()
+    assert stale.token_epoch == pre_bump_epoch, "the snapshot must stay pre-rotation"
+    return stale
 
 
 def _request(app) -> SimpleNamespace:
@@ -267,10 +315,10 @@ async def test_mb1_stale_epoch_cannot_grant_consent(client, app):
     await therapist.register(client)
     code = await therapist.create_pairing_code(client)
 
-    stale_user = await _stale_auth_user(app, patient.user_id)
     wrap = patient_wrap_for(patient, therapist.wrap_pub_key, therapist.user_id)
     body = ConsentGrantRequest(code=code, disclosure=consents_api.SHARING_DISCLOSURE_VERSION, **wrap)
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as raised:
             await consents_api.grant_consent(
                 body=body,
@@ -306,10 +354,10 @@ async def test_mb1_stale_epoch_cannot_rewrap_or_revoke(client, app):
     assert granted["status"] == 201, granted
     consent_id = granted["body"]["id"]
 
-    stale_user = await _stale_auth_user(app, patient.user_id)
     wrap = patient_wrap_for(patient, therapist.wrap_pub_key, therapist.user_id)
     body = ConsentRewrapRequest(**wrap)
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as rewrap_denied:
             await consents_api.rewrap_consent(
                 body=body,
@@ -320,6 +368,12 @@ async def test_mb1_stale_epoch_cannot_rewrap_or_revoke(client, app):
                 x_account_verifier=patient.auth_key_b64,
             )
         assert rewrap_denied.value.status_code == 401
+        # Re-arm the race for the second direct call: production loads a
+        # fresh auth-time snapshot per request, but this shared attached
+        # object was just refresh-in-place by the rewrap attempt's
+        # populate_existing re-read (epoch now the post-bump value) — so
+        # bump once more and re-capture before the revoke attempt.
+        stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as revoke_denied:
             await consents_api.revoke_consent(
                 consent_id,
@@ -342,9 +396,9 @@ async def test_mb1_stale_epoch_cannot_flip_llm_consent(client, app):
 
     patient = ClientEmulator("mb1-llm-p", "deep-password")
     await patient.register(client)
-    stale_user = await _stale_auth_user(app, patient.user_id)
     body = LlmConsentRequest(enabled=True, verifier=patient.auth_key_b64)
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as raised:
             await account_api.set_llm_consent(
                 body=body, request=_request(app), user=stale_user, session=session
@@ -357,8 +411,8 @@ async def test_mb1_stale_epoch_cannot_delete_account(client, app):
 
     patient = ClientEmulator("mb1-del-p", "deep-password")
     await patient.register(client)
-    stale_user = await _stale_auth_user(app, patient.user_id)
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as raised:
             await account_api.delete_account(
                 request=_request(app),
@@ -383,11 +437,11 @@ async def test_mb1_stale_epoch_cannot_rotate_wrap_key(client, app):
 
     therapist = TherapistEmulator("mb1-wrap-th", "deep-password")
     await therapist.register(client)
-    stale_user = await _stale_auth_user(app, therapist.user_id)
     body = WrapKeyRotateRequest(
         wrap_pub_key=therapist.wrap_pub_key, wrap_key_blob=therapist.wrap_key_blob_b64()
     )
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, therapist.user_id)
         with pytest.raises(ApiError) as raised:
             await therapist_api.rotate_wrap_key(
                 body=body,
@@ -404,8 +458,8 @@ async def test_mb1_stale_epoch_cannot_delete_therapist_account(client, app):
 
     therapist = TherapistEmulator("mb1-del-th", "deep-password")
     await therapist.register(client)
-    stale_user = await _stale_auth_user(app, therapist.user_id)
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, therapist.user_id)
         with pytest.raises(ApiError) as raised:
             await therapist_api.delete_therapist_account(
                 request=_request(app),
@@ -428,8 +482,8 @@ async def test_mb1_stale_epoch_cannot_change_totp(client, app, monkeypatch):
     # Deterministic code verification: matched counter 5.
     monkeypatch.setattr(account_api, "verify_code", lambda secret, code: 5)
 
-    stale = await _stale_auth_user(app, therapist.user_id)
     async with app.state.sessionmaker() as session:
+        stale = await _stale_auth_user(app, session, therapist.user_id)
         with pytest.raises(ApiError) as setup_denied:
             await account_api.totp_setup(
                 body=TotpSetupRequest(verifier=therapist.auth_key_b64),
@@ -448,8 +502,8 @@ async def test_mb1_stale_epoch_cannot_change_totp(client, app, monkeypatch):
         json={"verifier": therapist.auth_key_b64},
     )
     assert setup.status_code == 200, setup.text
-    stale = await _stale_auth_user(app, therapist.user_id)
     async with app.state.sessionmaker() as session:
+        stale = await _stale_auth_user(app, session, therapist.user_id)
         with pytest.raises(ApiError) as enable_denied:
             await account_api.totp_enable(
                 body=TotpConfirmRequest(verifier=therapist.auth_key_b64, code="123456"),
@@ -469,8 +523,8 @@ async def test_mb1_stale_epoch_cannot_change_totp(client, app, monkeypatch):
             .values(totp_enabled=True, totp_last_counter=1)
         )
         await session.commit()
-    stale = await _stale_auth_user(app, therapist.user_id)
     async with app.state.sessionmaker() as session:
+        stale = await _stale_auth_user(app, session, therapist.user_id)
         with pytest.raises(ApiError) as disable_denied:
             await account_api.totp_disable(
                 body=TotpConfirmRequest(verifier=therapist.auth_key_b64, code="123456"),
@@ -534,7 +588,6 @@ async def test_mb1_local_recompute_fences_on_epoch(client, app):
 
     patient = ClientEmulator("mb1-lr-p", "deep-password")
     await patient.register(client)
-    stale_user = await _stale_auth_user(app, patient.user_id)
     blob = base64.b64encode(
         crypto.encrypt(
             patient.data_key,
@@ -543,6 +596,7 @@ async def test_mb1_local_recompute_fences_on_epoch(client, app):
         )
     ).decode("ascii")
     async with app.state.sessionmaker() as session:
+        stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as raised:
             await insights_api.local_recompute(
                 body=LocalRecomputeRequest(
@@ -835,6 +889,30 @@ def test_mb4_every_es_lexicon_key_is_fold_invariant():
                 )
 
 
+def test_mb4_merged_lexicons_carry_no_divergent_fold_twins():
+    """2026-09-26 audit follow-up N-11: the MERGED runtime maps must obey
+    the same fold-invariance the ES tables do. The merged EN-winning map
+    used to carry 'tensión'=-2.2 beside its folded twin 'tension'=-1.3 —
+    the accented spelling is unreachable post-fold (dead weight), but a
+    divergent value documents a valence the engine can never produce.
+    _fold_canonicalize_lexicon aligns unreachable accented entries to
+    the value their twin actually scores; this pins the class."""
+    from app.services import brain
+
+    for name, mapping in (
+        ("SENTIMENT_LEXICON", brain.SENTIMENT_LEXICON),
+        ("SENTIMENT_LEXICON_ES", brain.SENTIMENT_LEXICON_ES),
+    ):
+        for key in mapping:
+            folded = _fold_key(key)
+            if folded == key or folded not in mapping:
+                continue
+            assert mapping[key] == mapping[folded], (
+                f"{name}: {key!r}={mapping[key]!r} contradicts its folded "
+                f"twin {folded!r}={mapping[folded]!r}"
+            )
+
+
 def test_mb4_the_cited_dead_keys_and_twins_are_gone():
     from app.services import sentiment_lexicon_es as es
 
@@ -1049,11 +1127,18 @@ def test_low_max_body_bytes_has_an_explicit_ceiling():
 
 def test_low_local_recompute_request_schema_hardening():
     """LOW item g: blob envelopes and the ISO-date pattern are enforced
-    at the schema, mirroring EntryCreate/MeasureCreate."""
+    at the schema, mirroring EntryCreate/MeasureCreate.
+
+    2026-09-26 audit follow-up (N-8): the state-blob envelope mirrors the
+    CONFIG ceiling (MAX_USER_BLOB_BYTES, b64-encoded) — not the
+    journal-sized MAX_BLOB_B64, which pre-empted the route's
+    settings.max_user_blob_bytes authority at ~1.07 MiB."""
     import pydantic
 
-    from app.schemas import LocalRecomputeRequest
+    from app.config import MAX_USER_BLOB_BYTES
+    from app.schemas import MAX_STATE_BLOB_B64, LocalRecomputeRequest
 
+    assert MAX_STATE_BLOB_B64 >= (MAX_USER_BLOB_BYTES // 3 + 1) * 4 - 4
     ok = LocalRecomputeRequest(
         base_state_seq=0,
         state_blob="a" * 100,
@@ -1061,13 +1146,26 @@ def test_low_local_recompute_request_schema_hardening():
         analysis_dates=["2026-09-26"],
     )
     assert ok.analysis_dates == ["2026-09-26"]
-    with pytest.raises(pydantic.ValidationError):
-        LocalRecomputeRequest(
-            base_state_seq=0,
-            state_blob="a" * 2_000_000,  # over the MAX_BLOB_B64 envelope
-            patterns_blob="b" * 100,
-            analysis_dates=["2026-09-26"],
-        )
+    # A blob the ROUTE would accept at its default configured ceiling is
+    # no longer 422'd by the schema.
+    big_but_config_legal = LocalRecomputeRequest(
+        base_state_seq=0,
+        state_blob="a" * 2_000_000,  # > 1.07 MiB, far under the 8 GiB ceiling
+        patterns_blob="b" * 100,
+        analysis_dates=["2026-09-26"],
+    )
+    assert len(big_but_config_legal.state_blob) == 2_000_000
+    # The ceiling itself is pinned off the Field metadata — building an
+    # actual over-ceiling string would allocate ~11 GB.
+    import annotated_types
+
+    for name in ("state_blob", "patterns_blob"):
+        caps = [
+            m
+            for m in LocalRecomputeRequest.model_fields[name].metadata
+            if isinstance(m, annotated_types.MaxLen)
+        ]
+        assert caps and caps[0].max_length == MAX_STATE_BLOB_B64, name
     with pytest.raises(pydantic.ValidationError):
         LocalRecomputeRequest(
             base_state_seq=0,

@@ -176,6 +176,12 @@ export function App(): React.JSX.Element {
     } catch (err) {
       wipePortalSession(keys);
       if (attempt === loginAttempt.current && startedAt === lifecycle.current) {
+        // 2026-09-26 audit follow-up (portal N-3): this path runs AFTER
+        // setSession minted a fresh 24 h bearer. Dropping it from memory
+        // without revocation left the token server-valid — the one
+        // session-end route that skipped M-P1's logout fire. Best-effort,
+        // same contract as lockDown: never block the local teardown.
+        void api.logout().catch(() => {});
         clearSession();
         replacePortalSession(null);
         setUnlockError(

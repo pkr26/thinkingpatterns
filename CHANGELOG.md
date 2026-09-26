@@ -4,6 +4,145 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-26 (ii) — audit-of-the-audit: every residual finding fixed and re-tested
+
+An independent verification pass over the 2026-09-26 remediation commit
+audited all 135 changed files against their claims. The four suite-count
+claims reproduced exactly, but the pass found 1 HIGH and ~13 MEDIUM
+defects the remediation itself introduced or left open — including two
+claimed fixes that did not actually work (H-6's byte quota, M-B1's epoch
+fences) and three green tests that pinned production-impossible states.
+Everything actionable is fixed below, each annotated
+`2026-09-26 audit follow-up` inline. Suite results after this pass:
+backend 1465 passed / 97.35% coverage (floor 97) + ruff + mypy clean,
+mobile 1723 passed + tsc clean, web 448 passed + tsc clean, portal 337
+passed + tsc clean; redteam `e_crisis` 0 errors (corpus 119→128 rows,
+want==observed); monitoring `verify.sh` (incl. `--production`) all
+green.
+
+### HIGH
+
+- **N-1 — the H-6 chart byte quota double-counted every edited note.**
+  The budget SELECT summed note bytes across the revision outer join, so
+  a note with N revisions was charged ~2N blobs: edited charts hit the
+  cap at roughly half the budget, and a note at the revision cap could
+  never be edited again (only deletion recovered). Both byte totals are
+  now scalar subqueries over their own tables; the pinning test uses a
+  budget where correct and fan-out math diverge (mutation-verified).
+- **Test masking, three ways (N-3 + web/mobile rotation tests).** The
+  M-B1 epoch-fence tests passed detached ORM objects the request session
+  could not refresh, the web resume-ladder test pinned the RNG to a
+  fixed salt, and the mobile ladder test used an empty journal — each
+  green test pinned a state production cannot reach. All three now
+  exercise the real wiring (attached identity-map users; the persisted
+  pending salt; a v2-bound journal row).
+
+### MEDIUM
+
+- **N-2 — six `account.py` epoch fences were no-ops** (LLM consent,
+  account deletion, TOTP setup/enable/disable, and — a regression —
+  `rotate_credential`): `expected_epoch` was captured AFTER
+  `_require_verifier`'s in-place `populate_existing` refresh of the very
+  same ORM object, so the fence compared the post-bump epoch against
+  itself. All six now capture the epoch BEFORE the proof (the pattern
+  consents.py/therapist.py already used); rewritten tests fail loudly
+  against the old ordering (mutation-verified).
+- **Rotation resume ladder, all clients (B-1).** The M-W2/F-4 ladder was
+  unreachable in production: every retry drew a FRESH salt, so the
+  re-derived key could never read the corpus the earlier attempt
+  rekeyed — and the UI told users to "repeat the password change to
+  finish it", an instruction that always dead-ended. Web and mobile now
+  persist the pending salt before the rekey attempt (cleared only on
+  full completion) and reuse it on retry; the mobile probe also passes
+  `content_version` through (every entry since M-2 is v2-AAD-bound; the
+  legacy-only retry read false for any real journal).
+- **B-2 — an empty journal no longer trivially verifies the ladder** on
+  either client: the rekey also moves measures, so the probe falls
+  through to a PHQ-9 row (both empty still trivially verifies).
+  Previously a measures-only user could "verify", finish the rotation,
+  and silently orphan every stored score.
+- **B-3 — the unverifiable-mismatch path now locks down** (web and
+  mobile): the corpus is provably under a key the vault cannot read, so
+  a live session must never keep writing under the dead old data key —
+  the H-4 rule, applied to the one path that escaped it.
+- **B-4 — web rotation tolerates per-grant rewrap failures** like
+  mobile: one therapist's 503 (or a failed listing) no longer aborts a
+  rotation whose corpus and credential already moved; completion now
+  carries an honest partial notice (new bilingual copy).
+- **N-4 — the ʂ/ᵴ homoglyph additions were server-only.** The TS
+  crisis engines' lookup character class did not cover the Phonetic
+  Extensions block, so the mapped ᵴ could never fire client-side
+  ("ʂuicide" folded server-side, no client dialog). Both engines now
+  mirror the map AND the class; pinned by dialog_fires fixtures and two
+  new corpus rows.
+- **Crisis false positives on everyday Spanish (the H-1 cost).** "me
+  quiero cortar el pelo" (a haircut) and "no hay salida de emergencia"
+  (an emergency exit) fired the interruptive dialog. Fixed with the
+  engine's own benign-compound masking (same mechanism as "suicide
+  squad"): grooming/nail-cutting, emergency-exit/navigation, colloquial
+  disappearing, and the common body-part injury forms; the bare
+  self-harm phrasings keep full recall. 7 new dialog_silent fixtures + 5
+  benign corpus rows pin the silent side; "tired of living in <place>"
+  (EN) and "me lastimo cuando corro" (no body part) stay accepted
+  conservative triggers, mirroring their pre-existing twins.
+- **N-5 — therapist self-erasure un-gated** (deletion-availability
+  reversal): the audit's LOW item e had added `require_sharing_enabled`
+  to DELETE /therapist/account, retiring the deliberate 2026-09-21
+  guarantee that a feature shutdown must block sharing, never
+  self-erasure. Deletion is not a sharing surface (verifier-gated,
+  epoch-fenced, serves no patient content); the gate is removed again
+  and the availability guarantee re-pinned.
+- **N-6 — caseload listing work is bounded again.** With the lifetime
+  413 gone, the listing serialized a per-patient lock + queries for
+  EVERY historical consent under one therapist fence. Per-patient
+  fences now guard ACTIVE grants only (bounded by the 100 cap);
+  revoked rows assemble from one bulk read with a batched existence
+  check preserving the concurrent-deletion skip semantics.
+- **Portal N-1 — the state_seq guard now covers the caseload scan**,
+  its second consumer: a replayed older insights blob degrades to the
+  honest error row instead of feeding stale sensitive-flags into triage
+  sort (exported the chart's guard; rollback test added).
+- **Infra B1 — the root compose `backup` service got the M-I3
+  treatment** it was missed by: cpus 1.0 / pids 64 / mem 512M (the dev
+  overlay inherits via merge). Also: blackbox `http_2xx` truly
+  equivalent to the stock module (5s timeout + ip4 preference — the
+  claim was false before), `verify.sh` now actually cross-checks the
+  module names prometheus.yml names (commented optional jobs included),
+  and WEB_PLAN's P8 row no longer dates i18n done before M-W5 closed it.
+
+### LOW / INFO
+
+- ES temporal questions no longer double-pluralize ("los martess"):
+  dedicated `{day_plural}` forms (lunes..viernes invariant;
+  sábados/domingos plural), all seven days pinned.
+- `LocalRecomputeRequest` state blobs: schema ceiling now mirrors the
+  config ceiling instead of pre-empting the route at ~1.07 MiB.
+- Rotation now REWRAPS the mood log, question feedback, and pattern
+  mutes under the new key instead of clearing them (B-7; clear remains
+  the fallback), and the "Get help" crisis chrome + login placeholder
+  are localized (B-5), legacy plaintext mutes are adopted at unlock
+  instead of at first Patterns visit (B-6).
+- Portal logout carries `keepalive` (N-2) and the failed-unlock path
+  revokes the freshly minted bearer server-side (N-3); the bfcache lock
+  route's logout fire is now asserted (coverage gap).
+- Merged-map fold-invariance: the one divergent twin (`tensión`) is
+  canonicalized and the class is pinned over both merged maps (N-11);
+  the stale "port is the follow-up" comment corrected (N-10).
+- Python sentiment scoring accumulates floats naively (left-to-right)
+  to match the TS ports — builtin `sum()` is Neumaier-compensated since
+  3.12, so bit-identical walks could diverge in the last ULP; a
+  divergent golden vector pins the order (E-7).
+- Mobile: `@react-native/babel-preset` pinned as a direct devDependency
+  (it resolved only via hoisting); the polyfill bootstrap extracted to
+  `installPolyfills.cjs` with a real child-process test that deletes
+  `Buffer`/`crypto` before loading it; quarantine/rejected byte bounds
+  never drop the last remaining (newest) record; the conflict-snippet
+  "(N characters total)" reports the raw text length.
+- Corpus/doc accuracy: the unpinned "life doesn't feel worth it"
+  pattern gained corpus rows; the audit report's change-surface figure
+  corrected to the actual 135 files / +8,411 (insertions were
+  understated by ~2.8k).
+
 ## 2026-09-26 — full-codebase deep audit: every finding fixed and re-tested
 
 A nine-pass exhaustive audit of every file (mobile and web audited

@@ -8,6 +8,8 @@ import { EntryView } from "../src/views/Entry";
 import { MeasuresView } from "../src/views/Measures";
 import { HistoryView } from "../src/views/History";
 import { QuestionView } from "../src/views/Question";
+import { LoginView } from "../src/views/LoginView";
+import { AppFrame } from "../src/ui";
 import { genericQuestionForDate } from "../src/genericQuestions";
 import { localDateISO } from "../src/dates";
 import { __setLocaleForTests } from "../src/strings";
@@ -103,5 +105,27 @@ describe("views consume the active locale (M-W5, audit 2026-09-26)", () => {
     await settle(40, 4);
     expect(textOf(root)).toContain(genericQuestionForDate(localDateISO(), "es"));
     expect(textOf(root)).toContain("La pregunta de hoy");
+  });
+
+  // 2026-09-26 audit follow-up (B-5): the chrome is on EVERY screen — the
+  // crisis entry point and the skip link must follow the locale too, not
+  // just the view bodies.
+  it("the chrome's crisis button and skip link are Spanish under es", async () => {
+    __setLocaleForTests("es");
+    const root = await render(<AppFrame title="MindPattern" onCrisis={() => undefined}><p>content</p></AppFrame>);
+    expect(textOf(root)).toContain("Ayuda");
+    expect(textOf(root)).not.toContain("Get help");
+    // The skip link is an <a>, which textOf's node set skips — assert
+    // through the node itself, like the placeholder assertions above.
+    const skip = root.root.findAllByType("a")[0]!;
+    expect((skip as unknown as { children: React.ReactNode[] }).children.join("")).toBe("Saltar al contenido");
+  });
+
+  it("the login username placeholder is Spanish under es", async () => {
+    __setLocaleForTests("es");
+    const root = await render(<LoginView onSuccess={() => undefined} />);
+    const input = root.root.findAllByType("input").find((node) => node.props.autoComplete === "username")!;
+    expect(String(input.props.placeholder)).toBe("p. ej. manana-tranquila");
+    expect(String(input.props.placeholder)).not.toBe("e.g. quiet.morning");
   });
 });

@@ -1002,6 +1002,30 @@ describe("quarantine and rejected store bounds (M-M2, 2026-09-26)", () => {
     );
   });
 
+  // 2026-09-26 audit follow-up: when the NEWEST quarantine record alone
+  // exceeds MAX_QUEUE_BYTES, the drop-oldest loop used to keep shifting
+  // until the store was EMPTY — destroying the newest record and breaking
+  // the "keeps the NEWEST" preservation promise. The loop must stop at the
+  // last remaining record, keeping it even oversize (readItems' catch
+  // already tolerates an unreadable quarantine row without wedging).
+  it("never drops the LAST quarantine record even when it alone exceeds the byte cap", async () => {
+    await enqueue(entry("alice", "a-oversize-newest"));
+    const quarantineKey = await quarantineKeyOf();
+    await storage.setItem(quarantineKey, JSON.stringify({ v: 1, records: ["old-small-1", "old-small-2"] }));
+    const queueKey = await itemsKey();
+    // A corrupt queue row LARGER than the cap: readItems quarantines it as
+    // the newest record, which on its own is already over the ceiling.
+    const oversizeCorrupt = `{"corrupt ${"x".repeat(1_100_000)}`;
+    await storage.setItem(queueKey, oversizeCorrupt);
+    expect(await queueLength("alice")).toBe(0);
+    const after = (await stored(quarantineKey)).records as string[];
+    // The two older records were dropped, but the NEWEST — though alone
+    // over the cap — survived instead of emptying the store.
+    expect(after).toHaveLength(1);
+    expect(after[0]).toBe(oversizeCorrupt);
+    expect(Buffer.byteLength(after[0], "utf8")).toBeGreaterThan(MAX_QUEUE_BYTES);
+  });
+
   it("readItems still resolves when the QUARANTINE row itself is unreadable (the catch never wedges)", async () => {
     // The M-M2 wedge: an oversize quarantine key made getItem throw inside
     // the recovery catch, so EVERY queue op on the scope rejected forever.
@@ -1038,6 +1062,37 @@ describe("quarantine and rejected store bounds (M-M2, 2026-09-26)", () => {
     expect(ids).toHaveLength(MAX_REJECTED_LENGTH);
     expect(ids[ids.length - 1]).toBe("a-latest"); // the newest rejection kept
     expect(ids).not.toContain("old-rej-0"); // the oldest dropped
+  });
+
+  // 2026-09-26 audit follow-up: the rejected byte bound had the same hole
+  // as the quarantine one — a NEWEST rejection that alone exceeds
+  // MAX_QUEUE_BYTES emptied the store. Such an item cannot pass enqueue's
+  // own cap, but a restored/tampered queue row (never re-capped on read)
+  // can carry one into the flush, so the rejection path must honor the
+  // same keep-the-last promise.
+  it("never drops the LAST rejected entry even when it alone exceeds the byte cap", async () => {
+    await enqueue(entry("alice", "a-seed-for-keys"));
+    const queueKey = await itemsKey();
+    const rejectedKey = await rejectedKeyOf();
+    // The queue holds a single entry whose serialized form is ALREADY over
+    // the cap (a shape only a restored backup or tamper can produce), and
+    // the rejected store holds one small older record.
+    const oversize = {
+      userId: "alice",
+      clientEntryId: "a-huge-newest",
+      blobB64: Buffer.alloc(800 * 1024, 7).toString("base64"), // ~1.07 MB serialized
+      entryDate: "2026-09-01",
+    };
+    await storage.setItem(queueKey, JSON.stringify({ v: 1, items: [oversize] }));
+    await storage.setItem(rejectedKey, JSON.stringify({ v: 1, items: [entry("alice", "old-rej-small")] }));
+    vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(422, "invalid encrypted blob"));
+
+    expect(await flushQueue("alice")).toBe(0);
+    expect(await queueLength("alice")).toBe(0);
+    // The older small rejection was dropped; the oversize NEWEST survived
+    // instead of silently emptying the recovery store.
+    const ids = (await rejectedEntries("alice")).map((i: any) => i.clientEntryId);
+    expect(ids).toEqual(["a-huge-newest"]);
   });
 });
 

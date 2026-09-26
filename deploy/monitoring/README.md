@@ -20,7 +20,7 @@ below).
 - `alerts.yml` — alert rules, each with a `runbook` annotation pointing at
   `docs/INCIDENT_RUNBOOK.md`.
 - `blackbox-modules.yml` — the blackbox exporter's module set as code:
-  `http_2xx` (byte-equivalent to the stock module, used by the `/readyz`
+  `http_2xx` (equivalent to the stock module incl. its 5s timeout and ip4 preference, used by the `/readyz`
   probe) and `tls` (the cert-expiry probe; see the file's header for why
   it deliberately skips chain verification). Mounted read-only over the
   path the image's own `--config.file` already points at, and

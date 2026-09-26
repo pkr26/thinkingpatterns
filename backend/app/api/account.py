@@ -665,9 +665,14 @@ async def rotate_credential(
     rotates here.
     """
     # Old-password proof first: nothing else may run on a bearer alone.
-    # M-B1 (2026-09-26): the proof runs against the freshly re-read row,
-    # and expected_epoch below fences the update against a concurrent
-    # rotation (the pre-existing M-2 fence keeps its semantics).
+    # M-B1 (2026-09-26): the proof runs against the freshly re-read row.
+    # The epoch MUST be captured BEFORE the proof: _require_verifier's
+    # populate_existing re-read mutates this very ORM object in place (the
+    # request session's identity map holds it), so reading it afterwards
+    # would compare the post-refresh epoch against itself and fence nothing
+    # (2026-09-26 audit follow-up N-2 — this exact bug shipped with M-B1
+    # and weakened the pre-existing M-2 fence here).
+    expected_epoch = user.token_epoch
     await _require_verifier(user, body.verifier, request, session)
     try:
         new_salt_bytes = base64.b64decode(body.new_salt, validate=True)
@@ -697,7 +702,6 @@ async def rotate_credential(
             new_verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
         )
 
-    expected_epoch = user.token_epoch
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         fresh = (
             (
@@ -842,10 +846,12 @@ async def set_llm_consent(
     version); disabling clears both, so the row never claims a consent it
     no longer holds.
     """
+    # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2): the proof's
+    # populate_existing re-read refreshes this same ORM object in place.
+    expected_epoch = user.token_epoch
     await _require_verifier(user, body.verifier, request, session)
     # M-B1 (2026-09-26): the epoch this bearer authenticated under, for the
     # in-fence re-authorization below.
-    expected_epoch = user.token_epoch
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         # Authentication loaded this row before re-authentication/KDF work.
         # Re-load under the same fence so a concurrent withdrawal/deletion or
@@ -917,13 +923,15 @@ async def delete_account(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
+    # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2): the proof's
+    # populate_existing re-read refreshes this same ORM object in place.
+    expected_epoch = user.token_epoch
     await _require_verifier(user, verifier, request, session)
     if not user.is_active:
         raise ApiError(status_code=404, detail="account not found", code="not_found")
     # M-B1 (2026-09-26): capture the token's epoch at entry; the fences
     # below re-read the row and refuse a request whose credential was
     # rotated (or session logged out) while it waited on the locks.
-    expected_epoch = user.token_epoch
     # Recompute holds the same lifecycle fence across its fresh consent read
     # and possible external dispatch. Once deletion returns, no queued or
     # in-flight recompute may newly send this account's plaintext off-server.
@@ -997,9 +1005,12 @@ async def totp_setup(
             detail="totp already enabled — disable it (code required) before re-arming",
             code="version_conflict",
         )
-    await _require_verifier(user, body.verifier, request, session)
-    # M-B1 (2026-09-26): epoch fence — see rotate_credential's M-2 note.
+    # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2):
+    # _require_verifier's populate_existing re-read refreshes this same ORM
+    # object in place, so capturing afterwards would compare the
+    # post-refresh epoch against itself and fence nothing.
     expected_epoch = user.token_epoch
+    await _require_verifier(user, body.verifier, request, session)
     raw_secret, secret_b32 = generate_secret()
     wrapped = wrap_secret(raw_secret, request.app.state.settings.token_secret)
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
@@ -1054,9 +1065,12 @@ async def totp_enable(
     session: AsyncSession = Depends(get_session),
 ):
     """Confirm enrollment by presenting a code from the PENDING secret."""
-    await _require_verifier(user, body.verifier, request, session)
-    # M-B1 (2026-09-26): epoch fence — see rotate_credential's M-2 note.
+    # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2):
+    # _require_verifier's populate_existing re-read refreshes this same ORM
+    # object in place, so capturing afterwards would compare the
+    # post-refresh epoch against itself and fence nothing.
     expected_epoch = user.token_epoch
+    await _require_verifier(user, body.verifier, request, session)
     settings = request.app.state.settings
     secret = unwrap_secret(user.totp_secret, settings.token_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
@@ -1134,9 +1148,12 @@ async def totp_disable(
         raise ApiError(
             status_code=404, detail="totp not enabled", code="not_found"
         )
-    await _require_verifier(user, body.verifier, request, session)
-    # M-B1 (2026-09-26): epoch fence — see rotate_credential's M-2 note.
+    # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2):
+    # _require_verifier's populate_existing re-read refreshes this same ORM
+    # object in place, so capturing afterwards would compare the
+    # post-refresh epoch against itself and fence nothing.
     expected_epoch = user.token_epoch
+    await _require_verifier(user, body.verifier, request, session)
     settings = request.app.state.settings
     secret = unwrap_secret(user.totp_secret, settings.token_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None

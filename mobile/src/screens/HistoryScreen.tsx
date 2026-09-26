@@ -163,12 +163,16 @@ function snippetOf(text: string): string {
  *  a 200k-character dialog is unusable on Android and buries the choice.
  *  Each side is flattened and cut to CONFLICT_SNIPPET_CHARS; the suffix
  *  states the FULL length so the truncation is explicit BEFORE the
- *  destructive Overwrite choice (never silently shortened). */
+ *  destructive Overwrite choice (never silently shortened).
+ *  2026-09-26 audit follow-up: the suffix now reports the RAW text's
+ *  length. The flattened form silently shrinks runs of whitespace, so the
+ *  old flattened count understated the entry the user still owns (raw
+ *  "a  b" is 4 chars; the flattened snippet shows 3). */
 const CONFLICT_SNIPPET_CHARS = 300;
 function conflictSnippet(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= CONFLICT_SNIPPET_CHARS) return flat;
-  return flat.slice(0, CONFLICT_SNIPPET_CHARS) + tr("history.conflictSnippetSuffix", { count: flat.length });
+  return flat.slice(0, CONFLICT_SNIPPET_CHARS) + tr("history.conflictSnippetSuffix", { count: text.length });
 }
 
 /** The payload's sentiment rides inside the encrypted blob, but the server

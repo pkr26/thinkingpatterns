@@ -1388,11 +1388,15 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
   // Every once-queue below is fully consumed — a stray payload leaks into
   // the next test's scan (clearAllMocks does not clear once-queues).
   const calmScan = {
+    // 2026-09-26 follow-up (portal N-1): scan payloads carry the same
+    // generation the chart guard checks; the echo default is 7.
+    state_seq: 7,
     stats: { patterns: [
       { kind: "temporal", label: "quiet", occurrences: 3, confidence: 0.4, detail: { pattern_pid: "t:quiet", evidence_dates: [] } },
     ] },
   };
   const sensitiveScan = {
+    state_seq: 7,
     stats: { patterns: [
       { kind: "recurring_phrase", label: "heavy", occurrences: 2, confidence: 0.5, detail: { sensitive: true, pattern_pid: "r:heavy", evidence_dates: [] } },
     ] },
@@ -1457,6 +1461,43 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
     expect(textOf(root)).not.toContain("of your patients");
   });
 
+  it("2026-09-26 follow-up (portal N-1): a replayed OLDER insights blob degrades to the error row, not stale triage data", async () => {
+    const { resetInsightsFreshness } = await import("../src/views/PatientView");
+    resetInsightsFreshness();
+    try {
+      const summary = (seq: number) => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: seq });
+      // The scan bar exists only for a caseload of 2+: pair the target
+      // (whose generation rolls back) with a quiet second patient that
+      // stays at generation 7 across both scans. Every once-queue below is
+      // fully consumed (a stray payload leaks into the next test's scan).
+      mockedApi.patientInsights
+        .mockResolvedValueOnce(summary(5))
+        .mockResolvedValueOnce(summary(7))
+        .mockResolvedValueOnce(summary(3))
+        .mockResolvedValueOnce(summary(7));
+      vi.mocked(mockedCrypto.decryptInsights)
+        .mockResolvedValueOnce({ state_seq: 5, stats: calmScan.stats } as never)
+        .mockResolvedValueOnce({ state_seq: 7, stats: calmScan.stats } as never)
+        .mockResolvedValueOnce({ state_seq: 3, stats: sensitiveScan.stats } as never)
+        .mockResolvedValueOnce({ state_seq: 7, stats: calmScan.stats } as never);
+      const root = await view([{ ...patient }, second]);
+      await press(root, "Scan caseload for triage");
+      await flush(8);
+      // First scan at generation 5 lands the quiet pattern count.
+      expect(textOf(root)).toContain("1 pattern");
+      // A server replaying generation 3 (below the session's high-water
+      // mark) must NOT feed its sensitive flag into the sort/banner — the
+      // row degrades to the honest could-not-scan blank instead.
+      await press(root, "Scan caseload for triage");
+      await flush(8);
+      expect(textOf(root)).not.toContain("sensitive card");
+      // Two patients scanned twice: four insight fetches total.
+      expect(mockedApi.patientInsights).toHaveBeenCalledTimes(4);
+    } finally {
+      resetInsightsFreshness();
+    }
+  });
+
   it("a patient known only from a scan row still counts toward the banner", async () => {
     vi.mocked(mockedCrypto.decryptInsights)
       .mockResolvedValueOnce(sensitiveScan as never)
@@ -1490,14 +1531,15 @@ describe("PatientsView caseload ordering (audit round 2, 2026-09-21, F-11)", () 
     mockedApi.patients.mockResolvedValueOnce(threePatients);
     // Scan payloads in patients-array order: a → 2 calm, b → 1 sensitive, c → 6 calm.
     vi.mocked(mockedCrypto.decryptInsights)
-      .mockResolvedValueOnce({ stats: { patterns: [
+      .mockResolvedValueOnce({ state_seq: 7, stats: { patterns: [
         { kind: "temporal", label: "a1", occurrences: 2, confidence: 0.4, detail: { pattern_pid: "t:a1", evidence_dates: [] } },
         { kind: "temporal", label: "a2", occurrences: 2, confidence: 0.4, detail: { pattern_pid: "t:a2", evidence_dates: [] } },
       ] } } as never)
-      .mockResolvedValueOnce({ stats: { patterns: [
+      .mockResolvedValueOnce({ state_seq: 7, stats: { patterns: [
         { kind: "recurring_phrase", label: "s1", occurrences: 1, confidence: 0.5, detail: { sensitive: true, pattern_pid: "r:s1", evidence_dates: [] } },
       ] } } as never)
       .mockResolvedValueOnce({
+        state_seq: 7,
         stats: {
           patterns: [1, 2, 3, 4, 5, 6].map((i) => (
             { kind: "temporal", label: `c${i}`, occurrences: 1, confidence: 0.4, detail: { pattern_pid: `t:c${i}`, evidence_dates: [] } }

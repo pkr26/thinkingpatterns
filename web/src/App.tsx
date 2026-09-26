@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
+import { adoptLegacyPlaintextMutes } from "./patternMutes";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from "./sessionLock";
 import { isOnline, localStore, onWindowEvent } from "./platform";
 import { AppFrame, Button, Card, ErrorBanner, Note } from "./ui";
@@ -170,6 +171,14 @@ export function App(): React.JSX.Element {
     // earlier (D-9 keeps ciphertext across sign-out) — one entry point of
     // the anti-stranding contract alongside the periodic flush above.
     void flushQueueOnReconnect();
+    // 2026-09-26 audit follow-up (B-6): adopt any pre-fix plaintext mute
+    // list the moment the vault holds THIS account's keys — the plaintext
+    // copy must not survive until the user happens to visit Patterns (the
+    // idempotent Patterns mount call stays). Best-effort by contract: it
+    // never blocks app start.
+    if (vault.ownerUserId() === success.userId) {
+      void adoptLegacyPlaintextMutes(vault.get().dataKey, success.userId).catch(() => undefined);
+    }
     if (hasSeenOnboarding(success.userId, localStore.get)) {
       setView({ kind: "today" });
     } else {

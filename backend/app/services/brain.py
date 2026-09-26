@@ -1049,8 +1049,44 @@ CURATED_SENTIMENT: dict[str, float] = {
 # The ENGLISH-only lexicon: the language-DETECTION set is built from it
 # (not the merged lookup), so Spanish prose cannot inflate English hits.
 SENTIMENT_LEXICON_EN: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
+def _fold_canonicalize_lexicon(mapping: dict[str, float]) -> dict[str, float]:
+    """2026-09-26 audit follow-up N-11: fold-invariance for the MERGED maps.
+
+    Text is scored post-fold (_fold_sentiment_text), so an accented key
+    whose folded twin also sits in the map is unreachable for lookup —
+    but when the two carry DIFFERENT values the map contradicts the
+    fold-invariance the ES tables are held to (M-B4). Align the accented
+    (unreachable) entry to the value its twin actually scores; the
+    observable default-path behavior never changes, and the class is
+    pinned by test_mb4_* over the merged maps too. Consistent pairs
+    (the ES tables ship both forms deliberately) are left untouched.
+    Plain NFD+Mn-strip, same Latin family _fold_sentiment_text folds."""
+    import unicodedata
+
+    for key in [
+        k
+        for k in mapping
+        if unicodedata.normalize("NFD", k) != k
+        and "".join(
+            c for c in unicodedata.normalize("NFD", k)
+            if unicodedata.category(c) != "Mn"
+        )
+        in mapping
+    ]:
+        folded = "".join(
+            c
+            for c in unicodedata.normalize("NFD", key)
+            if unicodedata.category(c) != "Mn"
+        )
+        if mapping[folded] != mapping[key]:
+            mapping[key] = mapping[folded]
+    return mapping
+
+
 # The runtime lookup: English wins every collision by merge order.
-SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}
+SENTIMENT_LEXICON: dict[str, float] = _fold_canonicalize_lexicon(
+    {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}
+)
 # L-3 (2026-09-26): the SPANISH-scoring lookup — the mirror merge, Spanish
 # winning every collision. The single EN-winning SENTIMENT_LEXICON above
 # stays the pinned artifact (shared/brain_lexicon.json + the mobile TS
@@ -1058,12 +1094,16 @@ SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}
 # selects THIS map when the corpus's detected language is "es", so the 13
 # shared words ("perfecto", "genial", "fatal", "terrible", ...) score
 # their Spanish weights instead of muted English ones — mirroring how
-# theme_for() already selects the theme lexicon by language. NOTE for the
-# on-device port: mobile/src/brain currently scores with the merged map
-# alone; porting this language-gated selection is the follow-up that
-# keeps server/local-recompute ES corpora identical (the golden vectors
-# pin only default-language scoring, which is unchanged here).
-SENTIMENT_LEXICON_ES: dict[str, float] = {**SENTIMENT_LEXICON_EN, **VADER_BASE_ES}
+# theme_for() already selects the theme lexicon by language. The
+# on-device port SHIPPED with this change (2026-09-26 L-3): mobile and
+# web src/brain/sentiment.ts select the ES mirror merge on detected
+# "es" with identical detection constants and negator scoping, keeping
+# server/local-recompute/on-device ES corpora identical (the golden
+# vectors pin default-language scoring, which is unchanged; the
+# brainLanguage parity suites pin the ES-gated path on both clients).
+SENTIMENT_LEXICON_ES: dict[str, float] = _fold_canonicalize_lexicon(
+    {**SENTIMENT_LEXICON_EN, **VADER_BASE_ES}
+)
 
 # Intensifiers/downtoners (VADER booster conventions, multiplicative).
 # "hardly"/"barely" are NOT downtoners: VADER treats them as negations
@@ -1955,7 +1995,14 @@ def sentiment_score(tokens: list[str], language: str | None = None) -> float:
     sentiments = _valence_walk(tokens, language)
     if not sentiments:
         return 0.0
-    total = sum(sentiments)
+    # E-7 (2026-09-26 audit follow-up): naive left-to-right accumulation,
+    # NOT builtin sum() — Python 3.12+ sums floats with Neumaier
+    # compensation while both TS ports reduce naively, so bit-identical
+    # walks could still disagree in the last ULP and break the
+    # float-equality port contract (pinned by the divergent vector).
+    total = 0.0
+    for v in sentiments:
+        total += v
     return max(-1.0, min(1.0, total / SENTIMENT_SCALE))
 
 
@@ -1974,8 +2021,17 @@ def sentiment_components(tokens: list[str], language: str | None = None) -> tupl
     sentiments = _valence_walk(tokens, language)
     if not sentiments:
         return (0.0, 0.0)
-    positive = sum(v for v in sentiments if v > 0) / SENTIMENT_SCALE
-    negative = -sum(v for v in sentiments if v < 0) / SENTIMENT_SCALE
+    # E-7: naive accumulation matching the TS ports' loop (see
+    # sentiment_score).
+    positive_total = 0.0
+    negative_total = 0.0
+    for v in sentiments:
+        if v > 0:
+            positive_total += v
+        elif v < 0:
+            negative_total += v
+    positive = positive_total / SENTIMENT_SCALE
+    negative = -negative_total / SENTIMENT_SCALE
     return (max(0.0, min(1.0, positive)), max(0.0, min(1.0, negative)))
 
 

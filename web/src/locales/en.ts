@@ -66,6 +66,7 @@ export const en: Record<string, string> = {
   "nav.getHelp": "Get help",
   "nav.a11y": "Main navigation",
   "nav.getHelpA11y": "Get help — crisis resources",
+  "nav.skipToContent": "Skip to content",
   "buttons.needHelp": "Need help now? Crisis resources",
 
   // -------------------------------------------------------------- calendar
@@ -950,6 +951,7 @@ export const en: Record<string, string> = {
   "login.webSignInTitle": "Sign in",
   "login.webRegisterTitle": "Create your journal",
   "login.webUsername": "Username",
+  "login.webUsernamePlaceholder": "e.g. quiet.morning",
   "login.webPassword": "Password",
   "login.webConfirm": "Confirm password",
   "login.webRegisterNote": "12+ characters (16+, or three character classes, keeps it strong). If you forget it, nobody can recover it — that is the point.",
@@ -1049,6 +1051,7 @@ export const en: Record<string, string> = {
   "settings.pwTooShort": "New password: at least 12 characters.",
   "settings.pwMismatch": "The two new passwords do not match.",
   "settings.rotateSuccessNotice": "Password changed. Every session — including the mobile app — was signed out. Sign in again with your new password.",
+  "settings.rotateSuccessPartialNotice": "Password changed. Every session — including the mobile app — was signed out; sign in again with your new password. {count} therapist share(s) could not be re-wrapped — re-share from the pairing screen next time you connect with them.",
   "settings.rotateMovedLockdown": "The re-encryption succeeded, but a later step failed — the server has already moved your journal to the new key, so this session was locked: sign in again and repeat the password change to finish it.",
   "settings.rotateAlreadyRotated": "Your journal was already re-encrypted under a different new password in an earlier attempt — nothing was changed now. Sign in with the password from that earlier change.",
   "settings.rotateFailed": "Could not change the password.",

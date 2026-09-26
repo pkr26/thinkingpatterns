@@ -38,6 +38,13 @@ export const localStore = {
       // cosmetic (WEB_PLAN D-4 — nothing sensitive is ever stored).
     }
   },
+  remove(key: string): void {
+    try {
+      if (typeof window !== "undefined") window.localStorage.removeItem(key);
+    } catch {
+      // Storage is optional; never let a cleanup write fail a flow.
+    }
+  },
   /** Remove only this app's non-content namespace at lock/logout. */
   removePrefix(prefix: string): void {
     try {

@@ -271,8 +271,8 @@ TOPIC_TEMPLATES_STEADY: tuple[str, ...] = (
 # at render time via the maps below.
 TEMPLATE_BY_KIND_ES: dict[str, tuple[str, ...]] = {
     "temporal": (
-        "'{label}' aparece sobre todo los {day}s — ¿qué tienen en común esos días?",
-        "Suele escribir sobre '{label}' los {day}s. ¿Qué suele pasar justo antes?",
+        "'{label}' aparece sobre todo los {day_plural} — ¿qué tienen en común esos días?",
+        "Suele escribir sobre '{label}' los {day_plural}. ¿Qué suele pasar justo antes?",
         "Cuando llega el {day} y '{label}' está en su mente, ¿dónde lo nota primero?",
     ),
     "mood_correlation": (
@@ -409,6 +409,22 @@ _WEEKDAYS_ES: dict[str, str] = {
     "Sunday": "domingo",
     "that day": "ese día",
 }
+# 2026-09-26 audit follow-up (ES grammar): Spanish pluralizes only
+# sábado/domingo — lunes..viernes are INVARIANT ("los lunes", never "los
+# luness"/"los luneses"). The temporal templates therefore take a
+# dedicated {day_plural} placeholder instead of appending "s" to the
+# singular {day} (template 3 keeps the singular: "Cuando llega el
+# sábado...").
+_WEEKDAYS_ES_PLURAL: dict[str, str] = {
+    "Monday": "lunes",
+    "Tuesday": "martes",
+    "Wednesday": "miércoles",
+    "Thursday": "jueves",
+    "Friday": "viernes",
+    "Saturday": "sábados",
+    "Sunday": "domingos",
+    "that day": "esos días",
+}
 _DIRECTION_ES: dict[str, str] = {
     "lower": "más bajo",
     "higher": "más alto",
@@ -449,12 +465,15 @@ def render_pattern_questions(pattern: Pattern, language: str = "en") -> list[str
     if spanish:
         # Translate the engine's English detail values for the ES templates
         # only — the EN path renders raw values exactly as before.
-        day = _WEEKDAYS_ES.get(pattern.detail.get("day", "that day"), pattern.detail.get("day"))
+        raw_day = pattern.detail.get("day", "that day")
+        day = _WEEKDAYS_ES.get(raw_day, raw_day)
+        day_plural = _WEEKDAYS_ES_PLURAL.get(raw_day, raw_day)
         direction = _DIRECTION_ES.get(
             pattern.detail.get("direction", "lower"), pattern.detail.get("direction")
         )
     else:
         day = pattern.detail.get("day", "that day")
+        day_plural = day  # EN templates append their own "s"
         direction = pattern.detail.get("direction", "lower")
     rendered = []
     for template in templates:
@@ -464,6 +483,7 @@ def render_pattern_questions(pattern: Pattern, language: str = "en") -> list[str
             template.format(
                 label=pattern.label,
                 day=day,
+                day_plural=day_plural,
                 direction=direction,
                 # Evidence anchoring (2026-09-17): percentages computed from the
                 # pattern's own numbers, so questions feel grounded ("31% of

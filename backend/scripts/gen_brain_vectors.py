@@ -30,6 +30,16 @@ from app.services import brain, statsig  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[2] / "shared" / "brain_vectors.json"
 
+# E-7 (2026-09-26 audit follow-up): this nine-word lexicon walk diverges
+# between naive left-to-right accumulation (what both TS ports do via
+# reduce/loop) and Python 3.12+'s Neumaier-compensated builtin sum() in
+# the final ULP — 0.4499999999999999 vs 0.44999999999999996. The engine
+# now accumulates naively; this row pins the ORDER, so a regression back
+# to sum() fails float equality on BOTH platforms.
+SENTIMENT_SUM_ORDER_CASE = (
+    "smuggled opportunist stammerer wisdom regretfulness respected harmonising fearsome jw"
+)
+
 TEXT_CASES: list[str] = [
     "quiet day, some work in the afternoon",
     "felt calm and grateful today",
@@ -203,7 +213,7 @@ def build_payload() -> dict:
     # vector would then pin the drift instead of catching it.
     from app.services.patterns import WORD_RE  # noqa: PLC0415 — engine seam
 
-    for text in TEXT_CASES:
+    for text in [*TEXT_CASES, SENTIMENT_SUM_ORDER_CASE]:
         tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
         tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
         pa, na = brain.sentiment_components(tokens)

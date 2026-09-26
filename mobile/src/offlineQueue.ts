@@ -255,8 +255,14 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
   // record count and serialized bytes — the preservation promise keeps the
   // NEWEST records, and an unbounded row would recreate the wedge the caps
   // exist to prevent.
+  // 2026-09-26 audit follow-up: the byte loop must never drop the LAST
+  // remaining record. When the newest record ALONE exceeds the cap the old
+  // `length > 0` guard emptied the store — silently destroying the newest
+  // quarantined bytes the promise above exists to keep. An oversize retained
+  // record cannot wedge the scope either: readItems' catch already degrades
+  // an unreadable quarantine row to a silent drop without rejecting.
   while (records.length > MAX_QUARANTINE_RECORDS) records.shift();
-  while (records.length > 0 && quarantineBytes(records) > MAX_QUEUE_BYTES) records.shift();
+  while (records.length > 1 && quarantineBytes(records) > MAX_QUEUE_BYTES) records.shift();
   await AsyncStorage.setItem(scope.quarantine, JSON.stringify({ v: 1, records }));
 }
 
@@ -351,8 +357,13 @@ async function appendRejected(scope: QueueScope, items: QueuedEntry[], generatio
   // (drop-oldest) — an unbounded rejected row could grow past the
   // cursor-window limit and wedge the scope; recovery keeps the NEWEST
   // rejections, which are the ones the user can still act on.
+  // 2026-09-26 audit follow-up: same fix as the quarantine byte bound —
+  // never drop the LAST remaining rejection. A newest record that alone
+  // exceeds the cap (possible through a restored/tampered queue row, which
+  // readItems does not re-cap on read) stays recoverable instead of being
+  // silently destroyed by the very loop promising to keep it.
   while (existing.length > MAX_REJECTED_LENGTH) existing.shift();
-  while (existing.length > 0 && serializedBytes(existing) > MAX_QUEUE_BYTES) existing.shift();
+  while (existing.length > 1 && serializedBytes(existing) > MAX_QUEUE_BYTES) existing.shift();
   if (!wipedSince(generation)) await writeItems(scope.rejected, existing);
 }
 

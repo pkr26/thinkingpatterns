@@ -220,6 +220,39 @@ BENIGN_COMPOUNDS: tuple[str, ...] = (
     "自杀预防",
     "prevencion del suicidio",
     "prevencion de suicidio",
+    # 2026-09-26 audit follow-up (corpus false positives): the H-1
+    # additions fired the dialog tier on everyday Spanish — grooming
+    # ("me quiero cortar el pelo" = I want a haircut), building
+    # navigation ("no hay salida de emergencia" = no emergency exit),
+    # common sports injuries ("me lastimo la rodilla" = I hurt my knee),
+    # and colloquial slipping-away ("desaparecer de la fiesta"). The
+    # engine's own benign-compound mask is the designed mechanism for
+    # exactly this class (same standing as "suicide squad"); an
+    # enumerated body-part/injury mask keeps the recall of the bare
+    # self-harm phrasings while removing the dominant benign usage.
+    # Post-fold spellings (masking runs after Latin-mark folding);
+    # "me lastimo cuando corro" (no body part) stays an accepted
+    # conservative trigger, mirroring EN's "tired of living in <place>".
+    "cortar el pelo",
+    "cortarme el pelo",
+    "cortar la barba",
+    "cortarme la barba",
+    "cortar las unas",
+    "cortarme las unas",
+    "no hay salida de emergencia",
+    "salida de emergencia",
+    "no hay salida hacia el mar",
+    "desaparecer de la fiesta",
+    "desaparecer de las redes",
+    "me lastimo el dedo",
+    "me lastimo la rodilla",
+    "me lastimo el tobillo",
+    "me lastimo el pie",
+    "me lastimo la mano",
+    "me lastimo el brazo",
+    "me lastimo la cabeza",
+    "me lastimo la espalda",
+    "me lastimo la pierna",
 )
 
 

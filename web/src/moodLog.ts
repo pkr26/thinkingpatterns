@@ -90,6 +90,17 @@ async function write(dataKey: Bytes, userId: string, days: MoodDay[]): Promise<v
   }
 }
 
+/** 2026-09-26 audit follow-up (B-7): rotation REWRAPS the mood log under
+ *  the incoming data key instead of clearing it — the trend/streak history
+ *  is journal-adjacent state the user expects to survive a password
+ *  change. Full-fidelity via the private read/write (recentMoods slices).
+ *  A failure propagates so the rotation falls back to the old clear. */
+export async function rewrapMoodLog(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
+  const days = await read(oldKey, userId);
+  if (days.length === 0) return;
+  await write(newKey, userId, days);
+}
+
 /** Record (or same-day replace) one mood value, optionally with energy. */
 export async function recordMood(
   dataKey: Bytes,

@@ -569,6 +569,11 @@ export const api = {
         {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${activeSession.token}` },
+          // 2026-09-26 audit follow-up (portal N-2): the audit doc's
+          // keepalive requirement — a logout fired at sign-out must
+          // survive the tab being closed/navigated inside the fetch
+          // window (no body, so the 64 KiB keepalive cap is irrelevant).
+          keepalive: true,
         },
         activeSession.baseUrl,
       );

@@ -202,6 +202,15 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # 2026-09-26 audit follow-up (B1): the M-I3 container-limit pass
+    # missed this service — a stuck dump|encrypt loop is exactly the
+    # CPU-saturating class those limits exist to contain on the shared
+    # host, and this worker had NO memory limit either. pg_dump is bursty:
+    # 1 CPU / 512 MiB is generous for a daily dump while the co-located
+    # DB keeps its headroom. (The dev overlay inherits these via merge.)
+    mem_limit: 512M
+    cpus: 1.0
+    pids_limit: 64
     # No image CMD override trickery: a plain POSIX loop. `$$` escapes keep
     # compose from interpolating the loop's own variables. The dump runs
     # BEFORE the first sleep so `up -d backup` proves itself immediately;

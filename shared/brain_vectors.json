@@ -46,7 +46,7 @@
   },
   {
    "text": "it was very very good but honestly kind of awful afterwards",
-   "score": 0.09049999999999991,
+   "score": 0.09050000000000002,
    "pa": 1.0,
    "na": 1.0
   },
@@ -76,7 +76,7 @@
   },
   {
    "text": "the interview went badly i suppose, but i realize now the reason i was nervous was because i cared about it",
-   "score": -0.33749999999999997,
+   "score": -0.3374999999999999,
    "pa": 0.675,
    "na": 1.0
   },
@@ -94,7 +94,7 @@
   },
   {
    "text": "terrible awful day \ud83d\ude1e but the dog \ud83d\udc15 helped",
-   "score": -0.9500000000000002,
+   "score": -0.9500000000000001,
    "pa": 0.6375,
    "na": 1.0
   },
@@ -289,6 +289,12 @@
    "score": 0.0,
    "pa": 0.0,
    "na": 0.0
+  },
+  {
+   "text": "smuggled opportunist stammerer wisdom regretfulness respected harmonising fearsome jw",
+   "score": 0.4499999999999999,
+   "pa": 1.0,
+   "na": 1.0
   }
  ],
  "updates": [

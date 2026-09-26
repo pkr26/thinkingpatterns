@@ -103,6 +103,10 @@ describe("App", () => {
     await flush();
     expect(textOf(root)).toContain("could not be unlocked with this password");
     expect(textOf(root)).toContain("Sign in");
+    // 2026-09-26 follow-up (portal N-3): this path runs AFTER a fresh 24 h
+    // bearer was minted — dropping it from memory must also revoke it
+    // server-side, like every other session end.
+    expect(api.logout).toHaveBeenCalledTimes(1);
   });
 
   it("a non-tamper unlock failure reports the raw message", async () => {
@@ -285,6 +289,10 @@ describe("App", () => {
     await act(async () => { window.dispatchEvent(pageshow as unknown as Event); });
     expect(textOf(root)).toContain("Restored from the browser cache");
     expect(textOf(root)).toContain("Sign in");
+    // 2026-09-26 follow-up: the fourth lock path revokes server-side too
+    // (the M-P1 test coverage gap — the lockdown was pinned, the logout
+    // fire was not).
+    expect(api.logout).toHaveBeenCalledTimes(1);
   });
 
   it("a normal (non-persisted) pageshow does NOT lock the app", async () => {

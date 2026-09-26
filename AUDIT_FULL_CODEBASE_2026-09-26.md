@@ -332,7 +332,10 @@ modified, created (other than this report), or deleted.*
 
 Every actionable finding above was fixed and re-tested after this report was filed.
 Each fix carries an inline `2026-09-26 audit <ID>` annotation and new test coverage.
-Change surface: 134 files, +5,576/−1,184 lines.
+Change surface: 135 files, +8,411/−1,184 lines (the originally stated
+134/+5,576 understated insertions by ~2.8k — the deletions figure was
+exact; corrected 2026-09-26 follow-up audit. Honoring this report's own
+convention of excluding the report file itself: 134 files, +8,044).
 
 | Finding | Status |
 |---|---|

@@ -1472,10 +1472,16 @@ describe("HistoryScreen edit: the two-writer conflict dialog (audit 2026-09-25)"
   // verbatim — up to 100k chars EACH inside one Alert. Each side is now
   // snippeted to ~300 chars with a suffix stating the full length, so the
   // user knows they are choosing on a preview before overwriting.
+  // 2026-09-26 audit follow-up: the suffix states the RAW text's length —
+  // the flattened form understates entries with whitespace runs (raw
+  // "a  b" is 4 chars; flattened it reads 3). The seeds below carry heavy
+  // whitespace so the two counts differ decisively.
   it("long conflict texts are snippeted with an explicit full-length suffix (M-M3)", async () => {
     oneEntry();
-    const theirLong = "their words ".repeat(120); // ~1.4k chars
-    const myLong = "my words ".repeat(120); // ~1k chars
+    const theirLong = "their   words  ".repeat(120); // 1800 raw, 1439 flattened
+    // The editor's save path hands conflictSnippet draft.trim(), so the
+    // "yours" seed carries no outer whitespace — its raw count is exact.
+    const myLong = Array.from({ length: 120 }, () => "my\t\twords").join(" "); // 1199 raw, 1079 flattened
     const flatLength = (s: string): number => s.replace(/\s+/g, " ").trim().length;
     seedConflict(theirLong);
     const root = await render(<HistoryScreen navigation={nav} />);
@@ -1488,9 +1494,12 @@ describe("HistoryScreen edit: the two-writer conflict dialog (audit 2026-09-25)"
     await flush();
     const [title, body] = lastAlert();
     expect(title).toBe("This entry changed on another device");
-    // Both sides carry the truncation suffix stating the full length...
-    expect(body).toContain(`… (${flatLength(theirLong)} characters total)`);
-    expect(body).toContain(`… (${flatLength(myLong)} characters total)`);
+    // Both sides carry the truncation suffix stating the FULL RAW length...
+    expect(body).toContain(`… (${theirLong.length} characters total)`);
+    expect(body).toContain(`… (${myLong.length} characters total)`);
+    // ...never the smaller flattened count (the honest-number pin).
+    expect(body).not.toContain(`… (${flatLength(theirLong)} characters total)`);
+    expect(body).not.toContain(`… (${flatLength(myLong)} characters total)`);
     // ...and neither full text appears in the dialog body.
     expect(body!.length).toBeLessThan(1_500);
     expect(body).not.toContain(theirLong);

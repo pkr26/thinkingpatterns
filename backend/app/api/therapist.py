@@ -561,12 +561,16 @@ async def read_own_access_log(
     "/account",
     status_code=204,
     dependencies=[
-        # 2026-09-26 audit (LOW, batch item e): sharing-disabled
-        # deployments must not expose the therapist delete route either —
-        # the same fail-closed posture deps.py documents for every other
-        # sharing surface (flat 404 when the feature is administratively
-        # off, consistent with register/me/wrap-key/pairing).
-        Depends(require_sharing_enabled),
+        # 2026-09-26 audit follow-up (deletion-availability reversal): the
+        # require_sharing_enabled gate added by this audit's LOW batch
+        # item e is REMOVED again — it retired the deliberate 2026-09-21
+        # guarantee ("a feature shutdown must block sharing, never
+        # self-erasure") and made right-to-erasure depend on a feature
+        # flag: an operator disabling sharing stranded therapist erasure
+        # until re-enablement or manual SQL. Deletion is not a sharing
+        # surface — it serves no patient content, is verifier-gated and
+        # epoch-fenced (M-B1), and removes the therapist's own account.
+        # Every other therapist route keeps the gate.
         Depends(
             make_rate_limiter("therapist-account-delete", "auth_rate_limit", "auth_rate_window")
         ),
@@ -742,21 +746,77 @@ async def list_patients(
                 detail="patient list exceeds the supported caseload size",
                 code="payload_too_large",
             )
-        patient_ids = (
+        # 2026-09-26 audit follow-up (bounded listing): the per-patient
+        # fence now guards ACTIVE grants only — the only rows that serve
+        # key material or summaries. REVOKED rows are terminal metadata
+        # (no keys, no summary, no phase computation) assembled from the
+        # bulk read, with one batched existence re-check so a patient
+        # deleted mid-request vanishes from the response exactly as the
+        # locked re-fetch used to skip them. Lock+query work is thereby
+        # bounded by MAX_PATIENTS_PER_THERAPIST instead of lifetime
+        # history: a decades-long or imported caseload used to serialize
+        # thousands of sequential lock acquisitions under the therapist
+        # fence (the H-7 413 had bounded it at ~100 before).
+        rows = (
             (
                 await session.execute(
-                    select(Consent.user_id)
+                    select(Consent, User)
+                    .join(User, Consent.user_id == User.id)
                     .where(Consent.therapist_id == user.id)
                     .order_by(Consent.granted_at.desc(), Consent.id.desc())
                 )
             )
-            .scalars()
             .all()
         )
         await session.commit()
-        for patient_id in patient_ids:
+        revoked_patient_ids = [
+            row.Consent.user_id for row in rows if row.Consent.status != "active"
+        ]
+        alive_revoked: set[str] = set()
+        if revoked_patient_ids:
+            alive_revoked = set(
+                (
+                    (
+                        await session.execute(
+                            select(User.id).where(User.id.in_(revoked_patient_ids))
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            )
+            await session.commit()
+        for row in rows:
+            consent, patient = row.Consent, row.User
+            patient_id = consent.user_id
+            active = consent.status == "active"
+            if not active and patient_id not in alive_revoked:
+                # The patient account was deleted between the bulk read
+                # and assembly; the locked re-fetch used to skip this
+                # pair, so it stays skipped here.
+                continue
+            if not active:
+                # Terminal history row: metadata only, no key material,
+                # no summary, no phase computation (all gated on active
+                # below), so no per-patient fence is needed.
+                out.append(
+                    PatientOut(
+                        user_id=patient.id,
+                        username=patient.username,
+                        status=consent.status,
+                        granted_at=consent.granted_at,
+                        revoked_at=consent.revoked_at,
+                        ephemeral_pub=None,
+                        wrapped_key=None,
+                        summary_blob=None,
+                        summary_eph_pub=None,
+                        summary_updated_at=None,
+                    )
+                )
+                _audit(session, user, patient_id, "list_patients")
+                continue
             async with sharing_locks.hold(sharing_patient_lock_key(patient_id)):
-                row = (
+                fresh = (
                     await session.execute(
                         select(Consent, User)
                         .join(User, Consent.user_id == User.id)
@@ -764,12 +824,12 @@ async def list_patients(
                         .execution_options(populate_existing=True)
                     )
                 ).first()
-                if row is None:
+                if fresh is None:
                     # A concurrent account deletion can remove the pair
                     # between the ID list and its per-patient fence.
                     await session.commit()
                     continue
-                consent, patient = row
+                consent, patient = fresh.Consent, fresh.User
                 active = consent.status == "active"
                 # H-16 (2026-09-20): gate the caseload summary on the
                 # patient being CURRENTLY insight-phase, not merely on the
@@ -836,6 +896,11 @@ async def list_patients(
                 # same per-patient transaction as the row above.
                 _audit(session, user, patient_id, "list_patients")
                 await session.commit()
+        if revoked_patient_ids:
+            # The revoked history's audit rows accumulate outside any lock;
+            # one commit flushes them (active rows committed per-fence
+            # above, exactly as before).
+            await session.commit()
     return out
 
 
@@ -1327,15 +1392,35 @@ async def _assert_note_quota(
     (blobs up to MAX_BLOB_64 ≈ 1.07 MiB) with zero accounting and no
     pruning — the chart quota bounded only live notes, so history grew
     without limit. Revision rows join the row budget and revision bytes
-    join the byte budget (one outer-joined aggregate query; the revision
-    table carries no patient column, so it joins through the note)."""
+    join the byte budget.
+
+    2026-09-26 audit follow-up (quota fan-out): both byte totals are SCALAR
+    SUBQUERIES over their own tables. The first cut summed them across the
+    revision outer join, so a note with k revisions contributed its blob
+    length k times — edited charts hit the byte cap at roughly half the
+    intended budget and a note at the revision cap could never be edited
+    again (eviction could not go below the cap; only deletion recovered)."""
+    chart_note_ids = select(TherapistNote.id).where(
+        TherapistNote.therapist_id == therapist_id,
+        TherapistNote.user_id == patient_id,
+    )
+    note_bytes_total = (
+        select(func.coalesce(func.sum(_note_blob_length(session)), 0))
+        .where(TherapistNote.id.in_(chart_note_ids))
+        .scalar_subquery()
+    )
+    revision_bytes_total = (
+        select(func.coalesce(func.sum(_revision_blob_length(session)), 0))
+        .where(TherapistNoteRevision.note_id.in_(chart_note_ids))
+        .scalar_subquery()
+    )
     note_count, note_bytes, revision_count, revision_bytes = (
         await session.execute(
             select(
                 func.count(distinct(TherapistNote.id)),
-                func.coalesce(func.sum(_note_blob_length(session)), 0),
+                note_bytes_total,
                 func.count(TherapistNoteRevision.id),
-                func.coalesce(func.sum(_revision_blob_length(session)), 0),
+                revision_bytes_total,
             )
             .outerjoin(
                 TherapistNoteRevision, TherapistNoteRevision.note_id == TherapistNote.id

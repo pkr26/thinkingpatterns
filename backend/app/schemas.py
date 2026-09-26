@@ -33,6 +33,17 @@ MAX_SALT_B64 = 128
 MAX_VERIFIER_B64 = 64
 MAX_DATA_KEY_B64 = 44  # b64(32 bytes) exactly — the endpoint enforces KEY_SIZE
 MAX_BLOB_B64 = 1_500_000  # ~1.07 MiB decoded
+# 2026-09-26 audit follow-up N-8: local-recompute STATE blobs are validated
+# by the route against settings.max_user_blob_bytes (config-ceiling
+# MAX_USER_BLOB_BYTES, 8 GiB). The schema cap here mirrors that hard
+# CONFIG ceiling instead of the journal-sized MAX_BLOB_B64 — the first cut
+# pre-empted the route authority at ~1.07 MiB, so a legitimately larger
+# brain state could never be uploaded regardless of configuration (the
+# request body is still bounded much earlier by max_body_bytes
+# middleware, default 2 MiB / ceiling 64 MiB).
+from .config import MAX_USER_BLOB_BYTES as _MAX_USER_BLOB_BYTES  # noqa: E402
+
+MAX_STATE_BLOB_B64 = (_MAX_USER_BLOB_BYTES // 3 + 1) * 4  # b64 of the ceiling
 
 
 class RegisterRequest(StrictRequestModel):
@@ -544,8 +555,8 @@ class LocalRecomputeRequest(StrictRequestModel):
     is a 422 at validation instead of reaching the route loop."""
 
     base_state_seq: int  # the seq of the brain state the client built on
-    state_blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
-    patterns_blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+    state_blob: str = Field(min_length=1, max_length=MAX_STATE_BLOB_B64)
+    patterns_blob: str = Field(min_length=1, max_length=MAX_STATE_BLOB_B64)
     analysis_dates: list[Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]] = Field(
         min_length=1, max_length=366
     )
