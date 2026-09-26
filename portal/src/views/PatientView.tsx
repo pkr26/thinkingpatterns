@@ -853,10 +853,10 @@ export function PatientView(props: {
     label.length > 0 && text.toLowerCase().includes(label.toLowerCase());
 
   return (
-    <main style={{ backgroundColor: theme.bg, minHeight: "100vh", color: theme.body, padding: 24, maxWidth: 860, margin: "0 auto" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+    <main className="portal-main" style={{ minHeight: "100vh" }}>
+      <header className="portal-head">
         <div>
-          <h1 style={{ color: theme.text, fontSize: 20, margin: 0 }}>{patient.username}</h1>
+          <h1>{patient.username}</h1>
           <NoteText>
             {notesOnly
               ? `sharing ended ${patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — their entries and patterns are no longer reachable; your private notes below remain`
@@ -864,7 +864,7 @@ export function PatientView(props: {
             {!notesOnly && newCount > 0 && ` · ${newCount} pattern${newCount === 1 ? "" : "s"} new${lastReviewed ? ` since you marked reviewed ${lastReviewed}` : " for you to review"}`}
           </NoteText>
         </div>
-        <div className="no-print" style={{ display: "flex", gap: 8 }}>
+        <div className="no-print row row--wrap">
           <Button label="Print session summary" small onPress={printPage} />
           <Button label="Back to patients" small onPress={props.onBack} />
           {props.onSignOut && <Button label="Sign out" small danger onPress={props.onSignOut} />}
@@ -977,14 +977,14 @@ export function PatientView(props: {
       {selected ? (
         <Card title={selected.detail.sensitive ? "A difficult thought has been returning" : `${selected.kind} — ${selected.label}`}>
           <NoteText>{describePattern(selected)}</NoteText>
-          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 16px", fontSize: 13 }}>
+          <dl className="evidence-grid">
             {evidenceRows(selected).map(([k, v]) => (
               <div key={k} style={{ display: "contents" }}>
-                <span style={{ color: theme.muted }}>{k}</span>
-                <span style={{ color: theme.body }}>{v}</span>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
               </div>
             ))}
-          </div>
+          </dl>
           <Button label="Back to all patterns" small onPress={() => {
             drilldownGeneration.current += 1;
             setSelected(null);
@@ -1065,7 +1065,7 @@ export function PatientView(props: {
                   rows={3}
                   className="textarea"
                 />
-                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <div className="row" style={{ marginTop: 6 }}>
                   <Button label={busy ? "Saving…" : "Save edit"} small onPress={() => void saveNoteEdit(note)} disabled={busy || !editing.text.trim()} />
                   <Button label="Cancel" small onPress={() => setEditing(null)} disabled={busy} />
                 </div>
@@ -1073,7 +1073,7 @@ export function PatientView(props: {
             ) : (
               <NoteText>{note.text}</NoteText>
             )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div className="row">
               <span style={{ color: theme.muted, fontSize: 11 }}>{dayOf(note.created_at)}</span>
               <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
               {/* Final-verification 2026-09-22: the note edit history used to

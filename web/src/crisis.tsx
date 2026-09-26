@@ -33,13 +33,22 @@ function CrisisAction(props: { href: string; label: string; detail: string; exte
   );
 }
 
+/** RFC 5724 wants `?body=`; only legacy iOS Safari honors `&body=` (the
+ *  same split the mobile app makes in CrisisScreen.tsx). Getting this
+ *  wrong on Android silently DROPS the "HOME" keyword that routes the
+ *  Crisis Text Line conversation — audit 2026-09-26, fix 2026-09-26 (ii). */
+export function crisisSmsLink(): string {
+  const legacyIos = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return `sms:741741${legacyIos ? "&" : "?"}body=HOME`;
+}
+
 export function CrisisCard(props: { onClose: () => void }): React.JSX.Element {
   return (
     <Dialog title={t("crisis.webTitle")} onClose={props.onClose}>
       <Note tone="danger">{t("crisis.webImmediate")}</Note>
       <div className="stack" style={{ gap: "var(--space-2)" }}>
         <CrisisAction href="tel:988" label={t("crisis.call988")} detail={t("crisis.call988.detail")} />
-        <CrisisAction href="sms:741741&body=HOME" label={t("crisis.text741741")} detail={t("crisis.text741741.detail")} />
+        <CrisisAction href={crisisSmsLink()} label={t("crisis.text741741")} detail={t("crisis.text741741.detail")} />
         <CrisisAction href="https://findahelpline.com" label={t("crisis.findhelpline")} detail={t("crisis.webOutsideUS")} external />
       </div>
       <Note tone="muted">{t("crisis.webSafeMessaging")}</Note>

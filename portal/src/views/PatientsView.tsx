@@ -654,10 +654,13 @@ export function PatientsView(props: {
 
       <h3 className="section-label" style={{ marginTop: 22 }}>ACTIVE</h3>
       {activeAll.length > 1 && (
-        <div style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="toolbar">
           <Button label={scanning ? "Scanning caseload…" : "Scan caseload for triage"} small onPress={() => void scanCaseload()} disabled={scanning} />
-          {/* F-6 (2026-09-21): search + sort for the caseload. */}
-          <label style={{ color: theme.muted, fontSize: 12 }}>
+          {/* F-6 (2026-09-21): search + sort for the caseload. The classes
+              carry the design (portal.css .toolbar*); the select keeps its
+              native arrow suppressed and .select-wrap draws the CSP-safe
+              CSS chevron in the control's right padding lane. */}
+          <label className="toolbar__search">
             search{" "}
             <input
               value={search}
@@ -665,22 +668,22 @@ export function PatientsView(props: {
               placeholder="username…"
               aria-label="Search patients by username"
               className="input"
-              style={{ padding: "7px 11px", fontSize: 14 }}
             />
           </label>
-          <label style={{ color: theme.muted, fontSize: 12 }}>
+          <label className="toolbar__sort">
             sort{" "}
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as typeof sort)}
-              aria-label="Sort patients"
-              className="select"
-              style={{ padding: "7px 30px 7px 11px", fontSize: 14 }}
-            >
-              <option value="shared">newest share</option>
-              <option value="username">username</option>
-              <option value="triage">triage{scan ? "" : " (scan first)"}</option>
-            </select>
+            <span className="select-wrap">
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as typeof sort)}
+                aria-label="Sort patients"
+                className="select"
+              >
+                <option value="shared">newest share</option>
+                <option value="username">username</option>
+                <option value="triage">triage{scan ? "" : " (scan first)"}</option>
+              </select>
+            </span>
           </label>
         </div>
       )}
@@ -793,7 +796,7 @@ export function PatientsView(props: {
       <Card title="Account security" deep>
         {!securityOpen ? (
           <div>
-            <Button label="Show account security" small onPress={() => setSecurityOpen(true)} />
+            <Button label="Show account security" small variant="ghost" onPress={() => setSecurityOpen(true)} />
             <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
               Change your password, recover your sharing key after an interrupted change, or rotate a
               compromised sharing key — nothing runs until you ask.
@@ -906,13 +909,15 @@ export function PatientsView(props: {
                   </Note>
                   <p
                     aria-label="Authenticator secret (manual entry)"
-                    style={{ fontFamily: "monospace", color: theme.text, fontSize: 14, wordBreak: "break-all", margin: 0, letterSpacing: 1 }}
+                    className="mono"
+                    style={{ color: theme.text, fontSize: 14, wordBreak: "break-all", margin: 0, letterSpacing: 1 }}
                   >
                     {totpPending.secretBase32}
                   </p>
                   <p
                     aria-label="otpauth URI for apps that accept it"
-                    style={{ fontFamily: "monospace", color: theme.muted, fontSize: 11, wordBreak: "break-all", margin: 0 }}
+                    className="mono"
+                    style={{ color: theme.muted, fontSize: 11, wordBreak: "break-all", margin: 0 }}
                   >
                     {totpPending.otpauthUri}
                   </p>
@@ -947,7 +952,8 @@ export function PatientsView(props: {
                       </Note>
                       <div
                         aria-label="One-time recovery codes"
-                        style={{ fontFamily: "monospace", color: theme.text, fontSize: 13, letterSpacing: 1, margin: "4px 0", columns: 2 }}
+                        className="mono"
+                        style={{ color: theme.text, fontSize: 13, letterSpacing: 1, margin: "4px 0", columns: 2 }}
                       >
                         {totpBackupCodes.map((code) => (
                           <p key={code} style={{ margin: "2px 0" }}>{code}</p>
@@ -983,6 +989,7 @@ export function PatientsView(props: {
             <Button
               label="Hide account security"
               small
+              variant="ghost"
               onPress={() => {
                 setSecurityOpen(false);
                 // The pending secret is shown-once material: closing the

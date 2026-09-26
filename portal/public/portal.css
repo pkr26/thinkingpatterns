@@ -16,17 +16,38 @@
   --surface-deep: #101622;
 
   --text: #e8edf6;
-  --body-c: #c6cfdd;
+  --body: #c6cfdd;
   --muted: #8a95a3;
 
-  --primary: #4f8cff;
-  --primary-hover: #6a9eff;
+  /* --------------------------------------------------------------- *
+   *  Button palette (2026-09-26 audit, P2): every button pair below
+   *  was verified against the WCAG 2.x relative-luminance formula —
+   *  L = 0.2126·R' + 0.7152·G' + 0.0722·B', where each channel is
+   *  c/12.92 when c ≤ 0.04045, else ((c+0.055)/1.055)^2.4, and the
+   *  contrast ratio is (L1+0.05)/(L2+0.05) — with a #fff label:
+   *
+   *    --primary        #2f6fe0  L = 0.17350  → (1.05)/(0.22350)  = 4.70:1
+   *    --primary-hover  #2557c4  L = 0.11193  → (1.05)/(0.16193)  = 6.48:1
+   *    --danger         #c2483a  L = 0.16411  → (1.05)/(0.21411)  = 4.90:1
+   *    --danger-hover   #a83a2e  L = 0.11550  → (1.05)/(0.16550)  = 6.35:1
+   *
+   *  The old pairs failed AA (#4f8cff = 3.22:1, #6a9eff = 2.64:1,
+   *  #e5685a = 3.25:1, #ee7c6f = 2.71:1). Hovers are now DARKER than
+   *  the rest state so contrast INCREASES on hover, mirroring the web
+   *  app's darkening pattern. --primary-ring is the same new accent.
+   *  --primary-strong is the accent safe as TEXT on dark surfaces
+   *  (#7db0ff on --bg = 8.52:1; plain --primary there is only 4.00:1,
+   *  so ghost-button labels and other accent text use the strong form).
+   *  --------------------------------------------------------------- */
+  --primary: #2f6fe0;
+  --primary-hover: #2557c4;
+  --primary-strong: #7db0ff;
   --primary-soft: #17253c;
   --primary-border: #2c4266;
-  --primary-ring: rgba(79, 140, 255, 0.28);
+  --primary-ring: rgba(47, 111, 224, 0.28);
 
-  --danger: #e5685a;
-  --danger-hover: #ee7c6f;
+  --danger: #c2483a;
+  --danger-hover: #a83a2e;
   --danger-strong: #f0a89e;
   --danger-soft: #2c1a17;
   --danger-border: #5e332c;
@@ -37,6 +58,11 @@
   --warn: #d9a35e;
   --warn-strong: #e5b87e;
   --warn-soft: #2c2317;
+
+  /* Info accent (2026-09-26 audit, P3): the one blue info text color,
+   *  formerly hardcoded 3×. #a8c0f0 on --primary-soft = 8.39:1 and on
+   *  --surface-deep = 9.88:1. */
+  --info-accent: #a8c0f0;
 
   --border: #232b3b;
   --border-strong: #323c50;
@@ -60,22 +86,29 @@ button { font: inherit; color: inherit; }
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--body-c);
+  color: var(--body);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: var(--text-md);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3, h4, p { margin: 0; }
-:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+/* 2026-09-26 audit, P3: no border-radius here — snapping the shape of
+ * whatever is focused (pills, cards, banners) distorts it; the outline
+ * alone is the focus indicator. */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* ------------------------------------------------------------- layout */
 .portal-main { max-width: 860px; margin: 0 auto; padding: 24px 20px 64px; display: flex; flex-direction: column; gap: 16px; }
 .portal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .portal-head h1 { font-size: 20px; color: var(--text); letter-spacing: -0.01em; }
+/* 2026-09-26 audit, P3: the chart (PatientView) shares the shell classes,
+ * so the responsive block below covers both screens — smaller padding,
+ * the action row wraps below the heading, and fixed-width charts shrink. */
 @media (max-width: 767px) {
   .portal-main { padding: 16px 14px 48px; }
   .portal-head { flex-direction: column; align-items: flex-start; }
+  .portal-main svg { max-width: 100%; }
 }
 
 /* ------------------------------------------------------------- buttons */
@@ -91,7 +124,9 @@ h1, h2, h3, h4, p { margin: 0; }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn--danger { background: var(--danger); }
 .btn--danger:hover:not(:disabled) { background: var(--danger-hover); }
-.btn--ghost { background: transparent; color: var(--primary); border: 1.5px solid var(--border-strong); box-shadow: none; }
+/* Ghost label uses --primary-strong: it is TEXT on the page background,
+ * where the raw button accent misses AA (4.00:1 — see the token block). */
+.btn--ghost { background: transparent; color: var(--primary-strong); border: 1.5px solid var(--border-strong); box-shadow: none; }
 .btn--ghost:hover:not(:disabled) { background: var(--primary-soft); border-color: var(--primary); }
 .btn--small { padding: 6px 13px; font-size: var(--text-sm); }
 
@@ -120,9 +155,48 @@ h1, h2, h3, h4, p { margin: 0; }
 .select { cursor: pointer; appearance: none; background-image: none; padding-right: 32px; }
 .input:focus, .textarea:focus, .select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
 .input::placeholder, .textarea::placeholder { color: var(--muted); opacity: 0.75; }
+/* The native select arrow is stripped above, so .select-wrap draws the
+ * replacement chevron with pure CSS borders (no data-URI image — CSP
+ * stays clean) inside the ~30px right padding lane. pointer-events:none
+ * keeps every click on the control; the color is the --muted token
+ * (#8a95a3 = 5.96:1 on the select's --surface-deep background). */
+.select-wrap { position: relative; display: inline-flex; color: var(--muted); }
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  right: 11px; top: 50%;
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid currentColor;
+  margin-top: -3px;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------- password strength */
+/* 4-segment meter under the register form's Password field — the same
+ * visual language as the patient web app (segments fill 1–4; level
+ * colors danger/warn/primary/ok). The label uses the *-strong tone
+ * variants so it clears AA text contrast on the page background
+ * (#f0a89e 9.66:1, #e5b87e 10.29:1, #7db0ff 8.52:1, #7cc7a2 9.44:1). */
+.pw-meter { display: flex; gap: 5px; align-items: center; }
+.pw-meter__bar {
+  height: 6px; flex: 1; border-radius: var(--radius-pill);
+  background: var(--border);
+  transition: background-color 140ms ease;
+}
+.pw-meter__bar--1 { background: var(--danger); }
+.pw-meter__bar--2 { background: var(--warn); }
+.pw-meter__bar--3 { background: var(--primary); }
+.pw-meter__bar--4 { background: var(--ok); }
+.pw-meter__label { font-size: var(--text-xs); font-weight: 700; white-space: nowrap; }
+.pw-meter__label--1 { color: var(--danger-strong); }
+.pw-meter__label--2 { color: var(--warn-strong); }
+.pw-meter__label--3 { color: var(--primary-strong); }
+.pw-meter__label--4 { color: var(--ok-strong); }
 
 /* --------------------------------------------------------------- notes */
-.note { margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--body-c); white-space: pre-wrap; }
+.note { margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--body); white-space: pre-wrap; }
 .note--muted { color: var(--muted); }
 .note--ok { color: var(--ok-strong); font-weight: 600; }
 .note--danger { color: var(--danger-strong); font-weight: 600; }
@@ -130,12 +204,15 @@ h1, h2, h3, h4, p { margin: 0; }
 
 .banner { border-radius: var(--radius); padding: 11px 16px; font-size: var(--text-sm); font-weight: 600; }
 .banner--error { background: var(--danger-soft); color: var(--danger-strong); border: 1px solid var(--danger-border); border-left-width: 4px; }
-.banner--info { background: var(--primary-soft); color: #a8c0f0; border: 1px solid var(--primary-border); border-left-width: 4px; }
+.banner--info { background: var(--primary-soft); color: var(--info-accent); border: 1px solid var(--primary-border); border-left-width: 4px; }
 
 /* ------------------------------------------------------------ caseload */
 .section-label { font-size: var(--text-xs); font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 8px; }
-.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.toolbar__search { flex: 1; min-width: 180px; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.toolbar__search { flex: 1 1 180px; min-width: 0; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.toolbar__search .input { padding: 7px 11px; font-size: var(--text-sm); }
+.toolbar__sort { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.toolbar__sort .select { padding: 7px 30px 7px 11px; font-size: var(--text-sm); }
 .pairing-code { font-size: 26px; letter-spacing: 7px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
 .fingerprint {
   font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -145,42 +222,28 @@ h1, h2, h3, h4, p { margin: 0; }
 }
 .mono { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
 
-.patient-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
-.patient-card__name { font-size: var(--text-md); font-weight: 700; color: var(--text); }
-.badge {
-  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
-  font-size: 12px; font-weight: 700; border-radius: var(--radius-pill); padding: 3px 10px;
-}
-.badge--sensitive { background: var(--warn-soft); color: var(--warn-strong); }
-.badge--new { background: var(--primary-soft); color: #a8c0f0; }
-.badge--stopped { background: var(--surface-deep); color: var(--muted); }
-
 /* --------------------------------------------------------------- chart */
-.evidence-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: var(--text-sm); }
-.evidence-grid dt { color: var(--muted); font-weight: 600; }
-.evidence-grid dd { margin: 0; color: var(--body-c); }
+/* Evidence drill-down key/value pairs (dt = stat name, dd = value); the
+ * display:contents rows let the real markup stay a plain div per pair. */
+.evidence-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 16px; font-size: 13px; }
+.evidence-grid dt { color: var(--muted); }
+.evidence-grid dd { margin: 0; color: var(--body); }
 @media (max-width: 767px) { .evidence-grid { grid-template-columns: 1fr; gap: 4px; } }
-
-.sparkline { background: var(--surface-deep); border-radius: var(--radius); padding: 8px; }
 
 /* ------------------------------------------- native widget alignment */
 input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; }
-details.disclosure > summary { cursor: pointer; color: var(--primary); font-weight: 600; font-size: var(--text-sm); }
-details.disclosure > summary:hover { color: var(--primary-hover); }
 
 /* -------------------------------------------------------------- utility */
 .tpl-chip {
-  background: var(--surface-deep); color: var(--body-c);
+  background: var(--surface-deep); color: var(--body);
   border: 1.5px solid var(--border-strong); border-radius: var(--radius-pill);
   padding: 6px 13px; font: inherit; font-size: 12px; font-weight: 600;
   cursor: pointer;
   transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
 }
-.tpl-chip:hover { border-color: var(--primary); color: #a8c0f0; }
+.tpl-chip:hover { border-color: var(--primary); color: var(--info-accent); }
 .row { display: flex; gap: 8px; align-items: center; }
 .row--wrap { flex-wrap: wrap; }
-.row--between { justify-content: space-between; }
-.row--end { justify-content: flex-end; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 .divider { border: none; border-top: 1px solid var(--border); width: 100%; margin: 4px 0; }
 

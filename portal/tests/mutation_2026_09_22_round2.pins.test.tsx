@@ -411,7 +411,7 @@ describe("round 2: App idle lock and session races", () => {
 // ---------------------------------------------------------------------------
 
 describe("round 2: ui theme and tones", () => {
-  it("the theme table is exactly the clinical palette (redesign 2026-09-26: refreshed values + the warn token the old table froze absent)", () => {
+  it("the theme table is exactly the clinical palette (2026-09-26 audit: AA-corrected button accents; warn/ok/danger mirror the *-strong tones the notes actually render with)", () => {
     expect(ui.theme).toEqual({
       bg: "#0d1219",
       card: "#151b28",
@@ -419,11 +419,11 @@ describe("round 2: ui theme and tones", () => {
       text: "#e8edf6",
       body: "#c6cfdd",
       muted: "#8a95a3",
-      accent: "#4f8cff",
+      accent: "#2f6fe0",
       accentBright: "#7db0ff",
-      danger: "#e5685a",
-      ok: "#55b384",
-      warn: "#d9a35e",
+      danger: "#f0a89e",
+      ok: "#7cc7a2",
+      warn: "#e5b87e",
       border: "#232b3b",
       radius: 12,
     });

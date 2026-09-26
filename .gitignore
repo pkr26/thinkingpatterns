@@ -81,3 +81,6 @@ mobile/android/keystore.properties
 
 # ZCode local session artifacts
 .zcode/
+
+# Stryker sandbox (in-place temp; only present if a run is killed mid-flight)
+stryker-tmp/

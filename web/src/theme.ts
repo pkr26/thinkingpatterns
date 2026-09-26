@@ -7,17 +7,27 @@
  * prefers-color-scheme and re-resolves live; the resolved value lands on
  * <html data-theme="…"> which app.css's token blocks key off.
  *
+ * Hardening 2026-09-26 (ii): the FIRST paint is covered by the tiny
+ * synchronous public/theme-init.js in <head> (before the stylesheet) —
+ * this module remains the reactive half (live OS tracking + writes) and
+ * is idempotent with it. applyThemePref also notifies tokens.ts so
+ * JS-drawn charts re-render on every change (auto mode included).
+ *
  * Every DOM touch is guarded: the test environment is node, where
  * window/document do not exist and these functions are inert.
  */
 
+import { notifyPaletteChanged } from "./tokens";
+
 export type ThemePref = "light" | "dark" | "auto";
 
-const STORAGE_KEY = "mindpattern.theme.pref";
+/** Shared with public/theme-init.js (pinned together in
+ *  tests/theme.test.ts so the pre-paint script can never drift). */
+export const THEME_STORAGE_KEY = "mindpattern.theme.pref";
 
 export function readThemePref(): ThemePref {
   try {
-    const value = localStorage.getItem(STORAGE_KEY);
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
     return value === "light" || value === "dark" || value === "auto" ? value : "auto";
   } catch {
     return "auto";
@@ -26,26 +36,33 @@ export function readThemePref(): ThemePref {
 
 export function writeThemePref(pref: ThemePref): void {
   try {
-    localStorage.setItem(STORAGE_KEY, pref);
+    localStorage.setItem(THEME_STORAGE_KEY, pref);
   } catch {
     // Storage unavailable (private mode, tests): the choice lives for
     // this tab only.
   }
 }
 
-function resolve(pref: ThemePref): "light" | "dark" {
-  if (pref !== "auto") return pref;
+/** Pure resolution (unit-testable): explicit prefs win; "auto" follows
+ *  the OS preference; anything unreadable resolves light. */
+export function resolveTheme(pref: ThemePref, prefersDark: boolean): "light" | "dark" {
+  if (pref === "light" || pref === "dark") return pref;
+  return prefersDark ? "dark" : "light";
+}
+
+function systemPrefersDark(): boolean {
   try {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
   } catch {
-    return "light";
+    return false;
   }
 }
 
 /** Apply a preference to the document (no-op outside the DOM). */
 export function applyThemePref(pref: ThemePref): void {
   if (typeof document === "undefined") return;
-  document.documentElement.dataset.theme = resolve(pref);
+  document.documentElement.dataset.theme = resolveTheme(pref, systemPrefersDark());
+  notifyPaletteChanged();
 }
 
 /**

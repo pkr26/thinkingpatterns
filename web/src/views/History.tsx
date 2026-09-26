@@ -24,7 +24,7 @@ import { localDateISO } from "../dates";
 import { moodLabel } from "../mood";
 import { dateLocaleTag, t } from "../strings";
 import { vault } from "../vault";
-import { moodFill, currentPalette } from "../tokens";
+import { moodFill, moodInk, currentPalette, usePaletteVersion } from "../tokens";
 import { Button, Card, Chip, ErrorBanner, Field, Icon, Note, Skeleton, TextArea } from "../ui";
 
 interface DecodedEntry {
@@ -260,6 +260,8 @@ export function HistoryView(): React.JSX.Element {
   };
 
   const today = localDateISO();
+  // Re-render the JS-drawn fills/inks when the theme flips (auto mode).
+  usePaletteVersion();
   const palette = currentPalette();
   const weekdays = useMemo(weekdayLabels, []);
 
@@ -285,13 +287,19 @@ export function HistoryView(): React.JSX.Element {
             <Icon name="chevron-right" size={17} />
           </button>
         </div>
-        <div className="cal-grid" role="grid" aria-label={t("history.calendarTitle")}>
+        {/* role=group, not grid: the cells are independent day buttons
+            (no rows/roving cells), and a mis-announced "grid" is worse
+            than an honest group (audit 2026-09-26 fix). */}
+        <div className="cal-grid" role="group" aria-label={t("history.calendarTitle")}>
           {weekdays.map((label) => (
             <span key={label} className="cal-weekday" aria-hidden="true">{label}</span>
           ))}
-          {calendar?.map((day) => {
-            if (day.iso === null) return <span key={`blank-${day.day}`} />;
-            const fill = day.hasEntry || day.value !== null ? moodFill(day.value) : undefined;
+          {calendar?.map((day, index) => {
+            // Leading blanks share day===0 — the index keys them apart
+            // (the old `blank-${day.day}` collided on most months).
+            if (day.iso === null) return <span key={`blank-${index}`} />;
+            const filled = day.hasEntry || day.value !== null;
+            const fill = filled ? moodFill(day.value) : undefined;
             const selected = selectedDay === day.iso;
             return (
               <button
@@ -303,8 +311,8 @@ export function HistoryView(): React.JSX.Element {
                   day.iso === today ? "cal-day--today" : "",
                   selected ? "cal-day--selected" : "",
                 ].filter(Boolean).join(" ")}
-                style={fill !== undefined ? { backgroundColor: fill } : undefined}
-                aria-label={`${day.iso}${day.hasEntry ? ` — ${t("history.dayHasEntry")}` : ""}`}
+                style={fill !== undefined ? { backgroundColor: fill, color: moodInk(day.value) } : undefined}
+                aria-label={`${day.iso}${day.hasEntry ? ` — ${t("history.dayHasEntry")}` : ""}${day.iso === today ? ` — ${t("history.todayA11y")}` : ""}`}
                 aria-pressed={selected}
                 onClick={() => day.hasEntry && setSelectedDay(selected ? null : day.iso)}
                 disabled={!day.hasEntry}

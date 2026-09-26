@@ -105,6 +105,8 @@
   --cal-text: #5b5349;
 
   --ink-interactive: #33523a;         /* pressed toast bg (light theme)   */
+  --overlay: rgba(30, 24, 15, 0.55);  /* modal scrim (audit fix: was 0.45) */
+  --toggle-knob: #fffdf8;
 
   --shadow-sm: 0 1px 2px rgba(63, 52, 35, 0.06);
   --shadow-md: 0 2px 6px rgba(63, 52, 35, 0.06), 0 10px 28px rgba(63, 52, 35, 0.08);
@@ -196,6 +198,8 @@
   --cal-text: #d8d2c6;
 
   --ink-interactive: #ede8df;
+  --overlay: rgba(8, 6, 3, 0.62);
+  --toggle-knob: #f4f1e8;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.25), 0 10px 28px rgba(0, 0, 0, 0.35);
@@ -219,8 +223,11 @@ h1, h2, h3, p { margin: 0; }
 ::selection { background: var(--primary-soft); }
 .mono { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; letter-spacing: 0.02em; }
 
-/* Keyboard users get a visible focus ring; touch users don't. */
-:focus-visible { outline: 2px solid var(--primary-strong); outline-offset: 2px; border-radius: 4px; }
+/* Keyboard users get a visible focus ring; touch users don't. (No
+   border-radius here — that would snap the SHAPE of any focusable
+   without its own radius rule; outlines follow the element's own
+   radius in every modern engine — audit 2026-09-26 fix.) */
+:focus-visible { outline: 2px solid var(--primary-strong); outline-offset: 2px; }
 
 /* ------------------------------------------------------------- app shell */
 .app-header {
@@ -230,9 +237,7 @@ h1, h2, h3, p { margin: 0; }
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 40;
 }
-.brand { display: flex; align-items: center; gap: 10px; padding: 0; border: none; background: none; cursor: pointer; }
 .brand__name { font-size: var(--text-lg); font-weight: 800; color: var(--text); letter-spacing: -0.01em; }
-.brand__mark { display: block; }
 
 .app-main {
   max-width: 720px; margin: 0 auto;
@@ -288,6 +293,16 @@ h1, h2, h3, p { margin: 0; }
 
 .btn--small { padding: 7px 14px; font-size: var(--text-sm); }
 .btn--block { width: 100%; }
+
+/* The ever-present crisis entry point: warm amber, calm but VISIBLE —
+   a safety control should not be the quietest thing on the screen, yet
+   it stays far from danger-red alarm (audit 2026-09-26 fix). Both text
+   pairs are contrast-pinned in tests/designTokens.test.ts. */
+.btn--help {
+  background: var(--warn-soft); color: var(--warn-strong);
+  border: 1.5px solid var(--warn-border); box-shadow: none;
+}
+.btn--help:hover:not(:disabled) { background: var(--warn-soft); border-color: var(--warn-strong); }
 
 /* ------------------------------------------------------- option chips
    One-tap selections (activity tags, measure answers, feedback). Selected
@@ -350,16 +365,19 @@ h1, h2, h3, p { margin: 0; }
 .toggle {
   position: relative; width: 52px; height: 30px; border-radius: var(--radius-pill);
   background: var(--border-strong); border: none; cursor: pointer; padding: 0; flex: none;
-  transition: background-color var(--speed) ease;
+  transition: background-color var(--speed) ease, opacity var(--speed-fast) ease;
 }
 .toggle::after {
   content: ""; position: absolute; width: 24px; height: 24px; border-radius: 50%;
-  background: #fff; top: 3px; left: 3px;
+  background: var(--toggle-knob); top: 3px; left: 3px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   transition: transform var(--speed) var(--ease);
 }
 .toggle[aria-checked="true"] { background: var(--primary); }
 .toggle[aria-checked="true"]::after { transform: translateX(22px); }
+/* Disabled switches must LOOK disabled — a busy-locked control that
+   appears active invites dead taps (audit 2026-09-26 fix). */
+.toggle:disabled { opacity: 0.45; cursor: default; }
 
 /* Styled checkbox — the native input stays (keyboard/screen-reader real),
    visually hidden; the custom box carries the look. */
@@ -436,7 +454,6 @@ h1, h2, h3, p { margin: 0; }
 
 /* More menu (Share / Settings / Privacy / Sign out). */
 .more { position: relative; }
-.more__trigger { /* same look as a tab */ }
 .more__menu {
   position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
   min-width: 230px; padding: 6px;
@@ -461,18 +478,27 @@ h1, h2, h3, p { margin: 0; }
 /* Bottom navigation (mobile). */
 .bottom-nav {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
-  display: none; justify-content: space-around;
+  display: none; justify-content: space-around; gap: 2px;
   background: var(--surface); border-top: 1px solid var(--border);
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
 }
 .bottom-nav__item {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  min-width: 62px; padding: 7px 10px; border: none; background: none; cursor: pointer;
-  font: inherit; font-size: 11px; font-weight: 700; color: var(--muted);
+  min-width: 62px; padding: 8px 12px; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; color: var(--muted);
   border-radius: 12px;
   transition: background-color var(--speed-fast) ease, color var(--speed-fast) ease;
 }
 .bottom-nav__item[aria-current="page"] { color: var(--primary-strong); background: var(--primary-soft); }
+/* The More trigger inside the bottom bar must size like its siblings,
+   not like a desktop tab (audit 2026-09-26 fix). */
+.bottom-nav .more > button {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 62px; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; color: var(--muted);
+}
+.bottom-nav .more > button:hover { color: var(--primary-strong); }
+.bottom-nav .more > button[aria-current="page"] { color: var(--primary-strong); background: var(--primary-soft); }
 @media (max-width: 767px) {
   .bottom-nav { display: flex; }
   .nav-tabs, .nav-row { display: none; }
@@ -480,6 +506,11 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* ------------------------------------------------------------ mood check-in */
+/* Today's two cards sit side by side on wide screens (check-in left,
+   journal right) — killing the half-empty check-in column while keeping
+   a comfortable measure on the textarea. */
+.today-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); align-items: start; }
+@media (min-width: 1000px) { .today-grid { grid-template-columns: 11fr 9fr; } }
 .checkin-grid { display: flex; flex-direction: column; gap: var(--space-4); }
 .checkin-label { font-size: var(--text-sm); font-weight: 800; color: var(--text); }
 .checkin-optional { font-size: var(--text-xs); font-weight: 600; color: var(--muted); }
@@ -487,6 +518,7 @@ h1, h2, h3, p { margin: 0; }
 .mood-scale { display: flex; gap: 6px; flex-wrap: wrap; }
 .mood-item { display: flex; flex-direction: column; align-items: center; gap: 5px; border: none; background: none; padding: 0; cursor: pointer; }
 .mood-face {
+  position: relative;
   width: 56px; height: 56px; border-radius: 50%;
   border: 2px solid var(--border-strong); background: var(--surface);
   display: grid; place-items: center; color: var(--muted);
@@ -495,12 +527,43 @@ h1, h2, h3, p { margin: 0; }
 }
 .mood-item:hover .mood-face { transform: translateY(-2px); border-color: var(--face); }
 .mood-item:active .mood-face { transform: scale(0.94); }
+/* Selected face: strong ring + soft fill + check badge + scale — the
+   old tint-only delta was near-invisible on the cream card (audit
+   2026-09-26 fix). Colors are theme-aware via --face-* inline vars. */
 .mood-item[aria-pressed="true"] .mood-face {
-  border-color: var(--face); background: var(--face-soft);
-  color: var(--face-strong); transform: scale(1.06); box-shadow: var(--shadow-sm);
+  border-color: var(--face-strong); background: var(--face-soft);
+  color: var(--face-strong); transform: scale(1.08);
+  box-shadow: 0 0 0 3px var(--face-soft), 0 1px 2px rgba(63, 52, 35, 0.14);
 }
-.mood-item__label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.mood-face__check {
+  position: absolute; top: -3px; right: -3px;
+  width: 19px; height: 19px; border-radius: 50%;
+  background: var(--face-strong); color: var(--face-soft);
+  display: grid; place-items: center;
+}
+.mood-item__label { font-size: 12px; font-weight: 700; color: var(--muted); }
 .mood-item[aria-pressed="true"] .mood-item__label { color: var(--face-strong); font-weight: 800; }
+
+/* Energy bars (Drained 1/3 → Energized 3/3) — energy is not a mood, so
+   it gets direction-reading bars instead of borrowed smiley faces. */
+.bar-scale { display: flex; gap: 10px; flex-wrap: wrap; }
+.bar-item {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  border: none; background: none; padding: 4px; cursor: pointer;
+  border-radius: var(--radius); min-width: 64px;
+  transition: background-color var(--speed-fast) ease;
+}
+.bar-item:hover { background: var(--primary-soft); }
+.bar-item[aria-pressed="true"] { background: var(--primary-soft); }
+.bar-bars { display: flex; flex-direction: column-reverse; gap: 3px; }
+.bar-bars__cell {
+  width: 26px; height: 7px; border-radius: 3px;
+  background: var(--border-strong); transition: background-color var(--speed-fast) ease;
+}
+.bar-bars__cell--on { background: var(--primary); }
+.bar-item[aria-pressed="true"] .bar-bars__cell--on { background: var(--primary-strong); }
+.bar-item__label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.bar-item[aria-pressed="true"] .bar-item__label { color: var(--primary-strong); font-weight: 800; }
 
 .dot-scale { display: flex; gap: 8px; flex-wrap: wrap; }
 .dot-item {
@@ -508,28 +571,28 @@ h1, h2, h3, p { margin: 0; }
   border: none; background: none; padding: 0; cursor: pointer;
 }
 .dot {
-  width: 34px; height: 34px; border-radius: 50%;
+  width: 38px; height: 38px; border-radius: 50%;
   border: 2px solid var(--border-strong); background: var(--surface);
   display: grid; place-items: center; font-size: var(--text-xs); font-weight: 800; color: var(--muted);
   transition: border-color var(--speed-fast) ease, background-color var(--speed-fast) ease, transform var(--speed-fast) var(--ease);
 }
 .dot-item:hover .dot { border-color: var(--primary); }
 .dot-item[aria-pressed="true"] .dot { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-strong); transform: scale(1.1); }
-.dot-item__label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.dot-item__label { font-size: 12px; font-weight: 700; color: var(--muted); }
 .dot-item[aria-pressed="true"] .dot-item__label { color: var(--primary-strong); }
 
 /* ---------------------------------------------------------------- calendar */
 .cal-toolbar { display: flex; align-items: center; gap: var(--space-2); justify-content: space-between; }
 .cal-month { font-size: var(--text-md); font-weight: 800; color: var(--text); }
 .cal-arrow {
-  width: 38px; height: 38px; border-radius: 50%;
+  width: 44px; height: 44px; border-radius: 50%;   /* 44px hit target */
   border: 1.5px solid var(--border-strong); background: var(--surface); color: var(--body);
   display: grid; place-items: center; cursor: pointer; font: inherit;
   transition: border-color var(--speed-fast) ease, background-color var(--speed-fast) ease, color var(--speed-fast) ease;
 }
 .cal-arrow:hover { border-color: var(--primary); color: var(--primary-strong); background: var(--primary-soft); }
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
-.cal-weekday { text-align: center; font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 2px; }
+.cal-weekday { text-align: center; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 2px; }
 .cal-day {
   aspect-ratio: 1; border-radius: 10px; padding: 0;
   display: flex; align-items: center; justify-content: center;
@@ -539,8 +602,11 @@ h1, h2, h3, p { margin: 0; }
 .cal-day:disabled { cursor: default; }
 .cal-day--entry { cursor: pointer; border-color: var(--border); transition: transform var(--speed-fast) var(--ease), box-shadow var(--speed-fast) ease; }
 .cal-day--entry:hover { transform: scale(1.08); box-shadow: var(--shadow-sm); }
-.cal-day--today { border: 2px solid var(--primary); }
-.cal-day--selected { box-shadow: 0 0 0 3px var(--primary-ring); }
+/* Today: a thick high-contrast ring + a 3px offset marker — the old
+   2px primary ring was 2.1:1 against the mid-tone fills and invisible
+   on saturated days (audit 2026-09-26 fix). */
+.cal-day--today { border: 3px solid var(--text); }
+.cal-day--selected { box-shadow: 0 0 0 3px var(--primary-ring), 0 0 0 5px var(--primary); }
 .cal-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--text-xs); color: var(--muted); font-weight: 600; }
 .cal-legend__swatch { width: 14px; height: 14px; border-radius: 5px; display: inline-block; border: 1px solid var(--border); }
 
@@ -567,9 +633,11 @@ h1, h2, h3, p { margin: 0; }
 .dots__dot--on { background: var(--primary); width: 24px; }
 
 /* ----------------------------------------------------------------- dialog */
+/* The modal sits ABOVE toasts (z-90): a safety dialog must never be
+   partially covered by a "Saved." pill (audit 2026-09-26 fix). */
 .dialog-backdrop {
-  position: fixed; inset: 0; z-index: 80;
-  background: rgba(30, 24, 15, 0.45);
+  position: fixed; inset: 0; z-index: 95;
+  background: var(--overlay);
   display: flex; align-items: center; justify-content: center;
   padding: var(--space-4);
   animation: fadeIn 160ms ease;
@@ -623,7 +691,10 @@ h1, h2, h3, p { margin: 0; }
 .login-hero__tagline { color: var(--muted); font-size: var(--text-md); font-weight: 600; }
 .login-hero__title { font-size: var(--text-hero); font-weight: 800; letter-spacing: -0.02em; color: var(--text); }
 
-/* Onboarding step art — abstract soft gradient, never literal imagery. */
+/* Onboarding step art — abstract soft gradient, never literal imagery.
+   The card centers vertically in the viewport so a short panel does not
+   float alone at the top of a tall window (audit 2026-09-26 fix). */
+.onboard-wrap { display: flex; align-items: center; min-height: min(62vh, 560px); }
 .panel-art {
   height: 132px; border-radius: var(--radius-lg);
   background: linear-gradient(135deg, var(--primary-soft) 0%, var(--accent-soft) 100%);
@@ -644,7 +715,6 @@ h1, h2, h3, p { margin: 0; }
 .chart__bar--last { opacity: 1; }
 .chart__bar:hover { opacity: 1; }
 .chart__axis { font-size: 10px; fill: var(--muted); font-weight: 600; }
-.chart__gridline { stroke: var(--border); stroke-width: 1; }
 .chart__baseline { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 4 3; }
 
 /* Evidence disclosure (native <details> semantics, restyled). */

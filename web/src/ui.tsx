@@ -19,7 +19,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "./strings";
-import { MOOD_FACE_COLORS } from "./tokens";
+import { moodFaceColors, usePaletteVersion } from "./tokens";
 
 /* ------------------------------------------------------------------ icons
    A tiny hand-rolled stroke icon set (no icon dependency). Decorative by
@@ -128,25 +128,29 @@ export function Button(props: {
 
 /* ------------------------------------------------------------------- chip
    One-tap option button (activity tags, measure answers, feedback).
-   Selected = aria-pressed + soft sage fill + check — never danger red. */
+   Selected = aria-pressed + soft sage fill + check — never danger red.
+   `toggle={false}` renders a PLAIN action chip (prompt seeds): those are
+   one-shot inserts, not on/off states, so aria-pressed would be a lie. */
 export function Chip(props: {
   label: string;
   onPress: () => void;
   selected?: boolean;
   disabled?: boolean;
   icon?: IconName;
+  toggle?: boolean;
 }): React.JSX.Element {
+  const toggle = props.toggle !== false;
   return (
     <button
       type="button"
       onClick={props.disabled ? undefined : props.onPress}
       disabled={props.disabled === true}
-      aria-pressed={props.selected === true}
+      {...(toggle ? { "aria-pressed": props.selected === true } : {})}
       className="chip"
     >
       {props.icon && <Icon name={props.icon} size={15} />}
       {props.label}
-      <span className="chip__check"><Icon name="check" size={14} /></span>
+      {toggle && <span className="chip__check"><Icon name="check" size={14} /></span>}
     </button>
   );
 }
@@ -290,23 +294,45 @@ export function Checkbox(props: { checked: boolean; onChange: (checked: boolean)
   );
 }
 
-/* ------------------------------------------------------- segmented control */
+/* ------------------------------------------------------- segmented control
+   Radiogroup with the full keyboard pattern: the checked option is the
+   tab stop (roving tabindex); Arrow keys/Home/End move and select —
+   what role=radiogroup promises (audit 2026-09-26 fix). */
 export function SegmentedControl(props: {
   options: { id: string; label: string }[];
   activeId: string;
   onSelect: (id: string) => void;
   a11yLabel: string;
 }): React.JSX.Element {
+  const optionAt = (index: number): { id: string; label: string } | undefined => props.options[index];
+  const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    let next: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % props.options.length;
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + props.options.length) % props.options.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = props.options.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    const target = optionAt(next);
+    if (!target) return;
+    props.onSelect(target.id);
+    // Focus follows selection in the radio pattern; the freshly checked
+    // option is the new tab stop.
+    const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(".segmented__opt");
+    buttons?.[next]?.focus();
+  };
   return (
     <div className="segmented" role="radiogroup" aria-label={props.a11yLabel}>
-      {props.options.map((option) => (
+      {props.options.map((option, index) => (
         <button
           key={option.id}
           type="button"
           role="radio"
           aria-checked={option.id === props.activeId}
+          tabIndex={option.id === props.activeId ? 0 : -1}
           className="segmented__opt"
           onClick={() => props.onSelect(option.id)}
+          onKeyDown={(event) => onKeyDown(event, index)}
         >
           {option.label}
         </button>
@@ -359,7 +385,10 @@ export function BottomNav(props: { items: NavItem[]; activeId: string | null; on
 
 export interface MoreMenuItem { id: string; label: string; icon?: IconName; danger?: boolean }
 
-/** Overflow menu (desktop: after the tabs; mobile: above the bottom bar). */
+/** Overflow menu (desktop: after the tabs; mobile: above the bottom bar).
+ *  Full menu keyboard pattern: opening focuses the first item, arrows/
+ *  Home/End roam, Escape/outside closes and returns focus to the trigger
+ *  (audit 2026-09-26 fix — role=menu promises arrows). */
 export function MoreMenu(props: {
   label: string;
   items: MoreMenuItem[];
@@ -369,6 +398,7 @@ export function MoreMenu(props: {
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const active = props.activeIds.length > 0;
 
   useEffect(() => {
@@ -377,19 +407,42 @@ export function MoreMenu(props: {
       if (root.current && event.target instanceof Node && !root.current.contains(event.target)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        trigger.current?.focus();
+      }
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    // Opening a menu moves focus INTO it (WAI-ARIA menu pattern).
+    root.current?.querySelector<HTMLButtonElement>(".more__item")?.focus();
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
 
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    let next: number | null = null;
+    if (event.key === "ArrowDown") next = (index + 1) % props.items.length;
+    else if (event.key === "ArrowUp") next = (index - 1 + props.items.length) % props.items.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = props.items.length - 1;
+    else if (event.key === "Tab") {
+      // Tab out of the menu closes it (focus leaves by browser default).
+      setOpen(false);
+      return;
+    }
+    if (next === null) return;
+    event.preventDefault();
+    const buttons = root.current?.querySelectorAll<HTMLButtonElement>(".more__item");
+    buttons?.[next]?.focus();
+  };
+
   return (
     <div className={`more${props.up ? " more--up" : ""}`} ref={root}>
       <button
+        ref={trigger}
         type="button"
         className="nav-tabs__item"
         aria-haspopup="menu"
@@ -402,8 +455,8 @@ export function MoreMenu(props: {
         <Icon name="chevron-down" size={13} />
       </button>
       {open && (
-        <div className="more__menu" role="menu">
-          {props.items.map((item) => (
+        <div className="more__menu" role="menu" aria-label={props.label}>
+          {props.items.map((item, index) => (
             <button
               key={item.id}
               type="button"
@@ -414,6 +467,7 @@ export function MoreMenu(props: {
                 setOpen(false);
                 props.onSelect(item.id);
               }}
+              onKeyDown={(event) => onMenuKeyDown(event, index)}
             >
               {item.icon && <Icon name={item.icon} size={16} />}
               {item.label}
@@ -428,13 +482,35 @@ export function MoreMenu(props: {
 /* ----------------------------------------------------------------- dialog
    Accessible modal: role=dialog + aria-modal, focus is trapped while
    open and restored on close, Escape closes, backdrop click closes.
-   Effects no-op where the DOM doesn't exist (node test environment). */
+   Effects no-op where the DOM doesn't exist (node test environment).
+
+   Hardening 2026-09-26 (ii): the trap used to re-run on every identity
+   change of `onClose` (App passes an inline arrow), which re-stole focus
+   mid-dialog and captured "previous" from INSIDE the dialog — close then
+   restored focus to body. The close callback now lives in a ref and the
+   effect runs exactly once per mount. */
 export function Dialog(props: { title: string; onClose: () => void; children: ReactNode }): React.JSX.Element {
   const panel = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(props.onClose);
+  useLayoutEffect(() => {
+    onCloseRef.current = props.onClose;
+  });
 
   useLayoutEffect(() => {
     if (typeof document === "undefined") return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // True modality: everything the dialog sits INSIDE of must stay
+    // focusable, while its siblings go inert — the dialog itself is a
+    // child of #app-content (AppFrame renders it with the view), so the
+    // inert set is "children of the app content except the dialog's own
+    // subtree" (audit P3, hardening 2026-09-26 ii; the naive
+    // inert-on-#app-content variant muted the dialog's own focusables —
+    // caught live in E2E and pinned in tests/interaction.test.tsx).
+    const appContent = document.getElementById("app-content");
+    const inerted = appContent
+      ? Array.from(appContent.children).filter((el) => !el.contains(panel.current) && !panel.current.contains(el))
+      : [];
+    inerted.forEach((el) => el.setAttribute("inert", ""));
     const focusables = (): HTMLElement[] => {
       if (!panel.current) return [];
       return Array.from(
@@ -445,7 +521,7 @@ export function Dialog(props: { title: string; onClose: () => void; children: Re
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
         event.preventDefault();
-        props.onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -453,6 +529,15 @@ export function Dialog(props: { title: string; onClose: () => void; children: Re
       if (list.length === 0) return;
       const first = list[0]!;
       const last = list[list.length - 1]!;
+      const activeInside = panel.current?.contains(document.activeElement) === true;
+      if (!activeInside) {
+        // Focus escaped the panel (backdrop, an outer re-focus): pull it
+        // back to the correct end instead of letting Tab walk the page
+        // behind a dialog the user believes is modal.
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
@@ -464,9 +549,12 @@ export function Dialog(props: { title: string; onClose: () => void; children: Re
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      inerted.forEach((el) => el.removeAttribute("inert"));
       previous?.focus();
     };
-  }, [props.onClose]);
+    // The trap's lifetime is the dialog's lifetime — onClose identity
+    // changes must NEVER tear it down (see the comment above).
+  }, []);
 
   return (
     <div
@@ -486,8 +574,10 @@ export function Dialog(props: { title: string; onClose: () => void; children: Re
 /* ------------------------------------------------------------------ toast */
 export interface ToastItem { id: number; message: string; tone: "ok" | "warn" | "info" }
 
-export function ToastHost({ items }: { items: ToastItem[] }): React.JSX.Element | null {
-  if (items.length === 0) return null;
+/** The live region stays MOUNTED (empty included): a region that appears
+ *  together with its first toast is one some screen-reader combinations
+ *  miss announcing (audit 2026-09-26 fix). */
+export function ToastHost({ items }: { items: ToastItem[] }): React.JSX.Element {
   return (
     <div className="toast-host" role="status" aria-live="polite">
       {items.map((toast) => (
@@ -537,26 +627,47 @@ export function ProgressTrack(props: { progress: number; label: string }): React
 
 /* ------------------------------------------------------- check-in controls
    The one-tap visual scales (Daylio-style frictionless check-in). Faces
-   carry per-level ring colors; selection is aria-pressed + scale, never
-   a color-only cue (the label under the face bolds too). */
+   carry per-level ring colors AND per-level expressions (brows + mouth
+   bend with the level so five side-by-side faces are told apart at a
+   glance, not five near-identical circles — audit 2026-09-26 fix);
+   selection is aria-pressed + check badge + ring + scale, never a
+   color-only cue. Face colors are theme-aware (tokens.moodFaceColors). */
 export interface ScaleOption { value: number; labelKey: string }
 
+/** Mouth path for a scale position 0..1 (heaviest → lightest). */
 function faceMouth(position: number): string {
-  // position 0..1 across the scale, Heavy → Light.
-  if (position <= 0) return "M8.5 16 Q12 13 15.5 16";
-  if (position < 0.25) return "M8.5 15.8 Q12 13.6 15.5 15.8";
-  if (position < 0.5) return "M8.5 15.3 H15.5";
-  if (position < 0.75) return "M8.5 14.8 Q12 17.2 15.5 14.8";
-  return "M8 14.6 Q12 18.4 16 14.6";
+  if (position <= 0) return "M8 17.6 Q12 12.8 16 17.6";       // deep frown
+  if (position < 0.25) return "M8.3 16.4 Q12 13.8 15.7 16.4"; // slight frown
+  if (position < 0.5) return "M8.5 15.4 H15.5";               // level
+  if (position < 0.75) return "M8.3 14.4 Q12 17.6 15.7 14.4"; // smile
+  return "M7.8 13.9 Q12 18.9 16.2 13.9";                      // broad smile
+}
+
+/** Brow pair for the same position: worried ↓↘ for the heavy end, flat
+ *  in the middle (a genuinely neutral face), lifted ↗ for the light end.
+ *  Bands are discrete-position safe: 0/0.25 → worried, 0.5 → none,
+ *  0.75/1 → lifted. */
+function faceBrows(position: number): string[] {
+  if (position < 0.3) {
+    if (position <= 0) return ["M7.2 7.2 L10.1 8.5", "M16.8 7.2 L13.9 8.5"];
+    return ["M7.5 7.7 L10.1 8.7", "M16.5 7.7 L13.9 8.7"];
+  }
+  if (position <= 0.7) return [];
+  if (position < 1) return ["M7.5 8.6 L10.1 7.8", "M16.5 8.6 L13.9 7.8"];
+  return ["M7.2 8.8 L10.1 7.5", "M16.8 8.8 L13.9 7.5"];
 }
 
 export function MoodScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
+  // Re-resolve face colors when the theme flips (auto mode included).
+  usePaletteVersion();
   const last = props.options.length - 1;
   return (
     <div className="mood-scale" role="group">
       {props.options.map((option, index) => {
-        const colors = MOOD_FACE_COLORS[last <= 0 ? 2 : Math.round((index * 4) / last)]!;
+        const level = last <= 0 ? 2 : Math.round((index * 4) / last);
+        const colors = moodFaceColors(level);
         const pressed = props.value === option.value;
+        const position = last <= 0 ? 0.5 : index / last;
         return (
           <button
             key={option.labelKey}
@@ -568,12 +679,16 @@ export function MoodScale(props: { options: readonly ScaleOption[]; value: numbe
             style={{ "--face": colors.face, "--face-soft": colors.faceSoft, "--face-strong": colors.faceStrong } as React.CSSProperties}
           >
             <span className="mood-face" aria-hidden="true">
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
                 <circle cx="12" cy="12" r="9.2" />
-                <circle cx="8.8" cy="9.6" r="1.15" fill="currentColor" stroke="none" />
-                <circle cx="15.2" cy="9.6" r="1.15" fill="currentColor" stroke="none" />
-                <path d={faceMouth(last <= 0 ? 0.5 : index / last)} />
+                <circle cx="8.8" cy="10.2" r="1.2" fill="currentColor" stroke="none" />
+                <circle cx="15.2" cy="10.2" r="1.2" fill="currentColor" stroke="none" />
+                {faceBrows(position).map((d) => <path key={d} d={d} />)}
+                <path d={faceMouth(position)} />
               </svg>
+              {pressed && (
+                <span className="mood-face__check"><Icon name="check" size={12} /></span>
+              )}
             </span>
             <span className="mood-item__label">{t(option.labelKey)}</span>
           </button>
@@ -583,7 +698,9 @@ export function MoodScale(props: { options: readonly ScaleOption[]; value: numbe
   );
 }
 
-/** The 1–5 sleep scale (and any short numeric pick): labeled round dots. */
+/** The 1–5 sleep scale (and any short numeric pick): labeled round dots.
+ *  The accessible name is "{n} — {label}" (not the concatenated spans,
+ *  which read as "1Rough" — audit 2026-09-26 fix). */
 export function DotScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
   return (
     <div className="dot-scale" role="group">
@@ -595,10 +712,41 @@ export function DotScale(props: { options: readonly ScaleOption[]; value: number
             type="button"
             className="dot-item"
             aria-pressed={pressed}
+            aria-label={`${index + 1} — ${t(option.labelKey)}`}
             onClick={() => props.onChange(pressed ? null : option.value)}
           >
             <span className="dot" aria-hidden="true">{index + 1}</span>
             <span className="dot-item__label">{t(option.labelKey)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Short qualitative pick rendered as filled energy bars (Drained 1/3 →
+ *  Energized 3/3) — energy is NOT a mood, so it stops borrowing smiley
+ *  faces (audit 2026-09-26 fix); bars make the direction obvious. */
+export function BarScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void; groupLabel: string }): React.JSX.Element {
+  return (
+    <div className="bar-scale" role="group" aria-label={props.groupLabel}>
+      {props.options.map((option, index) => {
+        const pressed = props.value === option.value;
+        return (
+          <button
+            key={option.labelKey}
+            type="button"
+            className="bar-item"
+            aria-pressed={pressed}
+            aria-label={t(option.labelKey)}
+            onClick={() => props.onChange(pressed ? null : option.value)}
+          >
+            <span className="bar-bars" aria-hidden="true">
+              {props.options.map((_, bar) => (
+                <span key={bar} className={`bar-bars__cell${bar <= index ? " bar-bars__cell--on" : ""}`} />
+              ))}
+            </span>
+            <span className="bar-item__label">{t(option.labelKey)}</span>
           </button>
         );
       })}
@@ -628,10 +776,14 @@ export function AppFrame(props: { title: string; onCrisis: () => void; children:
           <Logo />
           {props.title}
         </h1>
-        {/* The crisis entry point stays one tap from every screen; ghost
-            styling keeps it ever-present without competing with the
-            screen's primary action. */}
-        <Button label={t("nav.getHelp")} onPress={props.onCrisis} small variant="ghost" />
+        {/* The crisis entry point stays one tap from every screen. The
+            warm amber treatment keeps it calm while making it VISIBLE —
+            a safety action should not be the quietest control on the
+            screen (audit 2026-09-26 fix; still never danger-red). */}
+        <button type="button" className="btn btn--help btn--small" onClick={props.onCrisis}>
+          <Icon name="phone" size={15} />
+          {t("nav.getHelp")}
+        </button>
       </header>
       <main className="app-main" id="app-content">{props.children}</main>
     </>

@@ -29,7 +29,7 @@ import { reconcile, type ReconcileOutcome } from "../sync";
 import { recordThresholdNotice, thresholdNoticeShown } from "../thresholdNotice";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { moodFill } from "../tokens";
+import { moodFill, usePaletteVersion } from "../tokens";
 import { Button, Card, ErrorBanner, Icon, Note, ProgressTrack, Skeleton } from "../ui";
 
 /** One surfaced pattern, as the brain's encrypted payload carries it. */
@@ -133,6 +133,9 @@ function MoodTrendChart({ days }: { days: { date: string; value: number }[] }): 
 }
 
 export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element {
+  // The trend bars draw with JS-side palette values — re-render on theme
+  // flips (auto mode included; audit 2026-09-26 fix).
+  usePaletteVersion();
   const [phase, setPhase] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ activeDays: number; remaining: number } | null>(null);
   const [patterns, setPatterns] = useState<PatternPayload[] | null>(null);

@@ -12,7 +12,7 @@ import { unlockWrapPrivateKey } from "./crypto";
 import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
-import { theme } from "./ui";
+import { InfoBanner, theme } from "./ui";
 import { localStore, sessionStore, visitAnchorStore } from "./platform";
 
 type View =
@@ -205,11 +205,7 @@ export function App(): React.JSX.Element {
   if (view.kind === "login") {
     return (
       <>
-        {notice && (
-          <div className="banner banner--info" role="status" style={{ borderRadius: 0 }}>
-            {notice}
-          </div>
-        )}
+        {notice && <InfoBanner message={notice} flush />}
         {unlockError && (
           <div className="banner banner--error" role="alert" style={{ borderRadius: 0 }}>
             {unlockError}

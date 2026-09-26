@@ -12,9 +12,14 @@
  */
 import type { ReactNode } from "react";
 
-/** Mirrors the CSS custom properties in public/portal.css. The `warn`
- *  token is new (the old kit rendered warn Notes in accent blue — tone
- *  drift the redesign corrects). */
+/** Mirrors the CSS custom properties in public/portal.css (guarded by
+ *  tests/designTokens.test.ts). 2026-09-26 audit corrections:
+ *   - accent/accentBright follow the AA-corrected button palette
+ *     (--primary/--primary-strong — white labels now clear 4.5:1);
+ *   - warn/ok/danger mirror the color those tones actually RENDER with
+ *     (--warn-strong/--ok-strong/--danger-strong — .note--warn and
+ *     friends color their text with the *-strong variants, so the old
+ *     base-token mirrors were tone drift). */
 export const theme = {
   bg: "#0d1219",
   card: "#151b28",
@@ -22,11 +27,11 @@ export const theme = {
   text: "#e8edf6",
   body: "#c6cfdd",
   muted: "#8a95a3",
-  accent: "#4f8cff",
+  accent: "#2f6fe0",
   accentBright: "#7db0ff",
-  danger: "#e5685a",
-  ok: "#55b384",
-  warn: "#d9a35e",
+  danger: "#f0a89e",
+  ok: "#7cc7a2",
+  warn: "#e5b87e",
   border: "#232b3b",
   radius: 12,
 };
@@ -107,6 +112,31 @@ export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "dang
   return <p role={props.role} className={classes.join(" ")} style={{ whiteSpace: "pre-wrap" }}>{props.children}</p>;
 }
 
+/** 4-segment password-strength meter under the register form's Password
+ *  field (2026-09-26 UX parity with the patient web app): segments fill
+ *  1–4 in the level's palette color (danger/warn/primary/ok) with a
+ *  Weak/Fair/Good/Strong label. Pure presentation of a 0–4 score — the
+ *  ladder (passwordStrength) lives next to the policy it mirrors, and 0
+ *  renders nothing (an empty field has no strength story to tell). */
+const STRENGTH_LABELS = ["Weak", "Fair", "Good", "Strong"] as const;
+
+export function PasswordStrengthMeter(props: { strength: 0 | 1 | 2 | 3 | 4 }): React.JSX.Element | null {
+  const strength = props.strength;
+  if (strength === 0) return null;
+  const label = STRENGTH_LABELS[strength - 1]!;
+  return (
+    <div className="pw-meter" role="status" aria-label={`Password strength: ${label}`}>
+      {[1, 2, 3, 4].map((segment) => (
+        <span
+          key={segment}
+          className={segment <= strength ? `pw-meter__bar pw-meter__bar--${strength}` : "pw-meter__bar"}
+        />
+      ))}
+      <span className={`pw-meter__label pw-meter__label--${strength}`}>{label}</span>
+    </div>
+  );
+}
+
 export function ErrorBanner({ message }: { message: string }): React.JSX.Element | null {
   if (!message) return null;
   return (
@@ -116,8 +146,16 @@ export function ErrorBanner({ message }: { message: string }): React.JSX.Element
   );
 }
 
-/** Info banner (session notices on the login screen — App.tsx). */
-export function InfoBanner({ message }: { message: string }): React.JSX.Element | null {
+/** Info banner (session notices on the login screen — App.tsx). Same
+ *  live-region contract as ErrorBanner: role=status announces politely,
+ *  and `flush` drops the corner radius for the full-width notices App
+ *  pins to the very top of the page (identical DOM to the markup App
+ *  used to hand-write). */
+export function InfoBanner({ message, flush }: { message: string; flush?: boolean }): React.JSX.Element | null {
   if (!message) return null;
-  return <div className="banner banner--info">{message}</div>;
+  return (
+    <div role="status" className="banner banner--info" style={flush ? { borderRadius: 0 } : undefined}>
+      {message}
+    </div>
+  );
 }

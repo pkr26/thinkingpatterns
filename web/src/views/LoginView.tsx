@@ -224,10 +224,15 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         >
           <button type="submit" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }} />
           <Field label={t("login.webUsername")} value={username} onChange={setUsername} autoComplete="username" placeholder={t("login.webUsernamePlaceholder")} />
-          <Field label={t("login.webPassword")} value={password} onChange={setPassword} type="password" placeholder="••••••••••••" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
+          {/* No password placeholder: bullet-run placeholders read as a
+              SAVED password at a glance (audit 2026-09-26 fix) — the
+              visible label is the only cue. */}
+          <Field label={t("login.webPassword")} value={password} onChange={setPassword} type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
           {mode === "register" && (
             <>
-              <Field label={t("login.webConfirm")} value={confirm} onChange={setConfirm} type="password" placeholder="••••••••••••" autoComplete="new-password" />
+              {/* The meter rates the PASSWORD field, so it sits directly
+                  beneath it — under "Confirm password" it looked like
+                  feedback for the wrong input (audit 2026-09-26 fix). */}
               {strength > 0 && (
                 <div className="strength" role="status" aria-label={t("login.strengthA11y", { level: strengthLabel })}>
                   <span className={`strength__bar${strength === 1 ? " strength__bar--1" : strength === 2 ? " strength__bar--2" : strength === 3 ? " strength__bar--3" : " strength__bar--4"}`} />
@@ -237,6 +242,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
                   <span className="note note--muted" style={{ whiteSpace: "nowrap" }}>{strengthLabel}</span>
                 </div>
               )}
+              <Field label={t("login.webConfirm")} value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
               <Note>{t("login.webRegisterNote")}</Note>
             </>
           )}

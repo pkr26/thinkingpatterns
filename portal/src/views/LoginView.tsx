@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { auth, ApiError, clearSession, normalizeApiBaseUrl, setSession, type TokenResponse } from "../api";
 import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, toBase64 } from "../crypto";
-import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
+import { Button, Card, ErrorBanner, Field, Note, PasswordStrengthMeter, theme } from "../ui";
 import { currentOrigin, randomBytes } from "../platform";
 
 export interface PortalKeys {
@@ -31,6 +31,21 @@ export function passwordPolicyError(password: string): string {
     return "Use a 16-character passphrase, or 12+ characters from at least three character types.";
   }
   return "";
+}
+
+/** Visual strength (0–4) for the registration meter (2026-09-26 UX
+ *  parity): the same ladder the patient web app's meter climbs — empty
+ *  shows nothing, under the 12-character floor is Weak, a policy-failing
+ *  12+ password is Fair, a policy-passing 12–15 character password is
+ *  Good, and 16+ is Strong. Display-only; the enforceable contract stays
+ *  passwordPolicyError above (and mirrors the policy text the form
+ *  already shows). */
+export function passwordStrength(password: string): 0 | 1 | 2 | 3 | 4 {
+  if (password.length === 0) return 0;
+  if (password.length < 12) return 1;
+  if (passwordPolicyError(password) !== "") return 2;
+  if (password.length < 16) return 3;
+  return 4;
 }
 
 export function normalizeBaseUrl(candidate: string): string {
@@ -283,6 +298,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
             )}
             {mode === "login" && <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />}
             <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
+            {mode === "register" && <PasswordStrengthMeter strength={passwordStrength(password)} />}
             {mode === "login" && totpNeeded && (
               <Field
                 label="Authenticator code (or recovery code)"

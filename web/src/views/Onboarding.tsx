@@ -34,22 +34,28 @@ export function Onboarding(props: { onDone: () => void }): React.JSX.Element {
   const [step, setStep] = useState(0);
   const panel = PANEL_KEYS[step]!;
   const last = step === PANEL_KEYS.length - 1;
+  const stepLabel = t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length });
   return (
-    <Card title={t(panel.titleKey)}>
-      {/* Soft abstract gradient panel — decorative, calm, never literal. */}
-      <div className="panel-art" aria-hidden="true">
-        <Icon name={step === 0 ? "shield" : step === 1 ? "book" : "heart"} size={44} />
-      </div>
-      <Note tone="lead">{t(panel.bodyKey)}</Note>
-      <div className="row row--between">
-        <ProgressDots total={PANEL_KEYS.length} current={step} label={t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length })} />
-        <span className="note note--muted">{t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length })}</span>
-      </div>
-      <Button
-        label={last ? t("onboarding.webStart") : t("onboarding.webNext")}
-        onPress={() => (last ? props.onDone() : setStep(step + 1))}
-        block
-      />
-    </Card>
+    <div className="onboard-wrap">
+      <Card title={t(panel.titleKey)}>
+        {/* Soft abstract gradient panel — decorative, calm, never literal. */}
+        <div className="panel-art" aria-hidden="true">
+          <Icon name={step === 0 ? "shield" : step === 1 ? "book" : "heart"} size={44} />
+        </div>
+        <Note tone="lead">{t(panel.bodyKey)}</Note>
+        {/* One progress line: the step count and the dots travel together
+            (the split row read as two unrelated indicators — audit
+            2026-09-26 fix). The dots carry the same aria-label. */}
+        <div className="row row--wrap" style={{ gap: 10 }}>
+          <ProgressDots total={PANEL_KEYS.length} current={step} label={stepLabel} />
+          <span className="note note--muted">{stepLabel}</span>
+        </div>
+        <Button
+          label={last ? t("onboarding.webStart") : t("onboarding.webNext")}
+          onPress={() => (last ? props.onDone() : setStep(step + 1))}
+          block
+        />
+      </Card>
+    </div>
   );
 }

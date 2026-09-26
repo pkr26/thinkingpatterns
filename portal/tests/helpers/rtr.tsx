@@ -27,19 +27,24 @@ export async function flush(times = 3): Promise<void> {
   }
 }
 
-/** All text inside a rendered node, depth-first (spans/svg-safe). */
+/** All text inside a rendered node, depth-first (spans/svg-safe). React
+ *  renders number children as text too ({counts.length} patterns), so a
+ *  number child is stringified exactly like a string child (audit P3,
+ *  2026-09-26) — dropping it made numeric interpolations invisible to
+ *  assertions. */
 export const textOfNode = (node: unknown): string => {
   const children = (node as NodeWithChildren | null)?.children;
   if (!Array.isArray(children)) return "";
   return children
-    .map((child) => (typeof child === "string" ? child : textOfNode(child)))
+    .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : textOfNode(child)))
     .join("");
 };
 
 const allStrings = (node: unknown): string[] => {
   const children = (node as NodeWithChildren | null)?.children;
   if (!Array.isArray(children)) return [];
-  return children.flatMap((child) => (typeof child === "string" ? [child] : allStrings(child)));
+  return children.flatMap((child) =>
+    typeof child === "string" || typeof child === "number" ? [String(child)] : allStrings(child));
 };
 
 const textNodes = (root: ReactTestRenderer): ReactTestInstance[] =>

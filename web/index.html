@@ -19,6 +19,11 @@
       content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests"
     />
     <title>MindPattern</title>
+    <!-- Pre-paint theme resolution: sets <html data-theme> from the saved
+         preference / OS setting BEFORE the stylesheet below paints, so a
+         dark-theme user never sees a light flash (same-origin, SRI-stamped
+         by the build like every other local asset). -->
+    <script src="/theme-init.js"></script>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>

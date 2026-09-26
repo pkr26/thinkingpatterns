@@ -36,7 +36,7 @@ import { isOnline } from "../platform";
 import { detectLanguage, sentimentScore } from "../brain/sentiment";
 import { dateLocaleTag, getLocale, t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, Chip, DotScale, ErrorBanner, Icon, MoodScale, Note, PillNote, TextArea } from "../ui";
+import { Button, Card, Chip, DotScale, BarScale, ErrorBanner, Icon, MoodScale, Note, PillNote, TextArea } from "../ui";
 
 export type SaveResult = "sent" | "queued";
 
@@ -198,6 +198,10 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
         </Card>
       )}
 
+      {/* Check-in and journal side by side on wide screens — the old
+          single column left ~500px of dead space beside the check-in
+          (audit 2026-09-26 fix; stacks normally below 1000px). */}
+      <div className="today-grid">
       {/* The one-tap check-in — visible by default (Daylio-style
           frictionless); every dimension is optional and never blocks saving. */}
       <Card title={t("entry.checkinTitle")}>
@@ -209,7 +213,7 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
           </div>
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <span className="checkin-label">{t("entry.energyQuestion")}</span>
-            <MoodScale options={ENERGY_OPTIONS} value={energyPick} onChange={setEnergyPick} />
+            <BarScale options={ENERGY_OPTIONS} value={energyPick} onChange={setEnergyPick} groupLabel={t("entry.energyQuestion")} />
           </div>
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <span className="checkin-label">{t("entry.sleepQuestion")}</span>
@@ -237,7 +241,7 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
         />
         <div className="row row--wrap">
           {chips.map((chip) => (
-            <Chip key={chip} label={chip} onPress={() => setText(`${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `)} />
+            <Chip key={chip} label={chip} toggle={false} onPress={() => setText(`${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `)} />
           ))}
         </div>
         {sentiment !== null && (
@@ -255,6 +259,7 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
           </span>
         </div>
       </Card>
+      </div>
     </>
   );
 }
