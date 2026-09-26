@@ -56,9 +56,22 @@ export function textOf(root: ReactTestRenderer): string {
 export async function press(root: ReactTestRenderer, label: string): Promise<void> {
   const button = root.root.findAllByType("button").find((n) => joined(n) === label);
   if (!button) throw new Error(`no button labeled ${JSON.stringify(label)}`);
+  // A disabled Button withholds onClick entirely (by design, see ui.tsx);
+  // pressing one from a test is a test bug, not an app behavior to drive.
+  if (typeof button.props.onClick !== "function") {
+    throw new Error(`button ${JSON.stringify(label)} is disabled — there is no click path to press`);
+  }
   await act(async () => {
     button.props.onClick();
   });
+}
+
+/** Whether the labeled button is in its disabled state (the F3 gate
+ * lives here, so tests assert state instead of forcing a click). */
+export function isDisabled(root: ReactTestRenderer, label: string): boolean {
+  const button = root.root.findAllByType("button").find((n) => joined(n) === label);
+  if (!button) throw new Error(`no button labeled ${JSON.stringify(label)}`);
+  return button.props.disabled === true;
 }
 
 export function buttonByLabel(root: ReactTestRenderer, label: string): boolean {

@@ -12,7 +12,7 @@ import { INSTRUMENTS } from "../src/measures";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, render, settle, textOf, typeInto } from "./helpers/rtr";
+import { isDisabled, press, render, settle, textOf, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(8);
@@ -238,16 +238,24 @@ describe("SettingsView", () => {
     const mock = stubFetch((url) => {
       if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v2" });
       if (url.endsWith("/llm-consent")) return jsonResponse({ enabled: false });
-      if (url.endsWith("/access-log")) return jsonResponse([]);
+      if (url.endsWith("/access-log")) return jsonResponse([], {});
       return jsonResponse({}, { status: 404 });
     });
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
     await settle(40, 3);
+    // F3 (2026-09-26): the gate moved into the button state — with
+    // anything but the exact word typed, the destructive button is
+    // disabled outright, so no click path exists to drive.
     await typeInto(root, "Type DELETE to confirm", "no");
-    await press(root, "Delete my account");
     await settle(40, 3);
-    expect(textOf(root)).toContain("cannot be undone");
+    expect(isDisabled(root, "Delete my account")).toBe(true);
+    expect(mock.mock.calls.some(([url, init]) => String(url).endsWith("/account") && init?.method === "DELETE")).toBe(false);
+    expect(onLockdown).not.toHaveBeenCalled();
+    // The exact word arms it; nothing has been pressed yet.
+    await typeInto(root, "Type DELETE to confirm", "DELETE");
+    await settle(40, 3);
+    expect(isDisabled(root, "Delete my account")).toBe(false);
     expect(mock.mock.calls.some(([url, init]) => String(url).endsWith("/account") && init?.method === "DELETE")).toBe(false);
     expect(onLockdown).not.toHaveBeenCalled();
   });

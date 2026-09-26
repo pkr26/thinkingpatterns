@@ -4,6 +4,51 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-26 — independent E2E browser campaign: 24-point pass, all three findings fixed and re-verified
+
+A black-box end-to-end pass over the patient web client (and, where the
+patient flow requires a counterpart actor, the therapist portal) driven
+through a real browser against the real FastAPI backend — the true
+production bundles (`tsc + vite build + SRI`), not component tests. 22 of
+24 points passed outright; 2 flows were honestly untestable in the runtime
+(offline-queue reconnect needs network emulation; the Spanish locale needs
+a locale-capable runtime). Full report with screenshots:
+`E2E_TEST_REPORT_2026-09-26.md` + `gui-test-screenshots/`. Three findings,
+all fixed the same day:
+
+- **F1 (Blocker — dev tooling only; production bundles were never
+  affected) — `npm run dev` rendered a permanently blank page in web AND
+  portal**: the app's own CSP (`script-src 'self'`, no `'unsafe-inline'`,
+  enforced by both the index.html meta tag and the dev-server header copy)
+  blocks @vitejs/plugin-react's inline react-refresh preamble, so every
+  transformed module throws on boot and React never mounts (all modules
+  200; `$RefreshReg$` undefined; `#root` empty). Fix: a dev-only
+  `devInlineScriptHashes()` plugin in both `vite.config.ts` files
+  (`apply: "serve"`, `transformIndexHtml` order `post`) hashes the inline
+  module scripts the dev server actually serves and appends those
+  `'sha256-…'` tokens to the meta CSP, while the dev server drops its CSP
+  header so the hashed meta policy governs. No `'unsafe-inline'`
+  introduced (the pinned `securityConfig.test.ts` ban still holds); the
+  production triple (index.html file, `public/_headers`, nginx) is
+  untouched. Verified live: both dev servers now render their sign-in
+  screens in the browser.
+- **F2 (P3) — Privacy view's Back button stretched ~1000px wide** (Card
+  is a flex column; the bare stretch child ignored the codebase's
+  flex-row idiom): wrapped in the standard row container; measured 55px
+  in the served production bundle.
+- **F3 (P3) — "Delete my account" was clickable before the typed
+  confirmation** (the guard lived only in the click handler): the button
+  is now `disabled` until the field reads exactly DELETE, with the
+  handler guard retained as defense in depth. The parity test now pins
+  the stronger contract (disabled state, not a forced click), and the
+  `rtr.tsx` `press()` helper fails loudly when asked to press a disabled
+  button.
+
+Post-fix gates: web suite 407 passed / 5 skipped (coverage thresholds and
+the SRI/security-config pins green), portal suite 316 passed, both
+typechecks and production builds clean; every fix re-verified live in the
+browser against the real backend.
+
 ## 2026-09-26 — independent mobile+web security audit: all four findings fixed, web hardened to industrial header policy
 
 A fresh audit of both patient clients (verification: source-level control

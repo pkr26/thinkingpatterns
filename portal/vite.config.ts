@@ -1,4 +1,5 @@
-import { defineConfig } from "vitest/config";
+import { createHash } from "node:crypto";
+import { defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // The portal talks only to its own origin (`/api` is proxied locally in dev),
@@ -15,8 +16,47 @@ const securityHeaders = {
   "Cross-Origin-Resource-Policy": "same-origin",
 };
 
+/** Dev-only repair for the CSP-vs-fast-refresh conflict (E2E 2026-09-26,
+ * finding F1 — same fix as the patient web client): @vitejs/plugin-react
+ * boots HMR with an INLINE module script (the react-refresh preamble)
+ * that `script-src 'self'` blocks, blanking `npm run dev`. Instead of
+ * widening script-src, hash the inline module scripts actually served
+ * and append those hashes to the meta CSP. Production configs are
+ * untouched; applies only to `vite dev`, where the CSP header is
+ * dropped so the hashed meta policy governs. */
+function devInlineScriptHashes(): Plugin {
+  return {
+    name: "dev-inline-script-hashes",
+    apply: "serve",
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        const hashes = new Set<string>();
+        const rewritten = html.replace(
+          /<script((?![^>]*\bsrc=)[^>]*)>([\s\S]*?)<\/script>/g,
+          (full: string, attrs: string, code: string) => {
+            if (attrs.includes('type="module"') && code.trim() !== "") {
+              hashes.add(`'sha256-${createHash("sha256").update(code).digest("base64")}'`);
+            }
+            return full;
+          },
+        );
+        if (hashes.size === 0) return rewritten;
+        const directive = "script-src 'self'";
+        const at = rewritten.indexOf(directive);
+        if (at === -1) return rewritten;
+        return (
+          rewritten.slice(0, at + directive.length)
+          + " " + [...hashes].join(" ")
+          + rewritten.slice(at + directive.length)
+        );
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), devInlineScriptHashes()],
   test: {
     environment: "node",
     include: ["tests/**/*.test.{ts,tsx}"],
@@ -42,7 +82,12 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8000",
     },
-    headers: securityHeaders,
+    // No CSP header in dev: the served meta policy — rewritten with
+    // inline-script hashes by devInlineScriptHashes() — governs (a
+    // hash-less header copy would re-block the react-refresh preamble).
+    headers: Object.fromEntries(
+      Object.entries(securityHeaders).filter(([name]) => name !== "Content-Security-Policy"),
+    ),
   },
   preview: {
     headers: securityHeaders,

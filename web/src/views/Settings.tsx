@@ -246,7 +246,15 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
       <Card title="Delete account">
         <Note tone="danger">{"Removes you and the full cascade: entries, patterns, questions, measures, sharing grants. Only the access audit log survives (metadata, no content). This cannot be undone."}</Note>
         <Field label='Type DELETE to confirm' value={deleteText} onChange={setDeleteText} autoComplete="off" />
-        <Button label="Delete my account" onPress={() => void deleteAccount()} danger disabled={busy} />
+        {/* Disabled until the confirmation text is exactly DELETE (E2E
+            2026-09-26, finding F3) — the handler keeps its own guard so a
+            synthetic click path still cannot delete unconfirmed. */}
+        <Button
+          label="Delete my account"
+          onPress={() => void deleteAccount()}
+          danger
+          disabled={busy || deleteText.trim().toUpperCase() !== "DELETE"}
+        />
       </Card>
     </>
   );
