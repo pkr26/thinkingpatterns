@@ -140,3 +140,25 @@ describe("EntryView", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 });
+
+describe("EntryView: a 409 on a direct save is parked, never trusted (audit 2026-09-25)", () => {
+  it("a 409 while online queues the entry instead of claiming success", async () => {
+    // The entry id is 72 random bits: a genuine duplicate is practically
+    // impossible, so an unverified 409 is the lying-server case. The
+    // entry must land in the queue where the M-5 GET-verification can
+    // referee it — never be discarded as "sent".
+    stubFetch((url) => {
+      if (url.endsWith("/entries")) return jsonResponse({ detail: "exists", code: "conflict" }, { status: 409 });
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const onSaved = vi.fn();
+    const root = await render(<EntryView onSaved={onSaved} />);
+    await typeArea(root, "How was today?", "A heavy day, honestly.");
+    await press(root, "Save entry");
+    await settle(40, 4);
+    expect(onSaved).toHaveBeenCalledWith("queued", expect.any(String));
+    expect(await queueLength("user-1")).toBe(1);
+    // The editor cleared — the entry is safe in the ciphertext queue.
+    expect(root.root.findAllByType("textarea")[0]!.props.value).toBe("");
+  });
+});

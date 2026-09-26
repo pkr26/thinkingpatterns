@@ -114,3 +114,29 @@ inside the general-wellness lane to match.
 Operator, date, roles (controller/processor), hosting locations, and the
 review cadence (re-run on any architecture change — e.g. enabling the LLM
 path or moving to Redis-backed multi-host).
+
+## 7. Web client addendum (2026-09-25 — added in the audit remediation)
+
+The patient web client (`web/`, WEB_PLAN D-4) adds a browser storage
+surface to this assessment. What the browser may persist, per category:
+
+- **Session token and derived keys: never persisted.** Both live only in
+  the tab's memory; refresh, a new tab, or a 10-minute idle lock drops
+  them and re-authenticates. A storage-scrape red-team harness asserts
+  after every flow that no storage carries token, verifier, or key
+  material.
+- **localStorage: non-content flags only.** An onboarding-seen marker, a
+  per-day notice-dismissed date, and the muted-pattern id list. No
+  journal content, no usernames.
+- **IndexedDB: ciphertext and metadata only.** The offline sync queue
+  (encrypted entry blobs, origin+account scoped), encrypted entry-version
+  marks, the encrypted device-local mood log, and a numeric analysis
+  high-water mark. All content is AES-256-GCM ciphertext under the
+  password-derived data key.
+- **Residual (accepted, named in `docs/WEB_THREAT_MODEL.md`):** a live
+  tab holds decrypted plaintext in memory between unlock and lock; the
+  OS/user owns that window, as with any webmail. Offline journaling works
+  only while a tab lives (no service worker in v1).
+
+Re-run this addendum's review if a service worker, push notification, or
+any new persistence is added to the web client.

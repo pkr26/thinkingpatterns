@@ -425,6 +425,8 @@ jobs:
           files: |
             release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz
             release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256
+            release-assets/mindpattern-web-${{ github.ref_name }}.tar.gz
+            release-assets/mindpattern-web-${{ github.ref_name }}.tar.gz.sha256
             release-assets/mindpattern-release-${{ github.ref_name }}.env
             release-assets/mindpattern-release-${{ github.ref_name }}.env.sha256
           draft: false

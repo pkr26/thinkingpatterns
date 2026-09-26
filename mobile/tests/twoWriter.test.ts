@@ -73,6 +73,33 @@ describe("two-writer: the 410 account-death funnel (D-8 parity)", () => {
     __setLocaleForTests("en");
   });
 
+  it("a 410 WITHOUT the account-death code does NOT lock (audit 2026-09-25)", async () => {
+    // Resource-level 410s must stay possible without spuriously locking
+    // every vault — the funnel is code-checked exactly like the web client.
+    await api.setSession("tok", "dd".repeat(16), "someone");
+    const unlock = await deriveKeysAsync("deletion-test-password-1", Buffer.alloc(16, 5));
+    vault.unlock(unlock, "dd".repeat(16));
+
+    const fired: string[] = [];
+    setUnauthorizedHandler(() => {
+      fired.push("lock");
+      vault.lock();
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ detail: "that resource is gone", code: "gone_resource" }), {
+          status: 410,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(api.insights()).rejects.toBeInstanceOf(ApiError);
+    expect(fired).toEqual([]);
+    expect(vault.isUnlocked()).toBe(true);
+  });
+
   it("a 410 account_deleted locks the vault exactly like a 401", async () => {
     // A live session against the loopback dev origin (async: it persists
     // through the secureStore seam, mocked inert under node):

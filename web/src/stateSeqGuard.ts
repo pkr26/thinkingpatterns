@@ -22,6 +22,7 @@
  * with the stored copy for the session's duration.
  */
 import { kv } from "./kvstore";
+import { withLock } from "./platform";
 
 const STORAGE_PREFIX = "mindpattern.stateSeq.";
 
@@ -88,7 +89,18 @@ export async function checkAnalysisGeneration(
   }
   if (payload > highWater) {
     memoryMirror.set(userId, payload);
-    await kv.setItem(storageKey(userId), String(payload));
+    // The durable mark must be monotonic ACROSS TABS too (audit
+    // 2026-09-25): a plain setItem let tab B write an older value over a
+    // newer one tab A had just persisted. The Web Lock serializes the
+    // read-compare-write, and the compare refuses to move the mark
+    // backwards — a sibling that raced ahead wins.
+    await withLock(`mindpattern-stateSeq.${userId}`, async () => {
+      const raw = await kv.getItem(storageKey(userId));
+      const stored = raw == null ? NaN : Number(raw);
+      if (!Number.isFinite(stored) || stored < payload) {
+        await kv.setItem(storageKey(userId), String(payload));
+      }
+    });
   }
 }
 

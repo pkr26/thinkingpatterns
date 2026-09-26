@@ -663,6 +663,46 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // The first encryption stays OUTSIDE the network try: a local vault
       // failure keeps its own honest message (the pre-M-2 contract).
       let blobB64 = encryptFor(nextVersion);
+      // The post-save completion EVERY successful edit path must run
+      // (audit 2026-09-25: the conflict-overwrite retry used to skip most
+      // of it — stale list, no revision invalidation, and worst, no H-6
+      // crisis detection on the newly-saved text).
+      const finishEdit = async (text: string, version: number): Promise<void> => {
+        entry.contentVersion = version;
+        await observeEntryVersions(userId, vault.get().dataKey, [
+          { clientEntryId: entry.clientEntryId, contentVersion: version },
+        ]).catch(() => {});
+        // L-67: the replacement moved the collection revision on the server;
+        // drop the walk's token so the next "Load older" re-acquires it
+        // instead of 409-restarting (which would wipe the filters).
+        invalidateEntriesRevision();
+        // Keep the device-local mood log in step with the day's newest text.
+        void recordMood(vault.get().dataKey, userId, entry.entryDate, entry.sentiment ?? localSentiment(text)).catch(
+          () => {},
+        );
+        const updated: HistoryEntry = { ...entry, text };
+        setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
+        setMode({ kind: "detail", entry: updated });
+        showStatus(tr("history.updated"), "ok");
+        // H-6 (2026-09-20 audit): the EDIT path runs the same on-device crisis
+        // detection as a new entry. The server only ever sees ciphertext, so
+        // this detector is the only net for a user who edits yesterday's
+        // entry into crisis language — the same text as a NEW entry gets the
+        // dialog, an edited one must too. Never before or instead of saving:
+        // the replacement is already committed server-side at this point.
+        // Same per-day throttle stamp and calm copy as EntryScreen.
+        if (detectCrisisLanguage(text)) {
+          const today = localDateISO();
+          const flagged = await crisisDialogShownOn(userId, today).catch(() => false);
+          if (!flagged) {
+            await recordCrisisDialogShown(userId, today).catch(() => {});
+            Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
+              { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
+              { text: tr("common.notNow"), style: "cancel" },
+            ]);
+          }
+        }
+      };
       const applyEdit = async (): Promise<void> => {
         await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
       };
@@ -694,13 +734,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
               nextVersion = serverVersion + 1;
               blobB64 = encryptFor(nextVersion);
               void applyEdit()
-                .then(() => {
-                  entry.contentVersion = nextVersion;
-                  void observeEntryVersions(userId, vault.get().dataKey, [
-                    { clientEntryId: entry.clientEntryId, contentVersion: nextVersion },
-                  ]).catch(() => {});
-                  showStatus(tr("history.savedStatus"), "ok");
-                })
+                .then(() => finishEdit(trimmed, nextVersion))
                 .catch((retryErr: unknown) => {
                   Alert.alert(
                     tr("history.couldNotUpdateTitle"),
@@ -709,11 +743,28 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
                 });
             };
             if (theirText !== null && theirText !== trimmed) {
+              const theirs = theirText;
               Alert.alert(
                 tr("history.conflictTitle"),
-                tr("history.conflictBody", { theirs: theirText, yours: trimmed }),
+                tr("history.conflictBody", { theirs, yours: trimmed }),
                 [
-                  { text: tr("history.conflictKeepTheirs"), style: "cancel", onPress: (): void => undefined },
+                  {
+                    text: tr("history.conflictKeepTheirs"),
+                    style: "cancel",
+                    // Keeping theirs must still leave the local list
+                    // truthful (audit 2026-09-25): apply the server's text
+                    // and version instead of leaving a stale row that
+                    // re-enters the conflict funnel on the next save.
+                    onPress: (): void => {
+                      entry.contentVersion = serverVersion;
+                      void observeEntryVersions(userId, vault.get().dataKey, [
+                        { clientEntryId: entry.clientEntryId, contentVersion: serverVersion },
+                      ]).catch(() => {});
+                      const updated: HistoryEntry = { ...entry, text: theirs };
+                      setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
+                      setMode({ kind: "detail", entry: updated });
+                    },
+                  },
                   { text: tr("history.conflictOverwrite"), style: "destructive", onPress: retry },
                 ],
                 { cancelable: true },
@@ -741,40 +792,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         }
         return;
       }
-      entry.contentVersion = nextVersion;
-      await observeEntryVersions(userId, vault.get().dataKey, [
-        { clientEntryId: entry.clientEntryId, contentVersion: nextVersion },
-      ]).catch(() => {});
-      // L-67: the replacement moved the collection revision on the server;
-      // drop the walk's token so the next "Load older" re-acquires it
-      // instead of 409-restarting (which would wipe the filters).
-      invalidateEntriesRevision();
-      // Keep the device-local mood log in step with the day's newest text.
-      void recordMood(vault.get().dataKey, userId, entry.entryDate, entry.sentiment ?? localSentiment(trimmed)).catch(
-        () => {},
-      );
-      const updated: HistoryEntry = { ...entry, text: trimmed };
-      setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
-      setMode({ kind: "detail", entry: updated });
-      showStatus(tr("history.updated"), "ok");
-      // H-6 (2026-09-20 audit): the EDIT path runs the same on-device crisis
-      // detection as a new entry. The server only ever sees ciphertext, so
-      // this detector is the only net for a user who edits yesterday's
-      // entry into crisis language — the same text as a NEW entry gets the
-      // dialog, an edited one must too. Never before or instead of saving:
-      // the replacement is already committed server-side at this point.
-      // Same per-day throttle stamp and calm copy as EntryScreen.
-      if (detectCrisisLanguage(trimmed)) {
-        const today = localDateISO();
-        const flagged = await crisisDialogShownOn(userId, today).catch(() => false);
-        if (!flagged) {
-          await recordCrisisDialogShown(userId, today).catch(() => {});
-          Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
-            { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
-            { text: tr("common.notNow"), style: "cancel" },
-          ]);
-        }
-      }
+      await finishEdit(trimmed, nextVersion);
     } catch (err) {
       Alert.alert(tr("history.couldNotUpdateTitle"), requestFailureCopy(err));
     } finally {

@@ -587,7 +587,27 @@ export interface PairingLookup {
 
 export const api = {
   meta: () => request<ServerMeta>("GET", "/meta"),
-  logout: () => request<null>("POST", "/auth/logout"),
+  /** Logout deliberately does NOT ride the session's AbortController: the
+   *  button fires this and then synchronously calls clearSession(), whose
+   *  abort would cancel the very epoch bump (account-wide sign-out) the
+   *  request exists to perform (audit 2026-09-25). It keeps every other
+   *  hardening (deadline, no credentials, redirect refusal, origin recheck)
+   *  and uses the token captured at call time. */
+  logout: async (): Promise<null> => {
+    const activeSession = session;
+    if (!activeSession) throw new ApiError(0, "not signed in");
+    const response = await fetchWithTimeout(
+      `${activeSession.baseUrl}${API_PREFIX}/auth/logout`,
+      { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${activeSession.token}` } },
+      activeSession.baseUrl,
+    );
+    if (response.status === 204) return null;
+    const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
+    if (!response.ok) {
+      throw new ApiError(response.status, message(data.detail, response.status), sanitizeCode(data.code));
+    }
+    return null;
+  },
 
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number) => {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) throw new ApiError(0, "invalid entry id — refusing the request");

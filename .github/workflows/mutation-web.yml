@@ -12,21 +12,21 @@ name: Web mutation gate
 # mutant, no shared module graph to go stale (validated scoped: aad.ts
 # 0% → 100%).
 #
-# FRONTEND CAMPAIGN 2026-09-22 (mutation_campaign_2026-09-22_frontend):
-# the mutate scope widened from the four contract modules to ALL of src —
-# the views (where four audit-remediation waves landed) had never been
-# measured with the working runner. Fresh full-src baseline 3,549 mutants /
-# 55.68%; the campaign's two pin rounds (tests/
-# mutation_2026_09_22_frontend*.pins.test.tsx + _round2) lifted it to 65.65%
-# with 348 mutant-by-mutant verified kills. The
-# remaining gap is documented in the campaign REPORT.md: style/theme
-# literals, environment-limited equivalents, and view copy fragments.
+# PROVENANCE CORRECTION 2026-09-25 (independent audit): the 65.65%
+# measurement this workflow used to cite is the PORTAL's frontend campaign
+# (mutation_campaign_2026-09-22_frontend ran over portal/src). web/ did not
+# exist until 2026-09-25 and has never had a measured Stryker run — WEB_PLAN
+# 9.9 says exactly that. The 65.0 floor below is therefore PROVISIONAL:
+# inherited from the portal campaign as a sanity gate until this workflow's
+# first scheduled run measures the web suite for real. When that first
+# measured score lands, replace the floor with a small margin under it —
+# raise it as the score rises, never lower it.
 # concurrency 2 is safe here: Stryker 10 selects the active mutant via the
 # __STRYKER_ACTIVE_MUTANT__ env var, so parallel vitest processes mutate
 # independently. The 45 s mutant budget (suite baseline ~1.4 s) bounds the
 # infinite-loop mutants the views produce — each used to burn 120 s.
-# The floor sits at 65.0: below the measured 65.65 only by a small churn
-# margin — raise it when the score rises, never lower it.
+# The provisional floor sits at 65.0 (portal-inherited, see the provenance
+# note above — WEB_PLAN 9.9 tracks the first real web measurement).
 
 on:
   schedule:
@@ -58,7 +58,7 @@ jobs:
         # A runner/configuration failure is not a score. Let it fail the
         # workflow; the report upload below still runs for diagnosis.
         run: npx stryker run
-      - name: Enforce the floor (65.0 — measured 65.65 on 2026-09-22 over ALL of src after the campaign's two pin rounds; see header)
+      - name: Enforce the provisional floor (65.0 — portal-inherited pending web's first measured run; see header)
         working-directory: web
         run: |
           SCORE=$(node -e "
@@ -82,7 +82,7 @@ jobs:
           ")
           echo "mutation score: $SCORE"
           awk -v s="$SCORE" 'BEGIN { exit !(s < 65.0) }' && {
-            echo "::error::web mutation score $SCORE is below the 65.0 floor (measured 65.65 on 2026-09-22, full-src scope after the campaign's two pin rounds) — mutants survived that the suite used to kill"
+            echo "::error::web mutation score $SCORE is below the 65.0 provisional floor (portal-inherited; web's own baseline is not yet measured — see WEB_PLAN 9.9)"
             exit 1
           }
       - name: Upload the report artifact

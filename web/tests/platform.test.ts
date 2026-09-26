@@ -8,7 +8,6 @@ import {
   localStore,
   onWindowEvent,
   randomBytes,
-  sessionStore,
   withLock,
 } from "../src/platform";
 
@@ -50,25 +49,12 @@ describe("platform seam", () => {
     expect(localStore.get("k")).toBe("v");
   });
 
-  it("keeps localStorage and sessionStorage separate", () => {
-    localStore.set("persistent", "a");
-    sessionStore.set("perTab", "b");
-    expect(sessionStore.get("persistent")).toBeNull();
-    expect(localStore.get("perTab")).toBeNull();
-    expect(sessionStore.get("perTab")).toBe("b");
-  });
-
-  it("removes only a requested metadata namespace from each store", () => {
+  it("removes only a requested metadata namespace", () => {
     localStore.set("mindpattern.prefs.u1", "x");
     localStore.set("other.application.key", "keep");
-    sessionStore.set("mindpattern.prefs.u1", "x");
-    sessionStore.set("other.application.key", "keep");
     localStore.removePrefix("mindpattern.prefs.");
-    sessionStore.removePrefix("mindpattern.prefs.");
     expect(localStore.get("mindpattern.prefs.u1")).toBeNull();
-    expect(sessionStore.get("mindpattern.prefs.u1")).toBeNull();
     expect(localStore.get("other.application.key")).toBe("keep");
-    expect(sessionStore.get("other.application.key")).toBe("keep");
   });
 });
 

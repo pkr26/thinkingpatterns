@@ -83,9 +83,15 @@ export function HistoryView(): React.JSX.Element {
       }
     } catch (err) {
       if (generation.current !== run) return;
-      if (err instanceof ApiError && err.status === 0 && vault.isUnlocked()) {
+      // Every terminal failure leaves the screen honest — never a permanent
+      // "Loading…" (audit 2026-09-25: only status-0 used to surface).
+      setEntries([]);
+      if (!vault.isUnlocked()) {
+        setError("Your session locked — sign in again.");
+      } else if (err instanceof ApiError && err.status === 0) {
         setError("Could not load history — check your connection and try again.");
-        setEntries([]);
+      } else {
+        setError(err instanceof Error ? err.message : "Could not load history.");
       }
     }
   }, []);
@@ -252,7 +258,7 @@ export function HistoryView(): React.JSX.Element {
         <Field label="Search" value={query} onChange={setQuery} placeholder="Search your words, or an exact date (YYYY-MM-DD)" />
         {rolledBack.length > 0 && <Note tone="warn">{`${rolledBack.length} hidden by the rollback guard.`}</Note>}
         <ErrorBanner message={error} />
-        {visible === null && <Note role="status">Loading…</Note>}
+        {visible === null && !error && <Note role="status">Loading…</Note>}
         {visible?.length === 0 && <Note>No entries{query ? " match that search" : " yet — today is a fine day to start"}.</Note>}
         {visible?.map((entry) => (
           <section key={entry.clientEntryId} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>

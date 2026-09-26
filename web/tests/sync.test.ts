@@ -6,7 +6,7 @@ import { reconcile, reconcileInsights } from "../src/sync";
 import { checkAnalysisGeneration, FRESHNESS_ERROR, forgetAnalysisGeneration } from "../src/stateSeqGuard";
 import { encryptWithFixedNonce, fromBase64, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
-import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
+import { setKvBackendForTests } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 
@@ -72,19 +72,23 @@ describe("reconcileInsights funnels", () => {
 });
 
 describe("reconcile (the full pull)", () => {
-  it("walks the entries after a successful insights read", async () => {
+  it("stays one insights round-trip: no full-journal walk on focus events", async () => {
     const mock = stubFetch((url) => {
       if (url.endsWith("/insights")) {
         return jsonResponse({ phase: "baseline", active_days: 1, streak: 1, days_remaining: 29, blob: null });
       }
-      if (url.startsWith("http://localhost:5173/api/v1/entries?")) {
+      if (url.includes("/entries?")) {
         return jsonResponse([], { headers: { "X-Entries-Revision": "1" } });
       }
       return jsonResponse({ detail: "unmatched" }, { status: 404 });
     });
     const outcome = await reconcile();
     expect(outcome.kind).toBe("ok");
-    expect(mock.mock.calls.some(([url]) => String(url).includes("/entries?"))).toBe(true);
+    // The walk re-downloaded the account's entire ciphertext and discarded
+    // it on every focus — the History view owns that walk (audit
+    // 2026-09-25). Reconcile must not page entries at all.
+    expect(mock.mock.calls.some(([url]) => String(url).includes("/entries?"))).toBe(false);
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("/insights"))).toHaveLength(1);
   });
 });
 
@@ -109,28 +113,70 @@ describe("stateSeqGuard", () => {
     await expect(checkAnalysisGeneration(USER, undefined, undefined)).resolves.toBeUndefined();
   });
 
-  it("the mark persists across an in-memory reset (stored copy)", async () => {
-    await checkAnalysisGeneration(USER, 5, 5);
-    const fresh: KvBackend = { ...memorySnapshot() };
-    void fresh;
-    // A NEW module mirror (process restart) re-reads the stored mark:
-    const { forgetAnalysisGeneration: _f, ...mod } = await import("../src/stateSeqGuard");
-    void mod;
-    await expect(checkAnalysisGeneration(USER, 4, 4)).rejects.toThrow(FRESHNESS_ERROR);
+  it("the stored mark is authoritative with an empty mirror (process restart)", async () => {
+    // A fresh process has no mirror — the persisted mark alone must referee.
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    map.set(`mindpattern.stateSeq.${USER}`, "9");
+    await expect(checkAnalysisGeneration(USER, 8, 8)).rejects.toThrow(FRESHNESS_ERROR);
+    await expect(checkAnalysisGeneration(USER, 9, 9)).resolves.toBeUndefined();
+    await checkAnalysisGeneration(USER, 10, 10);
+    expect(map.get(`mindpattern.stateSeq.${USER}`)).toBe("10");
+  });
+
+  it("the persisted mark never regresses (cross-tab CAS)", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    // A sibling tab already advanced the durable mark to 12. A stale tab
+    // (mirror 11) seeing payload 11 must fail against highWater 12 — it
+    // can neither pass nor overwrite the newer mark.
+    map.set(`mindpattern.stateSeq.${USER}`, "12");
+    await expect(checkAnalysisGeneration(USER, 11, 11)).rejects.toThrow(FRESHNESS_ERROR);
+    expect(map.get(`mindpattern.stateSeq.${USER}`)).toBe("12");
+    // And a legitimate advance writes forward only.
+    await checkAnalysisGeneration(USER, 13, 13);
+    expect(map.get(`mindpattern.stateSeq.${USER}`)).toBe("13");
+  });
+
+  it("self-heals a tampered/stale stored mark upward, never downward", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    await checkAnalysisGeneration(USER, 10, 10);
+    expect(map.get(`mindpattern.stateSeq.${USER}`)).toBe("10");
+    // On-device tamper drops the stored copy to 4; the live mirror (10)
+    // must win the max and repair storage back up.
+    map.set(`mindpattern.stateSeq.${USER}`, "4");
+    await expect(checkAnalysisGeneration(USER, 10, 10)).resolves.toBeUndefined();
+    expect(map.get(`mindpattern.stateSeq.${USER}`)).toBe("10");
   });
 });
-
-function memorySnapshot(): KvBackend {
-  const map = new Map<string, string>();
-  return {
-    async getItem(k) {
-      return map.get(k) ?? null;
-    },
-    async setItem(k, v) {
-      map.set(k, v);
-    },
-    async removeItem(k) {
-      map.delete(k);
-    },
-  };
-}

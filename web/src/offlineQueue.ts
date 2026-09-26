@@ -27,6 +27,13 @@ export const MAX_QUEUE_BYTES = 1_000_000;
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 30 * 60_000;
 const SERVER_ADVISORY_MAX_MS = 60 * 60_000;
+/** Floor for a server Retry-After advisory (audit 2026-09-25): `Retry-After:
+ *  0` is valid HTTP, but a hostile or looping server must not be able to
+ *  turn it into a zero-pause in-process re-POST storm — the drain loop
+ *  would pick the same item again immediately. One second of honest pause
+ *  bounds the loop; anything the server genuinely wanted "now" still gets
+ *  effectively-now. */
+const SERVER_ADVISORY_MIN_MS = 1_000;
 /** After a 401 mid-flush the items stay QUEUED (not parked in the rejected
  *  store) with this long notBefore — a dead session cannot be hammered
  *  item-by-item, and the next healthy flush after re-auth recovers it. */
@@ -137,7 +144,11 @@ function normalizeEntry(raw: unknown): QueuedEntry | null {
   return normalized;
 }
 
-function parseItems(raw: string): QueuedEntry[] | null {
+/** parseItems, but the raw serialization of every slot that failed
+ * normalization is kept too — readItems quarantines those verbatim instead
+ * of silently dropping ciphertext (audit 2026-09-25: custody is
+ * quarantine-first everywhere else in this module). */
+function parseItemsWithMalformed(raw: string): { items: QueuedEntry[]; malformedRaw: string[] } | null {
   const parsed: unknown = JSON.parse(raw);
   const slots = Array.isArray(parsed)
     ? parsed
@@ -145,7 +156,14 @@ function parseItems(raw: string): QueuedEntry[] | null {
       ? (parsed as { items?: unknown }).items
       : null;
   if (!Array.isArray(slots)) return null;
-  return slots.map(normalizeEntry).filter((entry): entry is QueuedEntry => entry !== null);
+  const items: QueuedEntry[] = [];
+  const malformedRaw: string[] = [];
+  for (const slot of slots) {
+    const normalized = normalizeEntry(slot);
+    if (normalized === null) malformedRaw.push(JSON.stringify(slot));
+    else items.push(normalized);
+  }
+  return { items, malformedRaw };
 }
 
 function serializeItems(items: QueuedEntry[]): string {
@@ -155,6 +173,13 @@ function serializeItems(items: QueuedEntry[]): string {
 function serializedBytes(items: QueuedEntry[]): number {
   return new TextEncoder().encode(serializeItems(items)).length;
 }
+
+/** Quarantine keeps at most this many raw records (audit 2026-09-25): it is
+ *  an evidence drawer for inspection, not a parallel queue — a hostile or
+ *  corrupt store must not be able to grow it without bound. When full, the
+ *  NEWEST records win (they are the ones a human will inspect first); the
+ *  oldest are dropped. */
+const QUARANTINE_MAX_RECORDS = 50;
 
 async function appendQuarantine(scope: QueueScope, raw: string, generation: number): Promise<void> {
   if (wipedSince(generation)) return;
@@ -169,6 +194,7 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
     }
   })() : [];
   records.push(raw);
+  while (records.length > QUARANTINE_MAX_RECORDS) records.shift();
   await kv.setItem(scope.quarantine, JSON.stringify({ v: 1, records }));
 }
 
@@ -177,7 +203,7 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
   try {
     raw = await kv.getItem(key);
     if (!raw) return [];
-    const parsed = parseItems(raw);
+    const parsed = parseItemsWithMalformed(raw);
     if (parsed === null) {
       // A parseable but unrecognized shape gets the SAME custody as
       // unparseable bytes: quarantine it, then clear the key — leaving it
@@ -186,8 +212,17 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       if (!wipedSince(generation)) await kv.removeItem(key);
       return [];
     }
-    const own = parsed.filter((item) => item.userId === scope.userId);
-    const foreign = parsed.filter((item) => item.userId !== scope.userId);
+    if (parsed.malformedRaw.length > 0) {
+      // A well-formed envelope with corrupt member records: those records
+      // are ciphertext this account may still own — quarantine them
+      // verbatim rather than dropping them on the floor.
+      for (const slot of parsed.malformedRaw) {
+        await appendQuarantine(scope, slot, generation);
+      }
+      if (!wipedSince(generation)) await writeItems(key, parsed.items);
+    }
+    const own = parsed.items.filter((item) => item.userId === scope.userId);
+    const foreign = parsed.items.filter((item) => item.userId !== scope.userId);
     if (foreign.length > 0) {
       // A well-formed record carrying a FOREIGN userId inside this scope
       // key must not be silently dropped by the next rewrite — quarantine
@@ -252,12 +287,26 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
     const queue = await readItems(scope.queue, scope, generation);
     if (wipedSince(generation)) throw new QueueAbandonedError();
     if (queue.length >= MAX_QUEUE_LENGTH) throw new QueueFullError();
+    // The client_entry_id IS the dedupe key of the whole sync path (server
+    // idempotency): enqueueing the same id twice — a caller retry after a
+    // mid-commit failure, or storage tampering — must not fork it.
+    if (queue.some((entry) => entry.clientEntryId === item.clientEntryId)) return;
     // Scope owns the account id. Normalize it from the caller so a tampered
     // record cannot poison another account's queue key.
     const candidate = [...queue, { ...item, userId: scope.userId }];
     if (serializedBytes(candidate) > MAX_QUEUE_BYTES) throw new QueueFullError("over 1 MB of pending entries");
     if (wipedSince(generation)) throw new QueueAbandonedError();
     await writeItems(scope.queue, candidate);
+    // Write-after-wipe rollback (audit 2026-09-25): a clearQueue that won
+    // the race between the last fence check and this commit would find its
+    // wipe undone. The storage mutex is still held, so the content below is
+    // exactly what this enqueue wrote — remove it and fail honestly. (A
+    // NEXT session's enqueue chains on the mutex after this callback and
+    // cannot interleave.)
+    if (wipedSince(generation)) {
+      await kv.removeItem(scope.queue);
+      throw new QueueAbandonedError();
+    }
   });
 }
 
@@ -274,7 +323,10 @@ type FlushOutcome =
   | { kind: "session-expired" }
   | { kind: "retry"; retryAfterMs?: number; stop: boolean };
 
-function isFutureDateRejection(error: ApiError): boolean {
+/** Future-dated entries are the client clock's error, not the entry's:
+ *  exported for direct unit tests (the classifier previously had none —
+ *  audit 2026-09-25). */
+export function isFutureDateRejection(error: ApiError): boolean {
   return (error.code === undefined || error.code === "validation_error") && /future/i.test(error.message);
 }
 
@@ -383,7 +435,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
           const attempts = item.attempts ?? 0;
           const delay =
             outcome.retryAfterMs !== undefined
-              ? Math.min(outcome.retryAfterMs, SERVER_ADVISORY_MAX_MS)
+              ? Math.min(Math.max(outcome.retryAfterMs, SERVER_ADVISORY_MIN_MS), SERVER_ADVISORY_MAX_MS)
               : retryDelayMs(attempts);
           queue[index] = {
             ...item,
@@ -445,7 +497,11 @@ let lastReconnectFlushAt = 0;
 
 export async function flushQueueOnReconnect(): Promise<void> {
   const now = Date.now();
-  if (now - lastReconnectFlushAt < RECONNECT_FLUSH_MIN_INTERVAL_MS) return;
+  // Throttle only within a real, forward-looking window: a clock step
+  // BACKWARDS (NTP correction, or a faked clock in tests) must not leave
+  // the flusher throttled until the wall clock catches up to a stale
+  // future timestamp (audit 2026-09-25).
+  if (now >= lastReconnectFlushAt && now - lastReconnectFlushAt < RECONNECT_FLUSH_MIN_INTERVAL_MS) return;
   lastReconnectFlushAt = now;
   const userId = sessionUserId();
   if (!userId || (await queueLength(userId)) === 0) return;

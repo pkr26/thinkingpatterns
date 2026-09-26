@@ -54,37 +54,6 @@ export const localStore = {
   },
 };
 
-/** Per-tab storage seam: identical degradation contract to localStore. */
-export const sessionStore = {
-  get(key: string): string | null {
-    try {
-      return typeof window !== "undefined" ? window.sessionStorage.getItem(key) : null;
-    } catch {
-      return null;
-    }
-  },
-  set(key: string, value: string): void {
-    try {
-      if (typeof window !== "undefined") window.sessionStorage.setItem(key, value);
-    } catch {
-      // Per-tab storage is optional.
-    }
-  },
-  removePrefix(prefix: string): void {
-    try {
-      if (typeof window === "undefined") return;
-      const keys: string[] = [];
-      for (let index = 0; index < window.sessionStorage.length; index += 1) {
-        const key = window.sessionStorage.key(index);
-        if (key?.startsWith(prefix)) keys.push(key);
-      }
-      keys.forEach((key) => window.sessionStorage.removeItem(key));
-    } catch {
-      // Storage is optional; never fail sign-out on a hostile DOM.
-    }
-  },
-};
-
 /** Save a text file (the encrypted export bundle — WEB_PLAN P7.5).
  *  Returns true when a download was actually initiated, so callers can
  *  offer a copy-to-clipboard fallback in browsers that block programmatic

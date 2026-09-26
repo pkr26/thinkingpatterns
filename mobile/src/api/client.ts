@@ -356,6 +356,11 @@ export const API_ERROR_CODES = [
   "conflict",
   "collection_changed",
   "unauthorized",
+  // Account-wide death (2026-09-25 web parity): the 410 funnel keys on
+  // these — sanitizeCode erased them before the code-checked gate landed,
+  // which is exactly why the status-only check existed.
+  "account_deleted",
+  "gone",
   "entry_blob_invalid",
   "entry_payload_malformed",
   "feedback_blob_invalid",
@@ -528,7 +533,14 @@ async function request(
   if (response.status === 204) return opts.includeResponse ? { data: null, response } : null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if ((response.status === 401 || response.status === 410) && token !== null) {
+    // Audit 2026-09-25: a 410 only means account death when the server says
+    // so in its code (account_deleted/gone, exactly the web client's gate).
+    // A status-only check would spuriously lock the vault if a future
+    // resource-level 410 endpoint appears; 401 stays unconditional.
+    const deathCode = sanitizeCode((data as { code?: unknown }).code);
+    const isAccountDeath = response.status === 401
+      || (response.status === 410 && (deathCode === "account_deleted" || deathCode === "gone"));
+    if (isAccountDeath && token !== null) {
       // The bearer token we sent was rejected: the session is dead. A 401
       // is expiry/epoch death; a 410 is account deletion from another
       // device (WEB_PLAN D-8 parity with the web client) — both must lock

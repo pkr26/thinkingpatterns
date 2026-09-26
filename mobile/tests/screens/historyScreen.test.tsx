@@ -1383,3 +1383,88 @@ describe("HistoryScreen delete removes the day's local mood value (L-68, 2026-09
     await act(async () => root.unmount());
   });
 });
+
+describe("HistoryScreen edit: the two-writer conflict dialog (audit 2026-09-25)", () => {
+  const oneEntry = () => {
+    vi.mocked(api.listEntries).mockResolvedValue([
+      entryRow("e-2026-09-03-bbb", "original words", "2026-09-03"),
+    ] as never);
+  };
+
+  /** Seed: the first update races a concurrent device edit (409), and the
+   *  server's current row holds THEIR text. */
+  function seedConflict(theirText: string): void {
+    vi.mocked(api.updateEntry).mockRejectedValueOnce(new ApiError(409, "conflict", "version_conflict"));
+    vi.mocked(api.getEntry).mockResolvedValue({
+      id: "srv-e-2026-09-03-bbb",
+      client_entry_id: "e-2026-09-03-bbb",
+      blob: encrypt(dataKey, Buffer.from(JSON.stringify({ v: 1, text: theirText, sentiment: null, created_at: "2026-09-03" })), buildAad("entry", "user-1", "e-2026-09-03-bbb")).toString("base64"),
+      entry_date: "2026-09-03",
+      received_at: "2026-09-03T11:00:00.000Z",
+    } as never);
+  }
+
+  it("shows BOTH decrypted texts and overwrites nothing until the user chooses", async () => {
+    oneEntry();
+    seedConflict("their saved sentence");
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "original words");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("my conflicting sentence");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    // updateEntry was attempted exactly once — no silent retry over theirs.
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    const [title, body] = lastAlert();
+    expect(title).toBe("This entry changed on another device");
+    expect(body).toContain("their saved sentence");
+    expect(body).toContain("my conflicting sentence");
+  });
+
+  it("Keep theirs applies the server's text locally — the list never lies", async () => {
+    oneEntry();
+    seedConflict("their saved sentence");
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "original words");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("my conflicting sentence");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    await pressAlertButton("Keep theirs");
+    await flush();
+    // Only the ORIGINAL attempt ran; nothing was overwritten server-side.
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    // The local list now shows THEIR text (was: the stale pre-race text).
+    expect(allText(root)).toContain("their saved sentence");
+    expect(allText(root)).not.toContain("original words");
+  });
+
+  it("Overwrite with mine retries over theirs and runs the FULL post-save path (incl. H-6 crisis detection)", async () => {
+    oneEntry();
+    seedConflict("their saved sentence");
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "original words");
+    // The winning text carries crisis language: the overwrite path must
+    // run the same H-6 safety net as every other edit (it used to skip it).
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("I want to kill myself");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    await pressAlertButton("Overwrite with mine");
+    await flush();
+    // The retry fired with the server's next generation...
+    expect(api.updateEntry).toHaveBeenCalledTimes(2);
+    const retryArgs = vi.mocked(api.updateEntry).mock.calls[1] as unknown as [string, string, string, number];
+    expect(retryArgs[3]).toBe(1); // serverVersion(0) + 1
+    // ...the list shows MY text...
+    expect(allText(root)).toContain("I want to kill myself");
+    // ...and the crisis dialog followed the save — never before it.
+    expect(lastAlert()[0]).toBe("Support is available");
+  });
+});

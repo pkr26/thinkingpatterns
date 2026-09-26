@@ -177,3 +177,25 @@ describe("HistoryView", () => {
     expect(textOf(root)).toContain("rollback guard");
   });
 });
+
+describe("HistoryView: terminal load failures never wedge on Loading (audit 2026-09-25)", () => {
+  it("a server 5xx surfaces an honest error instead of an eternal spinner", async () => {
+    stubFetch((url) => {
+      if (url.includes("/entries?")) return jsonResponse({ detail: "database on fire", code: "internal_error" }, { status: 500 });
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const root = await render(<HistoryView />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("database on fire");
+    expect(textOf(root)).not.toContain("Loading…");
+  });
+
+  it("a locked vault lands the locked message, not silence", async () => {
+    stubFetch(() => jsonResponse([], { headers: { "X-Entries-Revision": "1" } }));
+    vault.lock();
+    const root = await render(<HistoryView />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Your session locked");
+    expect(textOf(root)).not.toContain("Loading…");
+  });
+});

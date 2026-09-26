@@ -20,7 +20,6 @@ import { buildAad } from "./aad";
 import {
   decrypt,
   encrypt,
-  encryptWithFixedNonce,
   fromBase64,
   hkdfSha256,
   toBase64,

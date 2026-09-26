@@ -11,7 +11,7 @@
  * data key changed elsewhere (S-8) and surfaces as `credentialRotated` —
  * never a retry loop, never stale keys.
  */
-import { ApiError, api, hasSession, listEntriesWalk, sessionUserId } from "./api/client";
+import { ApiError, api, hasSession, sessionUserId } from "./api/client";
 import { decryptInsights, type InsightsPayload } from "./crypto/patient";
 import { checkAnalysisGeneration, FRESHNESS_ERROR } from "./stateSeqGuard";
 import { withLock } from "./platform";
@@ -68,25 +68,16 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
   return { kind: "ok", phase: summary.phase, stateSeq: payload.state_seq ?? null };
 }
 
-/** The full honest-moment pull (S-1): insights + one reconciliation pass
- *  of the entries walk, serialized across tabs. Screens subscribe to the
- *  outcome; nothing here merges. */
+/** The full honest-moment pull (S-1): the analysis state under a Web Lock,
+ * serialized across tabs. Screens subscribe to the outcome; nothing here
+ * merges.
+ *
+ * This deliberately does NOT walk the entries anymore (audit 2026-09-25):
+ * the walk re-downloaded the account's entire ciphertext on every focus
+ * event and discarded it — the History view performs its own
+ * revision-pinned walk (S-5) whenever it is shown, which is the only
+ * consumer of that data, so reconcile() stays one cheap insights round
+ * trip. */
 export async function reconcile(): Promise<ReconcileOutcome> {
-  return withLock("mindpattern-reconcile", async () => {
-    const outcome = await reconcileInsights();
-    // A fresh entries pass only matters when the analysis state read
-    // succeeded (or is baseline) — the error funnels take priority.
-    if (outcome.kind === "ok") {
-      try {
-        await listEntriesWalk();
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 0) return { kind: "offline" } as ReconcileOutcome;
-        if (err instanceof ApiError && (err.status === 401 || err.status === 410)) return { kind: "locked" } as ReconcileOutcome;
-        // collection_changed storms already restart inside the walk; any
-        // other failure is surfaced but does not undo the insights result.
-        return { kind: "error", message: err instanceof Error ? err.message : "entries reconciliation failed" } as ReconcileOutcome;
-      }
-    }
-    return outcome;
-  });
+  return withLock("mindpattern-reconcile", () => reconcileInsights());
 }

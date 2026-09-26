@@ -9,6 +9,7 @@ import {
   clearQueue,
   enqueue,
   flushQueue,
+  isFutureDateRejection,
   QueueAbandonedError,
   QueueFullError,
   queueLength,
@@ -18,6 +19,7 @@ import {
   SessionExpiredError,
   MAX_QUEUE_LENGTH,
 } from "../src/offlineQueue";
+import { ApiError } from "../src/api/client";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 
@@ -230,5 +232,138 @@ describe("flushQueue", () => {
     // any key/token/plaintext markers.
     expect(persisted).toContain("T0hBSU9O");
     expect(persisted).not.toMatch(/dataKey|authKey|token-123|Bearer/);
+  });
+});
+
+describe("audit 2026-09-25 hardening", () => {
+  it("a Retry-After: 0 advisory backs off at least one second — no re-POST storm", async () => {
+    let posts = 0;
+    stubFetch(() => {
+      posts += 1;
+      return jsonResponse({ detail: "back now", code: "service_unavailable" }, { status: 503, headers: { "Retry-After": "0" } });
+    });
+    await enqueue(item(1));
+    // The drain loop must terminate: the item is re-parked with a real
+    // delay, so the immediate re-flush below finds nothing due.
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(posts).toBe(1);
+    expect(await queueLength("user-1")).toBe(1);
+  });
+
+  it("a past HTTP-date advisory (parsed as 0) gets the same floor", async () => {
+    let posts = 0;
+    stubFetch(() => {
+      posts += 1;
+      return jsonResponse({ detail: "x" }, { status: 503, headers: { "Retry-After": "Mon, 01 Jan 2001 00:00:00 GMT" } });
+    });
+    await enqueue(item(1));
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(posts).toBe(1);
+  });
+
+  it("enqueue is idempotent per client_entry_id (the id is the dedupe key)", async () => {
+    await enqueue(item(1));
+    await enqueue(item(1));
+    await enqueue(item(1));
+    expect(await queueLength("user-1")).toBe(1);
+  });
+
+  it("a wipe racing the enqueue commit is rolled back — nothing outlives sign-out", async () => {
+    const map = new Map<string, string>();
+    let bumped = false;
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+        // The commit lands, THEN the clearQueue generation bump fires —
+        // the write-after-wipe interleave (audit TOCTOU).
+        if (!bumped && k.includes(".items.")) {
+          bumped = true;
+          abortInFlightFlush();
+        }
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    await expect(enqueue(item(1))).rejects.toThrow(QueueAbandonedError);
+    expect([...map.keys()].filter((k) => k.includes(".items."))).toHaveLength(0);
+  });
+
+  it("corrupt member records inside a valid envelope are quarantined, not dropped", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    await enqueue(item(1));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const envelope = JSON.parse(map.get(queueKey)!) as { v: number; items: unknown[] };
+    envelope.items.push({ garbage: "not-a-valid-record" });
+    map.set(queueKey, JSON.stringify(envelope));
+    expect(await queueLength("user-1")).toBe(1); // the valid record survives
+    expect(await quarantinedQueueExists("user-1")).toBe(true); // the corrupt one is kept as evidence
+    const quarantineKey = [...map.keys()].find((k) => k.includes(".quarantine."))!;
+    const quarantine = JSON.parse(map.get(quarantineKey)!) as { records: string[] };
+    expect(quarantine.records.some((record) => record.includes("not-a-valid-record"))).toBe(true);
+  });
+
+  it("the quarantine store is capped — a hostile store cannot grow it without bound", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    const slots = Array.from({ length: 60 }, (_, n) => ({ corrupt: n }));
+    await enqueue(item(1));
+    const queueKey = [...map.keys()].find((k) => k.startsWith("mindpattern/queue.v1.items."))!;
+    map.set(queueKey, JSON.stringify({ v: 1, items: [...slots, item(2)] }));
+    await queueLength("user-1");
+    const quarantineKey = [...map.keys()].find((k) => k.startsWith("mindpattern/queue.v1.quarantine."))!;
+    const quarantine = JSON.parse(map.get(quarantineKey)!) as { records: string[] };
+    expect(quarantine.records.length).toBeLessThanOrEqual(50);
+    // The NEWEST records win when the cap evicts.
+    expect(quarantine.records.at(-1)).toContain('"corrupt":59');
+  });
+
+  it("the future-date classifier: only genuine future-date 422s retry", () => {
+    expect(isFutureDateRejection(new ApiError(422, "entry_date is in the future"))).toBe(true);
+    expect(isFutureDateRejection(new ApiError(422, "date must not be in the FUTURE", "validation_error"))).toBe(true);
+    expect(isFutureDateRejection(new ApiError(422, "blob is malformed", "validation_error"))).toBe(false);
+    expect(isFutureDateRejection(new ApiError(422, "too many", "quota_exceeded"))).toBe(false);
+  });
+
+  it("a future-dated 422 stays queued for retry; any other 422 is rejected", async () => {
+    stubFetch(() => jsonResponse({ detail: "entry_date is in the future", code: "validation_error" }, { status: 422 }));
+    await enqueue(item(1));
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(await queueLength("user-1")).toBe(1);
+    expect(await rejectedEntries("user-1")).toHaveLength(0);
+
+    // Fresh item for the non-future case (the first now carries a backoff).
+    await clearQueue("user-1");
+    await enqueue(item(2));
+    stubFetch(() => jsonResponse({ detail: "blob is malformed", code: "validation_error" }, { status: 422 }));
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(await queueLength("user-1")).toBe(0);
+    expect(await rejectedEntries("user-1")).toHaveLength(1);
   });
 });

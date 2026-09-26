@@ -82,7 +82,12 @@ for (const [name, section] of [["web_generated", fixtures.web_generated], ["mobi
 }
 
 it("both sections exist once generation has run on both platforms", () => {
-  // Skipped (not failed) until the generators have run; CI runs them in
-  // the contract-gates job after this file lands on both sides.
+  // Audit 2026-09-25: this guard used to assert only `v === 1` while the
+  // pin describes above used skipIf — deleting either section from the
+  // committed fixtures left both suites silently green. The committed file
+  // carries BOTH platforms' sections; a degraded file must FAIL here, not
+  // skip to green.
   expect(fixtures.v).toBe(1);
+  expect(fixtures.web_generated).toBeDefined();
+  expect(fixtures.mobile_generated).toBeDefined();
 });

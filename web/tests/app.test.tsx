@@ -6,6 +6,7 @@ import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { api, hasSession } from "../src/api/client";
+import { enqueue } from "../src/offlineQueue";
 import { vault } from "../src/vault";
 import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { flush, press, render, textOf } from "./helpers/rtr";
@@ -159,6 +160,70 @@ describe("App", () => {
     await flush();
     expect(textOf(root)).toContain("Locked after inactivity");
     expect(vault.isUnlocked()).toBe(false);
+  });
+
+  // Audit 2026-09-25: sessionActive had drifted to miss the later-phase
+  // views — the idle lock (and bfcache guard) was disarmed exactly where
+  // decrypted data and exports live. Every in-app view must lock.
+  for (const navLabel of ["Measures", "Share", "Settings"]) {
+    it(`the idle lock stays armed on the ${navLabel} view`, async () => {
+      authStubs();
+      const root = await render(<App />);
+      await vi.advanceTimersByTimeAsync(50);
+      await flush();
+      await signIn(root);
+      await press(root, "Next");
+      await press(root, "Next");
+      await press(root, "Start journaling");
+      await flush();
+      expect(textOf(root)).toContain(navLabel); // the nav row is present
+      await press(root, navLabel);
+      await flush();
+      expect(vault.isUnlocked()).toBe(true);
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 10);
+      await flush();
+      expect(textOf(root)).toContain("Locked after inactivity");
+      expect(vault.isUnlocked()).toBe(false);
+      expect(hasSession()).toBe(false);
+    });
+  }
+
+  it("a parked entry flushes on the periodic retry without any online transition", async () => {
+    // The `online` event only fires on offline→online transitions: an
+    // entry parked while the browser still believed it was online (server
+    // 5xx) must be picked up by the session's periodic flush instead.
+    const mock = stubFetch((url) => {
+      if (url.includes("/entries") && !url.includes("?")) return jsonResponse({ id: "row" }, { status: 201 });
+      if (url.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const root = await render(<App />);
+    await vi.advanceTimersByTimeAsync(50);
+    await flush();
+    // Park an entry for the account the mock login is about to unlock,
+    // not due for another 15 s: the sign-in flush must find nothing to
+    // send, so the PERIODIC flush is the only thing that can drain it.
+    await enqueue({
+      userId: "user-7",
+      clientEntryId: "e-parked-1",
+      blobB64: "AAECAwQFBgcICQoL",
+      entryDate: "2026-09-25",
+      notBefore: Date.now() + 15_000,
+    });
+    await signIn(root);
+    await press(root, "Next");
+    await press(root, "Next");
+    await press(root, "Start journaling");
+    await flush();
+    expect(mock.mock.calls.some(([url]) => String(url).includes("/entries") && !String(url).includes("?"))).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000 + 100);
+    // The flush is a promise chain (kv reads → withLock → fetch → text());
+    // give it several timer-async rounds to settle like the browser would.
+    for (let round = 0; round < 6; round += 1) await vi.advanceTimersByTimeAsync(50);
+    await flush();
+    const posts = mock.mock.calls.filter(([url]) => String(url).includes("/entries") && !String(url).includes("?"));
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(String((posts[0] as [string, RequestInit])[1]!.body))).toMatchObject({ client_entry_id: "e-parked-1" });
   });
 
   it("the privacy view opens from home and returns", async () => {

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { decryptInsights, type InsightsPayload } from "../crypto/patient";
+import { matchesCrisisSuppress } from "../crisisDetect";
 import { recentMoods } from "../moodLog";
 import { recordPatternMute } from "../questionFeedback";
 import { reconcile, type ReconcileOutcome } from "../sync";
@@ -69,6 +70,15 @@ const METHOD_PLAIN: Record<string, string> = {
 
 function muteKey(userId: string): string {
   return `mindpattern.mutedPids.v1.${userId}`;
+}
+
+/** Belt-and-braces with mobile and the backend (audit 2026-09-25): trust
+ * the payload's `sensitive` flag, but ALSO run the suppress-tier matcher on
+ * the label — an insights blob that carries a crisis-adjacent phrase
+ * without the flag (legacy payload, LLM extra, upstream regression) must
+ * still never have its text echoed by this view. */
+function isSensitivePattern(pattern: PatternPayload): boolean {
+  return pattern.detail.sensitive === true || matchesCrisisSuppress(pattern.label);
 }
 
 function readMuted(userId: string): Set<string> {
@@ -219,7 +229,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
               .map((pattern) => (
                 <Button
                   key={pattern.detail.pattern_pid}
-                  label={`Unmute: ${pattern.detail.sensitive === true ? "a private pattern" : pattern.label}`}
+                  label={`Unmute: ${isSensitivePattern(pattern) ? "a private pattern" : pattern.label}`}
                   onPress={() => void toggleMute(pattern.detail.pattern_pid)}
                   small
                 />
@@ -233,7 +243,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
         const pid = pattern.detail.pattern_pid ?? `#${index}`;
         const state = LIFECYCLE_LABEL[pattern.detail.pattern_state ?? ""] ?? pattern.detail.pattern_state ?? "";
         const method = METHOD_PLAIN[pattern.kind] ?? "Computed within your own journal, against your own baseline.";
-        const sensitive = pattern.detail.sensitive === true;
+        const sensitive = isSensitivePattern(pattern);
         return (
           <Card key={pid} title={sensitive ? "A difficult thought has been returning" : pattern.label}>
             {sensitive ? (

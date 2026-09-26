@@ -9,7 +9,7 @@
  * Drafts are memory-only: no plaintext at rest, ever (disclosed in the UI).
  */
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "../api/client";
+import { api } from "../api/client";
 import { encryptEntry, timeOfDayBucket } from "../crypto/patient";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { localDateISO } from "../dates";
@@ -102,14 +102,15 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
         try {
           await api.createEntry(clientEntryId, blobB64, entryDate, 1);
           result = "sent";
-        } catch (err) {
-          // A genuine duplicate (this id already lives server-side) is
-          // success; everything else parks in the offline queue.
-          if (!(err instanceof ApiError && err.status === 409)) {
-            await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
-          } else {
-            result = "sent";
-          }
+        } catch {
+          // EVERY failure while online parks the entry in the queue —
+          // including a 409 (audit 2026-09-25): this id carries 72 random
+          // bits, so a genuine duplicate is practically impossible, and an
+          // unverified "already exists" is exactly the lying-server case
+          // the queue's M-5 GET-verification exists to referee. The entry
+          // stays safe locally either way; the queue proves or refutes the
+          // 409 before dropping anything.
+          await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
         }
       } else {
         await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });

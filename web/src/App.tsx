@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { useBfcacheGuard, useIdleLock, type LockReason } from "./sessionLock";
-import { localStore, onWindowEvent } from "./platform";
+import { isOnline, localStore, onWindowEvent } from "./platform";
 import { AppFrame, Button, Card, ErrorBanner, Note } from "./ui";
 import { CrisisCard } from "./crisis";
 import { LoginView } from "./views/LoginView";
@@ -45,6 +45,11 @@ type View =
 
 /** Brief boot beat so the first paint is never a flash of the wrong state. */
 const BOOT_MS = 40;
+/** How often a live session re-attempts the offline queue. Bounds the
+ * stranding window for entries parked while the browser still believed it
+ * was online (audit 2026-09-25); the flush itself is throttled further and
+ * Web-Locks-serialized inside flushQueueOnReconnect. */
+const QUEUE_FLUSH_INTERVAL_MS = 30_000;
 
 function noticeFor(reason: "idle" | "bfcache" | "expired" | "deleted"): string {
   switch (reason) {
@@ -91,11 +96,13 @@ export function App(): React.JSX.Element {
     return () => setSessionExpiredHandler(null);
   }, [lockDown]);
 
-  // Idle auto-lock + bfcache guard are armed exactly while a session
-  // exists (anything past login).
-  const sessionActive =
-    view.kind === "onboarding" || view.kind === "today" || view.kind === "history"
-    || view.kind === "patterns" || view.kind === "question" || view.kind === "privacy";
+  // The views that hold a live session: everything past login. This is ONE
+  // list on purpose (audit 2026-09-25: it had drifted to miss measures/
+  // share/settings, leaving keys in memory with no idle lock there).
+  const inApp =
+    view.kind === "today" || view.kind === "history" || view.kind === "patterns"
+    || view.kind === "question" || view.kind === "measures" || view.kind === "share" || view.kind === "settings";
+  const sessionActive = inApp || view.kind === "onboarding" || view.kind === "privacy";
   const onLock = useCallback((reason: LockReason) => lockDown(noticeFor(reason)), [lockDown]);
   useIdleLock(sessionActive, onLock);
   useBfcacheGuard(sessionActive, onLock);
@@ -105,6 +112,19 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (!sessionActive) return;
     return onWindowEvent("online", () => void flushQueueOnReconnect());
+  }, [sessionActive]);
+
+  // The `online` event only fires on an offline→online TRANSITION: entries
+  // parked while the browser still believed it was online (server 5xx,
+  // timeouts — audit 2026-09-25) would otherwise wait forever. A periodic
+  // flush attempt while a session exists bounds that wait; it is free when
+  // the queue is empty (flushQueueOnReconnect checks the length first).
+  useEffect(() => {
+    if (!sessionActive) return;
+    const timer = setInterval(() => {
+      if (isOnline()) void flushQueueOnReconnect();
+    }, QUEUE_FLUSH_INTERVAL_MS);
+    return () => clearInterval(timer);
   }, [sessionActive]);
 
   // Multi-device reconciliation (P5/S-1): pull fresh truth on regained
@@ -138,6 +158,10 @@ export function App(): React.JSX.Element {
 
   const onLoginSuccess = useCallback((success: { userId: string; username: string }) => {
     setUsername(success.username);
+    // Sign-in is an honest moment to drain anything this browser parked
+    // earlier (D-9 keeps ciphertext across sign-out) — one entry point of
+    // the anti-stranding contract alongside the periodic flush above.
+    void flushQueueOnReconnect();
     if (hasSeenOnboarding(success.userId, localStore.get)) {
       setView({ kind: "today" });
     } else {
@@ -159,16 +183,16 @@ export function App(): React.JSX.Element {
   }, [lockDown]);
 
   const onSaved = useCallback((result: "sent" | "queued", _date: string): void => {
+    // A direct save that reached the server proves connectivity RIGHT NOW:
+    // drain anything parked earlier immediately instead of waiting for the
+    // periodic flush (the `online` event may never have fired).
+    if (result === "sent") void flushQueueOnReconnect();
     setView((current) =>
       current.kind === "today"
         ? { ...current, savedNote: result === "sent" ? "Saved." : "Saved offline — it will sync when you're back." }
         : current,
     );
   }, []);
-
-  const inApp =
-    view.kind === "today" || view.kind === "history" || view.kind === "patterns"
-    || view.kind === "question" || view.kind === "measures" || view.kind === "share" || view.kind === "settings";
 
   return (
     <AppFrame title="MindPattern" onCrisis={() => setCrisisOpen(true)}>

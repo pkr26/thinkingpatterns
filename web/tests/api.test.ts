@@ -7,6 +7,7 @@ import {
   apiBaseUrl,
   auth,
   clearSession,
+  listEntriesWalk,
   normalizeApiBaseUrl,
   parseRetryAfter,
   setSession,
@@ -331,5 +332,157 @@ describe("pagination validators", () => {
     const response = await api.exportAccountRaw();
     expect(response.status).toBe(200);
     clearSession();
+  });
+});
+
+describe("logout survives its own session teardown (audit 2026-09-25)", () => {
+  it("the epoch-bump request completes even though clearSession aborts everything else", async () => {
+    // The fetch resolves only AFTER clearSession() has already run — the
+    // exact race the old shared AbortController lost.
+    let release!: (value: Response) => void;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const mock = stubFetch(() => gate);
+    setSession("tok", "user-1", "tester");
+    const pending = api.logout();
+    clearSession(); // synchronous teardown, as lockDown performs it
+    release(new Response(null, { status: 204 }));
+    await expect(pending).resolves.toBeNull();
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(String(mock.mock.calls[0]![0])).toBe(`${ORIGIN}/api/v1/auth/logout`);
+  });
+
+  it("surfaces a failed logout as an ApiError, not a silent abort", async () => {
+    stubFetch(() => jsonResponse({ detail: "nope" }, { status: 500 }));
+    setSession("tok", "user-1", "tester");
+    await expect(api.logout()).rejects.toThrow(ApiError);
+  });
+
+  it("requires a session like every authenticated call", async () => {
+    await expect(api.logout()).rejects.toThrow("not signed in");
+  });
+});
+
+describe("listEntriesWalk (S-5: the bounded snapshot walk)", () => {
+  beforeEach(() => {
+    setSession("tok", "user-1", "tester");
+  });
+
+  const row = (id: string): { id: string; client_entry_id: string; blob: string; entry_date: string; received_at: string } => ({
+    id: `row-${id}`,
+    client_entry_id: id,
+    blob: "AAECAwQFBgcICQoL",
+    entry_date: "2026-09-25",
+    received_at: "2026-09-25T00:00:00Z",
+  });
+
+  function page(rows: ReturnType<typeof row>[], nextOffset: number | null, revision?: string): Response {
+    return jsonResponse(rows, {
+      headers: {
+        ...(nextOffset !== null ? { "X-Next-Offset": String(nextOffset) } : {}),
+        ...(revision !== undefined ? { "X-Entries-Revision": revision } : {}),
+      },
+    });
+  }
+
+  it("walks every page under one pinned revision and stops at the terminal page", async () => {
+    const seen: string[] = [];
+    stubFetch((url) => {
+      seen.push(String(url));
+      if (!url.includes("/entries?")) return jsonResponse({ detail: "unmatched" }, { status: 404 });
+      if (url.includes("offset=0")) return page([row("a"), row("b")], 2, "7");
+      if (url.includes("offset=2")) {
+        expect(url).toContain("expected_revision=7"); // the pin rides every continuation
+        return page([row("c")], null, "7");
+      }
+      return jsonResponse({ detail: "bad" }, { status: 500 });
+    });
+    const entries = await listEntriesWalk();
+    expect(entries.map((entry) => entry.client_entry_id)).toEqual(["a", "b", "c"]);
+    expect(seen).toHaveLength(2);
+  });
+
+  it("legacy headerless servers walk unpinned with cross-page dedupe", async () => {
+    stubFetch((url) => {
+      if (!url.includes("/entries?")) return jsonResponse({ detail: "unmatched" }, { status: 404 });
+      expect(String(url)).not.toContain("expected_revision=");
+      if (url.includes("offset=0")) return page([row("a"), row("dup")], 2); // no revision headers
+      if (url.includes("offset=2")) return page([row("dup"), row("z")], null); // boundary drift repeats "dup"
+      return jsonResponse({ detail: "bad" }, { status: 500 });
+    });
+    const entries = await listEntriesWalk();
+    expect(entries.map((entry) => entry.client_entry_id)).toEqual(["a", "dup", "z"]);
+  });
+
+  it("a mid-walk 409 collection_changed restarts from page one (bounded retries)", async () => {
+    let attempt = 0;
+    stubFetch((url) => {
+      if (!url.includes("/entries?")) return jsonResponse({ detail: "unmatched" }, { status: 404 });
+      if (url.includes("offset=0")) {
+        attempt += 1;
+        return page([row("a")], 1, attempt === 1 ? "5" : "6");
+      }
+      // First walk's continuation: the snapshot moved under us.
+      if (url.includes("offset=1") && attempt === 1) {
+        return jsonResponse({ detail: "changed", code: "collection_changed" }, { status: 409 });
+      }
+      if (url.includes("offset=1") && attempt === 2) return page([row("b")], null, "6");
+      return jsonResponse({ detail: "bad" }, { status: 500 });
+    });
+    const entries = await listEntriesWalk();
+    expect(entries.map((entry) => entry.client_entry_id)).toEqual(["a", "b"]);
+  });
+
+  it("a walk that keeps colliding fails honestly after the restart budget", async () => {
+    stubFetch((url) => {
+      if (url.includes("offset=0")) return page([row("a")], 1, "5");
+      return jsonResponse({ detail: "changed", code: "collection_changed" }, { status: 409 });
+    });
+    await expect(listEntriesWalk()).rejects.toThrow(ApiError);
+  });
+
+  it("a mid-walk protocol-mode switch (legacy then revision) restarts, never mixes", async () => {
+    let attempt = 0;
+    stubFetch((url) => {
+      if (!url.includes("/entries?")) return jsonResponse({ detail: "unmatched" }, { status: 404 });
+      if (url.includes("offset=0")) {
+        attempt += 1;
+        return attempt === 1 ? page([row("a")], 1) : page([row("a")], 1, "9");
+      }
+      if (url.includes("offset=1")) {
+        // The continuation suddenly speaks revisions while page one did not.
+        return page([row("b")], null, "9");
+      }
+      return jsonResponse({ detail: "bad" }, { status: 500 });
+    });
+    const entries = await listEntriesWalk();
+    expect(entries.map((entry) => entry.client_entry_id)).toEqual(["a", "b"]);
+  });
+
+  it("a server that never stops paginating is cut off by the page cap", async () => {
+    let pages = 0;
+    stubFetch((url) => {
+      if (!url.includes("/entries?")) return jsonResponse({ detail: "unmatched" }, { status: 404 });
+      pages += 1;
+      const offset = Number(new URL(String(url)).searchParams.get("offset") ?? "0");
+      return page([row(`r${offset}`)], offset + 1, "5");
+    });
+    await expect(listEntriesWalk()).rejects.toThrow("keeps returning entry continuations");
+    expect(pages).toBe(201); // 200 capped pages + the terminal probe
+  });
+
+  it("the terminal probe accepting completion on an empty 201st page", async () => {
+    let pages = 0;
+    stubFetch((url) => {
+      if (!url.includes("/entries?")) return jsonResponse({ detail: "unmatched" }, { status: 404 });
+      pages += 1;
+      const offset = Number(new URL(String(url)).searchParams.get("offset") ?? "0");
+      if (offset >= 200) return page([], null, "5"); // the honest 201st page
+      return page([row(`r${offset}`)], offset + 1, "5");
+    });
+    const entries = await listEntriesWalk();
+    expect(entries).toHaveLength(200);
+    expect(pages).toBe(201);
   });
 });

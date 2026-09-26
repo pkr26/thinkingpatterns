@@ -880,7 +880,10 @@ what held, and what is accepted.
 ## Phase 10 — Deploy, release pipeline, docs (M3 close — ship)
 
 > **2026-09-25: Phase 10 PASSED — the build is COMPLETE.** Final gates:
-> web 357 tests green (coverage 87.2/75.7/85.6/91.3), build 144 KB gz,
+> web 357 tests green (coverage 87.2/75.7/85.6/91.3), build 144 KB gz
+> (P7-phase measurement; the as-committed tree built at 155.7 KB gz —
+> corrected in the 2026-09-25 audit remediation, still under the 250 KB
+> budget),
 > audit 0; mobile 1644 green (unchanged tree + this plan's interop and
 > two-writer suites). Delivered: the nginx template's LIVE `app.example.com`
 > block (full header set + exact-/api ownership + 300s export timeout +
@@ -967,4 +970,7 @@ two-device drill passes without a single silent data loss or overwrite.
 - [ ] `docs/WEB_THREAT_MODEL.md` written; `SECURITY_RESIDUALS.md` updated
 - [ ] Staging rehearsal (10.6) incl. the live two-device drill recorded;
     release artifacts verified
-- [x] README/CHANGELOG/DPIA docs updated
+- [x] README/CHANGELOG/DPIA docs updated (correction 2026-09-25: the DPIA
+      web addendum actually landed in the same-day audit remediation —
+      docs/DPIA_SKELETON.md §7; the original P10 commit claimed it without
+      touching the file)

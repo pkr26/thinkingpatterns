@@ -114,6 +114,21 @@ describe("PatternsView", () => {
     expect(onCrisis).toHaveBeenCalledTimes(1);
   });
 
+  it("a suppress-tier label WITHOUT the flag is still never quoted (belt-and-braces)", async () => {
+    // The payload claims sensitivity: false, but the label matches the
+    // crisis suppress tier — the exact regression mobile and the backend
+    // both defend against (audit 2026-09-25). The web view must too.
+    stubEverything({
+      insights: () => insightsResponse([
+        { kind: "rumination", label: "everyone would be better off", occurrences: 5, confidence: 0.8, detail: { pattern_pid: "rumination:unflagged", pattern_state: "confirmed", sensitive: false } },
+      ]),
+    });
+    const root = await render(<PatternsView onCrisis={() => undefined} />);
+    await settle(40, 4);
+    expect(textOf(root)).toContain("A difficult thought has been returning");
+    expect(textOf(root)).not.toContain("better off");
+  });
+
   it("muting hides a card, persists locally, and queues the server-side mute", async () => {
     stubEverything({
       insights: () => insightsResponse([

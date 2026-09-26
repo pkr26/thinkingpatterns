@@ -4,6 +4,59 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-25 (b) — independent-audit remediation of the web client commit
+
+Every finding from the independent audit of the patient web client commit
+was fixed and re-tested (web 386 green, coverage 89.1/79.8/88.0/93.2 over
+the 85/75/85/90 floors; mobile 1648 green; build clean, audit clean):
+
+- **Session custody**: the idle lock, bfcache guard, reconnect flush, and
+  reconciliation were disarmed on the Measures/Share/Settings views
+  (`sessionActive` had drifted); every authenticated view now locks, with
+  per-view regression tests.
+- **Offline queue**: a `Retry-After: 0` (or past-date) advisory caused a
+  zero-pause re-POST storm — advisories now carry a 1 s floor; entries
+  parked while "online" could strand for the session — the queue now also
+  flushes at sign-in, on a 30 s periodic retry, and after any successful
+  direct save (and the flush throttle no longer wedges on a backwards
+  clock step); the generation fence gained a write-after-wipe rollback;
+  corrupt member records are quarantined instead of dropped; the
+  quarantine store is capped at 50 records; `enqueue` dedupes by
+  `client_entry_id`.
+- **Honesty on 409**: a direct save that answers 409 no longer claims
+  success and discards the plaintext — every online failure parks the
+  entry in the queue where the M-5 GET-verification referees it.
+- **Logout**: the epoch-bump request no longer aborts itself when
+  `clearSession()` fires in the same tick.
+- **Patterns**: the sensitive non-quoting contract no longer trusts the
+  payload flag alone — the suppress-tier matcher runs on every label,
+  belt-and-braces with mobile and the backend.
+- **Reconcile**: focus-time reconciliation no longer re-downloads the
+  entire journal ciphertext to discard it — it is one insights round-trip;
+  the History view owns the revision-pinned walk (now unit-covered:
+  snapshot pinning, restarts, mode switches, dedupe, page cap, terminal
+  probe).
+- **Mobile two-writer**: the conflict-overwrite path now runs the FULL
+  post-save work (H-6 crisis detection included — it used to skip it);
+  "Keep theirs" applies the server's text and version locally; the 410
+  funnel is code-checked (`account_deleted`/`gone` added to the mobile
+  error-code contract — the codes were being sanitized away) with
+  conflict/funnel tests added.
+- **Security tests made honest**: hostile decrypted text now renders
+  through a real jsdom DOM (inert, asserted); the sensitive-pattern
+  accessible-name contract is actually asserted; the interop fixtures'
+  "both sections exist" guards fail instead of skip; `listEntriesWalk`
+  and the future-date classifier gained direct coverage; dead code
+  removed (`sessionStore`, `phq9.ts`, an unused import).
+- **Release provenance**: `mindpattern-web-<tag>.tar.gz` + sha256 are now
+  actually attached to the GitHub Release (they were built, verified, and
+  silently dropped); `mutation-web.yml`'s 65.0 floor is labeled what it is
+  — portal-inherited and provisional until web's first measured run.
+- **Docs**: the promised DPIA web addendum exists
+  (`docs/DPIA_SKELETON.md` §7 — browser storage surface); the bundle-size
+  figure is corrected everywhere it was stated; deploy/README names nginx
+  as the production header enforcer.
+
 ## Unreleased
 
 ### Patient web client (2026-09-25): the web app, built phase by phase per WEB_PLAN.md
@@ -54,7 +107,9 @@ phases, each with its verification gate recorded in `WEB_PLAN.md`:
   real render pipeline, storage-scrape, replay/stale-token set), the
   four-way CI gate, Stryker + weekly `mutation-web.yml` (floor lands from
   the first measured run — configured, not claimed). 356 tests green,
-  coverage 87.2/75.7/85.6/91.3 (floors 85/75/85/90), bundle 144 KB gz.
+  coverage 87.2/75.7/85.6/91.3 (floors 85/75/85/90), bundle 144 KB gz at
+  the P7-phase measurement (the as-committed tree built at 155.7 KB gz —
+  under the 250 KB budget; figure corrected 2026-09-25).
 - **Deployment**: the nginx template carries the live `app.example.com`
   block (same-origin /api proxy — CORS stays empty); the release workflow
   builds, verifies, and ships `mindpattern-web-<tag>.tar.gz` + sha256

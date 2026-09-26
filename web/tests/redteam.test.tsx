@@ -1,9 +1,11 @@
 /**
  * Red-team harnesses for the web client (WEB_PLAN P9.4) — the vitest-runnable
  * set. The XSS corpus runs decrypted hostile journal text through the REAL
- * render pipeline (react-test-renderer) and asserts DOM-level outcomes; the
- * storage-scrape sweeps every web storage after each flow; the replay/stale
- * set drives dead tokens, queue replays, and processing-token reuse.
+ * view pipeline (react-test-renderer: element types, props, text children);
+ * the actual DOM serialization of hostile text is covered by the jsdom
+ * hostile-render test in a11y.test.tsx. The storage-scrape sweeps every web
+ * storage after each flow; the replay/stale set drives dead tokens, queue
+ * replays, and processing-token reuse.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryView } from "../src/views/Entry";

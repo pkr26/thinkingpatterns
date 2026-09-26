@@ -271,3 +271,14 @@ safe procedure:
 Long-term policy: prefer expand/contract migrations (add column, dual-
 write, drop later) so a rollback only needs step 2 — tracked as
 follow-up work.
+
+### Which header config actually serves (2026-09-25 audit note)
+
+Under the nginx deployment in this repository, **nginx is the enforcer**:
+its `add_header ... always` lines at server level reach every response.
+`web/public/_headers` ships inside the tarball but nginx never reads it —
+it is the contract for a NON-nginx static host (e.g. a CDN object store)
+and exists so the three configs (nginx, `_headers`, index.html meta
+fallback) are pinned identical by `web/tests/securityConfig.test.ts`.
+Do not "clean up" any one of the three: the test fails if they drift.
+
