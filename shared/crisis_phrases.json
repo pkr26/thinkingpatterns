@@ -1,6 +1,6 @@
 {
  "v": 1,
- "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-17 audit): the matchers additionally test a whitespace-free copy of the text against space-free copies of the tier patterns (\\b and \\s+ removed; a trailing (?![a-z]) is re-added for patterns whose final word extends into a benign one — die/diet, dead/deadline, on/online, up, out, cutting, gone), closing every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself'). 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold. 2026-09-20 audit additions, identical in both engines: U+2065 joins the invisible set; mapped leet digits also fold at a word's TRAILING edge ('suicid3' -> 'suicide', 'd13' -> 'die'); a standalone '2' token folds to 'to' ('i want 2 die'); benign-compound masking covers the CJK/Spanish prevention campaigns as plain substrings. LETTER-DOUBLING CHANNEL (2026-09-20 audit H-7): the matchers additionally test a fourth set of variants in which same-letter runs collapse on BOTH sides — the folded text ('kiill myself' -> 'kil myself') is matched only against folded pattern twins ('kill(?:ed|ing)? myself' -> 'kil(?:ed|ing)? myself'), so a letter typed twice cannot bypass every tier while canonically double-lettered words ('kill', 'sleep', 'cannot') keep matching. 'off(?:ing)? myself' is EXEMPT from the folded tier because its fold ('of(?:ing)? myself') matches ordinary prose ('ashamed of myself'); benign compounds re-mask after folding with their own folded spellings ('suicide awareness' -> 'suicide awarenes'), so 'suiciide squaad' stays masked.",
+ "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-17 audit): the matchers additionally test a whitespace-free copy of the text against space-free copies of the tier patterns (\\b and \\s+ removed; a trailing (?![a-z]) is re-added for patterns whose final word extends into a benign one — die/diet, dead/deadline, on/online, up, out, cutting, gone), closing every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself'). 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold. 2026-09-20 audit additions, identical in both engines: U+2065 joins the invisible set; mapped leet digits also fold at a word's TRAILING edge ('suicid3' -> 'suicide', 'd13' -> 'die'); a standalone '2' token folds to 'to' ('i want 2 die'); benign-compound masking covers the CJK/Spanish prevention campaigns as plain substrings. LETTER-DOUBLING CHANNEL (2026-09-20 audit H-7): the matchers additionally test a fourth set of variants in which same-letter runs collapse on BOTH sides — the folded text ('kiill myself' -> 'kil myself') is matched only against folded pattern twins ('kill(?:ed|ing)? myself' -> 'kil(?:ed|ing)? myself'), so a letter typed twice cannot bypass every tier while canonically double-lettered words ('kill', 'sleep', 'cannot') keep matching. 'off(?:ing)? myself' is EXEMPT from the folded tier because its fold ('of(?:ing)? myself') matches ordinary prose ('ashamed of myself'); benign compounds re-mask after folding with their own folded spellings ('suicide awareness' -> 'suicide awarenes'), so 'suiciide squaad' stays masked. 2026-09-26 full-codebase audit H-1: the EN worth-living family ('life is not worth living', 'life doesn't feel worth it'), 'no longer want to live', 'tired of living', first-person 'want to overdose' and 'suicidality' joined the dialog tier; the ES self-harm and hopelessness families joined both tiers — conjugated 'quitar(se) la vida' (me quiero/quisiera/me voy a), 'me quiero cortar/lastimar/quemar', 'quiero cortarme/matarme', present-tense 'me lastimo'/'me hago daño', 'quiero hacerme daño', 'no vale la pena vivir', 'la vida no vale la pena', 'no hay salida', 'quiero desaparecer', 'todos estarían mejor sin mí', 'no tengo ganas de vivir', 'harto de la vida', 'dormir para siempre', 'no puedo más'/'no aguanto más', 'no quiero despertar/seguir viviendo'; suppress_extra additionally gained 'not worth living', 'no vale la pena', 'quitar(le|me|se) la vida', 'hacer(le|me|se) daño'.",
  "regex_rules": "Every pattern must compile under BOTH Python re and ECMAScript RegExp. No lookahead/lookbehind. Consumers apply case-insensitive matching AFTER the shared normalization pipeline described in this file's description. \\s+ for whitespace, ['\\u2019]? for optional apostrophes, \\b word boundaries (Latin-script patterns only — \\b never fires next to CJK/Arabic/Devanagari in ECMAScript, so non-Latin patterns are plain substrings).",
  "dialog": [
   "\\bsuicid(?:e|al)\\b",
@@ -32,6 +32,12 @@
   "\\b(?:can['\\u2019]?t|cannot)\\s+do\\s+this\\s+anymore\\b",
   "\\boff(?:ing)?\\s+myself\\b",
   "\\bput\\s+me\\s+out\\s+of\\s+my\\s+misery\\b",
+  "\\b(?:life|living)(?:['\\u2019]?s)?\\s+(?:(?:is|was|feels?|seems?|sounds?)\\s*)?(?:n['\\u2019]?t|not)\\s+worth\\s+(?:living|it)\\b",
+  "\\b(?:life|living)(?:['\\u2019]?s)?\\s+(?:do(?:es)?|did)n['\\u2019]?t\\s+(?:feel|seem|sound)\\s+worth\\s+(?:living|it)\\b",
+  "\\bno\\s+longer\\s+want(?:s|ed|ing)?\\s+to\\s+(?:live|be\\s+here|be\\s+alive|exist|wake\\s+up)\\b",
+  "\\btired\\s+of\\s+(?:living|life)\\b",
+  "\\bwant(?:s|ed|ing)?\\s+to\\s+overdose\\b",
+  "\\bsuicidality\\b",
   "\\bquiero\\s+morir\\b",
   "\\bme\\s+quiero\\s+matar\\b",
   "\\bquitarme\\s+la\\s+vida\\b",
@@ -46,6 +52,22 @@
   "\\bsuicid(?:io|ios|arme|armi)\\b",
   "\\bno\\s+quiero\\s+vivir\\b",
   "\\bcansad[oa]s?\\s+de\\s+vivir\\b",
+  "\\bno\\s+vale\\s+la\\s+pena\\s+(?:vivir|seguir)\\b",
+  "\\bla\\s+vida\\s+no\\s+vale\\s+la\\s+pena\\b",
+  "\\b(?:me\\s+)?(?:quiero|quisiera|deberia|podria)\\s+quitar(?:me)?\\s+la\\s+vida\\b",
+  "\\bme\\s+voy\\s+a\\s+quitar\\s+la\\s+vida\\b",
+  "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar)\\b",
+  "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme)\\b",
+  "\\bme\\s+(?:lastimo|hago\\s+da[nñ]o|corto\\s+la\\s+piel|quemo\\s+la\\s+piel)\\b",
+  "\\b(?:quiero|quisiera)\\s+hacerme\\s+da[nñ]o\\b",
+  "\\bno\\s+hay\\s+salida\\b",
+  "\\b(?:quiero|quisiera)\\s+desaparecer\\b",
+  "\\b(?:todos|el\\s+mundo)\\s+estarian\\s+mejor\\s+sin\\s+mi\\b",
+  "\\bno\\s+tengo\\s+ganas\\s+de\\s+vivir\\b",
+  "\\bhart[oa]s?\\s+de\\s+(?:la\\s+)?vida\\b",
+  "\\b(?:solo\\s+)?quiero\\s+dormir\\s+para\\s+siempre\\b",
+  "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
+  "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
   "我想死",
   "我想去死",
   "自杀",
@@ -79,7 +101,11 @@
   "\\bno\\s+future\\s+for\\s+me\\b",
   "\\bhappier\\s+(?:if|when)\\s+(?:i['\\u2019]?m|i\\s+am|i\\s+was)\\s+gone\\b",
   "\\bhappier\\s+without\\s+me\\b",
-  "\\beveryone\\s+would\\s+be\\s+happier\\b"
+  "\\beveryone\\s+would\\s+be\\s+happier\\b",
+  "\\bnot\\s+worth\\s+living\\b",
+  "\\bno\\s+vale\\s+la\\s+pena\\b",
+  "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
+  "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b"
  ],
  "fixtures": {
   "dialog_fires": [
@@ -145,7 +171,34 @@
    "estoy cansada de vivir",
    "su⁥icide",
    "kiill myself",
-   "suiccide"
+   "suiccide",
+   "life is not worth living",
+   "life isn't worth living anymore",
+   "life doesn't feel worth it",
+   "i no longer want to live",
+   "i am tired of living",
+   "i want to overdose",
+   "my suicidality is back",
+   "no vale la pena vivir",
+   "la vida no vale la pena",
+   "me quiero quitar la vida",
+   "quisiera quitarme la vida",
+   "me voy a quitar la vida esta noche",
+   "me quiero cortar",
+   "quiero cortarme",
+   "me lastimo cuando estoy sola",
+   "me hago daño",
+   "quiero hacerme daño",
+   "no hay salida",
+   "quiero desaparecer",
+   "todos estarían mejor sin mí",
+   "no tengo ganas de vivir",
+   "estoy harto de la vida",
+   "solo quiero dormir para siempre",
+   "ya no puedo más",
+   "no aguanto más",
+   "no quiero despertar",
+   "no quiero seguir viviendo"
   ],
   "dialog_silent": [
    "This traffic is killing me",
@@ -177,7 +230,10 @@
    "covid2wave news is exhausting",
    "the route9walk home was lovely",
    "i am so ashamed of myself",
-   "we watched suiciide squad last night"
+   "we watched suiciide squad last night",
+   "the concert wasn't worth it",
+   "el examen no valió la pena",
+   "mi vida vale la pena"
   ],
   "suppress_only_fires": [
    "this traffic is killing me",
@@ -193,7 +249,11 @@
    "i don't see any future for me",
    "no future for me at all",
    "everyone would be happier",
-   "you would all be happier without me"
+   "you would all be happier without me",
+   "sometimes everything feels not worth living",
+   "ya no vale la pena nada",
+   "volvi a pensar en quitar la vida",
+   "pienso en hacerme daño seguido"
   ]
  },
  "benign_compounds": [
@@ -833,6 +893,209 @@
   {
    "technique": "letter-doubling",
    "sample": "we watched suiciide squad last night",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "unlisted-phrase",
+   "sample": "life is not worth living",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "apostrophe",
+   "sample": "life isn't worth living",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "unlisted-phrase",
+   "sample": "i no longer want to live",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "unlisted-phrase",
+   "sample": "i am tired of living",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "unlisted-phrase",
+   "sample": "i want to overdose",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "unlisted-phrase",
+   "sample": "my suicidality is back",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no vale la pena vivir",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "la vida no vale la pena",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "me quiero quitar la vida",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "quisiera quitarme la vida",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "me voy a quitar la vida",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "me quiero cortar",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "quiero cortarme",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "me lastimo cuando estoy sola",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "me hago daño",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "quiero hacerme daño",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no hay salida",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "quiero desaparecer",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "todos estarían mejor sin mí",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no tengo ganas de vivir",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "estoy harto de la vida",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "solo quiero dormir para siempre",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no puedo más",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no aguanto más",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no quiero despertar",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "non-english",
+   "sample": "no quiero seguir viviendo",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "benign",
+   "sample": "the concert wasn't worth it",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "benign",
+   "sample": "el examen no valió la pena",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "benign",
+   "sample": "mi vida vale la pena",
    "intent": "benign",
    "dialog": false,
    "suppress": false

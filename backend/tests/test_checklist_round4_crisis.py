@@ -56,7 +56,15 @@ DIALOG_SAMPLES = [
     "i can't do this anymore honestly",  # 27 can't do this anymore
     "i keep offing myself in my dreams",  # 28 off(ing)? myself
     "just put me out of my misery",  # 29 put me out of my misery
-    "quiero morir y no se que hacer",  # 30 quiero morir
+    # 2026-09-26 audit H-1: worth-living / no-longer / tired-of-living /
+    # overdose-intent / suicidality samples (index-parity continues).
+    "life is not worth living anymore",  # 30 life is(n't/ not) worth living/it
+    "life doesn't feel worth it today",  # 31 life doesn't feel worth it
+    "i no longer want to live",  # 32 no longer want to live
+    "i am tired of living like this",  # 33 tired of living/life
+    "i want to overdose on these pills",  # 34 want to overdose
+    "my suicidality is back and it scares me",  # 35 suicidality
+    "quiero morir y no se que hacer",  # 36 quiero morir
     "me quiero matar si no cambia nada",  # 31 me quiero matar
     "pense en quitarme la vida otra vez",  # 32 quitarme la vida
     "je veux mourir et personne ne le sait",  # 33 je veux mourir
@@ -67,22 +75,41 @@ DIALOG_SAMPLES = [
     "voglio morire ogni giorno di più",  # 38 voglio morire
     "as vezes quero morrer de cansaço",  # 39 quero morrer
     "eu me matar seria mais fácil",  # 40 me matar
-    "pensando em suicidio outra vez",  # 41 suicidio
-    "no quiero vivir asi mas",  # 42 no quiero vivir
-    "estoy cansado de vivir asi",  # 43 cansad@ de vivir
-    "我想死",  # 44
-    "我想去死",  # 45
-    "他留下了自杀的遗书",  # 46
-    "死にたいと毎日思う",  # 47
-    "自殺について調べてしまった",  # 48
-    "자살하고 싶다",  # 49
-    "나는 죽고 싶다",  # 50
-    "أريد أن أموت",  # 51
-    "أريد أن أنتحر",  # 52
-    "मैं मरना चाहता हूँ",  # 53
-    "वह मरना चाहती है",  # 54
-    "intihar etmek istiyorum diye yazdı",  # 55
-    "canını almak istiyorum demiş",  # 56
+    "pensando em suicidio outra vez",  # 47 suicidio
+    "no quiero vivir asi mas",  # 48 no quiero vivir
+    "estoy cansado de vivir asi",  # 49 cansad@ de vivir
+    # 2026-09-26 audit H-1: the Spanish self-harm / hopelessness family
+    # (index-parity with the contract's ES additions; accented samples
+    # exercise the post-fold pattern spellings).
+    "no vale la pena vivir asi",  # 50 no vale la pena vivir
+    "la vida no vale la pena",  # 51 la vida no vale la pena
+    "me quiero quitar la vida",  # 52 (me )?quiero quitar(me)? la vida
+    "me voy a quitar la vida esta noche",  # 53 me voy a quitar la vida
+    "me quiero cortar otra vez",  # 54 me quiero cortar/lastimar/quemar
+    "quiero cortarme los brazos",  # 55 quiero cortarme/matarme/...
+    "me lastimo cuando estoy sola",  # 56 me lastimo/me hago daño/piel
+    "quiero hacerme daño",  # 57 (quiero|quisiera) hacerme daño
+    "no hay salida de esto",  # 58 no hay salida
+    "quiero desaparecer para siempre",  # 59 (quiero|quisiera) desaparecer
+    "todos estarían mejor sin mí",  # 60 todos/el mundo estarian mejor sin mi
+    "no tengo ganas de vivir",  # 61 no tengo ganas de vivir
+    "estoy harto de la vida",  # 62 harto de la vida
+    "solo quiero dormir para siempre",  # 63 (solo )?quiero dormir para siempre
+    "ya no puedo más",  # 64 no puedo/aguanto mas
+    "no quiero despertar mañana",  # 65 no quiero despertar/seguir viviendo
+    "我想死",  # 66
+    "我想去死",  # 67
+    "他留下了自杀的遗书",  # 68
+    "死にたいと毎日思う",  # 69
+    "自殺について調べてしまった",  # 70
+    "자살하고 싶다",  # 71
+    "나는 죽고 싶다",  # 72
+    "أريد أن أموت",  # 73
+    "أريد أن أنتحر",  # 74
+    "मैं मरना चाहता हूँ",  # 75
+    "वह मरना चाहती है",  # 76
+    "intihar etmek istiyorum diye yazdı",  # 77
+    "canını almak istiyorum demiş",  # 78
 ]
 
 # One verbatim firing sample per SUPPRESS_EXTRA pattern (order-parity with
@@ -109,6 +136,11 @@ SUPPRESS_SAMPLES = [
     "my family would be happier if i'm gone",  # 17 happier if i'm gone
     "my kids would be happier without me",  # 18 happier without me
     "everyone would be happier if i disappeared",  # 19 everyone would be happier
+    # 2026-09-26 audit H-1: suppress-only counterparts.
+    "sometimes everything feels not worth living",  # 20 not worth living
+    "ya no vale la pena nada",  # 21 no vale la pena
+    "volvi a pensar en quitar la vida",  # 22 quitar(le|me|se) la vida
+    "pienso en hacerme daño seguido",  # 23 hacer(le|me|se) daño
 ]
 
 # Extra inflections and near-forms of contract patterns: not index-bound,
@@ -139,6 +171,25 @@ DIALOG_VARIANTS = [
     "i am offing myself slowly with these choices",
     "estoy cansada de vivir por ti",
     "ajudei um amigo com ideias de suicidarme",
+    # 2026-09-26 audit H-1 inflections: contraction/do-support forms of
+    # the worth-living family, quisiera variants, and ES hopelessness
+    # inflections.
+    "life isn't worth living anymore",
+    "life's not worth living",
+    "living is not worth it anymore",
+    "life didnt seem worth it",
+    "she no longer wants to wake up",
+    "i am so tired of life",
+    "he wants to overdose too",
+    "quisiera quitarme la vida hoy",
+    "me quisiera quitar la vida",
+    "quiero lastimarme antes de dormir",
+    "me quiero quemar con esto",
+    "me hago daño cuando estoy sola",
+    "quisiera desaparecer de todo",
+    "no aguanto más",
+    "no quiero seguir viviendo",
+    "estoy harta de la vida",
 ]
 
 # Third-person / wrong-subject forms are deliberately OUT of contract scope

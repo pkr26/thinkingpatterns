@@ -277,7 +277,12 @@ async def grant_consent(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
-    await _require_verifier(user, verifier, request)
+    # M-B1 (2026-09-26): the token's epoch at auth time — the grant fence
+    # below re-reads the account and refuses a session retired by a
+    # concurrent logout/credential rotation (the M-2 pattern), and the
+    # verifier proof itself runs against the freshly re-read row.
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
 
     try:
         sharing.validate_public_key_b64(body.ephemeral_pub)
@@ -324,6 +329,12 @@ async def grant_consent(
             fresh_user = await session.get(User, user.id, populate_existing=True)
             if fresh_user is None or not fresh_user.is_active:
                 raise ApiError(status_code=404, detail="account not found", code="not_found")
+            if fresh_user.token_epoch != expected_epoch:
+                # M-B1 (2026-09-26): a logout/rotation committed while this
+                # grant was queued behind the sharing fences — the bearer
+                # (and its verifier proof) predate the epoch bump and must
+                # not widen disclosure. 401 per the M-2 pattern.
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
 
             existing = (
                 (
@@ -477,7 +488,10 @@ async def rewrap_consent(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
-    await _require_verifier(user, verifier, request)
+    # M-B1 (2026-09-26): epoch captured at entry; enforced inside the
+    # patient fence below (the M-2 pattern — see grant_consent).
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
     try:
         sharing.validate_public_key_b64(body.ephemeral_pub)
     except sharing.SharingError:
@@ -498,6 +512,10 @@ async def rewrap_consent(
         fresh_user = await session.get(User, user.id, populate_existing=True)
         if fresh_user is None or not fresh_user.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh_user.token_epoch != expected_epoch:
+            # M-B1 (2026-09-26): pre-rotation bearer+verifier must not swap
+            # key material inside a live share.
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         row = (
             await session.execute(
                 select(Consent, User)
@@ -566,7 +584,10 @@ async def revoke_consent(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
-    await _require_verifier(user, verifier, request)
+    # M-B1 (2026-09-26): epoch captured at entry; enforced inside the
+    # patient fence below (the M-2 pattern — see grant_consent).
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
     # This is the counterpart to the therapist content-read fence. It owns
     # the patient key until the cleared key material and revoked status are
     # committed, so no new read can see active consent after this returns.
@@ -574,6 +595,10 @@ async def revoke_consent(
         fresh_user = await session.get(User, user.id, populate_existing=True)
         if fresh_user is None or not fresh_user.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh_user.token_epoch != expected_epoch:
+            # M-B1 (2026-09-26): pre-rotation bearer+verifier must not
+            # retire a grant after the session itself was retired.
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         consent = (
             (
                 await session.execute(

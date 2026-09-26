@@ -953,3 +953,122 @@ describe("mutation hardening (2026-09-18)", () => {
     expect(await storage.getItem(rejectedKey)).toBeTruthy();
   });
 });
+
+// --- 2026-09-26 audit M-M2: the quarantine/rejected stores are bounded, and
+// the recovery catch can never wedge the scope --------------------------------
+
+describe("quarantine and rejected store bounds (M-M2, 2026-09-26)", () => {
+  // Sibling keys are derived from the (existing) items key — the quarantine
+  // and rejected keys do not exist until first written.
+  const itemsKey = async (): Promise<string> => (await scopedKeys("items"))[0]!;
+  const quarantineKeyOf = async (): Promise<string> => (await itemsKey()).replace(".items.", ".quarantine.");
+  const rejectedKeyOf = async (): Promise<string> => (await itemsKey()).replace(".items.", ".rejected.");
+  const stored = async (key: string): Promise<any> => JSON.parse((await storage.getItem(key))!);
+
+  it("bounds the quarantine store by record count (drop-oldest keeps the newest)", async () => {
+    const { MAX_QUARANTINE_RECORDS } = await import("../src/offlineQueue");
+    // Seed an already-full v1 quarantine envelope directly (the tamper
+    // surface), then trigger one more quarantine append through a corrupt
+    // queue row: the store must stay at the cap, keeping the NEWEST record.
+    const seed = Array.from({ length: MAX_QUARANTINE_RECORDS }, (_i, i) => `old-record-${i}`);
+    await enqueue(entry("alice", "a-capped"));
+    const quarantineKey = await quarantineKeyOf();
+    await storage.setItem(quarantineKey, JSON.stringify({ v: 1, records: seed }));
+    const queueKey = await itemsKey();
+    await storage.setItem(queueKey, "{corrupt"); // readItems quarantines this
+    expect(await queueLength("alice")).toBe(0);
+    const after = (await stored(quarantineKey)).records as string[];
+    expect(after).toHaveLength(MAX_QUARANTINE_RECORDS);
+    expect(after[after.length - 1]).toContain("corrupt");
+    expect(after).not.toContain("old-record-0"); // the oldest record dropped
+    expect(after).toContain(`old-record-${MAX_QUARANTINE_RECORDS - 1}`);
+  });
+
+  it("bounds the quarantine store by serialized bytes (cursor-window safety)", async () => {
+    // One record near the shared per-row byte ceiling: a second push must
+    // drop the older one so the serialized row stays under the ceiling.
+    await enqueue(entry("alice", "a-byte-capped"));
+    const quarantineKey = await quarantineKeyOf();
+    const huge = "x".repeat(1_100_000);
+    await storage.setItem(quarantineKey, JSON.stringify({ v: 1, records: [huge] }));
+    const queueKey = await itemsKey();
+    await storage.setItem(queueKey, "{corrupt");
+    expect(await queueLength("alice")).toBe(0);
+    const after = (await stored(quarantineKey)).records as string[];
+    expect(after).toEqual(["{corrupt"]); // the oversize record was dropped
+    const serialized = await storage.getItem(quarantineKey);
+    expect(Buffer.byteLength(serialized!, "utf8")).toBeLessThanOrEqual(
+      (await import("../src/offlineQueue")).MAX_QUEUE_BYTES,
+    );
+  });
+
+  it("readItems still resolves when the QUARANTINE row itself is unreadable (the catch never wedges)", async () => {
+    // The M-M2 wedge: an oversize quarantine key made getItem throw inside
+    // the recovery catch, so EVERY queue op on the scope rejected forever.
+    await enqueue(entry("alice", "a-wedge-proof"));
+    const quarantineKey = await quarantineKeyOf();
+    const original = storage.getItem.bind(storage);
+    const spy = vi.spyOn(storage, "getItem").mockImplementation(async (key: string) => {
+      if (key === quarantineKey) throw new Error("Row too big to be processed due to CursorWindow");
+      return original(key);
+    });
+    try {
+      const queueKey = await itemsKey();
+      await storage.setItem(queueKey, "{corrupt");
+      // Both calls resolve despite the poisoned quarantine read.
+      await expect(queueLength("alice")).resolves.toBe(0);
+      await expect(enqueue(entry("alice", "a-after-wedge"))).resolves.toBeUndefined();
+      expect(await queueLength("alice")).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("bounds the rejected store by count (drop-oldest keeps the newest rejections)", async () => {
+    const { MAX_REJECTED_LENGTH } = await import("../src/offlineQueue");
+    // A restored/legacy rejected store already at the cap, then one more
+    // rejection lands through the flush path.
+    await enqueue(entry("alice", "a-latest"));
+    const rejectedKey = await rejectedKeyOf();
+    const seed = Array.from({ length: MAX_REJECTED_LENGTH }, (_i, i) => entry("alice", `old-rej-${i}`));
+    await storage.setItem(rejectedKey, JSON.stringify({ v: 1, items: seed }));
+    vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(422, "invalid encrypted blob"));
+    expect(await flushQueue("alice")).toBe(0);
+    const ids = (await rejectedEntries("alice")).map((i: any) => i.clientEntryId);
+    expect(ids).toHaveLength(MAX_REJECTED_LENGTH);
+    expect(ids[ids.length - 1]).toBe("a-latest"); // the newest rejection kept
+    expect(ids).not.toContain("old-rej-0"); // the oldest dropped
+  });
+});
+
+describe("clearQueue mutual exclusion (2026-09-26 audit LOW)", () => {
+  it("an enqueue racing clearQueue inside the commit window cannot resurrect the wiped queue", async () => {
+    // Hold the enqueue's storage commit open (the exact window where the
+    // un-serialized bump+multiRemove used to interleave), fire the wipe
+    // while it is pending, then let both settle: nothing may remain.
+    let releaseWrite: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let commitStarted = false;
+    const original = storage.setItem.bind(storage);
+    const spy = vi.spyOn(storage, "setItem").mockImplementation(async (key: string, value: string) => {
+      if (key.includes(".items.")) {
+        commitStarted = true;
+        await gate; // the enqueue's queue write pends here
+      }
+      return original(key, value);
+    });
+    try {
+      const saving = enqueue(entry("alice", "a-race"));
+      await vi.waitFor(() => expect(commitStarted).toBe(true));
+      const wiping = clearQueue("alice");
+      releaseWrite();
+      await Promise.all([saving, wiping]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await queueLength("alice")).toBe(0);
+    expect(await scopedKeys("items")).toHaveLength(0);
+  });
+});

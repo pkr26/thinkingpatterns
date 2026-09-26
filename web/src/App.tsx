@@ -29,6 +29,7 @@ import { ShareView } from "./views/Share";
 import { SettingsView } from "./views/Settings";
 import { vault } from "./vault";
 import { reconcile, type ReconcileOutcome } from "./sync";
+import { t } from "./strings";
 
 type View =
   | { kind: "booting" }
@@ -54,15 +55,15 @@ const QUEUE_FLUSH_INTERVAL_MS = 30_000;
 function noticeFor(reason: LockReason | "expired" | "deleted"): string {
   switch (reason) {
     case "idle":
-      return "Locked after inactivity — sign in again to continue.";
+      return t("app.noticeIdle");
     case "bfcache":
-      return "Locked — the page was restored from the browser's back/forward cache.";
+      return t("app.noticeBfcache");
     case "hidden":
-      return "Locked — this tab went to the background, so your keys were dropped. Sign in again to continue.";
+      return t("app.noticeHidden");
     case "expired":
-      return "Your session ended — the token expired, or the password was changed / signed out on another device. Sign in again.";
+      return t("app.noticeExpired");
     case "deleted":
-      return "This account was deleted.";
+      return t("app.noticeDeleted");
   }
 }
 
@@ -138,11 +139,11 @@ export function App(): React.JSX.Element {
   // focus and connectivity. The outcomes are honest funnels, not banners.
   const onReconcile = useCallback((outcome: ReconcileOutcome): void => {
     if (outcome.kind === "credentialRotated") {
-      lockDown("Your password was changed on another device and your journal was re-encrypted — sign in again with the new password.");
+      lockDown(t("app.noticeRotatedElsewhere"));
       return;
     }
     if (outcome.kind === "freshness") {
-      setErrorNote("Your pattern data failed its freshness check — it may have been replayed. Pull again in a moment.");
+      setErrorNote(t("app.freshnessNote"));
       return;
     }
     if (outcome.kind === "error") setErrorNote(outcome.message);
@@ -201,7 +202,7 @@ export function App(): React.JSX.Element {
     if (result === "sent") void flushQueueOnReconnect();
     setView((current) =>
       current.kind === "today"
-        ? { ...current, savedNote: result === "sent" ? "Saved." : "Saved offline — it will sync when you're back." }
+        ? { ...current, savedNote: result === "sent" ? t("app.saved") : t("app.savedOffline") }
         : current,
     );
   }, []);
@@ -212,7 +213,7 @@ export function App(): React.JSX.Element {
         <CrisisCard onClose={() => setCrisisOpen(false)} />
       ) : view.kind === "booting" ? (
         <Card>
-          <Note role="status">Starting…</Note>
+          <Note role="status">{t("app.starting")}</Note>
         </Card>
       ) : view.kind === "login" ? (
         <>
@@ -227,16 +228,16 @@ export function App(): React.JSX.Element {
         <>
           {errorNote && <ErrorBanner message={errorNote} />}
           <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-            <Button label="Today" onPress={() => setView({ kind: "today" })} small={view.kind !== "today"} disabled={view.kind === "today"} />
-            <Button label="History" onPress={() => setView({ kind: "history" })} small disabled={view.kind === "history"} />
-            <Button label="Patterns" onPress={() => setView({ kind: "patterns" })} small disabled={view.kind === "patterns"} />
-            <Button label="Question" onPress={() => setView({ kind: "question" })} small disabled={view.kind === "question"} />
-            <Button label="Measures" onPress={() => setView({ kind: "measures" })} small disabled={view.kind === "measures"} />
-            <Button label="Share" onPress={() => setView({ kind: "share" })} small disabled={view.kind === "share"} />
-            <Button label="Settings" onPress={() => setView({ kind: "settings" })} small disabled={view.kind === "settings"} />
+            <Button label={t("nav.today")} onPress={() => setView({ kind: "today" })} small={view.kind !== "today"} disabled={view.kind === "today"} />
+            <Button label={t("nav.history")} onPress={() => setView({ kind: "history" })} small disabled={view.kind === "history"} />
+            <Button label={t("nav.patterns")} onPress={() => setView({ kind: "patterns" })} small disabled={view.kind === "patterns"} />
+            <Button label={t("nav.question")} onPress={() => setView({ kind: "question" })} small disabled={view.kind === "question"} />
+            <Button label={t("nav.measures")} onPress={() => setView({ kind: "measures" })} small disabled={view.kind === "measures"} />
+            <Button label={t("nav.share")} onPress={() => setView({ kind: "share" })} small disabled={view.kind === "share"} />
+            <Button label={t("nav.settings")} onPress={() => setView({ kind: "settings" })} small disabled={view.kind === "settings"} />
             <span style={{ flex: 1 }} />
-            <Button label="Privacy" onPress={() => setView({ kind: "privacy" })} small />
-            <Button label="Sign out (all devices)" onPress={signOut} small danger />
+            <Button label={t("nav.privacy")} onPress={() => setView({ kind: "privacy" })} small />
+            <Button label={t("nav.signOutAll")} onPress={signOut} small danger />
           </nav>
           {view.kind === "today" ? (
             <>
@@ -261,7 +262,7 @@ export function App(): React.JSX.Element {
           )}
         </>
       )}
-      {inApp && username && <Note tone="muted">{`Signed in as ${username}`}</Note>}
+      {inApp && username && <Note tone="muted">{t("app.signedInAs", { name: username })}</Note>}
     </AppFrame>
   );
 }

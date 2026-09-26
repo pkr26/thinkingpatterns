@@ -8,6 +8,9 @@ import { QuestionView } from "../src/views/Question";
 import { buildFeedbackBlob, clearFeedback, recordFeedbackTap, recordPatternMute } from "../src/questionFeedback";
 import { decrypt, encrypt, fromBase64, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
+import { genericQuestionForDate } from "../src/genericQuestions";
+import { localDateISO } from "../src/dates";
+import { getLocale } from "../src/strings";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
@@ -150,6 +153,75 @@ describe("PatternsView", () => {
     expect(parsed.muted).toEqual(["temporal:work"]);
   });
 
+  it("muting a pattern leaves no readable pid in localStorage — the set persists as one encrypted kv blob (M-W4, audit 2026-09-26)", async () => {
+    // Pattern ids are CONTENT-DERIVED ("topic:divorce"): the pre-fix flow
+    // wrote them to plaintext localStorage. The mute set must live behind
+    // the data-key-encrypted kv seam, and the server-side sync must keep
+    // riding the feedback queue unchanged.
+    const kvMap = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return kvMap.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        kvMap.set(k, v);
+      },
+      async removeItem(k) {
+        kvMap.delete(k);
+      },
+      async keys() {
+        return [...kvMap.keys()];
+      },
+    });
+    stubEverything({
+      insights: () => insightsResponse([
+        { kind: "topic", label: "'divorce' keeps taking up space", occurrences: 9, confidence: 0.87, detail: { pattern_pid: "topic:divorce", pattern_state: "confirmed" } },
+      ]),
+    });
+    const root = await render(<PatternsView onCrisis={() => undefined} />);
+    await settle(40, 4);
+    await press(root, "Mute");
+    await settle(40, 3);
+    // localStorage carries NO readable pid token...
+    const win = (globalThis as { window?: { localStorage?: Storage } }).window;
+    const localScrape: string[] = [];
+    for (let i = 0; i < (win?.localStorage?.length ?? 0); i += 1) {
+      const k = win!.localStorage!.key(i)!;
+      localScrape.push(`${k}=${win!.localStorage!.getItem(k)}`);
+    }
+    expect(localScrape.join("\n")).not.toContain("divorce");
+    expect(localScrape.join("\n")).not.toContain("topic:");
+    // ...and the kv blob holds the pid ONLY under the data key.
+    const stored = kvMap.get("mindpattern.patternMutes.v1.user-1");
+    expect(stored).toBeTruthy();
+    expect(stored!).not.toContain("divorce");
+    const opened = await decrypt(DATA_KEY, fromBase64(stored!), buildAad("pattern-mutes", USER));
+    expect(JSON.parse(new TextDecoder().decode(opened))).toEqual(["topic:divorce"]);
+    // The server-side mute sync is intact (questionFeedback queue):
+    const blob = await buildFeedbackBlob(DATA_KEY, USER);
+    expect(blob).not.toBeNull();
+    const feedback = await decrypt(DATA_KEY, fromBase64(blob!), buildAad("feedback", USER, new Date().toISOString().slice(0, 10)));
+    expect((JSON.parse(new TextDecoder().decode(feedback)) as { muted: string[] }).muted).toEqual(["topic:divorce"]);
+  });
+
+  it("a pre-fix plaintext mute list is adopted once and the plaintext copy removed (M-W4)", async () => {
+    const win = (globalThis as { window?: { localStorage?: Storage } }).window;
+    win?.localStorage?.setItem("mindpattern.mutedPids.v1.user-1", JSON.stringify(["topic:legacy"]));
+    stubEverything({
+      insights: () => insightsResponse([
+        { kind: "topic", label: "'work' on Sundays", occurrences: 4, confidence: 0.8, detail: { pattern_pid: "topic:work", pattern_state: "confirmed" } },
+        ]),
+    });
+    const root = await render(<PatternsView onCrisis={() => undefined} />);
+    await settle(40, 4);
+    // The legacy plaintext is gone...
+    expect(win?.localStorage?.getItem("mindpattern.mutedPids.v1.user-1")).toBeNull();
+    // ...and its pid now lives encrypted, decryptable under the data key.
+    const { readMutedPids } = await import("../src/patternMutes");
+    const pids = await readMutedPids(DATA_KEY, USER);
+    expect([...pids]).toEqual(["topic:legacy"]);
+  });
+
   it("the one-time threshold notice appears exactly once", async () => {
     stubEverything({ insights: () => insightsResponse([]) });
     const root = await render(<PatternsView onCrisis={() => undefined} />);
@@ -179,11 +251,14 @@ describe("QuestionView", () => {
     expect(await buildFeedbackBlob(DATA_KEY, USER)).toBeNull();
   });
 
-  it("baseline 404 renders the honest 'questions begin with patterns' state", async () => {
+  it("baseline 404 renders today's built-in question with the honest caption (M-W5, audit 2026-09-26)", async () => {
+    // The generic-question pool used to be dead code on the web — the 404
+    // branch now renders today's localized on-device question, like mobile.
     stubEverything({});
     const root = await render(<QuestionView onRefreshed={() => undefined} />);
     await settle(40, 4);
-    expect(textOf(root)).toContain("Questions begin with your patterns");
+    expect(textOf(root)).toContain(genericQuestionForDate(localDateISO(), getLocale()));
+    expect(textOf(root)).toContain("small built-in set");
   });
 
   it("the explicit recompute: single-use session, feedback attached, refresh note", async () => {

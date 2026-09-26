@@ -34,7 +34,7 @@ from datetime import date as date_type, timedelta
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, distinct, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,6 +127,20 @@ ACCESS_LOG_RETENTION = timedelta(days=730)
 MAX_NOTES_PER_PATIENT = 1_000
 MAX_NOTE_BYTES_PER_PATIENT = 32 * 1024 * 1024
 NOTES_PAGE_SIZE = 100
+# 2026-09-26 audit H-6: the same attacker-controlled-storage reasoning now
+# covers the EDIT HISTORY. Every changing update preserves the superseded
+# blob as an immutable TherapistNoteRevision row (up to MAX_BLOB_64 ≈ 1.07
+# MiB each) that the chart quota never counted and nothing ever pruned —
+# an unbounded byte faucet on the notes table. Two bounds close it:
+#   * a per-NOTE revision cap with oldest-eviction on insert (below), so
+#     one note's history is a bounded ring, and
+#   * the chart quota itself counting revision rows+bytes (see
+#     _assert_note_quota), so history can never crowd past the same
+#     32 MiB / row budget live notes obey.
+# 50 keeps a genuinely useful longitudinal edit trail (the revisions read
+# serves 50 per page) while bounding one note's history far below the
+# chart's byte budget.
+MAX_NOTE_REVISIONS_PER_NOTE = 50
 # Count pagination alone still permits a page of 100 near-maximum encrypted
 # notes (over 100 MiB of raw ciphertext).  Bound a response independently of
 # the chart-storage quota.  This is deliberately above one accepted note, so
@@ -433,7 +447,12 @@ async def rotate_wrap_key(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
-    await _require_verifier(user, verifier, request)
+    # M-B1 (2026-09-26): epoch captured at entry; the fence below re-reads
+    # the row and refuses a session retired by a concurrent logout or
+    # credential rotation (the M-2 pattern), and the verifier proof runs
+    # against the freshly re-read row.
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
     try:
         sharing.validate_public_key_b64(body.wrap_pub_key)
     except sharing.SharingError as exc:
@@ -459,6 +478,12 @@ async def rotate_wrap_key(
         )
         if fresh is None or not fresh.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh.token_epoch != expected_epoch:
+            # M-B1 (2026-09-26): a logout/credential rotation committed
+            # while this request queued on the therapist fence — the
+            # bearer+verifier pair predates the epoch bump and must not
+            # publish replacement wrap key material.
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         fresh.wrap_pub_key = body.wrap_pub_key
         fresh.wrap_key_blob = key_blob
         _audit(session, fresh, fresh.id, "wrap_key_rotate")
@@ -536,9 +561,15 @@ async def read_own_access_log(
     "/account",
     status_code=204,
     dependencies=[
+        # 2026-09-26 audit (LOW, batch item e): sharing-disabled
+        # deployments must not expose the therapist delete route either —
+        # the same fail-closed posture deps.py documents for every other
+        # sharing surface (flat 404 when the feature is administratively
+        # off, consistent with register/me/wrap-key/pairing).
+        Depends(require_sharing_enabled),
         Depends(
             make_rate_limiter("therapist-account-delete", "auth_rate_limit", "auth_rate_window")
-        )
+        ),
     ],
 )
 async def delete_therapist_account(
@@ -556,10 +587,29 @@ async def delete_therapist_account(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
-    await _require_verifier(user, verifier, request)
+    # M-B1 (2026-09-26): epoch captured at entry; enforced inside the
+    # therapist fence below (the M-2 pattern — see rotate_wrap_key).
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
     # Therapist content reads and grants take this lock first, so a deletion
     # cannot commit between their consent decision and response assembly.
     async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        # M-B1 (2026-09-26): liveness AND epoch on a freshly re-read row
+        # before the destructive commit — a pre-rotation bearer+verifier
+        # pair queued behind the fence must not complete the deletion.
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         await session.execute(delete(User).where(User.id == user.id))
         await session.commit()
 
@@ -666,28 +716,43 @@ async def list_patients(
     # its patient fence; otherwise a revoke could clear the key just after a
     # bulk SELECT but before this endpoint returns it.
     async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        # 2026-09-26 audit H-7: the CAP counts ACTIVE consents only — the
+        # therapist-side twin of the patient list's F-9 rule. Consent rows
+        # are never deleted (they carry disclosure history and note
+        # continuity), so counting revoked rows against
+        # MAX_PATIENTS_PER_THERAPIST permanently 413'd the caseload of a
+        # clinician with >100 LIFETIME patients even at a small active
+        # load. The retained HISTORY below is still returned in full;
+        # like the patient side it is bounded by DISTINCT patients via
+        # the unique (patient, therapist) pair, each an account that had
+        # to exist — not manufacturable by grant/revoke churn.
+        active_count = int(
+            (
+                await session.execute(
+                    select(func.count(Consent.id)).where(
+                        Consent.therapist_id == user.id,
+                        Consent.status == "active",
+                    )
+                )
+            ).scalar_one()
+        )
+        if active_count > MAX_PATIENTS_PER_THERAPIST:
+            raise ApiError(
+                status_code=413,
+                detail="patient list exceeds the supported caseload size",
+                code="payload_too_large",
+            )
         patient_ids = (
             (
                 await session.execute(
                     select(Consent.user_id)
                     .where(Consent.therapist_id == user.id)
                     .order_by(Consent.granted_at.desc(), Consent.id.desc())
-                    # Keep the complete-list contract the portal currently
-                    # consumes. Standard grants cap this relationship; an
-                    # imported legacy caseload beyond that cap fails loudly
-                    # rather than producing a plausible-but-truncated list.
-                    .limit(MAX_PATIENTS_PER_THERAPIST + 1)
                 )
             )
             .scalars()
             .all()
         )
-        if len(patient_ids) > MAX_PATIENTS_PER_THERAPIST:
-            raise ApiError(
-                status_code=413,
-                detail="patient list exceeds the supported caseload size",
-                code="payload_too_large",
-            )
         await session.commit()
         for patient_id in patient_ids:
             async with sharing_locks.hold(sharing_patient_lock_key(patient_id)):
@@ -724,7 +789,19 @@ async def list_patients(
                         ).phase
                         is threshold.Phase.INSIGHT
                     )
-                serve_summary = active and insight_phase
+                # 2026-09-26 audit M-B2: the summary SERVE now applies the
+                # same disclosure gate as the WRITE side (insights.py) and
+                # the measures read (H-14): a v1-disclosure grant never
+                # named caseload summaries, so a summary that predates the
+                # gate (written while the recompute persisted it for every
+                # active consent) is treated as no-summary rather than
+                # served. Re-consenting under the current disclosure makes
+                # the next recompute write — and this list serve — it.
+                serve_summary = (
+                    active
+                    and insight_phase
+                    and consent.disclosure == SHARING_DISCLOSURE_VERSION
+                )
                 out.append(
                     PatientOut(
                         user_id=patient.id,
@@ -809,9 +886,12 @@ async def read_patient_insights(
                 blob=blob,
                 # H-16 (2026-09-20): the rollback-replay detection contract
                 # applies on the therapist path too — the response used to
-                # hardcode 0 while the decrypted payload embeds N >= 1, so
-                # the documented byte-identical-shape promise (and the
-                # portal's stateSeqGuard) could never fire here.
+                # hardcode 0 while the decrypted payload embeds N >= 1. The
+                # state_seq enforcement contract itself: the PATIENT web
+                # app's stateSeqGuard is the shipped client-side check;
+                # the portal's own guard ships in this release's portal
+                # workstream (2026-09-26 — the server has echoed the
+                # marker since H-16; who verifies it is client-side).
                 state_seq=latest.state_seq if latest is not None else 0,
             )
             await session.commit()  # the audit row
@@ -1199,6 +1279,38 @@ def _note_blob_length(session: AsyncSession):
     return func.length(TherapistNote.blob)
 
 
+def _revision_blob_length(session: AsyncSession):
+    if session.bind.dialect.name == "postgresql":
+        return func.octet_length(TherapistNoteRevision.blob)
+    return func.length(TherapistNoteRevision.blob)
+
+
+async def _enforce_note_revision_cap(session: AsyncSession, note_id: str) -> None:
+    """2026-09-26 audit H-6: keep at most MAX_NOTE_REVISIONS_PER_NOTE
+    revisions per note, deleting the OLDEST beyond the cap.
+
+    Runs inside the caller's chart-lock transaction AFTER the new revision
+    row was added (autoflush makes it visible to the keep-set SELECT), so
+    the eviction and the edit that triggered it commit or roll back
+    together. Oldest-first is (created_at, id) ascending — the exact
+    ordering key the revisions read uses, reversed — so eviction is
+    deterministic regardless of insert timing."""
+    keep_ids = (
+        select(TherapistNoteRevision.id)
+        .where(TherapistNoteRevision.note_id == note_id)
+        .order_by(
+            TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc()
+        )
+        .limit(MAX_NOTE_REVISIONS_PER_NOTE)
+    )
+    await session.execute(
+        delete(TherapistNoteRevision).where(
+            TherapistNoteRevision.note_id == note_id,
+            TherapistNoteRevision.id.not_in(keep_ids),
+        )
+    )
+
+
 async def _assert_note_quota(
     session: AsyncSession,
     therapist_id: str,
@@ -1208,25 +1320,42 @@ async def _assert_note_quota(
     previous_size: int = 0,
     is_new: bool,
 ) -> None:
-    """Check a per-chart count + ciphertext budget under the chart lock."""
-    count, total = (
+    """Check a per-chart count + ciphertext budget under the chart lock.
+
+    2026-09-26 audit H-6: the budget now counts the note EDIT HISTORY too.
+    Every changing edit used to insert a full TherapistNoteRevision row
+    (blobs up to MAX_BLOB_64 ≈ 1.07 MiB) with zero accounting and no
+    pruning — the chart quota bounded only live notes, so history grew
+    without limit. Revision rows join the row budget and revision bytes
+    join the byte budget (one outer-joined aggregate query; the revision
+    table carries no patient column, so it joins through the note)."""
+    note_count, note_bytes, revision_count, revision_bytes = (
         await session.execute(
             select(
-                func.count(TherapistNote.id),
+                func.count(distinct(TherapistNote.id)),
                 func.coalesce(func.sum(_note_blob_length(session)), 0),
-            ).where(
+                func.count(TherapistNoteRevision.id),
+                func.coalesce(func.sum(_revision_blob_length(session)), 0),
+            )
+            .outerjoin(
+                TherapistNoteRevision, TherapistNoteRevision.note_id == TherapistNote.id
+            )
+            .where(
                 TherapistNote.therapist_id == therapist_id,
                 TherapistNote.user_id == patient_id,
             )
         )
     ).one()
-    if is_new and int(count) >= MAX_NOTES_PER_PATIENT:
+    if is_new and int(note_count) + int(revision_count) >= MAX_NOTES_PER_PATIENT:
         raise ApiError(
             status_code=413,
             detail=f"note storage quota reached ({MAX_NOTES_PER_PATIENT} notes)",
             code="quota_exceeded",
         )
-    if int(total) - previous_size + incoming > MAX_NOTE_BYTES_PER_PATIENT:
+    if (
+        int(note_bytes) - previous_size + incoming + int(revision_bytes)
+        > MAX_NOTE_BYTES_PER_PATIENT
+    ):
         raise ApiError(
             status_code=413,
             detail="note storage quota reached (total size)",
@@ -1417,6 +1546,11 @@ async def create_note(
 ):
     patient_id = await _note_target(session, user, user_id)
     blob = _decode_note_blob(body.blob)
+    # 2026-09-26 audit (LOW, batch item b): close the read transaction the
+    # pre-lock _note_target opened BEFORE queueing on the chart lock — the
+    # same pooling discipline list_notes/update_note already apply; the row
+    # is re-resolved under the lock below.
+    await session.commit()
     async with _note_locks.hold(f"notes:{user.id}:{patient_id}"):
         existing = (
             (
@@ -1443,14 +1577,6 @@ async def create_note(
                     detail="note id already used for another patient",
                     code="conflict",
                 )
-            await _assert_note_quota(
-                session,
-                user.id,
-                patient_id,
-                len(blob),
-                previous_size=len(bytes(existing.blob)),
-                is_new=False,
-            )
             changed = bytes(existing.blob) != blob or existing.pattern_pid != body.pattern_pid
             if changed:
                 if bytes(existing.blob) != blob:
@@ -1468,9 +1594,32 @@ async def create_note(
                             created_at=utcnow(),
                         )
                     )
+                    # 2026-09-26 audit H-6: evict beyond the per-note cap
+                    # BEFORE the quota math so the chart budget sees the
+                    # post-eviction history (same rule as PATCH below).
+                    await _enforce_note_revision_cap(session, existing.id)
+                # H-6: the quota check runs AFTER the pending revision is
+                # visible, so the preserved superseded blob is counted.
+                await _assert_note_quota(
+                    session,
+                    user.id,
+                    patient_id,
+                    len(blob),
+                    previous_size=len(bytes(existing.blob)),
+                    is_new=False,
+                )
                 existing.blob = blob
                 existing.pattern_pid = body.pattern_pid
                 existing.updated_at = utcnow()
+            else:
+                await _assert_note_quota(
+                    session,
+                    user.id,
+                    patient_id,
+                    len(blob),
+                    previous_size=len(bytes(existing.blob)),
+                    is_new=False,
+                )
             row = existing
         else:
             await _assert_note_quota(session, user.id, patient_id, len(blob), is_new=True)
@@ -1571,14 +1720,6 @@ async def update_note(
         )
         if row is None:
             raise ApiError(status_code=404, detail="note not found", code="not_found")
-        await _assert_note_quota(
-            session,
-            user.id,
-            row.user_id,
-            len(blob),
-            previous_size=len(bytes(row.blob)),
-            is_new=False,
-        )
         changed = bytes(row.blob) != blob
         if changed:
             # P3 (2026-09-21): the edit history — the SUPERSEDED blob is
@@ -1593,6 +1734,25 @@ async def update_note(
                     created_at=utcnow(),
                 )
             )
+            # 2026-09-26 audit H-6: per-note revision cap with OLDEST
+            # eviction, applied before the quota math so the chart budget
+            # sees the post-eviction history (the eviction, the preserved
+            # revision and the edit share this chart-lock transaction —
+            # a refused quota rolls the eviction back with everything
+            # else).
+            await _enforce_note_revision_cap(session, row.id)
+        # H-6: the quota check now counts revision rows+bytes; running it
+        # after the (pending, autoflushed) revision insert means the
+        # preserved superseded blob is inside the budget it must fit.
+        await _assert_note_quota(
+            session,
+            user.id,
+            row.user_id,
+            len(blob),
+            previous_size=len(bytes(row.blob)),
+            is_new=False,
+        )
+        if changed:
             row.blob = blob
             row.updated_at = utcnow()
         _audit(session, user, row.user_id, "update_note")

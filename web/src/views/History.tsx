@@ -4,15 +4,20 @@
  * version-conflict editing ("reload theirs / reapply mine" — never a silent
  * overwrite), delete, and the entry-version rollback guard (a rolled-back
  * row is skipped and counted, exactly like a tampered blob).
+ *
+ * H-5 (audit 2026-09-26): the payload's sentiment is only ever an explicit
+ * check-in pick now, so the mood calendar sources like mobile — payload
+ * pick first, the device-local mood log's day value as fallback.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, listEntriesWalk, type ListedEntry } from "../api/client";
+import { api, ApiError, listEntriesWalk } from "../api/client";
 import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/patient";
 import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind";
-import { removeMoodDay } from "../moodLog";
+import { recentMoods, removeMoodDay } from "../moodLog";
 import { localDateISO } from "../dates";
 import { moodLabel } from "../mood";
+import { t } from "../strings";
 import { vault } from "../vault";
 import { theme, Button, Card, ErrorBanner, Field, Note, TextArea } from "../ui";
 
@@ -36,6 +41,9 @@ export function HistoryView(): React.JSX.Element {
   const [editText, setEditText] = useState("");
   const [conflict, setConflict] = useState<{ theirs: DecodedEntry; mine: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The device-local mood log's day values — the calendar's fallback source
+  // (H-5: payload pick first, log value second), like mobile's logMoods.
+  const [logMoods, setLogMoods] = useState<Record<string, number>>({});
   const generation = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
@@ -44,7 +52,7 @@ export function HistoryView(): React.JSX.Element {
     const keys = vault.get();
     const owner = vault.ownerUserId();
     if (!owner) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     setEntries(null);
@@ -75,11 +83,18 @@ export function HistoryView(): React.JSX.Element {
         decoded.map((entry) => ({ clientEntryId: entry.clientEntryId, contentVersion: entry.contentVersion })),
       );
       if (generation.current !== run) return;
+      // The mood-log fallback is disposable metadata: a failed read leaves
+      // the calendar on payload picks alone, never blocks the list.
+      const logDays = await recentMoods(keys.dataKey, owner, 400).catch(() => []);
+      if (generation.current !== run) return;
+      const moods: Record<string, number> = {};
+      for (const day of logDays) moods[day.date] = day.value;
+      setLogMoods(moods);
       const rolled = observation.rolledBack;
       setRolledBack(rolled);
       setEntries(decoded.filter((entry) => !rolled.includes(entry.clientEntryId)));
       if (tampered.length > 0 || rolled.length > 0) {
-        setError(`${tampered.length + rolled.length} entr${tampered.length + rolled.length === 1 ? "y" : "ies"} could not be verified and were hidden — they may have been tampered with.`);
+        setError(t(tampered.length + rolled.length === 1 ? "history.hiddenOne" : "history.hiddenMany", { count: tampered.length + rolled.length }));
       }
     } catch (err) {
       if (generation.current !== run) return;
@@ -87,18 +102,18 @@ export function HistoryView(): React.JSX.Element {
       // "Loading…" (audit 2026-09-25: only status-0 used to surface).
       setEntries([]);
       if (!vault.isUnlocked()) {
-        setError("Your session locked — sign in again.");
+        setError(t("common.sessionLocked"));
       } else if (err instanceof ApiError && err.status === 0) {
-        setError("Could not load history — check your connection and try again.");
+        setError(t("history.loadOffline"));
       } else {
-        setError(err instanceof Error ? err.message : "Could not load history.");
+        setError(err instanceof Error ? err.message : t("history.loadFailed"));
       }
     }
   }, []);
 
   useEffect(() => {
     if (vault.isUnlocked()) void load();
-    else setError("Your session locked — sign in again.");
+    else setError(t("common.sessionLocked"));
   }, [load]);
 
   const visible = useMemo(() => {
@@ -115,9 +130,12 @@ export function HistoryView(): React.JSX.Element {
     return monthGrid(cursor.year, cursor.month).map((day) => ({
       iso: day.iso, // null = leading blank
       day: day.day,
-      value: day.iso !== null ? (byDate.get(day.iso)?.payload.sentiment ?? null) : null,
+      // H-5 (audit 2026-09-26): the explicit payload pick wins; days
+      // without one fall back to the mood log's device-local estimate
+      // (mobile MoodCalendar parity — the log is recorded on every save).
+      value: day.iso !== null ? (byDate.get(day.iso)?.payload.sentiment ?? logMoods[day.iso] ?? null) : null,
     }));
-  }, [entries, cursor]);
+  }, [entries, cursor, logMoods]);
 
   const startEdit = (entry: DecodedEntry): void => {
     setEditing(entry);
@@ -171,18 +189,18 @@ export function HistoryView(): React.JSX.Element {
           });
           setEditing(null);
         } catch {
-          setError("This entry changed on another device and could not be reloaded — copy your text, then reload.");
+          setError(t("history.conflictReloadFailed"));
         }
       } else if (err instanceof ApiError && err.status === 404) {
         // Deleted on another device (S-4): the pending edit is quarantined
         // for review — shown verbatim, never resurrected silently.
         setConflict({
-          theirs: { ...target, payload: { ...target.payload, text: "(this entry was deleted on another device)" } },
+          theirs: { ...target, payload: { ...target.payload, text: t("history.deletedElsewhere") } },
           mine: editText,
         });
         setEditing(null);
       } else {
-        setError(err instanceof Error ? err.message : "Could not save the edit.");
+        setError(err instanceof Error ? err.message : t("history.editFailed"));
       }
     } finally {
       setBusy(false);
@@ -206,7 +224,7 @@ export function HistoryView(): React.JSX.Element {
       await removeMoodDay(keys.dataKey, owner, entry.entryDate).catch(() => undefined);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the entry.");
+      setError(err instanceof Error ? err.message : t("history.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -224,7 +242,7 @@ export function HistoryView(): React.JSX.Element {
 
   return (
     <>
-      <Card title="Mood calendar">
+      <Card title={t("history.calendarTitle")}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Button label="‹" onPress={() => setCursor(stepMonth(cursor.year, cursor.month, -1))} small />
           <Note>{monthLabel(cursor.year, cursor.month)}</Note>
@@ -251,54 +269,54 @@ export function HistoryView(): React.JSX.Element {
             </div>
           ))}
         </div>
-        <Note tone="muted">Each tile is the day's on-device sentiment read — computed locally from the decrypted entry, never synced separately.</Note>
+        <Note tone="muted">{t("history.calendarNote")}</Note>
       </Card>
 
-      <Card title="History">
-        <Field label="Search" value={query} onChange={setQuery} placeholder="Search your words, or an exact date (YYYY-MM-DD)" />
-        {rolledBack.length > 0 && <Note tone="warn">{`${rolledBack.length} hidden by the rollback guard.`}</Note>}
+      <Card title={t("history.title")}>
+        <Field label={t("history.search")} value={query} onChange={setQuery} placeholder={t("history.searchPlaceholderWeb")} />
+        {rolledBack.length > 0 && <Note tone="warn">{t(rolledBack.length === 1 ? "history.rollbackOne" : "history.rollbackMany", { count: rolledBack.length })}</Note>}
         <ErrorBanner message={error} />
-        {visible === null && !error && <Note role="status">Loading…</Note>}
-        {visible?.length === 0 && <Note>No entries{query ? " match that search" : " yet — today is a fine day to start"}.</Note>}
+        {visible === null && !error && <Note role="status">{t("common.loading")}</Note>}
+        {visible?.length === 0 && <Note>{query ? t("history.noMatch") : t("history.empty")}</Note>}
         {visible?.map((entry) => (
           <section key={entry.clientEntryId} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 13, color: theme.text }}>{entry.entryDate}</strong>
               <Note tone="muted">
-                {entry.payload.sentiment != null ? moodLabel(entry.payload.sentiment) : "no read"}
-                {entry.contentVersion > 1 ? ` · edited ×${entry.contentVersion - 1}` : ""}
+                {entry.payload.sentiment != null ? moodLabel(entry.payload.sentiment) : t("history.noRead")}
+                {entry.contentVersion > 1 ? ` · ${t("history.editedTimes", { count: entry.contentVersion - 1 })}` : ""}
               </Note>
             </div>
             <Note>{entry.payload.text.length > 240 ? `${entry.payload.text.slice(0, 240)}…` : entry.payload.text}</Note>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button label="Edit" onPress={() => startEdit(entry)} small disabled={busy || editing !== null || conflict !== null} />
-              <Button label="Delete" onPress={() => void remove(entry)} small danger disabled={busy} />
+              <Button label={t("history.edit")} onPress={() => startEdit(entry)} small disabled={busy || editing !== null || conflict !== null} />
+              <Button label={t("common.delete")} onPress={() => void remove(entry)} small danger disabled={busy} />
             </div>
           </section>
         ))}
       </Card>
 
       {editing && (
-        <Card title={`Edit ${editing.entryDate}`}>
-          <TextArea label="Your entry" value={editText} onChange={setEditText} rows={8} />
+        <Card title={t("history.editTitle", { date: editing.entryDate })}>
+          <TextArea label={t("history.yourEntry")} value={editText} onChange={setEditText} rows={8} />
           <div style={{ display: "flex", gap: 8 }}>
-            <Button label={busy ? "Saving…" : "Save edit"} onPress={() => void submitEdit()} disabled={busy} />
-            <Button label="Cancel" onPress={() => setEditing(null)} small />
+            <Button label={busy ? t("entry.saving") : t("history.saveEdit")} onPress={() => void submitEdit()} disabled={busy} />
+            <Button label={t("common.cancel")} onPress={() => setEditing(null)} small />
           </div>
         </Card>
       )}
 
       {conflict && (
-        <Card title="This entry changed on another device">
-          <Note tone="warn">{"Their version (saved first):"}</Note>
+        <Card title={t("history.conflictTitle")}>
+          <Note tone="warn">{t("history.conflictTheirs")}</Note>
           <Note>{conflict.theirs.payload.text}</Note>
-          <Note tone="warn">{"Your version:"}</Note>
+          <Note tone="warn">{t("history.conflictMine")}</Note>
           <Note>{conflict.mine}</Note>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Button label="Keep their version" onPress={() => { setConflict(null); void load(); }} small />
-            <Button label="Apply mine on top" onPress={() => void applyMineOnTop()} small />
+            <Button label={t("history.keepTheirs")} onPress={() => { setConflict(null); void load(); }} small />
+            <Button label={t("history.applyMine")} onPress={() => void applyMineOnTop()} small />
           </div>
-          <Note tone="muted">Nothing was overwritten automatically — you choose.</Note>
+          <Note tone="muted">{t("history.noOverwriteNote")}</Note>
         </Card>
       )}
     </>

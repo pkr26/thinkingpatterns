@@ -30,14 +30,14 @@ vi.mock("../src/api", async (importOriginal) => {
         totp_enabled: false,
       })),
       patients: vi.fn(async () => []),
-      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==" })),
+      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: 7 })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
       createNote: vi.fn(async () => ({})),
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
-      patientMeasures: vi.fn(async () => []),
+      patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       accessLog: vi.fn(async () => []),
       totpSetup: vi.fn(async () => ({
         secret_base32: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
@@ -64,7 +64,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
       wrapKeyBlobB64: "SEALED==",
     })),
     decryptCaseloadSummary: vi.fn(async () => null),
-    decryptInsights: vi.fn(async () => ({ stats: { patterns: [] } })),
+    decryptInsights: vi.fn(async () => ({ state_seq: 7, stats: { patterns: [] } })),
     decryptMeasure: vi.fn(async () => null),
   };
 });

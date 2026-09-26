@@ -62,6 +62,38 @@ recorded decision rather than an oversight:
   device access with the user watching. Accepted for v1; revisit with
   any native networking change.
 
+## Patient deletion destroys therapist notes (2026-09-26, accepted pending counsel)
+
+`therapist_notes.user_id` carries `ondelete="CASCADE"`
+(backend/app/models.py): when a patient deletes their account
+(`DELETE /api/account`), the therapist's notes ABOUT that patient —
+including every superseded revision and the notes' ciphertext — are
+destroyed with the account. This is a deliberate, and deliberately
+double-edged, design decision:
+
+- **For deletion (privacy):** a hard cascade is the strongest possible
+  Art. 17 story for the patient's own data trail — nothing about them
+  survives the live database, not even clinician-authored records they
+  cannot read.
+- **Against deletion (medical-record retention):** in many jurisdictions
+  a treating clinician owes a record-retention duty over clinical notes
+  (therapist notes are arguably the therapist's records about the
+  treatment relationship, not the patient's data alone). A patient-side
+  delete that erases the clinician's notes could put the therapist in
+  breach of that duty — or, read the other way, keeping them could
+  breach Art. 17. The honest statement: **the GDPR Art. 17 right vs
+  medical-record retention duties are in direct tension here and the
+  resolution is a legal question, not an engineering one.**
+
+Accepted for v1 with the cascade as-is (privacy-maximal, consistent with
+the no-account-recovery design), **flagged for counsel** before any
+deployment that owes clinician record-retention duties. If counsel
+requires retention, the narrow fix is per-row `ondelete` changes plus an
+explicit disclosed retention path (and the DPIA erasure section must
+then be rewritten to disclose it). The access-log rows deliberately
+SURVIVE the cascade (730-day window) — that trade-off is documented in
+`docs/DPIA_SKELETON.md` §4, not here.
+
 ## Tracked deferrals (not harness FINDINGs)
 
 Hardening the audit plan asked for that shipped as "next" rather than v1,
@@ -78,3 +110,17 @@ recorded here so they are not silently dropped (audit round 2, F-6):
   caveat as the decoy salts (operators must also clear `users.totp_*`);
   (3) a lost authenticator is an operator database action (no recovery
   flow, by the no-account-recovery design).
+- **WEB_PLAN P9.10 hand-written sync-surface mutation campaign** —
+  DEFERRED (registered 2026-09-26). The promised
+  `redteam/mutation_campaign_web_sync_<date>/` campaign (mutants over
+  conflict resolution, revision restart, queue dedupe/fence, epoch
+  funnels, `state_seq` guards, zeroization, lock paths — web AND
+  mobile) does not exist yet; no mutants are wired into the
+  `mutation-pr.yml` diff-scope gate for those surfaces. What IS in
+  place: the Stryker configs + scheduled `mutation-web.yml` /
+  `mutation-mobile.yml` runs (first measured floors pending) and the
+  adversarial harness set delivered with P9 (see WEB_PLAN's Phase 9
+  note). The deferral is owned by WEB_PLAN 9.10 — its checkbox stays
+  unchecked until the campaign directory exists with every mutant
+  killed. Re-review: after the first scheduled Stryker measurements
+  land, or before any v2 security review.

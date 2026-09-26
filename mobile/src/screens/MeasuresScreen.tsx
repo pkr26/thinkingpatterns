@@ -19,7 +19,7 @@
  * t(); nothing is hardcoded English anymore. The structural item list and
  * option values live in src/phq9.ts; only their display copy is local.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { api, ApiError } from "../api/client";
 import { buildAad, decrypt, encrypt } from "../crypto/envelope";
@@ -43,6 +43,12 @@ import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
 import { MainShell } from "../components/BottomNav";
 import { requestFailureCopy } from "../components/errors";
 import { t as tr } from "../strings";
+import { formatEntryDate } from "./HistoryScreen";
+
+/** 2026-09-26 audit LOW: the transient status line auto-clears after the
+ *  app-wide 2.6s idiom (EntryScreen/HistoryScreen STATUS_MS) — before, the
+ *  first status stayed on screen forever, going stale beside newer state. */
+const STATUS_MS = 2_600;
 
 interface MeasureRow {
   client_measure_id: string;
@@ -106,11 +112,22 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /** Transient status; replaces itself cleanly and never stacks (the
+   *  EntryScreen/HistoryScreen idiom, 2026-09-26 audit LOW). */
   const showStatus = (message: string, tone: InlineStatusTone) => {
+    if (statusTimer.current) clearTimeout(statusTimer.current);
     setStatusTone(tone);
     setStatus(message);
+    statusTimer.current = setTimeout(() => setStatus(null), STATUS_MS);
   };
+
+  useEffect(() => {
+    return () => {
+      if (statusTimer.current) clearTimeout(statusTimer.current);
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -191,11 +208,17 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         await load();
         return;
       }
-      const copy =
-        err instanceof ApiError && err.status === 0
-          ? tr("measures.recordOfflineBody")
-          : tr("measures.recordFailedBody");
-      Alert.alert(tr("measures.notRecordedTitle"), copy);
+      // 2026-09-26 audit LOW: an OFFLINE submit failure is now a quiet
+      // inline status, not a modal. The picks deliberately stay selected and
+      // the Record button stays enabled (the completion gate drives it) —
+      // that IS the retry affordance: when connectivity returns, the same
+      // tap re-submits the same picks. A modal here interrupted the screen
+      // for a condition the user can do nothing about right now.
+      if (err instanceof ApiError && err.status === 0) {
+        showStatus(tr("measures.recordOfflineBody"), "neutral");
+        return;
+      }
+      Alert.alert(tr("measures.notRecordedTitle"), tr("measures.recordFailedBody"));
     } finally {
       setBusy(false);
     }
@@ -229,7 +252,13 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
               {tr("measures.historyTitle")}
             </Text>
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-              {readings.map((r) => `${r.instrument} ${r.date}: ${r.score}`).join("   ·   ")}
+              {/* 2026-09-26 audit LOW: instrument ids map through the
+                  measures.select.* locale labels (a bare "phq9" was raw
+                  implementation vocabulary), and the date formats like every
+                  other date on the app (locale-aware, not raw ISO). */}
+              {readings
+                .map((r) => `${tr(`measures.select.${r.instrument}`)} ${formatEntryDate(r.date)}: ${r.score}`)
+                .join("   ·   ")}
             </Text>
           </View>
         )}

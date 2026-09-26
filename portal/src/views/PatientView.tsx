@@ -15,7 +15,6 @@ import {
   ApiError,
   api,
   THERAPIST_ENTRY_PAGE_SIZE,
-  THERAPIST_MEASURE_PAGE_SIZE,
   THERAPIST_NOTE_PAGE_SIZE,
   type Note,
   type Patient,
@@ -65,12 +64,16 @@ const MAX_EVIDENCE_ENTRIES = ENTRY_PAGE_SIZE * MAX_ENTRY_PAGES;
 const NOTE_PAGE_SIZE = THERAPIST_NOTE_PAGE_SIZE;
 const MAX_NOTE_PAGES = 20;
 const MAX_NOTES_PER_LOAD = 1_000;
-// Measures (audit L-76, 2026-09-20): the server now continues with
-// limit/offset over a deterministic order, so the chart pages through
+// Measures (audit L-76, 2026-09-20): the server continues with validated
+// offset cursors over a deterministic order, so the chart pages through
 // EVERYTHING it will share instead of silently dropping measure #61+.
 // 20 pages × 100 rows = 2_000 rows — exactly the backend's per-patient
 // measure quota, so a full traversal is always finite and complete.
-const MEASURE_PAGE_LIMIT = THERAPIST_MEASURE_PAGE_SIZE;
+// 2026-09-26 audit L: the traversal now runs the snapshot-revision
+// contract (X-Measures-Revision pinning + one collection_changed
+// restart), so MAX_MEASURE_PAGES retains pages plus one bounded terminal
+// probe, like entries and notes. The page size itself lives in the api
+// layer (THERAPIST_MEASURE_PAGE_SIZE), which now always sends it.
 const MAX_MEASURE_PAGES = 20;
 /** Rendering window per instrument: the trend row shows the newest 60
  *  readings and says so when older ones exist — an honest display slice,
@@ -243,6 +246,62 @@ async function loadStableCollection<T>(load: () => Promise<T>): Promise<T> {
   }
 }
 
+/** 2026-09-26 audit L: analysis-generation rollback guard — the portal
+ *  mirror of the patient clients' stateSeqGuard (web/src/stateSeqGuard.ts).
+ *  AES-GCM authenticates WHO and WHAT a ciphertext belongs to, never WHICH
+ *  VERSION it is: without this check a compromised server could replay an
+ *  earlier, cryptographically valid patterns blob and this chart would
+ *  render it as today's truth. The backend (schemas.InsightsResponse)
+ *  embeds a monotonic state_seq inside the encrypted payload AND echoes
+ *  the same value in the plaintext response; two checks make a rollback
+ *  loud:
+ *
+ *    1. payload.state_seq === response.state_seq — a replayed-older blob
+ *       disagrees with the row's echoed generation.
+ *    2. payload.state_seq >= this session's high-water mark — even a
+ *       both-copies rollback moves the value backwards. The mark is
+ *       deliberately MEMORY-ONLY and per patient (this portal persists
+ *       nothing — see App's storage posture), so it spans the tab's
+ *       lifetime rather than the device's; a fresh page load starts a
+ *       fresh mark, exactly like the patient web client's first run.
+ *
+ *  An absent or non-integer payload seq FAILS CLOSED: the backend has
+ *  embedded state_seq in every patterns blob since the 2026-09-19
+ *  contract, so a payload without one is either pre-contract legacy data
+ *  or a tampered blob — neither may render as today's truth. A mismatch
+ *  surfaces through the chart's honest load-error path (banner + retry),
+ *  mirroring the patient client's typed freshness error. */
+const INSIGHTS_FRESHNESS_ERROR =
+  "this patient's pattern data failed its freshness check — it may be an older snapshot replayed by the server; sign out and back in, then contact support if it repeats";
+
+/** Session-lifetime high-water marks per patient user id. */
+const insightsHighWater = new Map<string, number>();
+
+/** Test seam: forget the in-memory high-water marks (the mirror of the
+ *  patient client's forgetAnalysisGeneration helper). */
+export function resetInsightsFreshness(): void {
+  insightsHighWater.clear();
+}
+
+function verifyInsightsGeneration(
+  userId: string,
+  payloadSeq: unknown,
+  echoedSeq: number,
+): void {
+  if (
+    typeof payloadSeq !== "number"
+    || !Number.isSafeInteger(payloadSeq)
+    || payloadSeq < 0
+    || payloadSeq !== echoedSeq
+  ) {
+    throw new Error(INSIGHTS_FRESHNESS_ERROR);
+  }
+  if (payloadSeq < (insightsHighWater.get(userId) ?? 0)) {
+    throw new Error(INSIGHTS_FRESHNESS_ERROR);
+  }
+  insightsHighWater.set(userId, payloadSeq);
+}
+
 export function PatientView(props: {
   patient: Patient;
   session: PortalSession;
@@ -286,6 +345,10 @@ export function PatientView(props: {
    *  with the consent-unwrapped data key. Display only — interpretation
    *  belongs to the clinician, and the copy says so. */
   const [measures, setMeasures] = useState<MeasureReading[] | null>(null);
+  /** 2026-09-26 audit L: a failed measures traversal is no longer silently
+   *  "no measures" — the honest inline line names the failure without
+   *  blocking the rest of the chart (patterns/notes keep rendering). */
+  const [measuresError, setMeasuresError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ avg_sentiment?: number; total_entries?: number; active_days?: number; first_date?: string; last_date?: string } | null>(null);
   /** Notes search filter (client-side: notes are already decrypted here). */
   const [noteQuery, setNoteQuery] = useState("");
@@ -319,37 +382,62 @@ export function PatientView(props: {
     setEditing(null);
     setConfirmDeleteId(null);
     setMeasures(null);
+    setMeasuresError(null);
 
     // Measures (MBC): loaded independently of insights so a baseline-phase
-    // patient's recorded questionnaires still surface. Failures render as
-    // "no measures" rather than blocking the chart.  Skipped entirely for
-    // stopped consents — the read requires an active consent.
+    // patient's recorded questionnaires still surface.  Skipped entirely
+    // for stopped consents — the read requires an active consent.
+    // 2026-09-26 audit L: the traversal runs the IDENTICAL snapshot
+    // contract as entries and notes (loadStableCollection one-restart,
+    // X-Measures-Revision pinning, bounded terminal probe). The old silent
+    // `seen` id-dedupe heuristic is gone: a pre-paging backend that
+    // ignores offsets used to be papered over client-side, which is
+    // exactly the cross-snapshot drift the revision contract exists to
+    // refuse — now it surfaces as an honest measures-load failure instead.
     const measuresLoad = (async (): Promise<void> => {
       try {
         if (notesOnly || !patient.ephemeral_pub || !patient.wrapped_key) return;
         // Page through EVERYTHING the server will share (audit L-76): the
         // traversal below once sliced to the newest 60 rows and silently
         // dropped the rest while the write quota kept charging them.
-        // Continuation is offset-based over the server's deterministic
-        // order; a full page means "maybe more", a short page is terminal.
-        const rows: PortalMeasure[] = [];
-        const seen = new Set<string>();
-        for (let page = 0; page < MAX_MEASURE_PAGES; page += 1) {
-          const current = await api.patientMeasures(patient.user_id, {
-            offset: rows.length,
-            limit: MEASURE_PAGE_LIMIT,
-          });
-          const fresh = current.filter((row) => !seen.has(row.id));
-          if (page > 0 && current.length > 0 && fresh.length === 0) {
-            // A pre-paging backend ignores offset/limit and answers every
-            // request with its same fixed first rows.  Everything it can
-            // share is already retained — stop rather than loop on it.
-            break;
+        const rows = await loadStableCollection(async (): Promise<PortalMeasure[]> => {
+          const snapshotRows: PortalMeasure[] = [];
+          let offset = 0;
+          let revision: string | undefined;
+          // One extra request is a bounded terminal probe: compatibility
+          // mode infers a cursor from a headerless full final page, so
+          // exactly twenty complete pages must be allowed to prove there is
+          // no twenty-first (which is also the backend's 2_000-row quota).
+          for (let page = 0; page <= MAX_MEASURE_PAGES; page += 1) {
+            const currentPage = await api.patientMeasures(
+              patient.user_id,
+              revision === undefined ? { offset } : { offset, expectedRevision: revision },
+            );
+            // A revision must be present on the first modern page and stay
+            // constant thereafter. A header appearing only after a legacy
+            // first page cannot prove that the already-retained rows belong
+            // to its snapshot, so fail rather than silently mixing
+            // histories — the same fence as entries and notes.
+            if (revision === undefined && currentPage.revision !== undefined) {
+              if (offset !== 0) {
+                throw new Error("server changed the measures pagination protocol mid-load");
+              }
+              revision = currentPage.revision;
+            } else if (revision !== undefined && currentPage.revision !== revision) {
+              throw new Error("server returned an inconsistent measures snapshot revision");
+            }
+            if (page === MAX_MEASURE_PAGES) {
+              if (currentPage.measures.length > 0) {
+                throw new Error("measure history exceeds this portal's safe page limit");
+              }
+              break;
+            }
+            snapshotRows.push(...currentPage.measures);
+            if (currentPage.nextOffset === null) break;
+            offset = currentPage.nextOffset;
           }
-          for (const row of fresh) seen.add(row.id);
-          rows.push(...fresh);
-          if (current.length < MEASURE_PAGE_LIMIT) break;
-        }
+          return snapshotRows;
+        });
         if (operation !== loadGeneration.current || rows.length === 0) return;
         const dataKey = await unwrapPatientDataKey(
           session.privateKey,
@@ -371,8 +459,13 @@ export function PatientView(props: {
         // Oldest first for the trend row.
         readings.sort((a, b) => a.measureDate.localeCompare(b.measureDate));
         if (operation === loadGeneration.current) setMeasures(readings);
-      } catch {
-        // Unreadable measures never block the chart.
+      } catch (err) {
+        // Measures still never block the chart — but the failure is no
+        // longer silent (2026-09-26 audit L): an honest inline line says
+        // the questionnaire trail could not be loaded and why.
+        if (operation === loadGeneration.current) {
+          setMeasuresError(err instanceof Error ? err.message : "could not load this patient's recorded measures");
+        }
       }
     })();
 
@@ -472,6 +565,13 @@ export function PatientView(props: {
         } finally {
           dataKey.fill(0);
         }
+        // 2026-09-26 audit L: rollback-replay guard — the seq embedded in
+        // the decrypted payload must equal the response's plaintext echo
+        // and never move backwards within this session (see
+        // verifyInsightsGeneration above). A mismatch throws and lands in
+        // this load's honest error path: banner + in-page retry, exactly
+        // like any other failed chart load.
+        verifyInsightsGeneration(patient.user_id, payload.state_seq, summary.state_seq);
         if (operation !== loadGeneration.current) return;
         const surfaced = sortForReview(payload.stats.patterns ?? []);
         // The pre-session delta (2026-09-17 fix): the stamp moves ONLY on the
@@ -829,6 +929,22 @@ export function PatientView(props: {
           <NoteText>
             Patient-recorded questionnaire scores, shared with you by consent.
             MindPattern displays them; interpretation is yours.
+          </NoteText>
+        </Card>
+      )}
+
+      {measuresError && !measureGroups.length && (
+        // 2026-09-26 audit L: a failed measures traversal is stated
+        // honestly instead of rendering as "the patient recorded nothing"
+        // — the difference matters clinically (no questionnaire vs. an
+        // unloadable one). Deliberately NOT a chart-level loadFailed: the
+        // patterns and notes above/below are unaffected, so only this one
+        // card is replaced by the explanation. The chart retry control
+        // re-runs the measures load with everything else.
+        <Card title="Recorded measures">
+          <NoteText tone="warn">
+            Could not load this patient's recorded measures — {measuresError}.
+            The rest of this chart is unaffected.
           </NoteText>
         </Card>
       )}

@@ -39,7 +39,8 @@ const cancelDailyReminder = vi.fn(async () => true);
 vi.mock("../src/nativeFeatures", () => ({
   cancelDailyReminder: () => cancelDailyReminder(),
   reminderCapability: () => ({ available: false, reason: "notification module not linked" }),
-  biometricCapability: () => ({ available: false, reason: "biometric module not linked" }),
+  // 2026-09-26 audit LOW: biometricCapability was deleted (dead probe of a
+  // non-dependency) — dropped from this mock with it.
 }));
 
 const { api, setUnauthorizedHandler } = await import("../src/api/client");

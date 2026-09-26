@@ -1,0 +1,31 @@
+# Blackbox exporter module config for the MindPattern stack.
+#
+# OPERATOR TOOLING — same status as prometheus.yml (see deploy/monitoring/
+# README.md). The pinned prom/blackbox-exporter image ships a stock config
+# with no generic TLS-connect module, and cert-expiry monitoring needs one,
+# so this file replaces the stock config wholesale (mounted read-only by
+# the monitoring docker-compose.yml `blackbox` service). It deliberately
+# re-declares ONLY the modules this stack uses:
+#
+#   http_2xx — the optional /readyz probe job in prometheus.yml. Kept
+#     byte-equivalent to the stock module (plain HTTP 2xx check) so
+#     enabling this file changes nothing about that probe.
+#   tls — TCP connect with TLS, for the cert-expiry probe job. This module
+#     exists so probe_ssl_earliest_cert_expiry is populated for the public
+#     origins; insecure_skip_verify is deliberate and REQUIRED here: a
+#     probe that fails chain verification yields NO expiry series at all,
+#     so a broken/expired chain would silence the very alerts that watch
+#     it. With verification skipped the gauge still reports the real
+#     earliest expiry (in the past after expiry), and the arithmetic
+#     MindPatternTlsCertExpiringSoon / ...ExpiryImminent rules fire.
+#     Chain VALIDITY remains the clients' fail-closed job, not this
+#     module's.
+modules:
+  http_2xx:
+    prober: http
+  tls:
+    prober: tcp
+    tcp:
+      tls: true
+      tls_config:
+        insecure_skip_verify: true

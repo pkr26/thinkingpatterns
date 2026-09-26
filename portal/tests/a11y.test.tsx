@@ -56,7 +56,7 @@ vi.mock("../src/api", async (importOriginal) => {
           wrapped_key: "W==",
         },
       ]),
-      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==" })),
+      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: 7 })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({
         notes: [
@@ -68,7 +68,7 @@ vi.mock("../src/api", async (importOriginal) => {
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
-      patientMeasures: vi.fn(async () => []),
+      patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       accessLog: vi.fn(async () => []),
     },
   };
@@ -92,6 +92,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
     decryptCaseloadSummary: vi.fn(async () => null),
     decryptMeasure: vi.fn(async () => null),
     decryptInsights: vi.fn(async () => ({
+      state_seq: 7,
       stats: {
         patterns: [
           { kind: "temporal", label: "work", occurrences: 9, confidence: 0.8, detail: { day: "Sunday", pattern_pid: "temporal:work", pattern_state: "confirmed", evidence_dates: ["2026-09-01", "2026-09-08"], first_seen: "2026-08-20", last_seen: "2026-09-08" } },

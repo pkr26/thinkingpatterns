@@ -168,6 +168,46 @@ describe("AppNavigator", () => {
     }
   });
 
+  // 2026-09-26 audit M-M4: the navigator's screen titles resolve through
+  // tr() (nav.* keys) — they were hardcoded English. Under the es locale
+  // every mounted title must come back Spanish (catalog parity is enforced
+  // separately in tests/i18n.test.tsx).
+  it("screen titles resolve in Spanish under the es locale (M-M4)", async () => {
+    const { __setLocaleForTests } = await import("../src/strings");
+    await recordOnboardingSeen("user-1"); // a settled account: no onboarding
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    sessionState = { authStatus: "loggedIn", unlocked: true };
+    __setLocaleForTests("es");
+    try {
+      const root = await render(<AppNavigator />);
+      await flush();
+      expect(screenOptions(root, "Entry")).toEqual({ title: "Hoy" });
+      expect(screenOptions(root, "History")).toEqual({ title: "Historial" });
+      expect(screenOptions(root, "Insights")).toEqual({ title: "Patrones" });
+      expect(screenOptions(root, "Question")).toEqual({ title: "Una pregunta" });
+      expect(screenOptions(root, "Settings")).toEqual({ title: "Ajustes" });
+      expect(screenOptions(root, "TherapistShare")).toEqual({ title: "Mi terapeuta" });
+      expect(screenOptions(root, "Measures")).toEqual({ title: "Cuestionarios de bienestar" });
+      expect(screenOptions(root, "Privacy")).toEqual({ title: "Privacidad" });
+      expect(screenOptions(root, "Crisis")).toEqual({ title: "Ayuda" });
+    } finally {
+      __setLocaleForTests("en");
+    }
+
+    // Boot-state Crisis titles — and the splash tagline (login.subtitle) —
+    // localize as well.
+    sessionState = { authStatus: "loading", unlocked: false };
+    __setLocaleForTests("es");
+    try {
+      const root = await render(<AppNavigator />);
+      await flush();
+      expect(screenOptions(root, "Crisis")).toEqual({ title: "Ayuda" });
+      expect(textOf(root)).toContain("Sus patrones, a partir de sus palabras. Cifrado en este dispositivo.");
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
   it("a just-registered account lands on onboarding FIRST, before the journal", async () => {
     const { queueOnboarding } = await import("../src/onboarding");
     queueOnboarding(); // what LoginScreen does on a successful register

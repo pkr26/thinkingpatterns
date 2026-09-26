@@ -70,6 +70,20 @@ export function App(): React.JSX.Element {
     if (retiring && !visitAnchorStore.sessionBacked()) {
       localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
     }
+    // 2026-09-26 audit M-P1: revoke the bearer SERVER-SIDE before the local
+    // teardown. POST /auth/logout bumps the account's token epoch, so a
+    // bearer copied off this shared clinic machine (default TTL: 24h) dies
+    // with this lock instead of outliving it. Best-effort by contract:
+    // api.logout() deliberately does not ride the session's abort
+    // controller, so the clearSession() below cannot cancel it, and any
+    // failure (offline backend, token already expired on the 401 path) is
+    // swallowed — the local lockdown must never wait on, or be blocked by,
+    // the network. The same fire happens on every lockDown route in: the
+    // sign-out button, the idle lock, the 401-expiry latch, and a bfcache
+    // restore.
+    if (hasSession()) {
+      void api.logout().catch(() => {});
+    }
     clearSession();
     replacePortalSession(null);
     setDisplayName("");

@@ -219,7 +219,12 @@ describe("SettingsView branches", () => {
     expect(await rejectedEntries(USER)).toHaveLength(0);
   });
 
-  it("a rekey key mismatch changes nothing and says so", async () => {
+  it("a rekey key mismatch with an UNREADABLE journal says the honest already-rotated message (H-4, audit 2026-09-26)", async () => {
+    // The old copy claimed "NOTHING was changed" — false when a previous
+    // attempt already rekeyed the corpus. The mismatch ladder verifies the
+    // candidate key against a live entry first; the entries endpoint here
+    // 404s, so verification fails and the honest stop must name the real
+    // state, never the false claim.
     coreStubs({ rekey: () => jsonResponse({ detail: "old key mismatch", code: "rekey_key_mismatch" }, { status: 400 }) });
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
@@ -228,7 +233,8 @@ describe("SettingsView branches", () => {
     await typeInto(root, "Confirm new password", "another-new-password-9");
     await press(root, "Change password");
     await settle(60, 4);
-    expect(textOf(root)).toContain("NOTHING was changed");
+    expect(textOf(root)).toContain("already re-encrypted under a different new password");
+    expect(textOf(root)).not.toContain("NOTHING was changed");
     expect(onLockdown).not.toHaveBeenCalled();
   });
 });

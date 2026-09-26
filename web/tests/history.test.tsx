@@ -114,6 +114,36 @@ describe("HistoryView", () => {
     expect(tiles.length).toBeGreaterThanOrEqual(28);
   });
 
+  it("calendar days without a payload pick fall back to the mood log value; an explicit pick wins (H-5, audit 2026-09-26)", async () => {
+    // After H-5 the payload's sentiment is ONLY the explicit check-in
+    // pick — the calendar sources like mobile: payload pick first, the
+    // device-local mood log's day value as fallback.
+    const { localDateISO } = await import("../src/dates");
+    const { recordMood } = await import("../src/moodLog");
+    // Two days guaranteed inside the calendar's displayed (current) month.
+    const now = new Date();
+    const inMonth = (day: number): string => localDateISO(new Date(now.getFullYear(), now.getMonth(), day));
+    const pickDay = inMonth(3);
+    const noPickDay = inMonth(4);
+    const rows = [
+      await encryptedRow({ id: "e-pick", date: pickDay, text: "a good day, picked", sentiment: 0.6, version: 1 }),
+      await encryptedRow({ id: "e-nopick", date: noPickDay, text: "a quiet unpicked day", sentiment: null, version: 1 }),
+    ];
+    // The log holds a strongly negative estimate for BOTH days — the pick
+    // must override it on its day, and stand in on the unpicked day.
+    await recordMood(DATA_KEY, USER, pickDay, -0.8);
+    await recordMood(DATA_KEY, USER, noPickDay, -0.8);
+    stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
+    const root = await render(<HistoryView />);
+    await settle(40, 5);
+    const tile = (iso: string) =>
+      root.root.findAllByType("div").find((node) => node.props.title === iso);
+    // Explicit pick 0.6 → green, not the log's dark red.
+    expect(tile(pickDay)?.props.style.backgroundColor).toBe("#8fc7a8");
+    // No pick → the mood log's -0.8 shows through instead of a blank tile.
+    expect(tile(noPickDay)?.props.style.backgroundColor).toBe("#dba89c");
+  });
+
   it("an edit race (409) shows both versions and never silently overwrites", async () => {
     const rows = [await encryptedRow({ id: "e-a", date: "2026-09-25", text: "their saved text", sentiment: 0, version: 1 })];
     stubFetch((url, init) => {

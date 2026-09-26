@@ -14,7 +14,7 @@ const { Platform, Vibration } = (await import("react-native")) as unknown as {
 const { lightHaptic, loadHapticsSetting, setHapticsEnabled } = await import("../src/haptics");
 const { t } = await import("../src/strings");
 const { promptChipsFor, PROMPT_CHIPS } = await import("../src/promptChips");
-const { reminderCapability, biometricCapability } = await import("../src/nativeFeatures");
+const { reminderCapability } = await import("../src/nativeFeatures");
 
 const storage = (await import("./helpers/storageMock")).default;
 
@@ -126,10 +126,12 @@ describe("prompt chips", () => {
 });
 
 describe("native-feature seams", () => {
-  it("both capabilities degrade to unavailable without their native modules", () => {
+  it("the reminder capability degrades to unavailable without its native module", () => {
     expect(reminderCapability().available).toBe(false);
     expect(reminderCapability().reason).toContain("notification module");
-    expect(biometricCapability().available).toBe(false);
-    expect(biometricCapability().reason).toContain("biometric module");
+    // 2026-09-26 audit LOW: biometricCapability() was deleted from the seam
+    // — it probed react-native-biometrics (not a dependency) and had zero
+    // callers; the biometric surface is biometricUnlock.ts over
+    // react-native-keychain.
   });
 });

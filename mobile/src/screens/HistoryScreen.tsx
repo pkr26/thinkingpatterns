@@ -158,6 +158,19 @@ function snippetOf(text: string): string {
   return flat.length > SNIPPET_CHARS ? `${flat.slice(0, SNIPPET_CHARS)}…` : flat;
 }
 
+/** 2026-09-26 audit M-M3: the two-writer conflict dialog snippet. Both
+ *  sides used to ride VERBATIM inside Alert.alert — up to 100k chars each,
+ *  a 200k-character dialog is unusable on Android and buries the choice.
+ *  Each side is flattened and cut to CONFLICT_SNIPPET_CHARS; the suffix
+ *  states the FULL length so the truncation is explicit BEFORE the
+ *  destructive Overwrite choice (never silently shortened). */
+const CONFLICT_SNIPPET_CHARS = 300;
+function conflictSnippet(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= CONFLICT_SNIPPET_CHARS) return flat;
+  return flat.slice(0, CONFLICT_SNIPPET_CHARS) + tr("history.conflictSnippetSuffix", { count: flat.length });
+}
+
 /** The payload's sentiment rides inside the encrypted blob, but the server
  *  held the data key once (processing sessions) — treat the field like any
  *  other rendered value: type-check, clamp. */
@@ -743,10 +756,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
                 });
             };
             if (theirText !== null && theirText !== trimmed) {
-              const theirs = theirText;
+              // M-M3 (2026-09-26): each side is snippeted (see
+              // conflictSnippet) — the full texts stay on the device, only
+              // the bounded preview enters the dialog.
+              const theirs = conflictSnippet(theirText);
               Alert.alert(
                 tr("history.conflictTitle"),
-                tr("history.conflictBody", { theirs, yours: trimmed }),
+                tr("history.conflictBody", { theirs, yours: conflictSnippet(trimmed) }),
                 [
                   {
                     text: tr("history.conflictKeepTheirs"),
@@ -760,7 +776,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
                       void observeEntryVersions(userId, vault.get().dataKey, [
                         { clientEntryId: entry.clientEntryId, contentVersion: serverVersion },
                       ]).catch(() => {});
-                      const updated: HistoryEntry = { ...entry, text: theirs };
+                      const updated: HistoryEntry = { ...entry, text: theirText };
                       setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
                       setMode({ kind: "detail", entry: updated });
                     },
@@ -1018,7 +1034,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
                   {visibleEntries.length === 1
                     ? tr("history.matchOne", { count: visibleEntries.length })
                     : tr("history.matchMany", { count: visibleEntries.length })}
-                  {dayFilter !== null ? tr("history.filterDay", { date: dayFilter }) : ""}
+                  {/* 2026-09-26 audit LOW: the calendar filter line rendered
+                      the raw ISO date — format it like every other date on
+                      this screen (locale-aware via formatEntryDate). */}
+                  {dayFilter !== null ? tr("history.filterDay", { date: formatEntryDate(dayFilter) }) : ""}
                   {query.trim() !== "" ? tr("history.filterSearch") : ""}
                   {hasMore ? tr("history.filterLoaded") : ""}
                 </Text>

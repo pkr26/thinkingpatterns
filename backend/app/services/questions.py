@@ -88,6 +88,77 @@ GENERIC_QUESTIONS: tuple[str, ...] = (
     "What are you grateful to past-you for today?",
 )
 
+# 2026-09-26 audit M-B3: the Spanish generic pool — the position-by-position
+# counterpart of GENERIC_QUESTIONS (shared/generic_questions_es.json, E-3
+# 2026-09-21; the mobile client already rotates its day-1 questions over
+# it). Post-threshold question generation now selects it when the brain's
+# detected language is "es", so Spanish users no longer receive English
+# templates around Spanish pattern labels. Positional parity with the EN
+# pool is pinned by test (same length, same rotation index → the
+# equivalent question in either language).
+GENERIC_QUESTIONS_ES: tuple[str, ...] = (
+    '¿Qué ocupó la mayor parte de su mente hoy?',
+    '¿Qué se sintió diferente hoy en comparación con ayer?',
+    '¿Cuándo se sintió más usted mismo o usted misma hoy?',
+    '¿Qué pequeña cosa salió bien hoy?',
+    '¿Qué pensamiento se repitió hoy?',
+    'Si hoy tuviera un título, ¿cuál sería?',
+    '¿Qué se lleva consigo hacia mañana?',
+    '¿Qué notó hoy que suele pasar por alto?',
+    '¿Qué notó su cuerpo antes que su mente hoy?',
+    '¿Cuál fue el momento más tranquilo de su día?',
+    '¿Qué sonido recuerda de hoy?',
+    '¿Qué vio hoy que le gustaría volver a ver?',
+    '¿Qué le diría a un amigo que hubiera tenido su día?',
+    '¿Qué hizo hoy que le exigió esfuerzo?',
+    '¿Qué se perdonó hoy?',
+    '¿Qué haría que mañana fuera un 1% más amable con usted?',
+    '¿Qué tres cosas salieron más o menos bien hoy?',
+    '¿Quién hizo su día un poco más ligero hoy?',
+    '¿Hay algo que espera con ilusión?',
+    '¿Qué la confortó hoy?',
+    '¿Qué vale la pena conservar de hoy?',
+    '¿Qué fue lo que más le importó hoy?',
+    '¿Cuándo sintió que hoy tenía sentido?',
+    '¿Qué valor suyo apareció en algo que hizo hoy?',
+    '¿Qué le gustaría tener más en su vida?',
+    'Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?',
+    '¿Qué emoción lo visitó más hoy?',
+    '¿Qué emoción lo sorprendió hoy?',
+    '¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?',
+    '¿En quién pensó hoy?',
+    '¿Qué conversación se quedó con usted hoy?',
+    '¿Cuándo se sintió comprendido o comprendida hoy?',
+    '¿Cuándo se sintió solo o sola hoy, y cómo fue eso?',
+    '¿Qué le dio energía hoy?',
+    '¿Qué lo agotó hoy?',
+    '¿A qué dijo no hoy?',
+    '¿Qué dejó ir hoy?',
+    '¿Qué parte del día se sintió más larga?',
+    '¿Cuándo estuvo más absorbido o absorbida en algo hoy?',
+    '¿Cómo sintió el ritmo de hoy?',
+    '¿Cuál fue la parte más difícil de hoy?',
+    '¿Qué atravesó hoy que se sintió pesado?',
+    '¿Qué está evitando, dicho con gentileza?',
+    '¿Qué preocupación se hizo más pequeña al escribirla?',
+    '¿Sobre qué tiene curiosidad ahora mismo?',
+    '¿Qué pregunta lleva rondándole últimamente?',
+    '¿Qué le gustaría recordar de esta época?',
+    '¿Qué pequeña cosa tiene curiosidad por intentar mañana?',
+    '¿Qué saboreó hoy y recuerda?',
+    '¿Dónde se sintió más a gusto hoy?',
+    '¿En qué lugar habría preferido estar hoy?',
+    "¿Qué se siente más como 'usted' en estos días?",
+    '¿Qué está cambiando en usted lenta y lentamente?',
+    '¿Qué se ha mantenido estable en usted últimamente?',
+    'Si hoy fuera un clima, ¿cuál habría sido?',
+    '¿Cómo sería mañana en un mundo ideal?',
+    'Si pudiera enviarse una nota esta mañana, ¿qué diría?',
+    '¿Qué hizo hoy puramente porque quería?',
+    '¿Qué le pidió hoy el día?',
+    '¿Por qué le agradece hoy a su yo del pasado?',
+)
+
 TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
     "temporal": (
         "'{label}' shows up mostly on {day}s — what do those days have in common?",
@@ -192,6 +263,159 @@ TOPIC_TEMPLATES_STEADY: tuple[str, ...] = (
     "When did '{label}' first start mattering to you in this stretch of your life?",
 )
 
+# 2026-09-26 audit M-B3: the Spanish template set — every EN kind has an ES
+# counterpart tuple (rendered only when the brain's detected language is
+# "es"), so a Spanish corpus never mints English post-threshold questions.
+# The {label} placeholder carries the user's OWN words (already Spanish);
+# {day} and {direction} arrive as English engine values and are translated
+# at render time via the maps below.
+TEMPLATE_BY_KIND_ES: dict[str, tuple[str, ...]] = {
+    "temporal": (
+        "'{label}' aparece sobre todo los {day}s — ¿qué tienen en común esos días?",
+        "Suele escribir sobre '{label}' los {day}s. ¿Qué suele pasar justo antes?",
+        "Cuando llega el {day} y '{label}' está en su mente, ¿dónde lo nota primero?",
+    ),
+    "mood_correlation": (
+        # Direction-aware like the EN set: the brain reports both "lower"
+        # and "higher" (protective factors); the question must not
+        # contradict the data.
+        "Sus entradas suenan con un ánimo {direction} los días en que aparece "
+        "'{label}' — ¿cómo es normalmente ese día?",
+        "Cuando '{label}' está presente, ¿cómo responde normalmente su cuerpo?",
+        "¿Cuál es una diferencia entre los días con '{label}' y los días sin él?",
+    ),
+    "recurring_phrase": (
+        'La frase "{label}" sigue volviendo en lo que escribe — ¿qué significa para usted?',
+        'Ha escrito "{label}" varias veces ya. ¿Cuándo la notó por primera vez?',
+        'Cuando "{label}" aparece en una entrada, ¿qué lo precedió normalmente?',
+    ),
+    "avoidance": (
+        "Al día siguiente de que sale '{label}', muchas veces no escribe — "
+        "¿qué contienen esos días más callados?",
+        "Suele quedarse en silencio después de los días de '{label}' ({share}% de "
+        "ellos). ¿Cómo es el día siguiente cuando eso pasa?",
+    ),
+    "cadence": (
+        "Su ritmo de escritura ha sido menos regular que antes — ¿qué ha ido "
+        "moldeando los huecos?",
+        "Ha habido silencios más largos entre días de escritura últimamente. "
+        "¿Qué pasa en esos tramos?",
+    ),
+    "mood_shift": (
+        "Últimamente sus entradas han sonado con un ánimo {direction} que su "
+        "línea base habitual — ¿qué ha estado pasando alrededor de eso?",
+        "Su línea base de ánimo ha estado {direction} estas últimas semanas — "
+        "¿cuándo lo recuerda haber notado por primera vez?",
+        "Las cosas han sonado {direction} que su línea base últimamente — ¿cómo "
+        "se ven los días a cada lado de ese cambio?",
+    ),
+    "link": (
+        # Lag-neutral wording like the EN set: the claim points at the
+        # day(s) in between, never at a cause.
+        "Los días de '{label}' suelen ir seguidos de días con un ánimo "
+        "{direction} — ¿qué contienen normalmente los días intermedios?",
+        "Ha notado que los días de '{label}' van seguidos de días con un ánimo "
+        "{direction}. ¿Qué hace distinto en los días entre medias?",
+        "Cuando '{label}' estuvo en su mente últimamente, ¿cómo empezó el día siguiente?",
+    ),
+    "inertia": (
+        "Su ánimo se ha venido arrastrando de un día al otro más de lo habitual — "
+        "¿cómo se siente por dentro un tramo atascado?",
+        "Últimamente el ánimo de un día se apoya más que antes en el siguiente. "
+        "¿Cuándo empezó ese ritmo?",
+        "Hay semanas que arrastran su ánimo de día en día. ¿Qué suele romper el patrón para usted?",
+    ),
+    "energy_inertia": (
+        "Su energía se ha venido arrastrando de un día al otro más de lo habitual — "
+        "¿cómo se ve por dentro un tramo agotado?",
+        "Últimamente la energía de un día se apoya más que antes en el siguiente. "
+        "¿Cuándo empezó eso?",
+        "Hay semanas que arrastran su energía de día en día. ¿Qué suele levantar la suya?",
+    ),
+    "pa_inertia": (
+        "Sus sentimientos positivos se han venido arrastrando de un día al otro "
+        "más de lo habitual — ¿cómo se siente por dentro un buen tramo?",
+        "Últimamente un buen día parece apoyarse en el siguiente. ¿Cuándo empezó ese ritmo?",
+        "Hay semanas que llevan su brillo de día en día. ¿Qué alimenta el suyo?",
+    ),
+    "na_inertia": (
+        "Sus sentimientos difíciles se han venido arrastrando de un día al otro "
+        "más de lo habitual — ¿cómo se siente por dentro un tramo duro?",
+        "Últimamente un día duro parece apoyarse en el siguiente. ¿Cuándo empezó eso?",
+        "Hay semanas que arrastran su peso de día en día. ¿Qué suele interrumpirlo para usted?",
+    ),
+    "energy_mood_coupling": (
+        "Su energía y su ánimo han estado siguiéndose más de lo habitual — ¿cómo "
+        "se ven juntos esos días?",
+        "Últimamente, cuando su energía cambia, su ánimo tiende a moverse con "
+        "ella. ¿Qué se pone en medio de eso para usted?",
+        "Su energía y su ánimo han ido al paso últimamente. ¿Cuándo los nota engancharse por primera vez?",
+    ),
+    "sense_making": (
+        "Lo que escribe ha estado uniendo hechos con razones más que antes — "
+        "¿qué estaba resolviendo?",
+        "Se ha apoyado más en palabras como 'porque' y 'darme cuenta' "
+        "últimamente. ¿Qué encajó en su lugar?",
+        "Sus entradas han ido de describir hacia comprender. ¿Qué cambió para que eso fuera posible?",
+    ),
+    "activity_diversity": (
+        "La variedad de lo que etiqueta se ha {direction} comparada con su "
+        "costumbre — ¿cómo ha sido eso para usted?",
+        "Comparado con sus semanas habituales, su variedad de actividades se ha "
+        "{direction} — ¿qué llena la diferencia para usted?",
+        "Su variedad de actividades se ha {direction} estas últimas semanas — "
+        "¿cómo es ahora una semana normal para usted?",
+    ),
+    "instability": (
+        "Su ánimo diario ha oscilado más de lo habitual estas últimas semanas — "
+        "¿qué tienen en común los picos y las caídas?",
+        "La distancia entre sus buenos días y sus días duros ha crecido "
+        "últimamente. ¿Qué hay en cada extremo?",
+        "Cuando su ánimo se mueve rápido de un día a otro, ¿qué le ayuda a estabilizarlo?",
+    ),
+    "rumination": (
+        'El pensamiento "{label}" ha vuelto varias veces ya — ¿qué le pide cuando lo visita?',
+        'Ha escrito "{label}" más de una vez en semanas distintas. ¿Qué suele provocar su regreso?',
+        'Cuando "{label}" vuelve a aparecer, ¿qué le diría si pudiera?',
+    ),
+    # Trend-aware like the EN set: rising-trend templates by default, the
+    # steady-presence set below for non-rising trends — mirroring the EN
+    # detail.trend branch exactly.
+    "topic": (
+        "'{label}' ha estado ocupando más espacio en lo que escribe "
+        "últimamente — ¿qué es eso para usted?",
+        "Sigue volviendo a '{label}' en días distintos. ¿Qué significa para usted ahora mismo?",
+        "¿Cuándo empezó '{label}' a importarle en esta etapa de su vida?",
+    ),
+}
+
+TOPIC_TEMPLATES_STEADY_ES: tuple[str, ...] = (
+    "'{label}' es una presencia constante en lo que escribe — ¿qué le está guardando estos días?",
+    "Sigue volviendo a '{label}' en días distintos. ¿Qué significa para usted ahora mismo?",
+    "¿Cuándo empezó '{label}' a importarle en esta etapa de su vida?",
+)
+
+# Engine detail values are English wire values (DAY_NAMES / the detectors'
+# "lower"/"higher"/"narrowed"/"widened"); the ES templates phrase around
+# the translated forms. Unknown values pass through unchanged (a client
+# tag or a future detector value is still the user's own content).
+_WEEKDAYS_ES: dict[str, str] = {
+    "Monday": "lunes",
+    "Tuesday": "martes",
+    "Wednesday": "miércoles",
+    "Thursday": "jueves",
+    "Friday": "viernes",
+    "Saturday": "sábado",
+    "Sunday": "domingo",
+    "that day": "ese día",
+}
+_DIRECTION_ES: dict[str, str] = {
+    "lower": "más bajo",
+    "higher": "más alto",
+    "narrowed": "reducido",
+    "widened": "ampliado",
+}
+
 MAX_PATTERN_QUESTIONS = 5
 
 
@@ -202,16 +426,36 @@ def _percent(value: object) -> str:
     return "—"
 
 
-def render_pattern_questions(pattern: Pattern) -> list[str]:
-    templates = TEMPLATE_BY_KIND.get(pattern.kind)
+def render_pattern_questions(pattern: Pattern, language: str = "en") -> list[str]:
+    """Render the question variants for one pattern.
+
+    2026-09-26 audit M-B3: ``language`` selects the template set — "es"
+    renders the Spanish templates (with the engine's English weekday/
+    direction detail values translated), every other value renders the
+    historical English set byte-identically to the pre-localization
+    behavior. "other" (a detected language the engine cannot classify)
+    keeps English: the generic pool is the fallback there anyway.
+    """
+    spanish = language == "es"
+    templates = (TEMPLATE_BY_KIND_ES if spanish else TEMPLATE_BY_KIND).get(pattern.kind)
     if pattern.kind == "topic":
         # Steady-presence topics must not render the rising-trend claim
         # ("taking up more space lately") — the template is selected by
         # the pattern's own detail.trend, exactly like Pattern.describe().
         if pattern.detail.get("trend", "steady") != "rising":
-            templates = TOPIC_TEMPLATES_STEADY
+            templates = TOPIC_TEMPLATES_STEADY_ES if spanish else TOPIC_TEMPLATES_STEADY
     if not templates:
         return []
+    if spanish:
+        # Translate the engine's English detail values for the ES templates
+        # only — the EN path renders raw values exactly as before.
+        day = _WEEKDAYS_ES.get(pattern.detail.get("day", "that day"), pattern.detail.get("day"))
+        direction = _DIRECTION_ES.get(
+            pattern.detail.get("direction", "lower"), pattern.detail.get("direction")
+        )
+    else:
+        day = pattern.detail.get("day", "that day")
+        direction = pattern.detail.get("direction", "lower")
     rendered = []
     for template in templates:
         # Extra kwargs are ignored by templates that don't reference them,
@@ -219,8 +463,8 @@ def render_pattern_questions(pattern: Pattern) -> list[str]:
         rendered.append(
             template.format(
                 label=pattern.label,
-                day=pattern.detail.get("day", "that day"),
-                direction=pattern.detail.get("direction", "lower"),
+                day=day,
+                direction=direction,
                 # Evidence anchoring (2026-09-17): percentages computed from the
                 # pattern's own numbers, so questions feel grounded ("31% of
                 # them") instead of templated. Ints only — no p-values, no
@@ -276,21 +520,26 @@ def feedback_rank(p: Pattern) -> tuple[int, int, int, str]:
     return (min(not_me, 3), -min(resonated, 3), -p.occurrences, p.label)
 
 
-def build_pool(patterns: Sequence[Pattern]) -> list[str]:
+def build_pool(patterns: Sequence[Pattern], language: str = "en") -> list[str]:
     """Question pool: rendered variants for top patterns first, then generic.
 
     Crisis-adjacent patterns are excluded — their reflective templates
     would ask the user to engage with a suicidal or self-harm thought; the
     neutral generic pool serves instead.
+
+    2026-09-26 audit M-B3: ``language`` selects the generic pool (the ES
+    counterpart is positionally parallel to the EN list), and the same
+    value reaches render_pattern_questions for the pattern templates.
     """
+    generic = GENERIC_QUESTIONS_ES if language == "es" else GENERIC_QUESTIONS
     pool: list[str] = []
     for pattern in sorted(patterns, key=feedback_rank)[:MAX_PATTERN_QUESTIONS]:
         if pattern_is_muted(pattern):
             continue
         if pattern_is_sensitive(pattern):
             continue
-        pool.extend(render_pattern_questions(pattern))
-    pool.extend(GENERIC_QUESTIONS)
+        pool.extend(render_pattern_questions(pattern, language))
+    pool.extend(generic)
     # Belt and braces: no rendered question may quote crisis content even
     # if a label slipped past the pattern-side filter some other way.
     pool = [q for q in pool if not crisis.matches_suppress(q)]
@@ -309,7 +558,17 @@ def user_rotation_offset(user_id: str) -> int:
     return zlib.crc32(user_id.encode("utf-8"))
 
 
-def question_for_today(user_id: str, patterns: Sequence[Pattern], today: date) -> str:
-    pool = build_pool(patterns) or list(GENERIC_QUESTIONS)
+def question_for_today(
+    user_id: str, patterns: Sequence[Pattern], today: date, language: str = "en"
+) -> str:
+    """One deterministic question per user per day.
+
+    2026-09-26 audit M-B3: the language selects the whole pool (templates
+    and generics together), so the same corpus still yields the same
+    question — determinism is per-language, and the ES pool is
+    positionally parallel to the EN one."""
+    pool = build_pool(patterns, language) or list(
+        GENERIC_QUESTIONS_ES if language == "es" else GENERIC_QUESTIONS
+    )
     index = (today.toordinal() + user_rotation_offset(user_id)) % len(pool)
     return pool[index]

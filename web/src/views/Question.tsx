@@ -5,20 +5,31 @@
  * the posture mobile settled after the red-team audit. Question feedback
  * ("resonated / not me") is encrypted locally and rides the next
  * recompute as an opaque blob.
+ *
+ * M-W5 (audit 2026-09-26): the built-in generic question pool finally has
+ * a consumer — the 404 (baseline, no question yet) and offline branches
+ * render today's on-device question (localized) instead of dead code,
+ * exactly like mobile QuestionScreen's baseline/offline captions.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
+import { toBase64 } from "../crypto/core";
 import { decryptQuestion } from "../crypto/patient";
+import { genericQuestionForDate } from "../genericQuestions";
+import { localDateISO } from "../dates";
 import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
 import { reconcile } from "../sync";
 import { isOnline } from "../platform";
+import { getLocale, t } from "../strings";
 import { vault } from "../vault";
 import { Button, Card, ErrorBanner, Note } from "../ui";
 
 export function QuestionView(props: { onRefreshed: (message: string) => void }): React.JSX.Element {
   const [question, setQuestion] = useState<{ text: string; pid?: string; forDate: string } | null>(null);
   const [answered, setAnswered] = useState<"resonated" | "not-me" | null>(null);
-  const [absent, setAbsent] = useState(false);
+  // The on-device fallback question (M-W5): `offline` picks the honest
+  // caption — status 0 never claims to know the account's phase (L-57).
+  const [generic, setGeneric] = useState<{ text: string; offline: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
@@ -28,7 +39,7 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
     generation.current = run;
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     setError("");
@@ -37,15 +48,26 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       if (generation.current !== run) return;
       const payload = await decryptQuestion(vault.get().dataKey, owner, today.for_date, today.blob);
       setQuestion({ text: payload.question, pid: payload.pattern_pid, forDate: payload.for_date });
-      setAbsent(false);
+      setGeneric(null);
     } catch (err) {
       if (generation.current !== run) return;
       if (err instanceof ApiError && err.status === 404) {
-        setAbsent(true); // baseline phase: 404 is the honest "no question yet"
+        // Baseline phase: 404 is the honest "no question yet" — today's
+        // reflective question comes from the built-in LOCALIZED pool,
+        // computed on-device; nothing leaves this device for it.
         setQuestion(null);
+        setGeneric({ text: genericQuestionForDate(localDateISO(), getLocale()), offline: false });
         return;
       }
-      setError(err instanceof Error ? err.message : "Could not load today's question.");
+      if (err instanceof ApiError && err.status === 0) {
+        // Offline/timeout: the phase is unknowable, but the generic pool
+        // never needed the network — the user still gets today's question
+        // with the caption that says what is true (mobile L-57 parity).
+        setQuestion(null);
+        setGeneric({ text: genericQuestionForDate(localDateISO(), getLocale()), offline: true });
+        return;
+      }
+      setError(err instanceof Error ? err.message : t("question.loadFailed"));
     }
   }, []);
 
@@ -63,11 +85,11 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
   const refreshPatterns = useCallback(async (): Promise<void> => {
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     if (!isOnline()) {
-      setError("Refreshing patterns needs a connection.");
+      setError(t("question.refreshOffline"));
       return;
     }
     setBusy(true);
@@ -76,25 +98,21 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
     try {
       // The ONLY place the data key leaves the client: a single-use,
       // TTL-bounded processing session opened by this explicit button.
-      let dataKeyB64 = "";
-      let raw = "";
-      let binary = "";
-      for (const byte of keys.dataKey) binary += String.fromCharCode(byte);
-      raw = binary;
-      dataKeyB64 = btoa(raw);
-      const session = await api.openProcessingSession(dataKeyB64);
+      const session = await api.openProcessingSession(toBase64(keys.dataKey));
       const feedback = await buildFeedbackBlob(keys.dataKey, owner).catch(() => null);
       const result = await api.recompute(session.session_token, feedback ?? undefined);
       if (feedback) await clearFeedback(owner).catch(() => undefined);
       await reconcile().catch(() => undefined);
       props.onRefreshed(
         result.phase === "baseline"
-          ? `Baseline updated — ${result.days_remaining ?? "…"} active day${(result.days_remaining ?? 1) === 1 ? "" : "s"} to go.`
-          : "Patterns refreshed.",
+          ? result.days_remaining === undefined
+            ? t("question.refreshBaselineUnknown")
+            : t(result.days_remaining === 1 ? "question.refreshBaselineOne" : "question.refreshBaselineMany", { days: result.days_remaining })
+          : t("question.refreshDone"),
       );
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not refresh patterns.");
+      setError(err instanceof Error ? err.message : t("question.refreshFailed"));
     } finally {
       setBusy(false);
     }
@@ -102,31 +120,34 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
 
   return (
     <>
-      <Card title="Today's question">
+      <Card title={t("question.titleWeb")}>
         {question ? (
           <>
             <Note>{question.text}</Note>
             {question.pid ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Button label={answered === "resonated" ? "✓ This resonated" : "This resonated"} onPress={() => void tap(true)} small disabled={answered !== null} />
-                <Button label={answered === "not-me" ? "✓ Not me" : "Not me"} onPress={() => void tap(false)} small disabled={answered !== null} />
+                <Button label={answered === "resonated" ? `✓ ${t("question.resonated")}` : t("question.resonated")} onPress={() => void tap(true)} small disabled={answered !== null} />
+                <Button label={answered === "not-me" ? `✓ ${t("question.notMe")}` : t("question.notMe")} onPress={() => void tap(false)} small disabled={answered !== null} />
               </div>
             ) : (
-              <Note tone="muted">A reflective question from today's writing rhythm — no answer is required.</Note>
+              <Note tone="muted">{t("question.noPidNote")}</Note>
             )}
-            {answered && <Note role="status" tone="ok">Noted — it shapes future questions, privately.</Note>}
+            {answered && <Note role="status" tone="ok">{t("question.noted")}</Note>}
           </>
-        ) : absent ? (
-          <Note>Questions begin with your patterns. Keep journaling — thirty active days unlock them.</Note>
+        ) : generic ? (
+          <>
+            <Note>{generic.text}</Note>
+            <Note tone="muted">{t(generic.offline ? "question.captionOffline" : "question.captionBaseline")}</Note>
+          </>
         ) : (
-          <Note role="status">Loading…</Note>
+          <Note role="status">{t("common.loading")}</Note>
         )}
         <ErrorBanner message={error} />
       </Card>
 
-      <Card title="Refresh patterns">
-        <Note>{"Runs the analysis over your encrypted journal. This is the ONLY action that sends your key to the server — inside a single-use session that is destroyed the moment the analysis finishes."}</Note>
-        <Button label={busy ? "Refreshing…" : "Refresh patterns"} onPress={() => void refreshPatterns()} disabled={busy} />
+      <Card title={t("question.refreshTitle")}>
+        <Note>{t("question.refreshBody")}</Note>
+        <Button label={busy ? t("question.refreshing") : t("question.refreshPatterns")} onPress={() => void refreshPatterns()} disabled={busy} />
       </Card>
     </>
   );

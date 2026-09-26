@@ -111,7 +111,9 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        // 2026-09-26 audit LOW: three-segment version to match
+        // package.json / APP_VERSION ("1.0.0"); "1.0" drifted from both.
+        versionName "1.0.0"
     }
     signingConfigs {
         debug {

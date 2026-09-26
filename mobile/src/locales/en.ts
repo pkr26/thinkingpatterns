@@ -66,6 +66,13 @@ export const en: Record<string, string> = {
   "nav.getHelp": "Get help",
   "nav.a11y": "Main navigation",
   "nav.getHelpA11y": "Get help — crisis resources",
+  // 2026-09-26 audit M-M4: the navigator's screen titles resolve through
+  // the catalog (they were hardcoded English bypassing i18n). nav.question
+  // stays the bottom-tab label; the Question SCREEN header reads longer.
+  "nav.questionTitle": "One question",
+  "nav.therapist": "My therapist",
+  "nav.measures": "Wellbeing measures",
+  "nav.privacy": "Privacy",
   "buttons.needHelp": "Need help now? Crisis resources",
 
   // -------------------------------------------------------------- calendar
@@ -342,6 +349,10 @@ export const en: Record<string, string> = {
   "history.rekeyedElsewhere": "Every entry failed to decrypt — your journal was re-encrypted after a password change on another device. Sign out and sign back in with your new password.",
   "history.conflictTitle": "This entry changed on another device",
   "history.conflictBody": "Their saved version:\n{theirs}\n\nYour version:\n{yours}\n\nOverwrite their version with yours?",
+  // 2026-09-26 audit M-M3: both sides of the conflict dialog are snippeted
+  // to ~300 chars; the suffix states the FULL length so the truncation is
+  // explicit before the destructive Overwrite choice.
+  "history.conflictSnippetSuffix": "… ({count} characters total)",
   "history.conflictKeepTheirs": "Keep theirs",
   "history.conflictOverwrite": "Overwrite with mine",
   "history.deletedElsewhereTitle": "Deleted on another device",
@@ -706,7 +717,9 @@ export const en: Record<string, string> = {
   // most safety-adjacent string class in the app and was hardcoded English
   // before the 2026-09-20 audit fix.
   "measures.intro":
-    "A standard wellbeing questionnaire (PHQ-9), completed by you. MindPattern stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
+    // 2026-09-26 audit LOW: name all three instruments — the screen has
+    // offered GAD-7 and PHQ-2 since 2026-09-21, the copy still said PHQ-9 only.
+    "Standard wellbeing questionnaires (PHQ-9, GAD-7 and PHQ-2), completed by you. MindPattern stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
   "measures.offlineNote":
     "Your recorded history needs a connection to load. Completing the questionnaire also needs one — nothing here works offline yet.",
   "measures.loadFailed": "Could not load your measures.",

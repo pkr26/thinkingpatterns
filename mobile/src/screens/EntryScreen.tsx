@@ -120,6 +120,14 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const textRef = useRef(text);
   const userIdRef = useRef<string | null>(null);
   const savingRef = useRef(false);
+  // 2026-09-26 audit LOW: set synchronously in the save SUCCESS path. A
+  // save that resolves and an unmount in the same tick used to re-stash the
+  // just-saved text as a draft (textRef updates only on the post-render
+  // effect, so the cleanup still saw the saved words) — the draft then
+  // resurrected on the next mount and a re-save minted a fresh
+  // clientEntryId the server's dedupe could never catch. Cleared again the
+  // moment the user types (a NEW draft must keep the stash guarantee).
+  const justSavedRef = useRef(false);
   // Set by the mount effect's cleanup: the save flow consults it in its
   // finally to honor the draft guarantee when an in-flight save dies
   // after the screen already unmounted (audit L-56).
@@ -219,7 +227,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // landed (sync failed AND queueing failed after the unmount).
       const draft = textRef.current;
       const owner = userIdRef.current;
-      if (owner && draft.trim() && !savingRef.current) stashDraft(owner, draft);
+      if (owner && draft.trim() && !savingRef.current && !justSavedRef.current) stashDraft(owner, draft);
     };
     // NOTE (privacy hardening): this screen no longer triggers the daily
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
@@ -295,6 +303,12 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // LOCAL calendar day: the UTC day is wrong for non-UTC users in the
       // evening (it feeds entry ids, dates and the mood log).
       const today = localDateISO();
+      // 2026-09-26 audit (cross-platform parity): the payload's created_at is
+      // a FULL ISO timestamp, matching the web client and
+      // shared/interop_fixtures.json (the entry_date row above stays
+      // date-granular by contract; mobile previously sent the date-only
+      // value here, so the two clients' decrypted payloads disagreed).
+      const createdAt = new Date().toISOString();
       // Never before or instead of saving: the entry is already safe
       // (synced or queued) before this dialog appears. Safe-messaging
       // tone — acknowledge, point at humans, no diagnosis.
@@ -325,7 +339,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // M-2 (2026-09-20): a new entry is the FIRST content generation of
       // its id — encrypt under the version-bound v2 AAD and declare the
       // version to the server, which pins the AAD contract at the row.
-      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, today, selectedMood, {
+      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, createdAt, selectedMood, {
         energy: selectedEnergy,
         sleep: sleepQuality,
         tags: selectedTags,
@@ -410,6 +424,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           throw queueErr;
         }
       }
+      // LOW (2026-09-26): mark the save BEFORE clearing — the synchronous
+      // ref is visible to an unmount cleanup that fires before the re-render
+      // commits the cleared text (see justSavedRef above).
+      justSavedRef.current = true;
       setText("");
       setDraftRestored(false);
       setSelectedMood(null); // the check-in is per entry — never carry it over
@@ -572,6 +590,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           onChangeText={(next) => {
             touchActivity(); // typing resets the inactivity auto-lock
             if (draftRestored) setDraftRestored(false);
+            justSavedRef.current = false; // new words → the draft guarantee returns
             setText(next);
           }}
           accessibilityLabel={tr("entry.journalA11y")}

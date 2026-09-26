@@ -66,6 +66,13 @@ export const es: Record<string, string> = {
   "nav.getHelp": "Ayuda",
   "nav.a11y": "Navegación principal",
   "nav.getHelpA11y": "Buscar ayuda — recursos de crisis",
+  // 2026-09-26 audit M-M4: títulos de pantalla del navegador (antes fijos
+  // en inglés). nav.question sigue siendo la pestaña inferior; el ENCABEZADO
+  // de la pantalla de pregunta lee más largo.
+  "nav.questionTitle": "Una pregunta",
+  "nav.therapist": "Mi terapeuta",
+  "nav.measures": "Cuestionarios de bienestar",
+  "nav.privacy": "Privacidad",
   "buttons.needHelp": "¿Necesita ayuda ahora? Recursos de crisis",
 
   // -------------------------------------------------------------- calendar
@@ -340,7 +347,13 @@ export const es: Record<string, string> = {
   "history.unreadableMany": "{count} entradas no se pudieron leer en este dispositivo.",
   "history.rekeyedElsewhere": "Ninguna entrada se pudo descifrar — su diario fue recifrado tras un cambio de contraseña en otro dispositivo. Cierre sesión y vuelva a iniciarla con su nueva contraseña.",
   "history.conflictTitle": "Esta entrada cambió en otro dispositivo",
-  "history.conflictBody": "Su versión guardada:\n{theirs}\n\nSu versión nueva:\n{yours}\n\n¿Reemplazar la versión guardada con la suya?",
+  // 2026-09-26 audit LOW: "Su versión" en ambos lados era ambiguo — el
+  // diálogo no distinguía la versión del otro dispositivo de la nueva local.
+  "history.conflictBody": "La versión guardada en el otro dispositivo:\n{theirs}\n\nSu versión nueva:\n{yours}\n\n¿Reemplazar la versión del otro dispositivo con la suya?",
+  // 2026-09-26 audit M-M3: ambos lados del diálogo se recortan a ~300
+  // caracteres; el sufijo declara la longitud TOTAL para que el recorte sea
+  // explícito antes de la opción destructiva de reemplazo.
+  "history.conflictSnippetSuffix": "… ({count} caracteres en total)",
   "history.conflictKeepTheirs": "Conservar la otra",
   "history.conflictOverwrite": "Reemplazar con la mía",
   "history.deletedElsewhereTitle": "Eliminada en otro dispositivo",
@@ -461,7 +474,9 @@ export const es: Record<string, string> = {
   "insights.ev.basedOn": "Basado en",
   "insights.ev.basedOnValue": "{count} entradas en su ventana de análisis",
   "insights.ev.concentration": "Concentración",
-  "insights.ev.concentrationValue": "{share}% de estas menciones cayeron en {day} — su línea base para {day} es {baseline}%",
+  // 2026-09-26 audit LOW: "cayeron en {day}" con un día de la semana solo
+  // es gramatical con el artículo — "caían los {day}".
+  "insights.ev.concentrationValue": "{share}% de estas menciones caían los {day} — su línea base para los {day} es {baseline}%",
   "insights.ev.moodDiff": "Diferencia de ánimo",
   "insights.ev.moodDiffValue": "las entradas suenan {direction} que su propia norma, por una diferencia de {amount}",
   "insights.ev.size": "Tamaño de la diferencia",
@@ -505,7 +520,9 @@ export const es: Record<string, string> = {
   "insights.tech.coupling": "Acoplamiento, reciente vs anterior",
   "insights.tech.spread": "Dispersión, reciente vs anterior",
   "insights.tech.pairValue": "{recent} vs {earlier}",
-  "insights.desc.temporal": "Ha mencionado '{label}' {count} veces, la mayoría de las veces en {day}.",
+  // 2026-09-26 audit LOW: "en {day}" con un día de la semana suelta carece
+  // de artículo; la construcción gramatical es "los {day}".
+  "insights.desc.temporal": "Ha mencionado '{label}' {count} veces, la mayoría de las veces los {day}.",
   "insights.desc.sameDay": "el mismo día",
   "insights.desc.certainDay": "ciertos días",
   "insights.desc.moodCorrelation": "Sus entradas se leen {direction} en los días en que aparece '{label}' (cambio de ánimo de {shift}).",
@@ -698,7 +715,9 @@ export const es: Record<string, string> = {
 
   // --------------------------------------------------------- measures (M-16)
   "measures.intro":
-    "Un cuestionario de bienestar estándar (PHQ-9), completado por usted. MindPattern guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
+    // 2026-09-26 audit LOW: nombrar los tres instrumentos (desde 2026-09-21
+    // la pantalla ofrece también GAD-7 y PHQ-2, no solo PHQ-9).
+    "Cuestionarios de bienestar estándar (PHQ-9, GAD-7 y PHQ-2), completados por usted. MindPattern guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
   "measures.offlineNote":
     "Su historial registrado necesita conexión para cargarse. Completar el cuestionario también la necesita — nada aquí funciona aún sin conexión.",
   "measures.loadFailed": "No se pudieron cargar sus cuestionarios.",

@@ -677,3 +677,57 @@ describe("L-65: partial register failure points at sign-in, not a dead end", () 
     expect(lastAlert()[1]).toContain("already taken");
   });
 });
+
+describe("M-3 server-trust dialog: dismiss-after-confirm (2026-09-26 audit q)", () => {
+  it("tapping 'I trust this server' confirms the pin and dismisses the warning", async () => {
+    vi.mocked(api.originPinChanged).mockResolvedValue(true);
+    const { Text } = await import("react-native");
+    const root = await render(<LoginScreen />);
+    await flush();
+    // The phishing warning is up: the selected server differs from the
+    // pinned first-login origin.
+    const warningBefore = root.root.findAll(
+      (n) => n.props.accessibilityLabel === "Warning: server address changed",
+    )[0];
+    expect(warningBefore).toBeTruthy();
+    expect(textOf(root)).toContain("I trust this server");
+
+    // Dismiss-after-confirm: the inline link confirms the CURRENT origin...
+    const trustLink = root.root
+      .findAllByType(Text)
+      .find((n) => String((n.props as { children?: unknown }).children).includes("I trust this server"));
+    expect(trustLink).toBeTruthy();
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      await (trustLink!.props as { onPress?: () => void }).onPress?.();
+    });
+    await flush();
+    expect(api.confirmCurrentOrigin).toHaveBeenCalledTimes(1);
+
+    // ...and the warning goes away for this session (no re-render loop).
+    const warningAfter = root.root.findAll(
+      (n) => n.props.accessibilityLabel === "Warning: server address changed",
+    )[0];
+    expect(warningAfter).toBeFalsy();
+    expect(textOf(root)).not.toContain("I trust this server");
+  });
+
+  it("a failed confirm keeps the warning up (never silently trusts)", async () => {
+    vi.mocked(api.originPinChanged).mockResolvedValue(true);
+    vi.mocked(api.confirmCurrentOrigin).mockRejectedValueOnce(new Error("offline"));
+    const { Text } = await import("react-native");
+    const root = await render(<LoginScreen />);
+    await flush();
+    const trustLink = root.root
+      .findAllByType(Text)
+      .find((n) => String((n.props as { children?: unknown }).children).includes("I trust this server"));
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      await (trustLink!.props as { onPress?: () => void }).onPress?.();
+    });
+    await flush();
+    expect(
+      root.root.findAll((n) => n.props.accessibilityLabel === "Warning: server address changed")[0],
+    ).toBeTruthy();
+  });
+});

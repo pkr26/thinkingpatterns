@@ -70,7 +70,9 @@ const APP_VERSION = "1.0.0";
 
 /** The offered reminder times — an evening default, never a morning alarm.
  *  A custom stored time appears as its own extra chip. Labels resolve at
- *  module load (the app locale is resolved once at startup). */
+ *  module load (the app locale is resolved once at startup).
+ *  2026-09-26 audit (i18n guard): startup-fixed locale — these module-load
+ *  tr() lookups MUST be revisited if runtime language switching ever ships. */
 const REMINDER_PRESETS: readonly { label: string; hour: number; minute: number }[] = [
   { label: tr("settings.reminderMorning"), hour: 9, minute: 0 },
   { label: tr("settings.reminderMidday"), hour: 12, minute: 0 },
@@ -107,6 +109,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // the CURRENT password (the card's usual reauth field) and the new one.
   const [showRotate, setShowRotate] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  // 2026-09-26 audit LOW: the rotation card's CURRENT-password field has its
+  // OWN state. It used to share `password` with the re-auth card above, so
+  // text typed into one silently appeared in the other (a password entered
+  // for rotation could satisfy a later destructive re-auth card unseen).
+  const [rotateCurrentPassword, setRotateCurrentPassword] = useState("");
 
   React.useEffect(() => {
     getBaseUrl().then(setUrl);
@@ -420,7 +427,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  on success the vault is locked so the next unlock uses the new
    *  password, and the user is signed out to re-verify on this device. */
   const runRotate = async () => {
-    if (busy || !password || !newPassword) return;
+    if (busy || !rotateCurrentPassword || !newPassword) return;
     const policyError = passwordPolicyError(newPassword);
     if (policyError) {
       Alert.alert(tr("login.policyVarietyTitle"), policyError);
@@ -434,7 +441,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         Alert.alert(tr("common.reauthNoAccount"));
         return;
       }
-      const outcome = await rotatePassword({ username, userId, oldPassword: password, newPassword });
+      const outcome = await rotatePassword({ username, userId, oldPassword: rotateCurrentPassword, newPassword });
       if (outcome.ok) {
         const rewrapNote =
           outcome.rewrapFailures.length > 0
@@ -461,8 +468,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           outcome.detail ?? tr("errors.generic"),
         );
       }
+    } catch (err) {
+      // 2026-09-26 audit M-M5: an unexpected throw (anything outside the
+      // typed RotationOutcome surface) used to escape as an unhandled
+      // rejection while the finally cleared the fields — no feedback at all.
+      // Same discipline as confirmWithPassword's fallback branch: calm
+      // copy, never raw error text.
+      Alert.alert(tr("settings.rotateFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
     } finally {
-      setPassword("");
+      setRotateCurrentPassword("");
       setNewPassword("");
       setBusy(false);
     }
@@ -824,19 +838,21 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       <GhostButton
         label={showRotate ? tr("settings.changePasswordCancel") : tr("settings.changePasswordLabel")}
         disabled={busy}
-        onPress={() => { touchActivity(); setShowRotate((open) => !open); setNewPassword(""); }}
+        onPress={() => { touchActivity(); setShowRotate((open) => !open); setNewPassword(""); setRotateCurrentPassword(""); }}
       />
       {showRotate && (
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>{tr("settings.changePasswordTitle")}</Text>
           <Text style={themed.footnote}>{tr("settings.changePasswordBody")}</Text>
+          {/* 2026-09-26 audit LOW: bound to rotateCurrentPassword — the
+              rotation card's own state, never the re-auth card's. */}
           <TextInput
             style={themed.input}
             placeholder={tr("common.passwordPlaceholder")}
             placeholderTextColor={t.colors.placeholder}
             secureTextEntry
-            value={password}
-            onChangeText={setPassword}
+            value={rotateCurrentPassword}
+            onChangeText={setRotateCurrentPassword}
             accessibilityLabel={tr("common.passwordConfirmA11y")}
             textContentType="password"
           />
@@ -853,13 +869,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           <PrimaryButton
             label={busy ? tr("settings.rotateWorking") : tr("settings.changePasswordButton")}
             onPress={() => void runRotate()}
-            disabled={busy || !password || !newPassword}
+            disabled={busy || !rotateCurrentPassword || !newPassword}
             accessibilityLabel={tr("settings.changePasswordButton")}
           />
           <GhostButton
             label={tr("common.cancel")}
             disabled={busy}
-            onPress={() => { setShowRotate(false); setPassword(""); setNewPassword(""); }}
+            onPress={() => { setShowRotate(false); setRotateCurrentPassword(""); setNewPassword(""); }}
           />
         </View>
       )}

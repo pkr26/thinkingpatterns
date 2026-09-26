@@ -267,30 +267,143 @@ describe("authenticated requests", () => {
     expect(url).toContain("offset=200");
   });
 
-  it("builds bounded measures pages with limit/offset continuation (L-76)", async () => {
+  it("builds bounded measures pages on the snapshot-revision contract (2026-09-26 audit L)", async () => {
     setSession("tok-1", "https://api.example.com");
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([])));
-    await api.patientMeasures("u1", { offset: 200, limit: 100 });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([], 200, { "X-Measures-Revision": "9" })));
+    await api.patientMeasures("u1", { offset: 200, expectedRevision: "9" });
     let [url] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
-    expect(url).toBe("https://api.example.com/api/v1/therapist/patients/u1/measures?limit=100&offset=200");
-    // Offset zero and the page limit are the server's defaults: no query.
+    expect(url).toBe(
+      "https://api.example.com/api/v1/therapist/patients/u1/measures?limit=100&page_bytes=2097152&offset=200&expected_revision=9",
+    );
+    // Offset zero is the server's default: no query parameter for it.
     await api.patientMeasures("u1");
     [url] = vi.mocked(fetch).mock.calls[1]! as [string, RequestInit];
-    expect(url).toBe("https://api.example.com/api/v1/therapist/patients/u1/measures");
+    expect(url).toBe("https://api.example.com/api/v1/therapist/patients/u1/measures?limit=100&page_bytes=2097152");
     // Caller-controlled paging state is validated like every continuation.
     await expect(api.patientMeasures("u1", { offset: -1 })).rejects.toMatchObject({
       status: 0,
       message: "invalid measure page offset",
     });
-    await expect(api.patientMeasures("u1", { limit: 0 })).rejects.toMatchObject({
+    await expect(api.patientMeasures("u1", { expectedRevision: "01" })).rejects.toMatchObject({
       status: 0,
-      message: "invalid measure page limit",
+      message: "invalid measures snapshot revision",
     });
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ nope: true })));
     await expect(api.patientMeasures("u1")).rejects.toMatchObject({
       status: 0,
       message: "server returned an invalid measures page",
     });
+  });
+
+  it("returns a measures page with a validated continuation and revision", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const rows = Array.from({ length: 100 }, (_, index) => ({
+      id: `row-${index}`,
+      client_measure_id: `client-${index}`,
+      blob: "B==",
+      measure_date: "2026-09-01",
+      received_at: "2026-09-01T00:00:00Z",
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(rows, 200, { "X-Next-Offset": "100", "X-Measures-Revision": "4" })),
+    );
+    await expect(api.patientMeasures("u1", { expectedRevision: "4" })).resolves.toEqual({
+      measures: rows,
+      nextOffset: 100,
+      revision: "4",
+    });
+  });
+
+  it("rejects a malformed or changed measures continuation/revision before it can steer a page", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const oneRow = [{
+      id: "row-1", client_measure_id: "client-1", blob: "B==",
+      measure_date: "2026-09-01", received_at: "2026-09-01T00:00:00Z",
+    }];
+    // A cursor that does not advance exactly past the materialized rows.
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(oneRow, 200, { "X-Next-Offset": "25" })));
+    await expect(api.patientMeasures("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid measures continuation",
+    });
+    // A snapshot that moved under a pinned continuation.
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([], 200, { "X-Measures-Revision": "8" })));
+    await expect(api.patientMeasures("u1", { expectedRevision: "7" })).rejects.toMatchObject({
+      status: 0,
+      message: "server returned a changed measures snapshot revision",
+    });
+  });
+
+  it("patientInsights surfaces the echoed state_seq sentinel, validated as a canonical integer (2026-09-26 audit L)", async () => {
+    setSession("tok-1", "https://api.example.com");
+    const summary = {
+      phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "B==",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...summary, state_seq: 12 })));
+    await expect(api.patientInsights("u1")).resolves.toMatchObject({ state_seq: 12 });
+    // Baseline accounts echo 0 — a valid generation with nothing to guard.
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...summary, blob: null, state_seq: 0 })));
+    await expect(api.patientInsights("u1")).resolves.toMatchObject({ state_seq: 0 });
+    // The rollback-replay sentinel must never be a value an equality check
+    // could silently pass: floats, strings, negatives, NaN/null all refuse.
+    for (const bad of [-1, 1.5, "12", null]) {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ...summary, state_seq: bad })));
+      await expect(api.patientInsights("u1")).rejects.toMatchObject({
+        status: 0,
+        message: "server returned an invalid insights state sequence",
+      });
+    }
+    // A missing echo is just as invalid: the field is part of the response
+    // contract (backend schemas.InsightsResponse), not an optional extra.
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(summary)));
+    await expect(api.patientInsights("u1")).rejects.toMatchObject({
+      status: 0,
+      message: "server returned an invalid insights state sequence",
+    });
+  });
+
+  it("M-P1: logout POSTs /auth/logout with the bearer and resolves on 204", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    await expect(api.logout()).resolves.toBeNull();
+    const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/auth/logout");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
+    expect(init.credentials).toBe("omit");
+  });
+
+  it("M-P1: logout does NOT ride the session abort controller — clearSession cannot kill it", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      // A logout wired to the session's signal would be aborted by the
+      // clearSession() below long before this line runs; the epoch bump
+      // is exactly the request that must survive the local teardown.
+      if (init?.signal?.aborted) {
+        const abort = new Error("aborted");
+        abort.name = "AbortError";
+        throw abort;
+      }
+      return new Response(null, { status: 204 });
+    }));
+    const pending = api.logout();
+    clearSession();
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it("M-P1: logout without a session fails fast; failures map to ApiError", async () => {
+    await expect(api.logout()).rejects.toMatchObject({ status: 0, message: "not signed in" });
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
+    await expect(api.logout()).rejects.toMatchObject({
+      status: 0,
+      message: "server unreachable — check the server URL or your connection",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ detail: "rate limited" }, 429)));
+    await expect(api.logout()).rejects.toMatchObject({ status: 429, message: "rate limited" });
   });
 
   it("returns a note page with a validated continuation header", async () => {

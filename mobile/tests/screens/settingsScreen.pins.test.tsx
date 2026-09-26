@@ -11,8 +11,9 @@
  *  - the re-auth card (busy guard against leaked double presses, retry vs
  *    done semantics for busy/password, empty-password disable, danger fill
  *    per action kind, "disable" wording, the Verifying… label),
- *  - the 401-vs-fallback delete copy, the 4,000,000-char export boundary
- *    with exact oversized copy, Share resolving undefined,
+ *  - the 401-vs-fallback delete copy, the export-unavailable disclosure
+ *    (full exports fail closed in this build — no boundary math), Share
+ *    resolving undefined,
  *  - node-exact style contracts (rejected card, re-auth card + title,
  *    left-aligned ghost buttons) and the About else-branch.
  */

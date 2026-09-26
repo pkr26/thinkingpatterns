@@ -340,7 +340,10 @@ def test_development_env_allows_the_dev_secret(clean_env, monkeypatch):
 
 EXPECTED_ROUTES = {
     # (module router, path, method): (tags, limiter bucket or None)
-    (meta_api, "/meta", "GET"): ({"meta"}, None),
+    # 2026-09-26 audit (LOW, batch item d): /meta joined the shared ops
+    # bucket (the L-2 healthz/readyz pattern) — no unthrottled
+    # unauthenticated endpoint remains.
+    (meta_api, "/meta", "GET"): ({"meta"}, "ops-health"),
     (auth_api, "/auth/register", "POST"): ({"auth"}, "auth-register"),
     (auth_api, "/auth/salt", "POST"): ({"auth"}, "auth-salt"),
     (auth_api, "/auth/login", "POST"): ({"auth"}, "auth-login"),
@@ -624,10 +627,16 @@ async def test_cors_middleware_contract(settings):
         "X-Account-Verifier",
         "X-Therapist-Enrollment-Token",
     ]
+    # 2026-09-26 audit (LOW, batch item a): the measures snapshot marker
+    # and the access-log continuation cursor joined the expose list — a
+    # browser client paginating measures or audit trails could not read
+    # them from JS without it.
     assert cors.kwargs["expose_headers"] == [
         "X-Next-Offset",
         "X-Entries-Revision",
         "X-Notes-Revision",
+        "X-Measures-Revision",
+        "X-Next-Cursor",
     ]
     assert cors.kwargs["allow_origins"] == []
 

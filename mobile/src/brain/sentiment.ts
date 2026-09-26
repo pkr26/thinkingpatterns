@@ -34,9 +34,12 @@ interface Tables {
   scalars: { negation_scalar: number; sentiment_scale: number; booster_scope: number };
   butWords: Set<string>;
   negators: Set<string>;
+  negatorsEn: Set<string>;
   intensifiers: Record<string, number>;
   irregularForms: Record<string, string>;
   sentimentLexicon: Record<string, number>;
+  sentimentLexiconEs: Record<string, number>;
+  languageDetection: { minTokens: number; hitFloor: number; knownEn: Set<string>; knownEs: Set<string> };
   emojiValences: Record<string, number>;
   emojiOrder: string[];
 }
@@ -56,10 +59,17 @@ function T(): Tables {
   if (tables === null) {
     const lex = LEXICON as unknown as Record<string, never> & {
       scalars: Tables["scalars"];
-      word_sets: { but_words: string[]; negators: string[] };
+      word_sets: { but_words: string[]; negators: string[]; negators_en: string[] };
       intensifiers: Record<string, number>;
       irregular_forms: Record<string, string>;
       sentiment_lexicon: Record<string, number>;
+      sentiment_lexicon_es: Record<string, number>;
+      language_detection: {
+        min_tokens: number;
+        hit_floor: number;
+        known_tokens_en: string[];
+        known_tokens_es: string[];
+      };
       emoji_valences: Record<string, number>;
       emoji_order: string[];
     };
@@ -67,9 +77,17 @@ function T(): Tables {
       scalars: lex.scalars,
       butWords: new Set(lex.word_sets.but_words),
       negators: new Set(lex.word_sets.negators),
+      negatorsEn: new Set(lex.word_sets.negators_en),
       intensifiers: nullProto(lex.intensifiers),
       irregularForms: nullProto(lex.irregular_forms),
       sentimentLexicon: nullProto(lex.sentiment_lexicon),
+      sentimentLexiconEs: nullProto(lex.sentiment_lexicon_es),
+      languageDetection: {
+        minTokens: lex.language_detection.min_tokens,
+        hitFloor: lex.language_detection.hit_floor,
+        knownEn: new Set(lex.language_detection.known_tokens_en),
+        knownEs: new Set(lex.language_detection.known_tokens_es),
+      },
       emojiValences: nullProto(lex.emoji_valences),
       emojiOrder: lex.emoji_order,
     };
@@ -148,19 +166,34 @@ export function wordForms(token: string): string[] {
   return deduplicated;
 }
 
-function wordValence(token: string): number {
+/** brain._negators_for (L-3, 2026-09-26): the negator set is
+ *  language-SCOPED at scoring time. The union stays the default (the
+ *  cross-platform sentiment vectors pin it byte-identical); "en" excludes
+ *  the ES-only negators ("sin", "ni", ...) that are English letter
+ *  strings too — "washed away my sin and guilt" must not negate. */
+function negatorsFor(language: string | undefined): Set<string> {
+  return language === "en" ? T().negatorsEn : T().negators;
+}
+
+function wordValence(token: string, language: string | undefined): number {
   // Emoji are their own tokens (extracted alongside WORD_RE matches).
   const emoji = T().emojiValences[token];
   if (emoji !== undefined) return emoji;
+  // L-3 (2026-09-26): "es" text scores against the ES-winning mirror
+  // merge; every other language (and the undefined default of the
+  // vector callers) keeps the pinned EN-winning merge unchanged.
+  const lexicon = language === "es" ? T().sentimentLexiconEs : T().sentimentLexicon;
   for (const form of wordForms(token)) {
-    const valence = T().sentimentLexicon[form];
+    const valence = lexicon[form];
     if (valence !== undefined) return valence;
   }
   return 0.0;
 }
 
-/** The per-word graded valences of the sentiment walk — brain._valence_walk. */
-export function valenceWalk(tokens: string[]): number[] {
+/** The per-word graded valences of the sentiment walk — brain._valence_walk.
+ *  L-3 (2026-09-26): the optional language selects the scoring merge and
+ *  scopes the negator set (undefined keeps the historical default). */
+export function valenceWalk(tokens: string[], language?: string): number[] {
   const sentiments: number[] = [];
   let split = -1;
   for (let i = 0; i < tokens.length; i++) {
@@ -176,7 +209,7 @@ export function valenceWalk(tokens: string[]): number[] {
 
   for (const [seg, segWeight] of segments) {
     for (let i = 0; i < seg.length; i++) {
-      let valence = wordValence(seg[i]!);
+      let valence = wordValence(seg[i]!, language);
       if (valence === 0.0) continue;
       const window = seg.slice(Math.max(0, i - T().scalars.booster_scope), i);
       let boost = 1.0;
@@ -184,7 +217,7 @@ export function valenceWalk(tokens: string[]): number[] {
       for (const prev of window) {
         const intensifier = T().intensifiers[prev];
         if (intensifier !== undefined) boost *= intensifier;
-        if (T().negators.has(prev)) negated = true;
+        if (negatorsFor(language).has(prev)) negated = true;
       }
       valence *= boost;
       if (negated) valence *= T().scalars.negation_scalar;
@@ -209,9 +242,11 @@ export function tokenize(text: string): string[] {
   return tokens;
 }
 
-/** Graded lexicon sentiment in [-1, 1] — brain.sentiment_score. */
-export function sentimentScore(text: string): number {
-  const sentiments = valenceWalk(tokenize(text));
+/** Graded lexicon sentiment in [-1, 1] — brain.sentiment_score.
+ *  L-3 (2026-09-26): the optional language is forwarded to the walk;
+ *  callers that pass none keep the pinned default behavior. */
+export function sentimentScore(text: string, language?: string): number {
+  const sentiments = valenceWalk(tokenize(text), language);
   if (sentiments.length === 0) return 0.0;
   const total = sentiments.reduce((a, b) => a + b, 0);
   return Math.max(-1.0, Math.min(1.0, total / T().scalars.sentiment_scale));
@@ -219,8 +254,8 @@ export function sentimentScore(text: string): number {
 
 /** (positive, negative) affect magnitudes, each in [0, 1] — the PA/NA
  *  split of the same walk (brain.sentiment_components). */
-export function sentimentComponents(text: string): [number, number] {
-  const sentiments = valenceWalk(tokenize(text));
+export function sentimentComponents(text: string, language?: string): [number, number] {
+  const sentiments = valenceWalk(tokenize(text), language);
   if (sentiments.length === 0) return [0.0, 0.0];
   let positive = 0;
   let negative = 0;
@@ -232,4 +267,30 @@ export function sentimentComponents(text: string): [number, number] {
     Math.max(0.0, Math.min(1.0, positive / T().scalars.sentiment_scale)),
     Math.max(0.0, Math.min(1.0, -negative / T().scalars.sentiment_scale)),
   ];
+}
+
+/** brain's language-detection heuristic (L-3 follow-up, 2026-09-26):
+ *  shares of scored tokens (len >= 3) against the EN/ES detection sets;
+ *  "es" only when its share clears the floor AND beats English, "en"
+ *  when English clears the floor, otherwise "other". Below min-tokens
+ *  the server keeps the historical English default — mirrored here by
+ *  returning "en" so the walk falls back to the pinned default tables
+ *  exactly like a language-neutral caller. The server applies this per
+ *  CORPUS window; the on-device estimate classifies the single text,
+ *  which converges to the same answer for monolingual journals. */
+export function detectLanguage(text: string): "en" | "es" | "other" {
+  const scored = tokenize(text).filter((t) => t.length >= 3);
+  const det = T().languageDetection;
+  if (scored.length < det.minTokens) return "en";
+  let enHits = 0;
+  let esHits = 0;
+  for (const t of scored) {
+    if (det.knownEn.has(t)) enHits += 1;
+    if (det.knownEs.has(t)) esHits += 1;
+  }
+  const enShare = enHits / scored.length;
+  const esShare = esHits / scored.length;
+  if (esShare >= det.hitFloor && esShare > enShare) return "es";
+  if (enShare >= det.hitFloor) return "en";
+  return "other";
 }

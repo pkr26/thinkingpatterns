@@ -14,8 +14,14 @@
 #     test code. Policy: a real production secret must never live in a
 #     test; if one ever does, ROTATE it — an allowlist entry is not secrecy.
 #   - generated/vendored trees — node_modules, coverage, dist, .venv,
-#     .tools, reports, redteam mutation-campaign results: machine-generated
+#     .tools, redteam mutation-campaign results: machine-generated
 #     copies of already-scanned source, or vendored toolchains.
+#     reports/ holds TRACKED hand-written simulation source and reports
+#     (simulate.py, probe_tune.py, SIMULATION_REPORT.md) — only its
+#     generated artifacts (results JSON / run logs) are exempted
+#     (audit 2026-09-26: the former whole-tree entry silently exempted
+#     the hand-written source from every scan; the tracked files were
+#     re-verified clean when this was narrowed).
 #   - `wrapKeyBlobB64` — a TypeScript parameter name in portal/src/api.ts
 #     (the wrap-key ciphertext blob); the generic entropy rule reads the
 #     identifier itself as the "secret" beside `wrap_key_blob:`.
@@ -43,7 +49,15 @@ paths = [
   '''(^|[/\\])\.venv([/\\]|$)''',
   '''(^|[/\\])\.tools([/\\]|$)''',
   '''(^|[/\\])dist([/\\]|$)''',
-  '''(^|[/\\])reports([/\\]|$)''',
+  # reports/: generated artifacts ONLY — the directory's tracked .py/.md
+  # files are hand-written source and stay scanned (audit 2026-09-26).
+  '''reports/[^/]+/(results\.json|sim_run\.log|run\.log)$''',
+  # Stryker's machine-generated mutation report. The mobile/portal/web
+  # report trees are gitignored; this covers its HISTORY copies (the old
+  # whole-tree reports rule exempted them). The generic entropy rule
+  # reads an embedded `therapistPubSpkiB64.length === <num>` assertion as
+  # a key — a copy of already-scanned test source, not a secret.
+  '''reports/mutation/mutation\.json$''',
   '''redteam/mutation_campaign_[^/]+/results/''',
 ]
 

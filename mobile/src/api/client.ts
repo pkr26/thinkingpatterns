@@ -461,7 +461,17 @@ async function request(
   opts: RequestOptions = {},
 ): Promise<any> {
   const base = await getBaseUrl();
-  const actualOrigin = new URL(base).origin;
+  // 2026-09-26 audit LOW: parse/validate FIRST. A corrupt persisted base URL
+  // (restored backup, tampering) used to reach `new URL(base)` before this
+  // graceful guard and escape as a raw TypeError — every caller branches on
+  // ApiError, so the refusal must stay the typed surface. The origin below
+  // derives from the PARSED url, which round-trips parseServerUrl's
+  // origin+path normalization.
+  const configured = parseServerUrl(base);
+  if (!configured || (configured.insecure && !isLoopbackUrl(configured.url))) {
+    throw new ApiError(0, "refusing to send data to an invalid or cleartext remote server URL");
+  }
+  const actualOrigin = new URL(configured.url).origin;
   // H-1: the offline queue pins uploads to the CANONICAL loopback spelling
   // of its scope; a stored base URL may spell the same device-local server
   // as `localhost`, `127.0.0.1` or `[::1]`. Canonicalize BOTH sides of the
@@ -472,13 +482,6 @@ async function request(
     canonicalOrigin(actualOrigin) !== canonicalOrigin(opts.expectedOrigin)
   ) {
     throw new OriginPinnedError(opts.expectedOrigin, actualOrigin);
-  }
-  // Settings validates before persisting, but AsyncStorage can be restored
-  // from an older backup or tampered with. Enforce the transport boundary at
-  // the send point too, before reading/attaching a bearer credential.
-  const configured = parseServerUrl(base);
-  if (!configured || (configured.insecure && !isLoopbackUrl(configured.url))) {
-    throw new ApiError(0, "refusing to send data to an invalid or cleartext remote server URL");
   }
   const token = opts.noBearer ? null : await secureStore.getItem(TOKEN_KEY);
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
@@ -1035,7 +1038,10 @@ export const api = {
   insights: () => request("GET", `${API_PREFIX}/insights`),
   questionToday: () => request("GET", `${API_PREFIX}/questions/today`),
 
-  exportAccount: () => request("GET", `${API_PREFIX}/account/export`),
+  // 2026-09-26 audit LOW: the account export is a sensitive request like
+  // deleteAccount/login/rekey — it ships the bearer and must refuse an
+  // unverifiable final URL (strict redirect refusal) instead of trusting it.
+  exportAccount: () => request("GET", `${API_PREFIX}/account/export`, undefined, {}, { sensitive: true }),
   /** Requires the password-derived verifier: a stolen token cannot erase
    *  data. The verifier travels in the X-Account-Verifier header (the v1
    *  preference), never the URL; the server still accepts the legacy body

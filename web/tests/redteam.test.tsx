@@ -36,6 +36,9 @@ const memoryBackend = (capture: string[] = []): KvBackend => {
     async removeItem(k) {
       map.delete(k);
     },
+    async keys() {
+      return [...map.keys()];
+    },
   };
 };
 
@@ -111,7 +114,12 @@ describe("storage-scrape after every flow (P9.4)", () => {
       const k = win!.sessionStorage!.key(i)!;
       parts.push(`${k}=${win!.sessionStorage!.getItem(k)}`);
     }
-    parts.push(...Object.keys(await kv.getItem("mindpattern/anything") === null ? [] : []));
+    // LOW d (audit 2026-09-26): the kv sweep used to be a no-op spread of
+    // an empty array — the seam now enumerates keys for real, so the
+    // scrape covers IndexedDB-backed storage too.
+    for (const k of await kv.keys()) {
+      parts.push(`${k}=${await kv.getItem(k)}`);
+    }
     return parts.join("\n");
   }
 

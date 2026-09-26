@@ -97,6 +97,18 @@ vi.mock("../src/reauth", () => ({
       : { ok: false as const, reason: "wrong-password" as const },
 }));
 
+// 2026-09-26 audit H-2: controllable derivation seam. The default delegates
+// to the REAL deriveKeysAsync (every other rotation test runs the real
+// PBKDF2 path); the typed-catch test rejects once to prove a local throw
+// before the server flow becomes {ok:false} instead of an escaped rejection.
+const deriveKeysAsync = vi.hoisted(() => vi.fn());
+vi.mock("../src/crypto/MindPatternCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/crypto/MindPatternCrypto")>();
+  const real = actual.deriveKeysAsync;
+  deriveKeysAsync.mockImplementation((...args: Parameters<typeof real>) => real(...args));
+  return { ...actual, deriveKeysAsync: (...args: Parameters<typeof real>) => deriveKeysAsync(...args) };
+});
+
 import { checkAnalysisGeneration, FRESHNESS_ERROR, forgetAnalysisGeneration } from "../src/stateSeqGuard";
 // M-3/L-7 client-shape tests live in tests/client.rotation.test.ts against
 // the REAL client module (this file mocks it for the rotation flow).
@@ -125,6 +137,9 @@ beforeEach(() => {
   apiState.consents = [];
   keychainMock.__reset();
   vault.lock();
+  // H-2 seam: clear call history/queued rejections, keep the delegating
+  // default implementation.
+  deriveKeysAsync.mockClear();
 });
 
 // --- M-1: rollback guard -----------------------------------------------------
@@ -170,6 +185,22 @@ describe("entry content-version binding (M-2)", () => {
     // The version is IN the binding: v2 ciphertext does not decrypt under a
     // different declared version.
     expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-1", v2blob, 3)).toThrow();
+  });
+
+  // 2026-09-26 audit M-M1: the legacy three-part AAD fallback is gated to
+  // declared version 1. A pre-v2 blob echoed as version >= 2 is exactly the
+  // stale-ciphertext laundering a compromised server would try — it must
+  // fail closed with the AEAD tamper error, never decrypt through the
+  // legacy binding.
+  it("a legacy-bound blob declared as version >= 2 fails closed (no legacy fallback laundering)", () => {
+    const legacyBlob = encryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", "stale text", "2026-09-19", null).blobB64;
+    // The same legacy blob still decrypts at its honest declared generation.
+    expect(decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 1).text).toBe("stale text");
+    // ...but a server echoing version 2 for it is refused outright.
+    expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 2)).toThrow(
+      expect.objectContaining({ name: "TamperError" }),
+    );
+    expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 5)).toThrow();
   });
 
   it("flags a rolled-back row and remembers the high-water mark", async () => {
@@ -319,6 +350,48 @@ describe("rotatePassword (H-1/M-3)", () => {
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.reason).toBe("already-rotated-unverifiable");
+  });
+
+  // 2026-09-26 audit H-2: the flow used to draw its fresh salt from
+  // globalThis.crypto.getRandomValues — React Native ships no Web Crypto
+  // global, so the call crashed on device. The rotation must run end-to-end
+  // with that global deleted, proving the engine seam (quick-crypto on
+  // device / node:crypto here) is the only entropy source.
+  it("rotates successfully when globalThis.crypto does not exist (no Web Crypto dependency)", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    const hadGlobalCrypto = descriptor !== undefined;
+    if (hadGlobalCrypto) {
+      delete (globalThis as { crypto?: unknown }).crypto;
+    }
+    try {
+      expect((globalThis as { crypto?: unknown }).crypto).toBeUndefined();
+      const outcome = await rotatePassword({
+        username: "alice",
+        userId: USER,
+        oldPassword: "correct old password",
+        newPassword: "a strong new passphrase 42!",
+      });
+      expect(outcome.ok).toBe(true);
+    } finally {
+      if (hadGlobalCrypto) {
+        Object.defineProperty(globalThis, "crypto", descriptor!);
+      }
+    }
+  });
+
+  // H-2: an unexpected LOCAL throw (derivation/seam failure) must surface as
+  // a typed outcome, never an escaped rejection — the old code called
+  // freshSalt() outside the try block entirely.
+  it("maps an unexpected pre-flow throw to a typed outcome instead of escaping", async () => {
+    deriveKeysAsync.mockRejectedValueOnce(new Error("boom"));
+    await expect(
+      rotatePassword({
+        username: "alice",
+        userId: USER,
+        oldPassword: "correct old password",
+        newPassword: "a strong new passphrase 42!",
+      }),
+    ).resolves.toMatchObject({ ok: false, stage: "verify", reason: "offline" });
   });
 });
 

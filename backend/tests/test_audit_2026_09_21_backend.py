@@ -412,10 +412,20 @@ class _VanishingConsentSession:
 
     async def execute(self, statement):
         text = str(statement).lower()
-        if "consent" in text:
+        # 2026-09-26 audit M-B1: _require_verifier now re-reads the USER
+        # row through this session before comparing the verifier. The
+        # discriminator cannot be a bare "consent" substring — the users
+        # SELECT lists the llm_consent columns — so route on the table
+        # each statement actually reads.
+        if "from consents" in text:
             return SimpleNamespace(
                 first=lambda: (self.consent, self.therapist),
                 scalars=lambda: SimpleNamespace(first=lambda: self.consent),
+            )
+        if "from users" in text:
+            return SimpleNamespace(
+                first=lambda: self.user,
+                scalars=lambda: SimpleNamespace(first=lambda: self.user),
             )
         return SimpleNamespace(
             first=lambda: None, scalars=lambda: SimpleNamespace(first=lambda: None)

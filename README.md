@@ -87,7 +87,7 @@ emoji valence, the curation rules winning word-for-word: graded valences,
 intensifiers, damped negation, "but" re-weighting — Hutto & Gilbert 2014),
 **The on-device brain has begun (2026-09-19).** The deterministic core now
 runs in the mobile app too: the graded sentiment engine (the full merged
-lexicon — 7,267 words + emoji valences — with negation, intensifier and
+lexicon — 7,726 words + emoji valences — with negation, intensifier and
 "but" rules and morphological candidates) is ported to TypeScript
 (`mobile/src/brain/`) and pinned to the Python engine by cross-platform
 vectors (`shared/brain_vectors.json`: 48 sentiment cases including the
@@ -305,8 +305,10 @@ The mobile client keeps derived keys memory-only: after an app restart the sessi
 The WEB client (2026-09-25) is deliberately stricter still (WEB_PLAN D-4):
 token AND keys are memory-only — refresh or a new tab re-authenticates,
 nothing decryptable ever reaches any browser storage (pinned by a
-storage-scrape harness), a 10-minute idle lock and a bfcache guard bound
-the exposure window, and account-wide death is lazy and honest (401 vs
+storage-scrape harness), a 5-minute idle lock (tightened from the portal's
+10-minute lock in the 2026-09-25 audit, W-1 — mobile-parity window) and a
+bfcache guard bind the exposure window, and account-wide death is lazy
+and honest (401 vs
 410 funnels with distinct copy — WEB_PLAN D-8). The offline sync queue is scoped to both API origin and account; server error text is sanitized before reaching dialogs, and the app switcher sees only a blank shield. Sync is deliberately **push-only**: entries push up, and each client's
 History pulls this account's entries back. Since the web client
 (2026-09-25) the account is honestly TWO-WRITER-OR-MORE (WEB_PLAN D-1,
@@ -452,7 +454,7 @@ PATH="$PWD/../.venv/bin:$PATH" ../.venv/bin/mutmut run
 ../.venv/bin/mutmut show <id>                 # inspect a mutant
 ```
 
-CI (`.github/workflows/ci.yml`) runs thirteen jobs (the `web` job —
+CI (`.github/workflows/ci.yml`) runs fourteen jobs (the `web` job —
 typecheck, tests incl. security-config pins, build, audit — and
 `web-contract-vectors`, the four-way crypto/brain/interop gate): the backend suite on a
 Python 3.12 + 3.14 matrix (97% coverage floor), the same suite against real
@@ -469,8 +471,10 @@ restore), a release-env-contract job (proves `deploy/verify-release-env.sh`
 accepts exactly the valid env shape while rejecting every invalid one), a
 monitoring-verify job (`deploy/monitoring/verify.sh` plus shellcheck at
 error severity — the alerting stack's drift gate), lint
-(ruff check + formatting + mypy), and
-supply-chain (`pip-audit` on the pinned lock file). The release workflow
+(ruff check + formatting + mypy),
+supply-chain (`pip-audit` on the pinned lock file), and a secrets job
+(gitleaks 8.30.1, version- and sha256-pinned, scanning the full git
+history and the working tree against `.gitleaks.toml`). The release workflow
 repeats these gates before publishing multi-architecture images;
 prerelease tags never move the `latest` image tag.
 The red-team attack harnesses run weekly via

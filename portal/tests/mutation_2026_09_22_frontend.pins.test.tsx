@@ -29,7 +29,7 @@ vi.mock("../src/api", async (importOriginal) => {
         wrap_key_blob: "KQ==",
       })),
       patients: vi.fn(async () => []),
-      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==" })),
+      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: 7 })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
       noteRevisions: vi.fn(async () => []),
@@ -43,7 +43,7 @@ vi.mock("../src/api", async (importOriginal) => {
       })),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
-      patientMeasures: vi.fn(async () => []),
+      patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       rotateCredential: vi.fn(async () => null),
       rotateWrapKey: vi.fn(async () => null),
       totpSetup: vi.fn(async () => ({ secret_base32: "SECRET", otpauth_uri: "otpauth://x" })),
@@ -71,7 +71,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
     unwrapPatientDataKey: vi.fn(async () => new Uint8Array(32)),
     decryptCaseloadSummary: vi.fn(async () => null),
     decryptMeasure: vi.fn(async () => null),
-    decryptInsights: vi.fn(async () => ({ stats: { patterns: [] } })),
+    decryptInsights: vi.fn(async () => ({ state_seq: 7, stats: { patterns: [] } })),
     decryptEntry: vi.fn(async (_key: unknown, _uid: string, entry: { client_entry_id: string }) => ({
       text: `decrypted ${entry.client_entry_id}`,
       sentiment: null,
@@ -137,7 +137,7 @@ beforeEach(() => {
   mockedAuth.registerTherapist.mockReset().mockResolvedValue({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" });
   mockedApi.me.mockReset().mockResolvedValue({ username: "drportal", display_name: "Dr. Portal", wrap_pub_key: "P".repeat(124), wrap_key_blob: "KQ==" });
   mockedApi.patients.mockReset().mockResolvedValue([]);
-  mockedApi.patientInsights.mockReset().mockResolvedValue({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==" });
+  mockedApi.patientInsights.mockReset().mockResolvedValue({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: 7 });
   mockedApi.patientEntries.mockReset().mockResolvedValue({ entries: [], nextOffset: null });
   mockedApi.notes.mockReset().mockResolvedValue({ notes: [], nextOffset: null });
   mockedApi.noteRevisions.mockReset().mockResolvedValue([]);
@@ -151,7 +151,7 @@ beforeEach(() => {
   }));
   mockedApi.deleteNote.mockReset().mockResolvedValue(null);
   mockedApi.newPairingCode.mockReset().mockResolvedValue({ code: "7X2KQM4N", expires_in: 900 });
-  mockedApi.patientMeasures.mockReset().mockResolvedValue([]);
+  mockedApi.patientMeasures.mockReset().mockResolvedValue({ measures: [], nextOffset: null });
   mockedApi.rotateCredential.mockReset().mockResolvedValue(null);
   mockedApi.rotateWrapKey.mockReset().mockResolvedValue(null);
   mockedApi.totpSetup.mockReset().mockResolvedValue({ secret_base32: "SECRET", otpauth_uri: "otpauth://x" });
@@ -163,7 +163,7 @@ beforeEach(() => {
   mockedCrypto.unwrapPatientDataKey.mockReset().mockResolvedValue(new Uint8Array(32));
   mockedCrypto.decryptCaseloadSummary.mockReset().mockResolvedValue(null);
   mockedCrypto.decryptMeasure.mockReset().mockResolvedValue(null);
-  mockedCrypto.decryptInsights.mockReset().mockResolvedValue({ stats: { patterns: [] } });
+  mockedCrypto.decryptInsights.mockReset().mockResolvedValue({ state_seq: 7, stats: { patterns: [] } });
   mockedCrypto.decryptEntry.mockReset().mockImplementation(async (_key: unknown, _uid: string, entry: { client_entry_id: string }) => ({
     text: `decrypted ${entry.client_entry_id}`, sentiment: null,
   }));
@@ -364,11 +364,11 @@ describe("mutation pins 2026-09-22: api pagination contracts", () => {
     await realApi.api.patientEntries("u", {});
     await realApi.api.patientEntries("u", { offset: 25, since: "2026-09-01", until: "2026-09-08", expectedRevision: "9" });
     await realApi.api.notes("u", {});
-    await realApi.api.patientMeasures("u", { limit: 1 });
+    await realApi.api.patientMeasures("u", {});
     expect(urls[0]).toBe(`${BASE}/api/v1/therapist/patients/u/entries?limit=25&page_bytes=2097152`);
     expect(urls[1]).toBe(`${BASE}/api/v1/therapist/patients/u/entries?since=2026-09-01&until=2026-09-08&limit=25&page_bytes=2097152&offset=25&expected_revision=9`);
     expect(urls[2]).toBe(`${BASE}/api/v1/therapist/patients/u/notes?limit=100&page_bytes=2097152`);
-    expect(urls[3]).toBe(`${BASE}/api/v1/therapist/patients/u/measures?limit=1`);
+    expect(urls[3]).toBe(`${BASE}/api/v1/therapist/patients/u/measures?limit=100&page_bytes=2097152`);
     vi.unstubAllGlobals();
   });
 
@@ -380,24 +380,36 @@ describe("mutation pins 2026-09-22: api pagination contracts", () => {
       await expect(realApi.api.notes("u", { offset: bad })).rejects.toThrow("invalid note page offset");
       await expect(realApi.api.patientMeasures("u", { offset: bad })).rejects.toThrow("invalid measure page offset");
     }
-    await expect(realApi.api.patientMeasures("u", { limit: 1, offset: 0 })).resolves.toEqual([]);
+    await expect(realApi.api.patientMeasures("u", { offset: 0 })).resolves.toEqual({ measures: [], nextOffset: null });
     vi.unstubAllGlobals();
   });
 
   it("hits the exact documented endpoint paths", async () => {
     realApi.setSession("tok", BASE);
     const urls: string[] = [];
+    let call = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: unknown) => {
+      call += 1;
       urls.push(String(url));
-      return { ok: true, status: 200, json: async () => ({}), headers: new Headers(), url: "" };
+      // The third call is the insights summary, whose body must carry the
+      // validated state_seq sentinel (2026-09-26 audit L); every other
+      // endpoint here answers an empty JSON object.
+      return {
+        ok: true, status: 200,
+        json: async () => (call === 3 ? { phase: "insight", state_seq: 1 } : {}),
+        headers: new Headers(), url: "",
+      };
     }));
     await realApi.api.me();
     await realApi.api.accessLog();
     await realApi.api.patientInsights("u");
+    // 2026-09-26 audit M-P1: logout joins the documented surface.
+    await realApi.api.logout();
     expect(urls).toEqual([
       `${BASE}/api/v1/therapist/me`,
       `${BASE}/api/v1/therapist/access-log?limit=100`,
       `${BASE}/api/v1/therapist/patients/u/insights`,
+      `${BASE}/api/v1/auth/logout`,
     ]);
     vi.unstubAllGlobals();
   });
@@ -694,7 +706,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     ({ kind: over.kind ?? "topic", label: over.label ?? "x", occurrences: over.occurrences ?? 2, confidence: 0.5, detail: over });
 
   const renderChart = async (patterns: PatternPayload[]) => {
-    mockedCrypto.decryptInsights.mockResolvedValueOnce({ stats: { patterns, total_entries: 9, active_days: 4 } });
+    mockedCrypto.decryptInsights.mockResolvedValueOnce({ state_seq: 7, stats: { patterns, total_entries: 9, active_days: 4 } });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush(6);
     return root;
@@ -723,6 +735,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
 
   it("the sparkline label reports the exact average of the mood-tagged entries", async () => {
     mockedCrypto.decryptInsights.mockResolvedValueOnce({
+      state_seq: 7,
       stats: { patterns: [pattern({ kind: "temporal", label: "work", evidence_dates: ["2026-09-01", "2026-09-02", "2026-09-03"] })] },
     });
     mockedApi.patientEntries.mockResolvedValue({
@@ -797,33 +810,49 @@ describe("mutation pins 2026-09-22: PatientView", () => {
   });
 
   it("measure traversal stops at its page cap against an always-full server", async () => {
+    // 2026-09-26 audit L: the traversal retains MAX_MEASURE_PAGES pages plus
+    // ONE bounded terminal probe. An always-full server answers the probe
+    // with rows, so the portal refuses the twenty-first page honestly —
+    // the same fence entries and notes run — instead of accumulating an
+    // unbounded chart.
     let page = 0;
     mockedApi.patientMeasures.mockImplementation(async () => {
       page += 1;
-      return Array.from({ length: 100 }, (_, i) => ({
-        id: `m-${page}-${i}`, client_measure_id: `c-${page}-${i}`, blob: "b", measure_date: "2026-09-01", received_at: "x",
-      }));
+      return {
+        measures: Array.from({ length: 100 }, (_, i) => ({
+          id: `m-${page}-${i}`, client_measure_id: `c-${page}-${i}`, blob: "b", measure_date: "2026-09-01", received_at: "x",
+        })),
+        // Headerless full pages keep the compatibility continuation alive.
+        nextOffset: page * 100,
+      };
     });
     mockedCrypto.decryptMeasure.mockResolvedValue({ measure: "phq9", score: 4, completedAt: null, measureDate: "2026-09-01" });
-    await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
-    await vi.waitFor(() => expect(mockedApi.patientMeasures.mock.calls.length).toBe(20), { timeout: 4000 });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await vi.waitFor(() => expect(mockedApi.patientMeasures.mock.calls.length).toBe(21), { timeout: 4000 });
+    expect(textOf(root)).toContain("measure history exceeds this portal's safe page limit");
   });
 
   it("a pre-paging backend (same rows every request) cannot loop the traversal", async () => {
+    // 2026-09-26 audit L: the silent id-dedupe heuristic is GONE. A server
+    // that answers every request with the same full page keeps the
+    // compatibility continuation alive to the same bounded probe as above,
+    // then fails with the honest page-limit error — bounded, never looping,
+    // and never silently rendering a de-duplicated maybe-stale subset.
     const sameRows = Array.from({ length: 100 }, (_, i) => ({
       id: `m-${i}`, client_measure_id: `c-${i}`, blob: "b", measure_date: "2026-09-01", received_at: "x",
     }));
-    mockedApi.patientMeasures.mockImplementation(async () => sameRows);
+    mockedApi.patientMeasures.mockImplementation(async () => ({ measures: sameRows, nextOffset: 100 }));
     mockedCrypto.decryptMeasure.mockResolvedValue({ measure: "phq9", score: 4, completedAt: null, measureDate: "2026-09-01" });
-    await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
-    await vi.waitFor(() => expect(mockedApi.patientMeasures.mock.calls.length).toBe(2), { timeout: 4000 });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await vi.waitFor(() => expect(mockedApi.patientMeasures.mock.calls.length).toBe(21), { timeout: 4000 });
+    expect(textOf(root)).toContain("measure history exceeds this portal's safe page limit");
   });
 
   it("the unwrapped data key is zeroized after the insights load and after a drill-down", async () => {
     const tracked = [new Uint8Array(32).fill(9), new Uint8Array(32).fill(9)];
     let issued = 0;
     mockedCrypto.unwrapPatientDataKey.mockImplementation(async () => tracked[Math.min(issued++, 1)]!);
-    mockedCrypto.decryptInsights.mockResolvedValue({ stats: { patterns: [pattern({ label: "work", evidence_dates: ["2026-09-01"] })] } });
+    mockedCrypto.decryptInsights.mockResolvedValue({ state_seq: 7, stats: { patterns: [pattern({ label: "work", evidence_dates: ["2026-09-01"] })] } });
     mockedApi.patientEntries.mockResolvedValue({ entries: [{ id: "1", client_entry_id: "e-1", blob: "b", entry_date: "2026-09-01", received_at: "x" }], nextOffset: null });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush(6);
@@ -834,10 +863,13 @@ describe("mutation pins 2026-09-22: PatientView", () => {
   });
 
   it("reversed measure input renders oldest-first", async () => {
-    mockedApi.patientMeasures.mockResolvedValue([
-      { id: "m-2", client_measure_id: "c-2", blob: "b", measure_date: "2026-09-02", received_at: "x" },
-      { id: "m-1", client_measure_id: "c-1", blob: "b", measure_date: "2026-09-01", received_at: "x" },
-    ]);
+    mockedApi.patientMeasures.mockResolvedValue({
+      measures: [
+        { id: "m-2", client_measure_id: "c-2", blob: "b", measure_date: "2026-09-02", received_at: "x" },
+        { id: "m-1", client_measure_id: "c-1", blob: "b", measure_date: "2026-09-01", received_at: "x" },
+      ],
+      nextOffset: null,
+    });
     mockedCrypto.decryptMeasure.mockImplementation(async (_k, _u, row) => ({ measure: "phq9", score: 4, completedAt: null, measureDate: row.measure_date }));
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await vi.waitFor(() => expect(textOf(root)).toContain("PHQ-9"), { timeout: 4000 });
@@ -872,7 +904,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
   });
 
   it("duplicate evidence rows render once, and same-date entries order by id", async () => {
-    mockedCrypto.decryptInsights.mockResolvedValueOnce({ stats: { patterns: [pattern({ label: "work", evidence_dates: ["2026-09-01"] })] } });
+    mockedCrypto.decryptInsights.mockResolvedValueOnce({ state_seq: 7, stats: { patterns: [pattern({ label: "work", evidence_dates: ["2026-09-01"] })] } });
     mockedApi.patientEntries.mockResolvedValue({
       entries: [
         { id: "b", client_entry_id: "e-2", blob: "x", entry_date: "2026-09-01", received_at: "x" },
@@ -978,7 +1010,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
   });
 
   it("pattern-anchored notes never bleed into the general list or vice versa", async () => {
-    mockedCrypto.decryptInsights.mockResolvedValueOnce({ stats: { patterns: [pattern({ label: "work", pattern_pid: "pid-1", evidence_dates: ["2026-09-01"] })] } });
+    mockedCrypto.decryptInsights.mockResolvedValueOnce({ state_seq: 7, stats: { patterns: [pattern({ label: "work", pattern_pid: "pid-1", evidence_dates: ["2026-09-01"] })] } });
     mockedCrypto.decryptNote.mockImplementation(async (_k, _t, _u, clientId: string) =>
       clientId === "c1" ? "pattern-anchored note" : "general note");
     mockedApi.notes.mockResolvedValue({
@@ -1015,7 +1047,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
   });
 
   it("the account summary renders honest fallbacks for absent stats", async () => {
-    mockedCrypto.decryptInsights.mockResolvedValueOnce({ stats: { patterns: [pattern({ label: "work" })], total_entries: undefined, active_days: undefined, avg_sentiment: undefined } });
+    mockedCrypto.decryptInsights.mockResolvedValueOnce({ state_seq: 7, stats: { patterns: [pattern({ label: "work" })], total_entries: undefined, active_days: undefined, avg_sentiment: undefined } });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush(6);
     const text = textOf(root);
@@ -1029,7 +1061,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
       notes: [{ id: "n1", client_note_id: "c1", pattern_pid: null, blob: "b", created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" }],
       nextOffset: null,
     });
-    mockedApi.patientMeasures.mockResolvedValueOnce([{ id: "m1", client_measure_id: "c1", blob: "b", measure_date: "2026-09-01", received_at: "x" }]);
+    mockedApi.patientMeasures.mockResolvedValueOnce({ measures: [{ id: "m1", client_measure_id: "c1", blob: "b", measure_date: "2026-09-01", received_at: "x" }], nextOffset: null });
     mockedCrypto.decryptMeasure.mockResolvedValueOnce({ measure: "phq9", score: 4, completedAt: null, measureDate: "2026-09-01" });
     mockedApi.patientInsights.mockRejectedValueOnce(new Error("load failed"));
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
@@ -1204,9 +1236,10 @@ describe("mutation pins 2026-09-22: PatientsView caseload", () => {
       { ...patient, user_id: "p3", username: "charlie", granted_at: "2026-09-01T00:00:00Z" },
     ]);
     const mk = (userId: string, blob: string | null) => async () =>
-      ({ phase: "insight", active_days: 1, streak: 1, days_remaining: 0, blob });
+      ({ phase: "insight", active_days: 1, streak: 1, days_remaining: 0, blob, state_seq: 7 });
     mockedApi.patientInsights.mockImplementation(async (userId: string) => mk(userId, userId === "p1" ? null : "B")());
     mockedCrypto.decryptInsights.mockImplementation(async (_k, userId: string) => ({
+      state_seq: 7,
       stats: {
         patterns: userId === "p3"
           ? [pattern0("a", "2026-09-06"), pattern0("b", "2026-09-07")]

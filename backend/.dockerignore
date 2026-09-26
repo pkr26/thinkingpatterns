@@ -1,16 +1,29 @@
 # Local-only artifacts — the image installs runtime deps from
 # requirements.lock.txt and copies only app/, alembic/, alembic.ini,
-# docker-entrypoint.sh.
+# docker-entrypoint.sh. NOTE: requirements.LOCK.txt is intentionally NOT
+# ignored — both Dockerfile stages COPY it (do not add a requirements.*
+# glob here; enumerate only the files the build never reads).
 __pycache__/
 **/__pycache__/
 *.pyc
 .venv/
 .pytest_cache/
 .mutmut-cache/
+.mypy_cache/
+.ruff_cache/
+.artifacts/
 .coverage
 coverage/
 htmlcov/
 *.db
+*.db-wal
+*.db-shm
+# Dev/CI dependency manifests the image never reads (the runtime set is
+# requirements.lock.txt, hash-verified in both stages).
+requirements.in
+requirements.dev.in
+requirements.dev.lock.txt
+uv.lock
 tests/
 scripts/
 probe_brain.py

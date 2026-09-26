@@ -79,11 +79,47 @@ egress. For anything else claiming "leak":
    had `llm_consent_at` set (their data may be in the provider's hands —
    provider retention is disclosed in the consent copy).
 4. Rotate `MINDPATTERN_TOKEN_SECRET` if tokens are implicated (invalidates
-   every session; users re-login). `BACKUP_KEY` rotation requires the
-   dual-key procedure (below).
+   every session; users re-login). Rotation has TWO further consequences
+   the backend documents (`backend/app/security/totp.py`,
+   `backend/app/config.py`) — see "Rotating `MINDPATTERN_TOKEN_SECRET`"
+   below BEFORE turning the key: every wrapped TOTP enrollment dies with
+   it, and decoy salts change unless a dedicated decoy secret is set.
+   `BACKUP_KEY` rotation requires the dual-key procedure (below).
 5. Disclosure: journal content is special-category data. Prepare the
    notification per your jurisdiction (GDPR Art. 33: 72h to the SA;
    FTC Health Breach Notification Rule for US non-HIPAA deployments).
+
+## Rotating `MINDPATTERN_TOKEN_SECRET`
+
+Token invalidation IS `MINDPATTERN_TOKEN_SECRET` rotation — but the key
+derives more than tokens, so a rotation is never a one-line change. The
+backend's own contract (`backend/app/security/totp.py`,
+`backend/app/config.py`):
+
+1. **Sessions:** every issued token dies; every user re-logins. Expected.
+2. **Therapist TOTP (the lockout):** the wrapped second-factor secrets
+   (`users.totp_secret`) are AES-256-GCM under an HKDF subkey of the
+   token secret. Rotation makes EVERY enrollment undecryptable — all
+   TOTP-enrolled therapists are locked out at login until either they
+   re-enroll or an operator clears the columns by direct database
+   action (no API exposes them):
+   `UPDATE users SET totp_secret = NULL, totp_enabled = NULL, totp_last_counter = NULL WHERE totp_secret IS NOT NULL;`
+   then those therapists log in password-only and re-enroll. Clearing
+   is usually the right call during an incident: a rotation under
+   pressure with a locked-out clinician population is its own S3.
+3. **Decoy salts (the enumeration signal):** the anti-enumeration decoy
+   salts derive from the token secret by default, so rotating it
+   changes every decoy — a longitudinal observer comparing
+   "unknown user" responses across the rotation boundary can
+   distinguish the rotation (and with it, infer when accounts were
+   created). Set a dedicated `MINDPATTERN_DECOY_SECRET` (it survives
+   the rotation) BEFORE rotating if that boundary matters for your
+   threat model; without it, accept the one-time fingerprint.
+
+Sequence: set `MINDPATTERN_DECOY_SECRET` first (if you want it) → clear
+`users.totp_*` (or accept the lockout) → rotate the secret at the next
+deploy. All three consequences are the documented caveats registered in
+`docs/SECURITY_RESIDUALS.md`.
 
 ## S1: crisis-screen defect
 

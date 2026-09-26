@@ -30,6 +30,14 @@ updates:
       npm-deps:
         update-types: ["minor", "patch"]
 
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      npm-deps:
+        update-types: ["minor", "patch"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

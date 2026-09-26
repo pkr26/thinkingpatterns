@@ -11,18 +11,22 @@ import { vault } from "../../src/vault";
 export type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
 
 /** A fresh in-memory kv backend per test (isolated queue/mood/version
- *  stores; tests that need their own can re-inject after this). */
+ *  stores; tests that need their own can re-inject after this).
+ *  Enumerates like the real IDB backend so kv.keys() is observable. */
 export function memoryKvBackend(): KvBackend {
   const map = new Map<string, string>();
   return {
-    async getItem(key: string) {
+    async getItem(key) {
       return map.get(key) ?? null;
     },
-    async setItem(key: string, value: string) {
+    async setItem(key, value) {
       map.set(key, value);
     },
-    async removeItem(key: string) {
+    async removeItem(key) {
       map.delete(key);
+    },
+    async keys() {
+      return [...map.keys()];
     },
   };
 }

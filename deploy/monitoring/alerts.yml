@@ -13,8 +13,11 @@
 #   mindpattern_keystore_sessions                                   gauge
 #
 # plus Prometheus' own `up` (and `probe_success` if the blackbox job is
-# enabled). Two facts about the hand-rolled exposition, which the queries
-# account for:
+# enabled), and — ONLY inside the commented optional sections at the
+# bottom — the blackbox tls module's `probe_ssl_earliest_cert_expiry` and
+# the node_exporter filesystem series, grounded by their exporters rather
+# than by metrics.py. Two facts about the hand-rolled exposition, which the
+# queries account for:
 #   * a status family series appears only after its first response is
 #     observed — an absent {status="5xx"} numerator makes the ratio
 #     expression empty (correctly "no alert"), never zero-division noise;
@@ -22,8 +25,11 @@
 #     histogram_quantile parses them as floats, so this is legal PromQL.
 #
 # SEVERITY MAPPING (docs/INCIDENT_RUNBOOK.md matrix; details in README.md):
-#   S2  service unusable — API down, 5xx storm, readyz failing
-#   S3  degraded — slow recomputes, LLM failure ratio
+#   S2  service unusable — API down, 5xx storm, readyz failing; also the
+#       imminent-outage host cases: disk almost full (Postgres writes /
+#       log volumes fail), TLS cert hours from expiry
+#   S3  degraded — slow recomputes, LLM failure ratio; also time-bounded
+#       host decay: disk filling up, cert inside the renewal window
 #   The keystore alert starts at S2 and ESCALATES to S1 per the runbook's
 #   plaintext-exposure checklist, which names this exact metric.
 
@@ -178,3 +184,87 @@ groups:
   #       annotations:
   #         summary: "Backup heartbeat metric never appeared (wiring broken)"
   #         runbook: "docs/INCIDENT_RUNBOOK.md — Backups; deploy/monitoring/README.md, Backup freshness"
+
+  # --------------------------------------------------------------------
+  # OPTIONAL: host disk via node_exporter. Uncomment ONLY if you enabled
+  # the `node` profile (node-exporter service in the monitoring
+  # docker-compose.yml) and the mindpattern-node scrape job in
+  # prometheus.yml — without the exporter running this would reference
+  # series that never exist (harmless, but dishonest on the targets page).
+  # The node_* series come from the exporter, not from metrics.py.
+  # --------------------------------------------------------------------
+  # - name: mindpattern-host
+  #   rules:
+  #     # S3 — time-bounded decay: the host (or any real filesystem holding
+  #     # pgdata/pgbackups/log volumes) is below 20% free. Postgres degrades
+  #     # and dumps fail long before ENOSPC; act inside the window. The
+  #     # fstype filter drops the container-runtime's virtual mounts so a
+  #     # full tmpfs/overlay never masks (or fakes) a real filesystem.
+  #     - alert: MindPatternHostDiskSpaceLow
+  #       expr: |
+  #         (
+  #           node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|fuse.*|autofs|nsfs|tracefs|efivarfs"}
+  #             /
+  #           node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|fuse.*|autofs|nsfs|tracefs|efivarfs"}
+  #         ) < 0.20
+  #       for: 30m
+  #       labels:
+  #         severity: S3
+  #       annotations:
+  #         summary: "A real filesystem is under 20% free for 30m"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — S3 (find the writer before it finds ENOSPC: docker system df, du over the volume dirs, backup volume retention)"
+  #
+  #     # S2 — imminent service loss: below 5% free, Postgres WAL/writes and
+  #     # the json-file log rotation (max-size 10m x 3 per service) can hit
+  #     # ENOSPC within the alert window, which is an S2 outage class.
+  #     - alert: MindPatternHostDiskSpaceCritical
+  #       expr: |
+  #         (
+  #           node_filesystem_avail_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|fuse.*|autofs|nsfs|tracefs|efivarfs"}
+  #             /
+  #           node_filesystem_size_bytes{fstype!~"tmpfs|devtmpfs|overlay|squashfs|fuse.*|autofs|nsfs|tracefs|efivarfs"}
+  #         ) < 0.05
+  #       for: 10m
+  #       labels:
+  #         severity: S2
+  #       annotations:
+  #         summary: "A real filesystem is under 5% free for 10m — ENOSPC imminent"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — S2 (the db is fail-closed on a dead host path; free space FIRST, then check backup freshness)"
+
+  # --------------------------------------------------------------------
+  # OPTIONAL: TLS certificate expiry via the blackbox exporter's tls
+  # module. Uncomment ONLY if you enabled the `blackbox` profile AND the
+  # mindpattern-blackbox-tls scrape job in prometheus.yml (that job uses
+  # the `tls` module from blackbox-modules.yml; replace its
+  # portal.example.com/app.example.com target literals with your real
+  # origins). probe_ssl_earliest_cert_expiry comes from the exporter, not
+  # from metrics.py.
+  # --------------------------------------------------------------------
+  # - name: mindpattern-blackbox-tls
+  #   rules:
+  #     # S3 — inside the renewal window (warning): Lets Encrypt-style certs
+  #     # renew ~monthly on a 90d life; 14d means several failed renewals
+  #     # already. time()-based arithmetic: after expiry the difference is
+  #     # negative, so an already-expired cert also trips BOTH rules.
+  #     - alert: MindPatternTlsCertExpiringSoon
+  #       expr: |
+  #         probe_ssl_earliest_cert_expiry{job="mindpattern-blackbox-tls"} - time() < 14 * 86400
+  #       for: 30m
+  #       labels:
+  #         severity: S3
+  #       annotations:
+  #         summary: "TLS certificate expires in under 14 days"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — S3 (certbot renew + deploy at the proxy host; expiry is a scheduled S2, see the imminent rule)"
+  #
+  #     # S2 — imminent outage (critical): under 3 days. An expired cert is
+  #     # a TOTAL origin outage (every client fails TLS), which is the
+  #     # runbook's S2 class — this rule is the last exit before it.
+  #     - alert: MindPatternTlsCertExpiryImminent
+  #       expr: |
+  #         probe_ssl_earliest_cert_expiry{job="mindpattern-blackbox-tls"} - time() < 3 * 86400
+  #       for: 30m
+  #       labels:
+  #         severity: S2
+  #       annotations:
+  #         summary: "TLS certificate expires in under 3 days — renewal is an outage clock"
+  #         runbook: "docs/INCIDENT_RUNBOOK.md — S2 (renew NOW; on expiry every client fails TLS at the origin and the API reads as down)"

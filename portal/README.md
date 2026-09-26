@@ -32,6 +32,31 @@ patient patterns**, plus the therapist's own encrypted notes.
   scrubbed at every lock boundary instead. No content is ever stored
   locally.
 
+## Language scope (deliberate)
+
+This portal is **intentionally English-only in this release**, while the
+patient clients (web and mobile) are bilingual. The decision, not an
+oversight (2026-09-26 audit L):
+
+- The portal's readers are clinicians charting in one clinic's working
+  language; every deployment of this generation is single-language on the
+  clinician side, so a second locale would double the review surface of
+  clinical-safety copy (non-quoting crisis wording, consent-scope
+  explanations, interpretation-belongs-to-you disclaimers) with no user
+  served yet.
+- The patient apps localize because patients are many and self-select
+  their language; a clinician's chart vocabulary is set by their
+  organization, not by a per-session preference.
+
+If localization is ever required, the seam is already narrow: all
+user-facing strings live inline in `src/views/*.tsx` and `src/ui.tsx` —
+no string is composed server-side. Extraction would move those literals
+into a single strings module (keyed per view) consumed by the same call
+sites; the security-copy rules above (crisis wording never quotes the
+patient, disclaimers never soften in translation) would need to be part
+of that work's acceptance tests. No strings extraction is attempted in
+this release.
+
 ## Running
 
 ```bash

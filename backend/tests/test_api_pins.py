@@ -770,13 +770,20 @@ async def test_measure_error_envelope_matches_entries(client):
 
 
 class _FkCommitSession:
-    """Serves the create_note query ladder, then fails the commit with a
-    FOREIGN KEY violation (the patient row vanished mid-request)."""
+    """Serves the create_note query ladder, then fails the note commit
+    with a FOREIGN KEY violation (the patient row vanished mid-request).
+
+    2026-09-26: the ladder changed twice — the pre-lock read transaction
+    now COMMITS before queueing on the chart lock (LOW, batch item b),
+    and the quota aggregate returns FOUR columns (audit H-6: live notes
+    plus revision rows/bytes). The first commit (the read release)
+    succeeds; the note commit raises the FK error the pin exercises."""
 
     bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     def __init__(self):
         self.executions = 0
+        self.commits = 0
         self.rolled_back = False
         self.added = []
 
@@ -789,8 +796,8 @@ class _FkCommitSession:
             )
         if self.executions == 2:  # duplicate pre-check
             return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: None))
-        if "count" in text:  # note quota
-            return SimpleNamespace(one=lambda: (0, 0))
+        if "count" in text:  # note quota (live + revision aggregate)
+            return SimpleNamespace(one=lambda: (0, 0, 0, 0))
         return SimpleNamespace(rowcount=1)  # notes revision increment
 
     async def scalar(self, _statement):
@@ -803,6 +810,9 @@ class _FkCommitSession:
         self.added.append(row)
 
     async def commit(self):
+        self.commits += 1
+        if self.commits == 1:
+            return  # the pre-lock read-release commit (LOW batch item b)
         raise IntegrityError("INSERT", {}, Exception("foreign key constraint failed"))
 
     async def rollback(self):

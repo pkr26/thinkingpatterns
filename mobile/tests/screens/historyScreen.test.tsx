@@ -1467,4 +1467,59 @@ describe("HistoryScreen edit: the two-writer conflict dialog (audit 2026-09-25)"
     // ...and the crisis dialog followed the save — never before it.
     expect(lastAlert()[0]).toBe("Support is available");
   });
+
+  // 2026-09-26 audit M-M3: both sides of the conflict dialog used to ride
+  // verbatim — up to 100k chars EACH inside one Alert. Each side is now
+  // snippeted to ~300 chars with a suffix stating the full length, so the
+  // user knows they are choosing on a preview before overwriting.
+  it("long conflict texts are snippeted with an explicit full-length suffix (M-M3)", async () => {
+    oneEntry();
+    const theirLong = "their words ".repeat(120); // ~1.4k chars
+    const myLong = "my words ".repeat(120); // ~1k chars
+    const flatLength = (s: string): number => s.replace(/\s+/g, " ").trim().length;
+    seedConflict(theirLong);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "original words");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText(myLong);
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    const [title, body] = lastAlert();
+    expect(title).toBe("This entry changed on another device");
+    // Both sides carry the truncation suffix stating the full length...
+    expect(body).toContain(`… (${flatLength(theirLong)} characters total)`);
+    expect(body).toContain(`… (${flatLength(myLong)} characters total)`);
+    // ...and neither full text appears in the dialog body.
+    expect(body!.length).toBeLessThan(1_500);
+    expect(body).not.toContain(theirLong);
+    expect(body).not.toContain(myLong);
+  });
+
+  // M-M3 companion: the snippet is display-only — choosing "Keep theirs"
+  // must still apply the server's FULL text to the local entry, never the
+  // truncated preview.
+  it("Keep theirs applies the FULL server text even when the dialog showed a snippet", async () => {
+    oneEntry();
+    const theirLong = "their words ".repeat(120);
+    seedConflict(theirLong);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, "original words");
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("my conflicting sentence");
+    });
+    await pressLabel(root, "Save changes");
+    await flush();
+    // The dialog body carried only the snippet...
+    expect(lastAlert()[1]).toContain("characters total)");
+    await pressAlertButton("Keep theirs");
+    await flush();
+    // ...but the applied entry holds the server's full text (the detail view
+    // renders it whole).
+    const rendered = allText(root).join(" ");
+    expect(rendered).toContain(theirLong.trim());
+    expect(rendered).not.toContain("original words");
+  });
 });

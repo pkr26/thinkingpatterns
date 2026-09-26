@@ -1,4 +1,4 @@
-# Pre-commit hooks for the backend tree. Install once: `pre-commit install`.
+# Pre-commit hooks. Install once: `pre-commit install`.
 # The ruff version here (v0.16.6) is the same one CI pins and the config in
 # backend/pyproject.toml was verified against.
 #
@@ -6,7 +6,10 @@
 #
 # revs are pinned to each tag's commit SHA (resolved via git ls-remote),
 # matching the SHA-pinning posture used for CI actions: a moved tag must
-# never silently repoint developer-machine hooks.
+# never silently repoint developer-machine hooks. The gitleaks rev is the
+# SAME version CI's `secrets` job installs (v8.30.1, ci.yml — the job also
+# sha256-pins the release tarball; the pre-commit hook builds from source
+# at the tag SHA, so both paths are pinned to the same upstream release).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: 321478e58f4938179c6b86e4ddfa923d1547a49b # v0.16.6
@@ -27,3 +30,24 @@ repos:
         files: ^backend/
       - id: trailing-whitespace
         files: ^backend/
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1
+    hooks:
+      # Secret scanning at commit time (audit 2026-09-26, L-5), running
+      # the repo's own .gitleaks.toml policy — the same rules CI's
+      # `secrets` job enforces over history and the working tree, applied
+      # to staged changes BEFORE they can enter history. Unscoped: secrets
+      # have no home directory.
+      - id: gitleaks
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: 4de1378e4cd853bfc2b111b05fff35e2dbf809a3 # v0.9.0.6
+    hooks:
+      # Scoped to deploy/'s shell scripts with the SAME severity CI's
+      # monitoring-verify job gates on (SHELLCHECK_OPTS=--severity=error):
+      # the tree's deliberate idioms are info/warning-level notes and must
+      # not block a commit, while parse/quoting failures fail here first
+      # instead of at the CI gate.
+      - id: shellcheck
+        name: shellcheck (deploy/)
+        files: ^deploy/.*\.sh$
+        args: [--severity=error]

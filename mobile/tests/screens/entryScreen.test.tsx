@@ -313,7 +313,10 @@ describe("EntryScreen save pipeline", () => {
       "user-1",
       expect.stringMatching(/^e-\d{4}-\d{2}-\d{2}-/),
       "good day, calm evening",
-      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      // 2026-09-26 audit (cross-platform parity): the payload's created_at is
+      // a FULL ISO timestamp now (web + shared/interop_fixtures.json shape),
+      // while the entry id/date stay date-granular.
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
       null,  // v3: no client sentiment — the server engine re-scores at analysis time
       // P3 (2026-09-21): the structured arg now carries the coarse local
       // writing-window bucket alongside the optional channels.
@@ -943,6 +946,31 @@ describe("EntryScreen crisis-dialog throttle (once per calendar day per account)
     const again = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect((inputByPlaceholder(again, "What's going on today?").props as { value: string }).value).toBe("words that must survive");
+  }, 10_000);
+
+  // 2026-09-26 audit LOW: the L-56 guard covered an unmount DURING the
+  // upload; the residual window was an unmount in the SAME TICK as the
+  // success — the save continuation had already reset savingRef, but the
+  // textRef effect had not committed the cleared text yet, so the cleanup
+  // re-stashed the just-saved words (draft resurrection on next mount).
+  it("a save that RESOLVES and unmounts in the same tick stashes no draft (justSavedRef)", async () => {
+    vi.mocked(stashDraft).mockClear();
+    let resolveUpload!: (value: unknown) => void;
+    vi.mocked(api.createEntry).mockImplementation(
+      () => new Promise((res) => { resolveUpload = res; }) as Promise<never>,
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "saved then backgrounded same tick");
+    await firePress(root, "Save entry");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      resolveUpload({}); // the upload lands…
+      await Promise.resolve(); // …the save continuation runs (fields cleared, guards reset)…
+      await Promise.resolve();
+      root.unmount(); // …and the screen goes away BEFORE the textRef effect commits
+    });
+    await flush();
+    expect(stashDraft).not.toHaveBeenCalled();
   }, 10_000);
 
   it("an ORDINARY 422 save stays quiet after OK (no false support dialog)", async () => {

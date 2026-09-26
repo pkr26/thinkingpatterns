@@ -4,10 +4,11 @@ path exists at all. Contains no user data; same posture as /healthz."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from .. import __version__
 from ..api.consents import SHARING_DISCLOSURE_VERSION
+from ..cache import make_rate_limiter
 from ..schemas import MetaResponse
 from ..services.llm import processing_policy_fingerprint
 
@@ -17,7 +18,16 @@ router = APIRouter(prefix="/meta", tags=["meta"])
 API_VERSION = "v1"
 
 
-@router.get("", response_model=MetaResponse)
+@router.get(
+    "",
+    response_model=MetaResponse,
+    # 2026-09-26 audit (LOW, batch item d): /meta joins the shared generous
+    # ops bucket (the L-2 healthz/readyz pattern) — it does not touch the
+    # database, but it recomputes the policy fingerprint per request and
+    # was the last unthrottled unauthenticated endpoint: a free
+    # cheap-request flood surface for anyone.
+    dependencies=[Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))],
+)
 async def get_meta(request: Request) -> MetaResponse:
     settings = request.app.state.settings
     # L-31 (2026-09-20): when the LLM path is off, EVERY llm_* field must be

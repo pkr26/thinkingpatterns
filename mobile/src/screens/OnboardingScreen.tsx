@@ -27,6 +27,8 @@ interface Panel {
 
 // Resolved at module load — the app locale is resolved once at startup, so
 // the panels cannot drift between languages mid-session.
+// 2026-09-26 audit (i18n guard): startup-fixed locale — this module-load
+// tr() table MUST be revisited if runtime language switching ever ships.
 const PANELS: readonly Panel[] = [
   {
     title: tr("onboarding.panel1Title"),

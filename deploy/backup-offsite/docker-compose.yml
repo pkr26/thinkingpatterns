@@ -82,9 +82,13 @@ services:
     read_only: true
     tmpfs:
       # The entrypoint writes rclone.conf here at start; rclone caches
-      # under /tmp. Both are disposable by design.
-      - /config
-      - /tmp
+      # under /tmp. Both are disposable by design — and BOUNDED like the
+      # production file's tmpfs entries (audit 2026-09-26): an unbounded
+      # tmpfs on a read-only-rootfs container is a silent disk-fill path
+      # (it pages from the same host memory/disk pool). rclone.conf is
+      # bytes; the transfer scratch is bounded by --transfers 4.
+      - /config:size=16m,mode=1777
+      - /tmp:size=64m,mode=1777
     # 2026-09-21 audit G-7: bounded log rotation.
     logging:
       driver: json-file
@@ -95,7 +99,13 @@ services:
       resources:
         limits:
           memory: 256M
+          cpus: 0.5
     mem_limit: 256M
+    cpus: 0.5
+    # 2026-09-26 audit M-I3: replication is a low-and-slow hourly loop —
+    # a fractional CPU ceiling is its whole appetite; pids 256 contains
+    # a runaway rclone without touching the hourly pass.
+    pids_limit: 256
     healthcheck:
       # Observability only (Docker does not act on unhealthy by itself):
       # proves config + credentials + remote reachability.

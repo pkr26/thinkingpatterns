@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from datetime import date, datetime
-from typing import TYPE_CHECKING
+from typing import Annotated, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -534,12 +534,21 @@ class LocalRecomputeRequest(StrictRequestModel):
     blobs (brain state + patterns payload, same AAD contracts the app
     already uses to decrypt what GET /insights serves) plus the analysis
     date-scope it claims. The server never sees the data key — no
-    processing session exists on this path."""
+    processing session exists on this path.
+
+    2026-09-26 audit (LOW, batch item g): schema hardening for symmetry
+    with EntryCreate/MeasureCreate — the blob fields carry the same
+    max_length envelope (the route-level size checks in insights.py
+    remain the authority; this bounds the parsed request earlier) and
+    analysis_dates entries carry the ISO-date pattern so a malformed date
+    is a 422 at validation instead of reaching the route loop."""
 
     base_state_seq: int  # the seq of the brain state the client built on
-    state_blob: str
-    patterns_blob: str
-    analysis_dates: list[str]
+    state_blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+    patterns_blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+    analysis_dates: list[Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]] = Field(
+        min_length=1, max_length=366
+    )
 
 
 class NoteRevisionOut(BaseModel):

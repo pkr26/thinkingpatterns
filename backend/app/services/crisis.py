@@ -93,6 +93,16 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     # --- 2026-09-16 red-team remediation: unlisted plain-English phrasing ---
     "\\boff(?:ing)?\\s+myself\\b",
     "\\bput\\s+me\\s+out\\s+of\\s+my\\s+misery\\b",
+    # --- 2026-09-26 full-codebase audit H-1: the EN worth-living family,
+    # "no longer want to live", "tired of living", first-person overdose
+    # intent, and suicidality — textbook ideation phrasings that matched
+    # neither tier (the semantically identical "no reason to live" did). --
+    "\\b(?:life|living)(?:['\\u2019]?s)?\\s+(?:(?:is|was|feels?|seems?|sounds?)\\s*)?(?:n['\\u2019]?t|not)\\s+worth\\s+(?:living|it)\\b",
+    "\\b(?:life|living)(?:['\\u2019]?s)?\\s+(?:do(?:es)?|did)n['\\u2019]?t\\s+(?:feel|seem|sound)\\s+worth\\s+(?:living|it)\\b",
+    "\\bno\\s+longer\\s+want(?:s|ed|ing)?\\s+to\\s+(?:live|be\\s+here|be\\s+alive|exist|wake\\s+up)\\b",
+    "\\btired\\s+of\\s+(?:living|life)\\b",
+    "\\bwant(?:s|ed|ing)?\\s+to\\s+overdose\\b",
+    "\\bsuicidality\\b",
     # --- 2026-09-16 red-team remediation: non-English (Latin script) --------
     "\\bquiero\\s+morir\\b",
     "\\bme\\s+quiero\\s+matar\\b",
@@ -111,6 +121,28 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     "\\bsuicid(?:io|ios|arme|armi)\\b",
     "\\bno\\s+quiero\\s+vivir\\b",
     "\\bcansad[oa]s?\\s+de\\s+vivir\\b",
+    # --- 2026-09-26 full-codebase audit H-1: the Spanish self-harm and
+    # hopelessness families — only six ES ideation phrases existed, so
+    # "me quiero cortar", "no vale la pena vivir", the conjugated
+    # quitar-la-vida forms and a dozen other first-person phrasings fired
+    # nothing and could be quoted back on pattern cards. Accented spellings
+    # (estarían/mía/más) are written post-fold (é->e normalization). ------
+    "\\bno\\s+vale\\s+la\\s+pena\\s+(?:vivir|seguir)\\b",
+    "\\bla\\s+vida\\s+no\\s+vale\\s+la\\s+pena\\b",
+    "\\b(?:me\\s+)?(?:quiero|quisiera|deberia|podria)\\s+quitar(?:me)?\\s+la\\s+vida\\b",
+    "\\bme\\s+voy\\s+a\\s+quitar\\s+la\\s+vida\\b",
+    "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar)\\b",
+    "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme)\\b",
+    "\\bme\\s+(?:lastimo|hago\\s+da[nñ]o|corto\\s+la\\s+piel|quemo\\s+la\\s+piel)\\b",
+    "\\b(?:quiero|quisiera)\\s+hacerme\\s+da[nñ]o\\b",
+    "\\bno\\s+hay\\s+salida\\b",
+    "\\b(?:quiero|quisiera)\\s+desaparecer\\b",
+    "\\b(?:todos|el\\s+mundo)\\s+estarian\\s+mejor\\s+sin\\s+mi\\b",
+    "\\bno\\s+tengo\\s+ganas\\s+de\\s+vivir\\b",
+    "\\bhart[oa]s?\\s+de\\s+(?:la\\s+)?vida\\b",
+    "\\b(?:solo\\s+)?quiero\\s+dormir\\s+para\\s+siempre\\b",
+    "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
+    "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
     # --- non-Latin scripts: plain substrings (\\b never fires next to
     #     CJK/Arabic/Devanagari in ECMAScript) --------------------------------
     "我想死",
@@ -155,6 +187,12 @@ SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
     "\\bhappier\\s+(?:if|when)\\s+(?:i['\\u2019]?m|i\\s+am|i\\s+was)\\s+gone\\b",
     "\\bhappier\\s+without\\s+me\\b",
     "\\beveryone\\s+would\\s+be\\s+happier\\b",
+    # --- 2026-09-26 audit H-1: suppress-only counterparts (broader, never
+    # the dialog) for the worth-living and Spanish families ---------------
+    "\\bnot\\s+worth\\s+living\\b",
+    "\\bno\\s+vale\\s+la\\s+pena\\b",
+    "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
+    "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b",
 )
 
 # The effective suppression tier: dialog + suppress_extra (per the JSON).
@@ -231,6 +269,14 @@ _INVISIBLE = dict.fromkeys(
 # fires on "kıll myself" while ECMAScript does not, splitting the engines.
 # Keys are the post-NFKC lowercase forms; the sigma family (final/lunate)
 # is spelled by codepoint — ς, σ and ϲ all look like "s".
+#
+# 2026-09-26 audit L-2: the two exotic Latin "s" lookalikes that NFKC does
+# NOT fold — U+0282 ʂ (s with hook) and U+1D74 ᵴ (s with middle tilde) —
+# so "ʂuicide"/"ᵴuicide" read as plain "suicide". Deliberately NOT added:
+# U+1D62 ᵢ and U+1D69 ᵩ — both NFKC-decompose (to "i" and Greek φ
+# respectively), so the normalize step below already handles them and a
+# map entry would be redundant; each candidate here was verified with
+# unicodedata to have no NFKC decomposition.
 _HOMOGLYPHS = str.maketrans(
     {
         "а": "a",
@@ -268,6 +314,8 @@ _HOMOGLYPHS = str.maketrans(
         "\u03c2": "s",
         "\u03c3": "s",  # final/regular sigma: "s"-shaped
         "\u03f2": "c",  # lunate sigma: crescent, impersonates "c"
+        "\u0282": "s",  # ʂ s with hook (2026-09-26 audit L-2; no NFKC fold)
+        "\u1d74": "s",  # ᵴ s with middle tilde (2026-09-26 audit L-2; no NFKC fold)
     }
 )
 

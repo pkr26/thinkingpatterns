@@ -16,7 +16,7 @@
  * speaks the app locale while the payload the server's engine reads stays
  * byte-identical across locales.
  */
-import { sentimentScore } from "./brain/sentiment";
+import { detectLanguage, sentimentScore } from "./brain/sentiment";
 import { t } from "./strings";
 
 export interface MoodOption {
@@ -99,5 +99,7 @@ export function moodLabel(value: number): string {
  *  metadata; in the entry payload only a deliberate check-in pick rides
  *  along. */
 export function localSentiment(text: string): number {
-  return sentimentScore(text);
+  // L-3 (2026-09-26): the on-device estimate scores Spanish text with
+  // the ES-winning merge, mirroring the server's language-gated walk.
+  return sentimentScore(text, detectLanguage(text));
 }

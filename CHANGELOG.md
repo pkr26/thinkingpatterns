@@ -4,6 +4,145 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-26 — full-codebase deep audit: every finding fixed and re-tested
+
+A nine-pass exhaustive audit of every file (mobile and web audited
+independently; report: `AUDIT_FULL_CODEBASE_2026-09-26.md`) found no
+CRITICAL issues, 7 HIGH, ~20 MEDIUM and a LOW/INFO tail. Everything
+actionable was fixed the same day, each fix annotated inline with its
+finding ID and covered by new tests. Suite results after remediation:
+backend 1464 passed / 97.35% coverage (floor 97), mobile 1706 passed +
+tsc clean, web 437 passed + tsc clean, portal 336 passed + tsc clean +
+coverage gates exceeded; redteam `e_crisis` 0 errors; monitoring
+`verify.sh` (incl. `--production`) all green; gitleaks full-history and
+working-tree scans clean.
+
+### HIGH
+
+- **H-1 — crisis-language coverage gap (safety-critical; found
+  independently by two audit passes).** EN: the worth-living family
+  ("life is not worth living", "life doesn't feel worth it"), "no longer
+  want to live", "tired of living", first-person "want to overdose" and
+  "suicidality" matched NEITHER tier. ES: only six ideation phrases
+  existed — "me quiero cortar", "no vale la pena vivir", the conjugated
+  "quitar(se) la vida" forms and ~15 other first-person self-harm /
+  hopelessness phrasings fired nothing, and an uncovered phrase could be
+  quoted verbatim into reflective questions. Fixed at the contract level
+  (`shared/crisis_phrases.json` + all four embedded copies in lockstep):
+  22 new dialog patterns, 4 new suppress_extra patterns, 30 new
+  dialog_fires fixtures, 3 new benign fixtures, 4 suppress-only
+  fixtures, 29 new red-team corpus rows (corpus now 119 rows,
+  want==observed on every row), and one verbatim firing sample per new
+  pattern in `test_checklist_round4_crisis.py` (78 dialog / 23
+  suppress samples, index-parity).
+- **H-2 — mobile password rotation crashed on-device**: `freshSalt()`
+  used `globalThis.crypto` (absent in RN) and ran outside the try. Now
+  uses the engine CSPRNG seam inside the guarded block; rotation works
+  with `globalThis.crypto` deleted (pinned).
+- **H-3 — mobile app could fail to boot on device**: no bootstrap
+  installed `global.Buffer`/`global.crypto` and no babel/metro configs
+  existed. `index.js` now runs `QuickCrypto.install()` before anything
+  else; `babel.config.cjs` + `metro.config.cjs` added (.cjs because the
+  package is ESM).
+- **H-4 — web rotation data loss**: a failure after the server rekeyed
+  left a live session writing under the dead old key. The F-4 lockdown
+  is ported (honest message + `onLockdown`), the mobile
+  `rekey_key_mismatch` resume ladder is ported (verify-and-continue from
+  the rewrap stage), and derived keys are zeroized on every exit.
+- **H-5 — web inverted the sentiment contract**: the machine text
+  estimate was written into the encrypted payload's explicit-mood field
+  on every entry. The payload now carries only an explicit pick (mobile
+  parity); the mood log records on every save with
+  `pick ?? estimate`; the mood calendar sources pick-first.
+- **H-6 — therapist note revisions bypassed the chart quota** (~7.7
+  GB/hour unbounded growth). Revisions now count into the quota
+  (rows+bytes) with a per-note revision cap and deterministic
+  oldest-eviction.
+- **H-7 — therapist caseload permanently 413'd past 100 lifetime
+  consents.** The cap now counts ACTIVE consents only (the F-9 fix's
+  therapist twin).
+
+### MEDIUM
+
+- **M-B1** verifier-gated lifecycle ops (grant/revoke/rewrap, LLM
+  consent, account delete, TOTP, wrap-key rotate) now re-read the user
+  row inside their fences and enforce `token_epoch` equality — a stale
+  pre-rotation verifier+token can no longer complete them.
+- **M-B2** caseload summaries now gated on the v2 sharing disclosure on
+  both the write and serve paths, matching the measures discipline.
+- **M-B3** post-threshold daily questions render in Spanish for Spanish
+  corpora (ES template set + ES generic pool, byte-pinned to
+  `shared/generic_questions_es.json`); EN unchanged.
+- **M-B4** ES lexicon dead accented keys replaced/aligned (fold
+  invariance now exhaustively pinned).
+- **M-M1** the legacy-AAD decrypt fallback is gated to `contentVersion
+  === 1`; version ≥ 2 fails closed.
+- **M-M2** offline-queue quarantine/rejected stores are count+byte
+  capped with drop-oldest; the catch-path quarantine append can no
+  longer wedge a scope.
+- **M-M3** two-writer conflict dialog snippets both sides (300 chars +
+  honest total length) before the overwrite choice.
+- **M-M4** all navigator titles + boot tagline resolve through i18n in
+  both locales (pinned by a new Spanish-render test).
+- **M-M5** password rotation catches unexpected throws with calm copy.
+- **M-W1** web Measures view handles every terminal load error (no more
+  permanent "Loading…").
+- **M-W3** account deletion wipes the per-account IndexedDB surface
+  (queue, version marks, analysis generation, mutes).
+- **M-W4** muted pattern IDs moved behind the data-key-encrypted kv
+  seam (legacy plaintext adopted once and removed).
+- **M-W5** the web client is genuinely bilingual: all view copy routed
+  through the catalogs (256 keys added to both), locale-aware prompt
+  chips, the localized daily question on 404/offline, and a locale-flip
+  consumption test that would have caught the original drift.
+- **M-P1** the portal now revokes its bearer server-side on sign-out,
+  idle lock, 401 expiry and bfcache restore (best-effort keepalive
+  `POST /auth/logout`), consumes the insights `state_seq` rollback
+  guard, and honors the `X-Measures-Revision` snapshot contract with the
+  same one-restart traversal as entries/notes.
+- **M-I1/M-I2/M-I3** Dependabot covers `/web`; optional node/blackbox-TLS
+  monitoring (disk-full + cert-expiry alerts, digest-pinned, grounded in
+  `verify.sh`); CPU + pids limits on every container.
+- **M-D1/M-D2** docs corrected: 5-minute web idle lock (README + DPIA),
+  14 CI jobs, 7,726-word lexicon count, WEB_PLAN dashboard brought up
+  to shipped reality with the P9.10 deferral registered in
+  SECURITY_RESIDUALS.
+
+### L-3 follow-through (cross-platform parity)
+
+The backend's language-gated Spanish scoring (ES-winning merge,
+EN-scoped negators) is now mirrored on-device: the lexicon dump emits
+`sentiment_lexicon_es`, `negators_en` and the detection tables to all
+three artifacts (shared JSON + mobile + web TS), both client engines
+select the merge by detected language with the no-language default
+byte-identical to the pinned vectors, and the mood-log callers detect
+per text. New `brainLanguage` parity pins on both clients.
+
+### Also fixed (LOW/INFO selection)
+
+Mobile: prototype-chain guard on `maxScoreForMeasure`, corrupt base-URL
+typed error, `exportAccount` strict-redirect flag, `clearQueue` mutex,
+dead `biometricCapability` removed, ambiguous ES conflict copy, ES
+weekday grammar, rotation-card password state separation, measures
+status timer + localized history labels, offline measures retry
+affordance, locale-formatted filter/share dates, draft re-stash guard,
+measures intro naming all three instruments, `versionName` 1.0.0.
+Web: measures pagination terminal probe, LLM-settings unknown state,
+per-day crisis prompt cadence, real kv enumeration in the red-team
+scrape, a11y scans for the remaining five views. Backend: CORS expose
+list carries the measures/cursor headers, `create_note` releases its
+read transaction before the chart lock, `local_recompute` epoch fence,
+`/meta` rate-limited, therapist-delete sharing gate, `MAX_BODY_BYTES`
+ceiling, recompute schema caps, `uv.lock` aligned to `requirements.in`
+(+ drift guard), orphaned `e2e_test.db-*` sidecars removed, exotic
+homoglyphs (ʂ, ᵴ) mapped. Infra: gitleaks allowlist narrowed to
+generated artifacts (hand-written `reports/` source is scanned again —
+canary-verified), gitleaks + shellcheck pre-commit hooks, nginx
+`limit_req_status 429`, sized offsite tmpfs, `.dockerignore` caches.
+Docs: token-secret rotation runbook section (TOTP lockout + decoy
+boundary), multi-tenant/insider threat row, notes-retention residual
+documented for counsel.
+
 ## 2026-09-26 — independent E2E browser campaign: 24-point pass, all three findings fixed and re-verified
 
 A black-box end-to-end pass over the patient web client (and, where the

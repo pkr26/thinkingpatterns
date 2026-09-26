@@ -7,16 +7,22 @@
  * (coarse pattern ids only, local), and the sensitive non-quoting
  * contract: a crisis-adjacent pattern NEVER echoes its text — it says so
  * calmly and links to support.
+ *
+ * M-W4 (audit 2026-09-26): the muted pid set is CONTENT-DERIVED
+ * ("topic:divorce") and used to sit in plaintext localStorage — it now
+ * lives in the encrypted kv seam (patternMutes.ts, data-key sealed). The
+ * server-side mute sync (recordPatternMute → recompute blob) is unchanged.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "../api/client";
-import { decryptInsights, type InsightsPayload } from "../crypto/patient";
+import { api } from "../api/client";
+import { decryptInsights } from "../crypto/patient";
 import { matchesCrisisSuppress } from "../crisisDetect";
 import { recentMoods } from "../moodLog";
 import { recordPatternMute } from "../questionFeedback";
+import { adoptLegacyPlaintextMutes, writeMutedPids } from "../patternMutes";
 import { reconcile, type ReconcileOutcome } from "../sync";
 import { recordThresholdNotice, thresholdNoticeShown } from "../thresholdNotice";
-import { localStore } from "../platform";
+import { t } from "../strings";
 import { vault } from "../vault";
 import { theme, Button, Card, ErrorBanner, Note } from "../ui";
 
@@ -40,36 +46,41 @@ export interface PatternPayload {
   };
 }
 
-const LIFECYCLE_LABEL: Record<string, string> = {
-  candidate: "early evidence",
-  emerging: "early evidence",
-  confirmed: "established",
-  fading: "fading",
-  archived: "fading",
+/** Lifecycle label per declared state, as CATALOG KEYS (M-W5): the copy
+ *  resolves through t() so a Spanish device reads Spanish evidence
+ *  labels. Unknown states fall back to the raw wire token below. */
+const LIFECYCLE_KEY: Record<string, string> = {
+  candidate: "insights.state.emerging",
+  emerging: "insights.state.emerging",
+  confirmed: "insights.stateWeb.confirmed",
+  fading: "insights.state.fading",
+  archived: "insights.state.fading",
 };
 
-const METHOD_PLAIN: Record<string, string> = {
-  temporal: "Compared how often this word appears on each weekday against your own writing schedule, with multiple-testing correction across every claim.",
-  mood_correlation: "Compared your mood on days this appears versus days it doesn't — always against your own baseline, never anyone else's.",
-  link: "Compared how you write the DAY AFTER this appears against your own baseline days.",
-  inertia: "Measured how strongly your mood carries over from one day to the next, compared with your own earlier norm.",
-  energy_inertia: "Measured how strongly your energy carries over day to day, compared with your own earlier norm.",
-  pa_inertia: "Measured how strongly your positive feelings carry over day to day, compared with your own earlier norm.",
-  na_inertia: "Measured how strongly your negative feelings carry over day to day, compared with your own earlier norm.",
-  energy_mood_coupling: "Measured how much your energy and mood move together, compared with your own earlier norm.",
-  sense_making: "Measured how much your writing leans on cause-and-effect and insight words, compared with your own earlier norm.",
-  activity_diversity: "Measured the variety of your tagged activities per week, compared with your own earlier weeks.",
-  instability: "Measured the size of your day-to-day mood swings, compared with your own earlier norm.",
-  mood_shift: "Watched your mood against your personal baseline with a control chart that flags sustained shifts.",
-  rumination: "Found a negative thought-phrase that keeps returning in near-identical form.",
-  topic: "Found a word or phrase taking up more space in your writing than it used to.",
-  recurring_phrase: "Found a phrase that keeps returning in near-identical form.",
-  avoidance: "Noticed you tend to go quiet the day after this comes up, compared with your own usual rhythm.",
-  cadence: "Compared how regular your writing rhythm is against your own earlier norm.",
+/** Plain-language method copy per pattern kind, as catalog keys (M-W5). */
+const METHOD_KEY: Record<string, string> = {
+  temporal: "insights.webmethod.temporal",
+  mood_correlation: "insights.webmethod.mood_correlation",
+  link: "insights.webmethod.link",
+  inertia: "insights.webmethod.inertia",
+  energy_inertia: "insights.webmethod.energy_inertia",
+  pa_inertia: "insights.webmethod.pa_inertia",
+  na_inertia: "insights.webmethod.na_inertia",
+  energy_mood_coupling: "insights.webmethod.energy_mood_coupling",
+  sense_making: "insights.webmethod.sense_making",
+  activity_diversity: "insights.webmethod.activity_diversity",
+  instability: "insights.webmethod.instability",
+  mood_shift: "insights.webmethod.mood_shift",
+  rumination: "insights.webmethod.rumination",
+  topic: "insights.webmethod.topic",
+  recurring_phrase: "insights.webmethod.recurring_phrase",
+  avoidance: "insights.webmethod.avoidance",
+  cadence: "insights.webmethod.cadence",
 };
 
-function muteKey(userId: string): string {
-  return `mindpattern.mutedPids.v1.${userId}`;
+function methodText(kind: string): string {
+  const key = METHOD_KEY[kind];
+  return key === undefined ? t("insights.methodFallbackWeb") : t(key);
 }
 
 /** Belt-and-braces with mobile and the backend (audit 2026-09-25): trust
@@ -79,17 +90,6 @@ function muteKey(userId: string): string {
  * still never have its text echoed by this view. */
 function isSensitivePattern(pattern: PatternPayload): boolean {
   return pattern.detail.sensitive === true || matchesCrisisSuppress(pattern.label);
-}
-
-function readMuted(userId: string): Set<string> {
-  try {
-    const raw = localStore.get(muteKey(userId));
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? new Set(parsed.filter((x): x is string => typeof x === "string")) : new Set();
-  } catch {
-    return new Set();
-  }
 }
 
 export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element {
@@ -109,7 +109,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     generation.current = run;
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     setError("");
@@ -119,11 +119,11 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     }) as ReconcileOutcome);
     if (generation.current !== run) return;
     if (outcome.kind === "credentialRotated" || outcome.kind === "locked") {
-      setError("Your session ended — sign in again.");
+      setError(t("errors.sessionEndedWeb"));
       return;
     }
     if (outcome.kind === "freshness") {
-      setError("Your pattern data failed its freshness check — it may have been replayed. Try again in a moment.");
+      setError(t("insights.freshnessWeb"));
       return;
     }
     if (outcome.kind === "error") {
@@ -131,14 +131,14 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
       return;
     }
     if (outcome.kind === "offline") {
-      setError("Offline — patterns need a connection to refresh.");
+      setError(t("insights.offlineWeb"));
       return;
     }
     // ok: pull the decrypted summary directly for the richer fields.
     const keys = vault.get();
     const summary = await api.insights().catch(() => null);
     if (!summary || generation.current !== run) {
-      if (!summary) setError("Could not read your pattern summary.");
+      if (!summary) setError(t("insights.summaryFailedWeb"));
       return;
     }
     setPhase(summary.phase);
@@ -151,10 +151,10 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
         // The one-time threshold-crossing notice (P6.5).
         if (summary.phase !== "baseline" && !(await thresholdNoticeShown(owner))) {
           await recordThresholdNotice(owner);
-          setNotice("Your patterns are live — thirty honest days of data, computed only from your own writing. Every card shows its evidence.");
+          setNotice(t("insights.thresholdNotice"));
         }
       } catch {
-        setError("Your pattern data could not be decrypted.");
+        setError(t("insights.decryptFailedWeb"));
       }
     } else {
       setPatterns([]);
@@ -169,7 +169,11 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
 
   useEffect(() => {
     const owner = vault.ownerUserId();
-    if (owner) setMuted(readMuted(owner));
+    // M-W4 (audit 2026-09-26): the mute set loads through the ENCRYPTED kv
+    // seam (adopting any pre-fix plaintext list once, then removing it).
+    if (owner && vault.isUnlocked()) {
+      void adoptLegacyPlaintextMutes(vault.get().dataKey, owner).then(setMuted).catch(() => undefined);
+    }
     void load();
   }, [load]);
 
@@ -181,7 +185,9 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     if (muting) next.add(pid);
     else next.delete(pid);
     setMuted(next);
-    localStore.set(muteKey(owner), JSON.stringify([...next]));
+    // M-W4: the local set persists as ONE data-key-encrypted blob — never
+    // plaintext localStorage (the pids are content-derived theme words).
+    await writeMutedPids(vault.get().dataKey, owner, next).catch(() => undefined);
     // The mute also rides the next recompute (server-side suppression):
     await recordPatternMute(vault.get().dataKey, owner, pid, muting).catch(() => undefined);
   }, [muted]);
@@ -196,12 +202,12 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
   return (
     <>
       {notice && <Note role="status" tone="ok">{notice}</Note>}
-      <Card title="Patterns">
+      <Card title={t("insights.titleWeb")}>
         {phase === "baseline" || phase === null ? (
           <>
-            <Note role="status">{progress ? `Building your baseline: ${progress.activeDays} active day${progress.activeDays === 1 ? "" : "s"}, ${progress.remaining} to go before patterns surface.` : "Reading your baseline…"}</Note>
+            <Note role="status">{progress ? t("insights.baselineProgress", { active: progress.activeDays, remaining: progress.remaining, activeUnit: progress.activeDays === 1 ? "" : "s" }) : t("insights.baselineReading")}</Note>
             {localTrend.length > 1 && (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 48 }} aria-label="Your local mood trend">
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 48 }} aria-label={t("insights.localTrendA11y")}>
                 {localTrend.map((day) => (
                   <div
                     key={day.date}
@@ -216,20 +222,20 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
                 ))}
               </div>
             )}
-            <Note tone="muted">This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time.</Note>
+            <Note tone="muted">{t("insights.baselineNote")}</Note>
           </>
         ) : (
-          <Note>{"Observations, not verdicts — computed only from your own writing. Every card shows its evidence."}</Note>
+          <Note>{t("insights.activeIntro")}</Note>
         )}
         {mutedCount > 0 && (
           <>
-            <Note tone="muted">{`${mutedCount} pattern${mutedCount === 1 ? "" : "s"} muted — they stay muted on this browser and in future analyses after your next refresh.`}</Note>
+            <Note tone="muted">{t(mutedCount === 1 ? "insights.mutedCountOne" : "insights.mutedCountMany", { count: mutedCount })}</Note>
             {patterns
               ?.filter((pattern) => pattern.detail.pattern_pid && muted.has(pattern.detail.pattern_pid))
               .map((pattern) => (
                 <Button
                   key={pattern.detail.pattern_pid}
-                  label={`Unmute: ${isSensitivePattern(pattern) ? "a private pattern" : pattern.label}`}
+                  label={t("insights.unmuteLabel", { label: isSensitivePattern(pattern) ? t("insights.privatePattern") : pattern.label })}
                   onPress={() => void toggleMute(pattern.detail.pattern_pid)}
                   small
                 />
@@ -241,38 +247,39 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
 
       {visible?.map((pattern, index) => {
         const pid = pattern.detail.pattern_pid ?? `#${index}`;
-        const state = LIFECYCLE_LABEL[pattern.detail.pattern_state ?? ""] ?? pattern.detail.pattern_state ?? "";
-        const method = METHOD_PLAIN[pattern.kind] ?? "Computed within your own journal, against your own baseline.";
+        const stateKey = LIFECYCLE_KEY[pattern.detail.pattern_state ?? ""];
+        const state = stateKey === undefined ? (pattern.detail.pattern_state ?? "") : t(stateKey);
+        const method = methodText(pattern.kind);
         const sensitive = isSensitivePattern(pattern);
         return (
-          <Card key={pid} title={sensitive ? "A difficult thought has been returning" : pattern.label}>
+          <Card key={pid} title={sensitive ? t("insights.sensitiveTitle") : pattern.label}>
             {sensitive ? (
               <>
-                <Note tone="warn">{"Something heavy shows up repeatedly in your writing. It is not quoted here — you deserve to decide when to look at it."}</Note>
-                <Button label="Get support" onPress={props.onCrisis} small />
+                <Note tone="warn">{t("insights.sensitiveBodyWeb")}</Note>
+                <Button label={t("measures.getSupport")} onPress={props.onCrisis} small />
               </>
             ) : (
               <Note>{pattern.label}</Note>
             )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              {state && <Note tone="muted">{`evidence: ${state}${pattern.detail.is_new ? " · new" : ""}`}</Note>}
-              <Note tone="muted">{`seen ${pattern.occurrences} time${pattern.occurrences === 1 ? "" : "s"}`}</Note>
-              {pattern.detail.last_seen && <Note tone="muted">{`last: ${pattern.detail.last_seen}`}</Note>}
+              {state && <Note tone="muted">{`${t("insights.evidencePrefix")}: ${state}${pattern.detail.is_new ? ` · ${t("insights.newFlag").trim()}` : ""}`}</Note>}
+              <Note tone="muted">{t(pattern.occurrences === 1 ? "insights.seenOne" : "insights.seenMany", { count: pattern.occurrences })}</Note>
+              {pattern.detail.last_seen && <Note tone="muted">{t("insights.lastSeen", { date: pattern.detail.last_seen })}</Note>}
             </div>
             <details style={{ color: theme.muted, fontSize: 13 }}>
-              <summary style={{ cursor: "pointer" }}>Why am I seeing this?</summary>
-              <Note tone="muted">{`Window: the last ${pattern.detail.sample_days ?? 180} days of your journal. Sample: ${pattern.occurrences} occurrences. Confidence: ${(pattern.confidence * 100).toFixed(0)}%. Method: ${method} First seen: ${pattern.detail.first_seen ?? "—"}.`}</Note>
-              <Note tone="muted">{"No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."}</Note>
+              <summary style={{ cursor: "pointer" }}>{t("insights.whySeeing")}</summary>
+              <Note tone="muted">{t("insights.evidenceLine", { days: pattern.detail.sample_days ?? 180, count: pattern.occurrences, confidence: (pattern.confidence * 100).toFixed(0), method, firstSeen: pattern.detail.first_seen ?? "—" })}</Note>
+              <Note tone="muted">{t("insights.evidenceFootnoteWeb")}</Note>
             </details>
             <div style={{ display: "flex", gap: 8 }}>
-              <Button label={muted.has(pattern.detail.pattern_pid ?? "") ? "Unmute" : "Mute"} onPress={() => void toggleMute(pattern.detail.pattern_pid)} small />
+              <Button label={muted.has(pattern.detail.pattern_pid ?? "") ? t("insights.unmute") : t("insights.muteVerbWeb")} onPress={() => void toggleMute(pattern.detail.pattern_pid)} small />
             </div>
           </Card>
         );
       })}
       {visible !== null && visible.length === 0 && phase !== "baseline" && (
         <Card>
-          <Note>No patterns surfaced yet — the engine only speaks when the evidence clears its statistical bars.</Note>
+          <Note>{t("insights.noneYetWeb")}</Note>
         </Card>
       )}
     </>

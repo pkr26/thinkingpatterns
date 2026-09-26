@@ -56,6 +56,17 @@ vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
   };
 });
 
+// 2026-09-26 audit M-M5: controllable rotation seam. The default delegates
+// to the REAL rotatePassword (the self-completion test below runs it); the
+// throw-path test rejects once to pin the new catch.
+const rotatePasswordMock = vi.hoisted(() => vi.fn());
+vi.mock("../../src/rotation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/rotation")>();
+  const real = actual.rotatePassword;
+  rotatePasswordMock.mockImplementation((...args: Parameters<typeof real>) => real(...args));
+  return { ...actual, rotatePassword: (...args: Parameters<typeof real>) => rotatePasswordMock(...args) };
+});
+
 const signOut = vi.fn(async () => {});
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
@@ -1385,5 +1396,50 @@ describe("change-password rotation self-completes (audit fix 7, 2026-09-21)", ()
     // The OK-button-only signOut never ran — proving none of the security
     // cleanup hung off the alert.
     expect(signOut).not.toHaveBeenCalled();
+  });
+
+  // 2026-09-26 audit M-M5: runRotate had no catch — an unexpected throw
+  // became an unhandled rejection with zero user feedback while the finally
+  // cleared the typed passwords. The catch must surface the calm failed
+  // rotation title + generic copy (the confirmWithPassword idiom).
+  it("an unexpected rotation throw surfaces calm feedback instead of an unhandled rejection", async () => {
+    rotatePasswordMock.mockRejectedValueOnce(new Error("unexpected local failure"));
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Change password");
+    await typeInto(root, "password", "correct old password");
+    await typeInto(root, "New password (12+ characters)", "a strong new passphrase 42!");
+    await pressLabel(root, "Rotate keys and sign in again");
+    await flush(6);
+
+    expect(Alert.alert).toHaveBeenCalledWith("Could not change password", "Something went wrong — try again.");
+    // The finally still ran: busy cleared and both fields wiped (the retry
+    // starts from empty inputs, never from a stale password).
+    expect((inputByPlaceholder(root, "password")?.props as { value?: string })?.value ?? "").toBe("");
+    expect(touchableByLabel(root, "Rotate keys and sign in again").props.disabled).toBe(true);
+  });
+
+  // 2026-09-26 audit LOW: the rotation card's current-password field is no
+  // longer the re-auth card's shared state — a password typed for rotation
+  // must never silently satisfy a later destructive re-auth prompt.
+  it("the rotation card's password never leaks into the destructive re-auth card", async () => {
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Change password");
+    await typeInto(root, "password", "rotation-only secret");
+    // Close the rotation card without running it…
+    await pressLabel(root, "Cancel");
+    expect(textOf(root)).not.toContain("Rotate keys and sign in again");
+    // …then open the DELETE flow's password card.
+    await pressLabel(root, "Delete my account and data");
+    await pressAlertButton("Continue");
+    await pressAlertButton("Continue to password");
+    await flush();
+    expect(textOf(root)).toContain("Enter your password to delete everything");
+    // The re-auth field starts EMPTY — before the split it carried
+    // "rotation-only secret", one tap away from deleting the account.
+    const reauthInput = inputByPlaceholder(root, "password");
+    expect((reauthInput.props as { value: string }).value).toBe("");
+    expect(touchableByLabel(root, "Confirm with password").props.disabled).toBe(true);
   });
 });

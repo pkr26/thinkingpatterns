@@ -30,6 +30,8 @@ export interface BottomNavItem {
 // Labels resolve ONCE at module load: the locale itself is resolved once at
 // startup (there is no in-app language switch this wave), so per-render
 // lookups would only invite drift between this table and the rendered bar.
+// 2026-09-26 audit (i18n guard): startup-fixed locale — this module-load
+// tr() block MUST be revisited if runtime language switching ever ships.
 export const BOTTOM_NAV_ITEMS: readonly BottomNavItem[] = [
   { key: "Entry", label: tr("nav.today") },
   { key: "History", label: tr("nav.history") },

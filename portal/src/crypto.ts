@@ -420,6 +420,12 @@ export async function decryptInsights(
   userId: string,
   blobB64: string,
 ): Promise<{
+  /** Analysis generation embedded INSIDE the encrypted payload (backend
+   *  insights.py seals {"v":2,"state_seq":N,"stats":…}). The rollback-replay
+   *  sentinel: PatientView checks it against the response's plaintext echo
+   *  (2026-09-26 audit L). Absent on pre-2026-09-19 payloads — the guard
+   *  treats absence as unverifiable and fails closed. */
+  state_seq?: number;
   stats: {
     patterns: PatternPayload[];
     /** Aggregate account stats the backend already packs into the same
@@ -437,7 +443,7 @@ export async function decryptInsights(
   try {
     encrypted = unb64(blobB64);
     plain = await decrypt(dataKey, encrypted, buildAad("insights", userId, "patterns"));
-    return decodeJson(plain) as { stats: { patterns: PatternPayload[] } };
+    return decodeJson(plain) as { state_seq?: number; stats: { patterns: PatternPayload[] } };
   } finally {
     zeroize(encrypted, plain);
   }

@@ -22,7 +22,7 @@ import { therapistKeyFingerprint, wrapDataKeyForTherapist } from "../crypto/shar
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { calmFallbackCopy } from "../components/errors";
-import { t as tr } from "../strings";
+import { t as tr, dateLocaleTag } from "../strings";
 
 type PendingAction =
   | { kind: "grant"; code: string; lookup: PairingLookup }
@@ -55,7 +55,16 @@ function isDisclosureOutdated(err: unknown): boolean {
   return typeof err.message === "string" && err.message.toLowerCase().includes("disclosure");
 }
 
-const dayOf = (iso: string): string => iso.slice(0, 10);
+/** 2026-09-26 audit LOW: a granted/revoked-at timestamp renders through the
+ *  locale date format, not a raw ISO slice — `iso.slice(0, 10)` leaked UTC
+ *  (wrong day for non-UTC evenings) and read like machine output in a
+ *  disclosure row. Garbage input falls back to the raw string (the
+ *  formatEntryDate discipline). */
+const dayOf = (iso: string): string => {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString(dateLocaleTag(), { year: "numeric", month: "long", day: "numeric" });
+};
 
 export function TherapistShareScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();

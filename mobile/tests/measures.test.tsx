@@ -100,8 +100,12 @@ describe("MeasuresScreen", () => {
     const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
     await flush();
     expect(textOf(root)).toContain("Your recorded scores");
-    expect(textOf(root)).toContain("2026-09-18: 9");
-    expect(textOf(root)).toContain("2026-09-11: 14");
+    // 2026-09-26 audit LOW: the history line maps instrument ids through the
+    // measures.select.* labels and formats dates locale-aware — no raw
+    // "phq9 2026-09-18: 9" implementation vocabulary.
+    expect(textOf(root)).toContain("PHQ-9 (depression, 9 items) Friday, September 18, 2026: 9");
+    expect(textOf(root)).toContain("September 11, 2026: 14");
+    expect(textOf(root)).not.toContain("2026-09-18: 9");
     expect(textOf(root)).toContain("never interprets it");
   });
 
@@ -112,7 +116,7 @@ describe("MeasuresScreen", () => {
     ] as never);
     const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
     await flush();
-    expect(textOf(root)).toContain("2026-09-11: 5");
+    expect(textOf(root)).toContain("September 11, 2026: 5");
     expect(textOf(root)).not.toContain("2026-09-18");
   });
 
@@ -153,8 +157,13 @@ describe("MeasuresScreen", () => {
     }
     await pressLabel(root, "Record this check-in");
     await flush();
-    // Save failed offline: the dialog must NOT have fired (never before saving).
-    expect(Alert.alert).toHaveBeenCalledWith("Not recorded", expect.stringContaining("connection"));
+    // 2026-09-26 audit LOW: an offline failure is a quiet INLINE status now
+    // (never a modal), the picks stay selected and the Record button stays
+    // enabled — that is the retry affordance until connectivity returns.
+    expect(Alert.alert).not.toHaveBeenCalledWith("Not recorded", expect.anything());
+    expect(textOf(root)).toContain("Recording needs a connection right now. Your picks are still on screen.");
+    expect(touchableByLabel(root, "Record this check-in").props.disabled).toBe(false);
+    // The picks really are still there (item 9 still selected for retry).
     expect(Alert.alert).not.toHaveBeenCalledWith("Support is available", expect.anything());
 
     // Retry succeeds: now the calm support pointer fires.
@@ -264,6 +273,12 @@ describe("MeasuresScreen", () => {
     expect(maxScoreForMeasure("phq2")).toBe(6);
     expect(maxScoreForMeasure("future-instrument")).toBeNull();
     expect(maxScoreForMeasure(42)).toBeNull();
+    // 2026-09-26 audit LOW: inherited property names must read as unknown —
+    // `"constructor" in INSTRUMENTS` used to return undefined (≠ null),
+    // defeating the caller's null gate and producing a NaN share.
+    expect(maxScoreForMeasure("constructor")).toBeNull();
+    expect(maxScoreForMeasure("toString")).toBeNull();
+    expect(maxScoreForMeasure("__proto__")).toBeNull();
     // Every instrument's item copy exists in BOTH locale catalogs.
     const { enCatalog, esCatalog } = await import("../src/strings");
     for (const id of ["phq9", "gad7", "phq2"] as const) {
@@ -291,6 +306,35 @@ describe("MeasuresScreen", () => {
     }
     for (const v of [0, 1, 2, 3]) {
       expect(t(`measures.phq9.option${v}`).length).toBeGreaterThan(3);
+    }
+  });
+});
+
+describe("MeasuresScreen status line auto-clears (2026-09-26 audit LOW)", () => {
+  it("a transient status clears itself after the app-wide 2.6s inline-status lifetime", async () => {
+    // An offline submit failure raises the inline status (see the retry-
+    // affordance test above); the same line must not linger forever.
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
+    const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    for (let i = 0; i < PHQ9_ITEMS.length; i++) {
+      await pressOption(root, `Question ${i + 1}: Not at all`);
+    }
+    // Fake timers BEFORE the submit, so the dismissal timer registers on the
+    // fake clock and can be advanced deterministically (the submit path is
+    // promise-only; flush() after the press would deadlock under fakes) —
+    // the InsightsScreen auto-dismiss idiom.
+    vi.useFakeTimers();
+    try {
+      await pressLabel(root, "Record this check-in");
+      expect(textOf(root)).toContain("Your picks are still on screen.");
+      const { act } = await import("./helpers/rtr");
+      await act(async () => {
+        vi.advanceTimersByTime(2_600);
+      });
+      expect(textOf(root)).not.toContain("Your picks are still on screen.");
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

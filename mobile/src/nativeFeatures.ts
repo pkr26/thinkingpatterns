@@ -69,16 +69,9 @@ export function reminderCapability(): NativeCapability {
   return { available: true };
 }
 
-export function biometricCapability(): NativeCapability {
-  const mod = probe("react-native-biometrics");
-  if (mod === null) {
-    return {
-      available: false,
-      reason: "biometric module not linked in this build",
-    };
-  }
-  return { available: true };
-}
+// 2026-09-26 audit LOW: biometricCapability() deleted — it probed
+// react-native-biometrics, which is NOT a dependency (biometrics actually
+// ride react-native-keychain via biometricUnlock.ts) and had zero callers.
 
 /** The notifee API surface this module touches (the real module exports
  *  far more; this keeps the seam typed without importing it). */

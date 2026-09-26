@@ -25,6 +25,12 @@
 # coarse outer armor sized for a clinical-caseload deployment, not a
 # substitute for it. 10 requests/second/IP with a small burst allowance.
 limit_req_zone $binary_remote_addr zone=edge_api:10m rate=10r/s;
+# 429, not nginx's default 503 (audit 2026-09-26): deliberate throttling
+# is not a server error, and the clients already speak 429 — the API's own
+# limiter answers `rate_limited` + Retry-After with it. A 503 here would
+# pollute the 5xx signal every synthetic/monitoring watch uses for real
+# failures (the 5xx-ratio alert's whole premise).
+limit_req_status 429;
 
 server {
     listen 80;

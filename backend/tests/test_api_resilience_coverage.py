@@ -878,12 +878,19 @@ async def test_therapist_note_quota_rejects_count_and_total_byte_overflow():
     class QuotaSession:
         bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
-        def __init__(self, count: int, total: int):
+        # 2026-09-26 audit H-6: the aggregate now returns FOUR columns —
+        # live-note count/bytes plus revision count/bytes (the edit
+        # history joined through the note rows).
+        def __init__(self, count: int, total: int, rev_count: int = 0, rev_bytes: int = 0):
             self.count = count
             self.total = total
+            self.rev_count = rev_count
+            self.rev_bytes = rev_bytes
 
         async def execute(self, statement):
-            return SimpleNamespace(one=lambda: (self.count, self.total))
+            return SimpleNamespace(
+                one=lambda: (self.count, self.total, self.rev_count, self.rev_bytes)
+            )
 
     with pytest.raises(ApiError) as count_error:
         await therapist_api._assert_note_quota(
@@ -904,3 +911,26 @@ async def test_therapist_note_quota_rejects_count_and_total_byte_overflow():
             is_new=False,
         )
     assert bytes_error.value.code == "blob_quota_exceeded"
+
+    # 2026-09-26 audit H-6: the HISTORY alone can refuse — revision rows
+    # consume the same row budget (stored history at the note cap blocks a
+    # new note) and revision bytes alone consume the byte budget.
+    with pytest.raises(ApiError) as revision_count_error:
+        await therapist_api._assert_note_quota(
+            QuotaSession(0, 0, rev_count=therapist_api.MAX_NOTES_PER_PATIENT),
+            "therapist",
+            "patient",
+            1,
+            is_new=True,
+        )
+    assert revision_count_error.value.code == "quota_exceeded"
+
+    with pytest.raises(ApiError) as revision_bytes_error:
+        await therapist_api._assert_note_quota(
+            QuotaSession(0, 0, rev_bytes=therapist_api.MAX_NOTE_BYTES_PER_PATIENT),
+            "therapist",
+            "patient",
+            1,
+            is_new=False,
+        )
+    assert revision_bytes_error.value.code == "blob_quota_exceeded"

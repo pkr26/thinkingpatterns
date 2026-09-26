@@ -59,11 +59,20 @@ services:
     # matters on shared hosts) and scrypt login bursts are 64 MiB each.
     # The ceiling is generous headroom over the measured working set; an
     # OOM-kill here is a DoS against every account on the instance.
+    # 2026-09-26 audit M-I3: a memory-only ceiling leaves CPU and process
+    # count unbounded — a fork-leaking dependency or a CPU-bound tight
+    # loop starves the host the same way. cpus matches the two-worker
+    # reality (one analyze slot + one serving loop with headroom);
+    # pids_limit 256 is far above uvicorn's real usage and contains any
+    # fork bomb inside the container's cgroup.
     deploy:
       resources:
         limits:
           memory: 1500M
+          cpus: 2.0
     mem_limit: 1500M
+    cpus: 2.0
+    pids_limit: 256
     healthcheck:
       # Same readiness probe as the Dockerfile HEALTHCHECK.  /healthz proves
       # only that Python is alive; /readyz also proves DB connectivity and
@@ -115,11 +124,19 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    # 2026-09-26 audit M-I3: db gets the same CPU ceiling as the api (its
+    # workload is the api's, amplified by recompute bursts) but a HIGHER
+    # pids ceiling — every client connection is a backend process, so
+    # 512 keeps real headroom above peak connections while still
+    # containing a runaway.
     deploy:
       resources:
         limits:
           memory: 1G
+          cpus: 2.0
     mem_limit: 1G
+    cpus: 2.0
+    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mindpattern}"]
       interval: 5s

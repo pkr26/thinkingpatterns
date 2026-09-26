@@ -339,7 +339,18 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # across independent requests. Hoisted so HardeningMiddleware can
     # mirror the same expose list onto its own short-circuit responses
     # (L-4) — one list, no drift between the two CORS surfaces.
-    cors_expose_headers = ["X-Next-Offset", "X-Entries-Revision", "X-Notes-Revision"]
+    # 2026-09-26 audit (LOW, batch item a): the measures snapshot marker
+    # (X-Measures-Revision, set at measures.py) and the access-log
+    # continuation cursor (X-Next-Cursor, set by the patient/therapist
+    # access-log reads) joined the expose list — without them a browser
+    # client could paginate entries/notes but not measures or audit trails.
+    cors_expose_headers = [
+        "X-Next-Offset",
+        "X-Entries-Revision",
+        "X-Notes-Revision",
+        "X-Measures-Revision",
+        "X-Next-Cursor",
+    ]
     app.add_middleware(
         CORSMiddleware,
         # Empty by default — the mobile app is a native client and needs no

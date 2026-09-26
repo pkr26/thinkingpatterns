@@ -15,6 +15,12 @@ export interface KvBackend {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
+  /** 2026-09-26 audit LOW d: enumerate the backend's keys. Optional so
+   *  injected test backends stay two-method compatible; a backend without
+   *  it enumerates as empty. The VALUES stay behind getItem — enumeration
+   *  is for diagnostics and the storage-scrape red-team sweep, which used
+   *  to carry a dead no-op where this call now stands. */
+  keys?(): Promise<string[]>;
 }
 
 const DB_NAME = "mindpattern";
@@ -63,6 +69,9 @@ const memoryBackend: KvBackend = (() => {
     async removeItem(key) {
       map.delete(key);
     },
+    async keys() {
+      return [...map.keys()];
+    },
   };
 })();
 
@@ -110,6 +119,14 @@ async function backend(): Promise<KvBackend> {
         tx.onabort = () => reject(tx.error);
       });
     },
+    async keys() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, "readonly");
+        const request = tx.objectStore(STORE).getAllKeys();
+        request.onsuccess = () => resolve(request.result.map((k) => String(k)));
+        request.onerror = () => reject(request.error);
+      });
+    },
   };
 }
 
@@ -137,5 +154,15 @@ export const kv = {
   },
   async multiRemove(keys: string[]): Promise<void> {
     for (const key of keys) await kv.removeItem(key);
+  },
+  /** Enumerate every key in the active backend ([] when the backend cannot
+   *  or does not support it — see KvBackend.keys). */
+  async keys(): Promise<string[]> {
+    try {
+      const active = await backend();
+      return active.keys ? await active.keys() : [];
+    } catch {
+      return [];
+    }
   },
 };

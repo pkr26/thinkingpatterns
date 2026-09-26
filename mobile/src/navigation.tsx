@@ -17,6 +17,7 @@ import { PrivacyScreen } from "./screens/PrivacyScreen";
 import { CrisisScreen } from "./screens/CrisisScreen";
 import { takePendingOnboarding, hasSeenOnboarding, onboardingSeenCached } from "./onboarding";
 import { api } from "./api/client";
+import { t as tr } from "./strings";
 import { MainShell, NavDestination } from "./components/BottomNav";
 
 /** Wrap a main screen with the persistent bottom navigation (2026-09-17):
@@ -75,7 +76,11 @@ function BootSplash(): React.JSX.Element {
         MindPattern
       </Text>
       <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
-        Your patterns, from your words. Encrypted on this device.
+        {/* 2026-09-26 audit M-M4: the tagline was hardcoded English while
+            the identical copy already lives in the catalog as
+            login.subtitle — resolve it through tr() like every other
+            user-visible string. */}
+        {tr("login.subtitle")}
       </Text>
       <ActivityIndicator color={t.colors.primaryBright} size="large" />
     </View>
@@ -159,14 +164,14 @@ export function AppNavigator(): React.JSX.Element {
           <Stack.Screen name="Booting" component={BootSplash} options={{ headerShown: false }} />
           {/* Crisis help stays reachable even while the saved session is
               still resolving — "always one or two interactions away". */}
-          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
+          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />
         </>
       ) : authStatus === "loggedOut" ? (
         <>
           <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           {/* Crisis help must be reachable BEFORE any sign-in: it is offline
               static content and never needs the vault or the network. */}
-          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
+          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />
         </>
       ) : !unlocked ? (
         // Logged in (token on disk) but the memory-only key vault is locked:
@@ -175,7 +180,7 @@ export function AppNavigator(): React.JSX.Element {
           <Stack.Screen name="Unlock" component={UnlockScreen} options={{ headerShown: false }} />
           {/* Vault-locked users are at their most vulnerable moment — the
               crisis screen must stay one tap away without unlocking. */}
-          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
+          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />
         </>
       ) : !onboardingResolved && !showOnboarding ? (
         // M-18: the persisted onboarding flag has not been resolved for the
@@ -184,7 +189,7 @@ export function AppNavigator(): React.JSX.Element {
         // screen of the main flow — no journal flash before the panels.
         <>
           <Stack.Screen name="Booting" component={BootSplash} options={{ headerShown: false }} />
-          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
+          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />
         </>
       ) : (
         <>
@@ -193,18 +198,22 @@ export function AppNavigator(): React.JSX.Element {
           {showOnboarding && (
             <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
           )}
-          <Stack.Screen name="Entry" component={EntryScreen} options={{ title: "Today" }} />
-          <Stack.Screen name="History" component={HistoryWithShell} options={{ title: "History" }} />
-          <Stack.Screen name="Insights" component={InsightsWithShell} options={{ title: "Patterns" }} />
-          <Stack.Screen name="Question" component={QuestionWithShell} options={{ title: "One question" }} />
-          <Stack.Screen name="Settings" component={SettingsWithShell} options={{ title: "Settings" }} />
-          <Stack.Screen name="TherapistShare" component={TherapistShareScreen} options={{ title: "My therapist" }} />
-          <Stack.Screen name="Measures" component={MeasuresScreen} options={{ title: "Wellbeing measures" }} />
+          {/* 2026-09-26 audit M-M4: every screen title resolves through tr()
+              at render time (the locale is startup-fixed, so per-render
+              lookup is stable) — they were hardcoded English while nav.*
+              keys existed in both catalogs. */}
+          <Stack.Screen name="Entry" component={EntryScreen} options={{ title: tr("nav.today") }} />
+          <Stack.Screen name="History" component={HistoryWithShell} options={{ title: tr("nav.history") }} />
+          <Stack.Screen name="Insights" component={InsightsWithShell} options={{ title: tr("nav.patterns") }} />
+          <Stack.Screen name="Question" component={QuestionWithShell} options={{ title: tr("nav.questionTitle") }} />
+          <Stack.Screen name="Settings" component={SettingsWithShell} options={{ title: tr("nav.settings") }} />
+          <Stack.Screen name="TherapistShare" component={TherapistShareScreen} options={{ title: tr("nav.therapist") }} />
+          <Stack.Screen name="Measures" component={MeasuresScreen} options={{ title: tr("nav.measures") }} />
           {/* The privacy policy is static, offline content (like Crisis). */}
-          <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: "Privacy" }} />
+          <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: tr("nav.privacy") }} />
           {/* Crisis help: one navigation hop from every screen (offline,
               static content — see CrisisScreen). */}
-          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />
+          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />
         </>
       )}
     </Stack.Navigator>

@@ -28,6 +28,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
+from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
 from ..models import AccessLog, Consent, Entry, Insight, Measure, User, utcnow
@@ -103,13 +104,45 @@ def _take_export_metadata_page(rows):
     return selected
 
 
-async def _require_verifier(user: User, body_verifier: str, request: Request) -> None:
+async def _require_verifier(
+    user: User,
+    body_verifier: str,
+    request: Request,
+    session: AsyncSession | None = None,
+) -> User:
     """Password-equivalent proof: scrypt(verifier) must match the stored hash.
 
     403, not 401: the bearer token authenticated fine — it is the
     re-authentication that failed. Clients treat 401 as "session expired,
     re-login", which would loop forever on a wrong-password answer.
-    """
+
+    2026-09-26 audit M-B1: when the caller supplies its request session,
+    the comparison runs against a FRESHLY re-read row
+    (``populate_existing``), not the auth-time ORM snapshot — the app's
+    sessionmaker is ``expire_on_commit=False``, so that snapshot keeps
+    PRE-ROTATION salt/verifier bytes for the whole request. A credential
+    rotation (or logout) that commits while this request is in flight must
+    make the old verifier fail HERE instead of re-authenticating a
+    mid-flight request against retired key material; the caller's own
+    lifecycle fence additionally re-checks the token epoch (see each
+    verifier-gated endpoint). A vanished row falls back to the snapshot
+    only so the endpoint's in-fence re-read (which refuses missing
+    accounts with its own flat 404) still decides the outcome — nothing
+    can commit from a deleted account either way. Returns the row the
+    proof was checked against so callers can reuse the fresh object."""
+    target = user
+    if session is not None:
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is not None:
+            target = fresh
     try:
         verifier_bytes = base64.b64decode(body_verifier, validate=True)
     except (binascii.Error, ValueError):
@@ -118,10 +151,24 @@ async def _require_verifier(user: User, body_verifier: str, request: Request) ->
         ) from None
     async with auth_work_slot(request):
         candidate = await hash_verifier_off_loop(
-            verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
+            verifier_bytes, target.scrypt_salt, limiter=_auth_limiter(request)
         )
-    if not hmac.compare_digest(candidate, bytes(user.verifier)):
+    if not hmac.compare_digest(candidate, bytes(target.verifier)):
         raise ApiError(status_code=403, detail="invalid credentials", code="verification_failed")
+    return target
+
+
+def _epoch_fence_failed(fresh: User, expected_epoch: int) -> bool:
+    """2026-09-26 audit M-B1: the in-fence epoch half of the M-2 pattern.
+
+    Every verifier-gated lifecycle endpoint captures ``user.token_epoch``
+    at entry (the epoch its bearer authenticated under) and re-reads the
+    row inside its fence; this predicate is the shared 401 decision. A
+    logout or credential rotation that committed while the request was
+    queued behind the fence must fail the request closed — a pre-rotation
+    bearer+verifier pair may not finish widening disclosure or destroying
+    the account, exactly like the M-2 recompute/rekey fences."""
+    return fresh.token_epoch != expected_epoch
 
 
 @router.get(
@@ -618,7 +665,10 @@ async def rotate_credential(
     rotates here.
     """
     # Old-password proof first: nothing else may run on a bearer alone.
-    await _require_verifier(user, body.verifier, request)
+    # M-B1 (2026-09-26): the proof runs against the freshly re-read row,
+    # and expected_epoch below fences the update against a concurrent
+    # rotation (the pre-existing M-2 fence keeps its semantics).
+    await _require_verifier(user, body.verifier, request, session)
     try:
         new_salt_bytes = base64.b64decode(body.new_salt, validate=True)
         new_verifier_bytes = base64.b64decode(body.new_verifier, validate=True)
@@ -792,7 +842,10 @@ async def set_llm_consent(
     version); disabling clears both, so the row never claims a consent it
     no longer holds.
     """
-    await _require_verifier(user, body.verifier, request)
+    await _require_verifier(user, body.verifier, request, session)
+    # M-B1 (2026-09-26): the epoch this bearer authenticated under, for the
+    # in-fence re-authorization below.
+    expected_epoch = user.token_epoch
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         # Authentication loaded this row before re-authentication/KDF work.
         # Re-load under the same fence so a concurrent withdrawal/deletion or
@@ -808,6 +861,8 @@ async def set_llm_consent(
         )
         if fresh is None or not fresh.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         policy = llm.processing_policy_fingerprint(request.app.state.settings)
         if body.enabled and policy is None:
             raise ApiError(
@@ -862,9 +917,13 @@ async def delete_account(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
-    await _require_verifier(user, verifier, request)
+    await _require_verifier(user, verifier, request, session)
     if not user.is_active:
         raise ApiError(status_code=404, detail="account not found", code="not_found")
+    # M-B1 (2026-09-26): capture the token's epoch at entry; the fences
+    # below re-read the row and refuse a request whose credential was
+    # rotated (or session logged out) while it waited on the locks.
+    expected_epoch = user.token_epoch
     # Recompute holds the same lifecycle fence across its fresh consent read
     # and possible external dispatch. Once deletion returns, no queued or
     # in-flight recompute may newly send this account's plaintext off-server.
@@ -873,6 +932,22 @@ async def delete_account(
         # an active consent can expose journal ciphertext. Deleting the user
         # inside it makes the account lifecycle linearize with those reads.
         async with sharing_locks.hold(sharing_patient_lock_key(user.id)):
+            # M-B1 (2026-09-26): liveness AND epoch on a freshly re-read row
+            # before the destructive commit — a pre-rotation bearer+verifier
+            # pair queued behind these fences must not complete the deletion.
+            fresh = (
+                (
+                    await session.execute(
+                        select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if fresh is None or not fresh.is_active:
+                raise ApiError(status_code=404, detail="account not found", code="not_found")
+            if _epoch_fence_failed(fresh, expected_epoch):
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
             request.app.state.key_store.destroy_all_for_owner(user.id)
             await session.execute(delete(Insight).where(Insight.user_id == user.id))
             await session.execute(delete(Entry).where(Entry.user_id == user.id))
@@ -922,10 +997,27 @@ async def totp_setup(
             detail="totp already enabled — disable it (code required) before re-arming",
             code="version_conflict",
         )
-    await _require_verifier(user, body.verifier, request)
+    await _require_verifier(user, body.verifier, request, session)
+    # M-B1 (2026-09-26): epoch fence — see rotate_credential's M-2 note.
+    expected_epoch = user.token_epoch
     raw_secret, secret_b32 = generate_secret()
     wrapped = wrap_secret(raw_secret, request.app.state.settings.token_secret)
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        # M-B1 (2026-09-26): re-read inside the fence; a session retired by
+        # logout/rotation while this request queued must not arm a factor.
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         # One transaction: pending secret recorded, enrollment disarmed
         # until confirm, replay fence reset, audit row persisted.
         await session.execute(
@@ -962,7 +1054,9 @@ async def totp_enable(
     session: AsyncSession = Depends(get_session),
 ):
     """Confirm enrollment by presenting a code from the PENDING secret."""
-    await _require_verifier(user, body.verifier, request)
+    await _require_verifier(user, body.verifier, request, session)
+    # M-B1 (2026-09-26): epoch fence — see rotate_credential's M-2 note.
+    expected_epoch = user.token_epoch
     settings = request.app.state.settings
     secret = unwrap_secret(user.totp_secret, settings.token_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
@@ -971,15 +1065,34 @@ async def totp_enable(
             status_code=403, detail="invalid totp code", code="totp_code_invalid"
         )
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        # M-B1 (2026-09-26): liveness+epoch on a freshly re-read row inside
+        # the fence before the guarded arm below.
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         # Guarded update: only arms when the stored secret is still the one
         # this code was checked against (a concurrent re-setup wins and
         # leaves enrollment pending for a fresh confirm).
+        # 2026-09-26: db_rowcount — the established typed helper for DML
+        # rowcounts (the Result stubs carry no rowcount; see app/db.py);
+        # this was the one remaining raw .rowcount read and it tripped the
+        # mypy gate.
         result = await session.execute(
             update(User)
             .where(User.id == user.id, User.totp_secret == user.totp_secret)
             .values(totp_enabled=True, totp_last_counter=matched)
         )
-        if result.rowcount != 1:
+        if db_rowcount(result) != 1:
             raise ApiError(
                 status_code=409,
                 detail="totp setup changed, confirm again",
@@ -1021,7 +1134,9 @@ async def totp_disable(
         raise ApiError(
             status_code=404, detail="totp not enabled", code="not_found"
         )
-    await _require_verifier(user, body.verifier, request)
+    await _require_verifier(user, body.verifier, request, session)
+    # M-B1 (2026-09-26): epoch fence — see rotate_credential's M-2 note.
+    expected_epoch = user.token_epoch
     settings = request.app.state.settings
     secret = unwrap_secret(user.totp_secret, settings.token_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
@@ -1035,6 +1150,21 @@ async def totp_disable(
             status_code=403, detail="invalid totp code", code="totp_code_invalid"
         )
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        # M-B1 (2026-09-26): liveness+epoch on a freshly re-read row inside
+        # the fence before the factor is stripped below.
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         await session.execute(
             update(User)
             .where(User.id == user.id)

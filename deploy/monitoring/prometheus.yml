@@ -77,3 +77,39 @@ scrape_configs:
   #       target_label: instance
   #     - target_label: __address__
   #       replacement: blackbox:9115
+
+  # OPTIONAL host metrics (enable together with `--profile node` in the
+  # monitoring docker-compose.yml, then uncomment this job AND the
+  # mindpattern-host alert group in alerts.yml). The node-exporter service
+  # mounts the HOST root filesystem read-only at /host, so its filesystem
+  # series describe the host's real disks (pgdata/pgbackups volumes, log
+  # dirs) — the one failure class the API's own exposition cannot see.
+  #
+  # - job_name: mindpattern-node
+  #   static_configs:
+  #     - targets: ["node-exporter:9100"]
+
+  # OPTIONAL TLS certificate-expiry probe (same `blackbox` profile/service
+  # as the /readyz job above — it uses the `tls` module from
+  # blackbox-modules.yml, mounted by that service). Replace BOTH target
+  # literals with your real public origins before enabling; then uncomment
+  # this job AND the mindpattern-blackbox-tls alert group in alerts.yml.
+  # Probe the PUBLIC origin, not api:8000: the certificate that can expire
+  # is the one the proxy serves, and the exporter performs a real TLS
+  # handshake against it to read probe_ssl_earliest_cert_expiry.
+  #
+  # - job_name: mindpattern-blackbox-tls
+  #   metrics_path: /probe
+  #   params:
+  #     module: [tls]
+  #   static_configs:
+  #     - targets:
+  #         - portal.example.com:443
+  #         - app.example.com:443
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: __param_target
+  #     - source_labels: [__param_target]
+  #       target_label: instance
+  #     - target_label: __address__
+  #       replacement: blackbox:9115

@@ -1,10 +1,17 @@
 /**
  * The daily journal editor (WEB_PLAN P4.1). Everything happens on-device
  * first: the crisis dialog tier runs PRE-encryption over what was just
- * typed; sentiment comes from the on-device brain; the mood check-in and
- * streak live in the device-local encrypted mood log. On save, the payload
- * is encrypted and either uploaded or parked in the ciphertext-only
- * offline queue (open-tab offline, WEB_PLAN D-6).
+ * typed (throttled to once per account-day); the mood check-in and streak
+ * live in the device-local encrypted mood log. On save, the payload is
+ * encrypted and either uploaded or parked in the ciphertext-only offline
+ * queue (open-tab offline, WEB_PLAN D-6).
+ *
+ * H-5 (audit 2026-09-26): the encrypted payload's `sentiment` slot is the
+ * user's EXPLICIT self-report — backend brain.py treats it as "the user's
+ * own report, never a translation guess" and therapists read it. Only an
+ * explicit mood pick rides in the payload (null otherwise, mobile
+ * EntryScreen parity); the machine-derived sentimentScore stays
+ * device-local (the on-device read line and the mood-log fallback).
  *
  * Drafts are memory-only: no plaintext at rest, ever (disclosed in the UI).
  */
@@ -12,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { encryptEntry, timeOfDayBucket } from "../crypto/patient";
 import { detectCrisisLanguage } from "../crisisDetect";
+import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { localDateISO } from "../dates";
 import { newClientEntryId } from "../entryId";
 import { recordMood, localStreak } from "../moodLog";
@@ -19,8 +27,8 @@ import { ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, ACTIVITY_TAGS, activityTag
 import { enqueue, queueLength } from "../offlineQueue";
 import { promptChipsFor } from "../promptChips";
 import { isOnline } from "../platform";
-import { sentimentScore } from "../brain/sentiment";
-import { t } from "../strings";
+import { detectLanguage, sentimentScore } from "../brain/sentiment";
+import { getLocale, t } from "../strings";
 import { vault } from "../vault";
 import { Button, Card, ErrorBanner, Note, TextArea } from "../ui";
 
@@ -40,8 +48,15 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
   const [queuedCount, setQueuedCount] = useState(0);
 
   const userId = vault.ownerUserId();
-  const sentiment = useMemo(() => (text.trim() ? sentimentScore(text) : null), [text]);
-  const chips = useMemo(() => promptChipsFor(new Date(), 3), []);
+  // The on-device read is a display-only estimate — it never rides in the
+  // payload (H-5); only an explicit pick does.
+  const sentiment = useMemo(
+    () => (text.trim() ? sentimentScore(text, detectLanguage(text)) : null),
+    [text],
+  );
+  // E-3 parity: chips are seed text for the user's own journal — they must
+  // follow the app locale, not default to English.
+  const chips = useMemo(() => promptChipsFor(new Date(), 3, getLocale()), []);
 
   // The streak is device-local value (never synced) — load once per mount.
   useEffect(() => {
@@ -56,35 +71,49 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
 
   const save = async (): Promise<void> => {
     if (!text.trim()) {
-      setError("Write something first — even one honest sentence counts.");
+      setError(t("entry.empty"));
       return;
     }
     const keys = vault.get();
     const owner = vault.ownerUserId();
     if (!owner) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
+    const date = localDateISO();
     // The crisis dialog tier runs PRE-encryption, on what was just typed:
-    // the resource prompt must precede any encrypt/send call.
+    // the resource prompt must precede any encrypt/send call. Throttled to
+    // once per (account, calendar day) — LOW c (audit 2026-09-26), mobile
+    // crisisDialog parity: a prompt on every draft trains dismissal. The
+    // stamp records BEFORE the prompt so sequential saves cannot
+    // double-fire; a storage failure fails toward showing.
     if (detectCrisisLanguage(text) && !crisisPrompt) {
-      setCrisisPrompt(true);
-      return; // the user confirms once; the next Save proceeds
+      const shownToday = await crisisDialogShownOn(owner, date).catch(() => false);
+      if (!shownToday) {
+        await recordCrisisDialogShown(owner, date).catch(() => undefined);
+        setCrisisPrompt(true);
+        return; // the user confirms once; the next Save proceeds
+      }
+      // Already acknowledged today (or the stamp is unreadable): the save
+      // proceeds without re-prompting.
     }
     setBusy(true);
     setError("");
     try {
-      const date = localDateISO();
       const entryDate = date; // WEB_PLAN D-7: creation is today-only
       const clientEntryId = newClientEntryId(entryDate);
       const createdAt = new Date().toISOString();
+      // H-5 (audit 2026-09-26): ONLY the explicit pick rides in the
+      // encrypted payload's sentiment slot — null when no pick was made.
+      // The machine estimate is never written where the backend/therapist
+      // would read it as the user's own report.
       const { blobB64 } = await encryptEntry(
         keys.dataKey,
         owner,
         clientEntryId,
         text,
         createdAt,
-        sentiment,
+        moodPick,
         {
           ...(energyPick !== null ? { energy: energyPick } : {}),
           ...(sleepPick !== null ? { sleep: sleepPick } : {}),
@@ -93,9 +122,10 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
         },
         1,
       );
-      if (moodPick !== null) {
-        await recordMood(keys.dataKey, owner, date, moodPick, energyPick).catch(() => undefined);
-      }
+      // The mood log is device-local metadata recorded on EVERY save
+      // (mobile EntryScreen parity): the explicit pick wins, the quick
+      // text estimate fills in when there is none.
+      await recordMood(keys.dataKey, owner, date, moodPick ?? sentimentScore(text, detectLanguage(text)), energyPick).catch(() => undefined);
 
       let result: SaveResult = "queued";
       if (isOnline()) {
@@ -123,7 +153,7 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       setCrisisPrompt(false);
       props.onSaved(result, date);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save — try again.");
+      setError(err instanceof Error ? err.message : t("entry.couldNotSave"));
     } finally {
       setBusy(false);
     }
@@ -132,19 +162,19 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
   return (
     <>
       {crisisPrompt && (
-        <Card title="Before you save">
-          <Note tone="danger">{"What you wrote sounds heavy. You deserve support — the resources below are one tap away, any time."}</Note>
-          <Note tone="muted">{"You can still save this entry. Press Save again to continue."}</Note>
+        <Card title={t("entry.crisisPromptTitle")}>
+          <Note tone="danger">{t("entry.crisisPromptBody")}</Note>
+          <Note tone="muted">{t("entry.crisisPromptProceed")}</Note>
         </Card>
       )}
-      <Card title="Today's entry">
-        {streak !== null && streak > 0 && <Note role="status">{`Writing streak: ${streak} day${streak === 1 ? "" : "s"}`}</Note>}
-        {queuedCount > 0 && <Note tone="warn">{`${queuedCount} entr${queuedCount === 1 ? "y" : "ies"} waiting to sync — saved on this device, encrypted.`}</Note>}
+      <Card title={t("entry.title")}>
+        {streak !== null && streak > 0 && <Note role="status">{t(streak === 1 ? "common.streakOne" : "common.streakMany", { count: streak })}</Note>}
+        {queuedCount > 0 && <Note tone="warn">{t(queuedCount === 1 ? "entry.queuedOne" : "entry.queuedMany", { count: queuedCount })}</Note>}
         <TextArea
-          label="How was today?"
+          label={t("entry.question")}
           value={text}
           onChange={setText}
-          placeholder="Write freely. Only you can read this."
+          placeholder={t("entry.placeholderWeb")}
           rows={8}
         />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -153,10 +183,10 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
           ))}
         </div>
         {sentiment !== null && (
-          <Note tone="muted">On-device read: this entry leans {sentiment > 0.05 ? "lighter" : sentiment < -0.05 ? "heavier" : "even"}.</Note>
+          <Note tone="muted">{t("entry.onDeviceRead", { leaning: sentiment > 0.05 ? t("entry.leanLighter") : sentiment < -0.05 ? t("entry.leanHeavier") : t("entry.leanEven") })}</Note>
         )}
 
-        <Button label={detailsOpen ? "Hide details" : "Add details (mood, sleep, energy, tags)"} onPress={() => setDetailsOpen(!detailsOpen)} small />
+        <Button label={detailsOpen ? t("entry.hideDetails") : t("entry.showDetailsWeb")} onPress={() => setDetailsOpen(!detailsOpen)} small />
         {detailsOpen && (
           <>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -197,14 +227,14 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
                 <Button key={tag} label={activityTagLabel(tag)} small danger={tags.includes(tag)} onPress={() => toggleTag(tag)} />
               ))}
             </div>
-            <Note tone="muted">Details are optional and travel inside the entry's encryption — the server sees only ciphertext.</Note>
+            <Note tone="muted">{t("entry.detailsNote")}</Note>
           </>
         )}
 
         <ErrorBanner message={error} />
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <Button label={busy ? "Saving…" : "Save entry"} onPress={() => void save()} disabled={busy} />
-          <Note tone="muted">{isOnline() ? "Drafts live in this tab's memory only — nothing readable is stored." : "Offline — the entry will queue, encrypted, and sync when you're back."}</Note>
+          <Button label={busy ? t("entry.saving") : t("entry.save")} onPress={() => void save()} disabled={busy} />
+          <Note tone="muted">{isOnline() ? t("entry.draftMemoryNote") : t("entry.offlineQueueNote")}</Note>
         </div>
       </Card>
     </>

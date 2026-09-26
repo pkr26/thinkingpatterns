@@ -153,7 +153,19 @@ else:
     EXPORTED = set(re.findall(r"mindpattern_[a-zA-Z0-9_:]+", render_code))
     print(f"verify: metrics.py render() exports: {', '.join(sorted(EXPORTED))}")
 TEXTFILE = {"mindpattern_backup_last_success_timestamp_seconds"}  # backup-heartbeat.sh
-BUILTIN = {"up", "probe_success"}  # provided by Prometheus / blackbox job
+# Provided by Prometheus itself, the blackbox jobs (including the tls
+# module's certificate-expiry gauge), and the opt-in node_exporter
+# profile's filesystem series — grounded by their exporters, not by
+# metrics.py. These names appear only in commented OPTIONAL alert groups
+# (disk-full, TLS-cert expiry); enabling one of those groups makes its
+# expressions check against this set exactly like any other rule.
+BUILTIN = {
+    "up",
+    "probe_success",
+    "probe_ssl_earliest_cert_expiry",  # blackbox `tls` module
+    "node_filesystem_avail_bytes",     # node_exporter (`node` profile)
+    "node_filesystem_size_bytes",      # node_exporter (`node` profile)
+}
 
 errors = []
 
@@ -295,6 +307,23 @@ for db_rel in sorted((base / "grafana" / "dashboards").glob("*.json")):
                     f"metrics.py does NOT export: {', '.join(bad)}"
                 )
     print(f"verify: dashboard {rel}: {len(panels)} panel(s), {n_exprs} grounded expression(s)")
+
+# --- blackbox exporter modules: YAML + shape ---------------------------
+# blackbox-modules.yml replaces the pinned image's stock module config;
+# every scrape job that names a module (http_2xx for /readyz, tls for
+# cert expiry) resolves against THIS file, so a typo'd module name must
+# fail here rather than as a 400 on the targets page at 3am.
+bb = load("blackbox-modules.yml")
+if isinstance(bb, dict):
+    modules = bb.get("modules")
+    if not isinstance(modules, dict) or not modules:
+        errors.append("blackbox-modules.yml: modules must be a non-empty mapping")
+    else:
+        for mname, module in modules.items():
+            if not isinstance(module, dict) or not module.get("prober"):
+                errors.append(f"blackbox-modules.yml: module {mname!r} needs a prober")
+else:
+    errors.append("blackbox-modules.yml: not a module mapping (expected modules:)")
 
 for rel in [
     "docker-compose.yml",

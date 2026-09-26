@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ListedConsent } from "../api/client";
 import { toBase64 } from "../crypto/core";
 import { keyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
+import { t } from "../strings";
 import { vault } from "../vault";
 import { Button, Card, ErrorBanner, Field, Note } from "../ui";
 
@@ -31,7 +32,7 @@ export function ShareView(): React.JSX.Element {
     const run = generation.current + 1;
     generation.current = run;
     if (!vault.isUnlocked()) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     try {
@@ -40,7 +41,7 @@ export function ShareView(): React.JSX.Element {
       setConsents(rows);
     } catch (err) {
       if (generation.current !== run) return;
-      setError(err instanceof Error ? err.message : "Could not load sharing.");
+      setError(err instanceof Error ? err.message : t("share.webLoadFailed"));
     }
   }, []);
 
@@ -55,7 +56,7 @@ export function ShareView(): React.JSX.Element {
     setDisclosureAccepted(false);
     setFingerprintVerified(false);
     if (!code.trim()) {
-      setError("Type the pairing code your therapist shows.");
+      setError(t("share.webCodeRule"));
       return;
     }
     setBusy(true);
@@ -68,8 +69,8 @@ export function ShareView(): React.JSX.Element {
         fingerprint: await keyFingerprint(found.wrap_pub_key),
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) setError("That code is not valid — codes expire after 15 minutes and work once.");
-      else setError(err instanceof Error ? err.message : "Lookup failed.");
+      if (err instanceof ApiError && err.status === 404) setError(t("share.webCodeExpired"));
+      else setError(err instanceof Error ? err.message : t("share.webLookupFailed"));
     } finally {
       setBusy(false);
     }
@@ -84,7 +85,7 @@ export function ShareView(): React.JSX.Element {
       const keys = vault.get();
       const wrap = await wrapDataKeyForTherapist(keys.dataKey, lookup.wrapPubKey, owner, lookup.therapistId);
       await api.grantConsent(code.trim(), wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(keys.authKey));
-      setStatus(`Shared with ${lookup.name}. They can now see your patterns and the entries behind them, until you revoke.`);
+      setStatus(t("share.webGrantedStatus", { name: lookup.name }));
       setCode("");
       setLookup(null);
       setDisclosureAccepted(false);
@@ -92,9 +93,9 @@ export function ShareView(): React.JSX.Element {
       await load();
     } catch (err) {
       if (err instanceof ApiError && err.code === "disclosure_outdated") {
-        setError("The sharing terms changed — start the pairing again to see the current disclosure.");
+        setError(t("share.webTermsChanged"));
       } else {
-        setError(err instanceof Error ? err.message : "Could not complete sharing.");
+        setError(err instanceof Error ? err.message : t("share.webGrantFailed"));
       }
     } finally {
       setBusy(false);
@@ -107,10 +108,10 @@ export function ShareView(): React.JSX.Element {
     setError("");
     try {
       await api.revokeConsent(consent.id, toBase64(vault.get().authKey));
-      setStatus(`Revoked — ${consent.display_name} loses access immediately. What they already read cannot be unread.`);
+      setStatus(t("share.webRevokedStatus", { name: consent.display_name }));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not revoke.");
+      setError(err instanceof Error ? err.message : t("share.webRevokeFailed"));
     } finally {
       setBusy(false);
     }
@@ -121,45 +122,45 @@ export function ShareView(): React.JSX.Element {
 
   return (
     <>
-      <Card title="Share with a therapist">
-        <Note tone="muted">{"Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."}</Note>
-        <Field label="Pairing code" value={code} onChange={setCode} placeholder="from your therapist's portal" />
-        <Button label={busy ? "Working…" : "Look up"} onPress={() => void doLookup()} disabled={busy} small />
+      <Card title={t("share.webTitle")}>
+        <Note tone="muted">{t("share.webZeroKnowledge")}</Note>
+        <Field label={t("share.webPairingCode")} value={code} onChange={setCode} placeholder={t("share.webPairingPlaceholder")} />
+        <Button label={busy ? t("settings.working") : t("share.webLookUp")} onPress={() => void doLookup()} disabled={busy} small />
         {lookup && (
           <>
-            <Note role="status">{`Therapist: ${lookup.name}`}</Note>
-            <Note>{`Their key fingerprint: ${lookup.fingerprint}`}</Note>
-            <Note tone="warn">{"Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."}</Note>
+            <Note role="status">{t("share.webTherapist", { name: lookup.name })}</Note>
+            <Note>{t("share.webFingerprint", { fingerprint: lookup.fingerprint })}</Note>
+            <Note tone="warn">{t("share.webFingerprintWarn")}</Note>
             <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: themeBody }}>
               <input type="checkbox" checked={fingerprintVerified} onChange={(e) => setFingerprintVerified(e.target.checked)} />
               <span>
-                {"We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"}
+                {t("share.webFingerprintConfirm")}
               </span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: themeBody }}>
               <input type="checkbox" checked={disclosureAccepted} onChange={(e) => setDisclosureAccepted(e.target.checked)} />
               <span>
-                {"I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what was already seen."}
+                {t("share.webDisclosureConfirm")}
               </span>
             </label>
-            <Button label="Confirm and share" onPress={() => void grant()} disabled={busy || !disclosureAccepted || !fingerprintVerified} />
+            <Button label={t("share.webConfirmShare")} onPress={() => void grant()} disabled={busy || !disclosureAccepted || !fingerprintVerified} />
           </>
         )}
         <ErrorBanner message={error} />
         {status && <Note role="status" tone="ok">{status}</Note>}
       </Card>
 
-      <Card title="Your grants">
-        {consents === null && <Note role="status">Loading…</Note>}
-        {consents !== null && active.length === 0 && <Note>No active grants — your journal is shared with no one.</Note>}
+      <Card title={t("share.webGrantsTitle")}>
+        {consents === null && <Note role="status">{t("common.loading")}</Note>}
+        {consents !== null && active.length === 0 && <Note>{t("share.webNoGrants")}</Note>}
         {active.map((consent) => (
           <div key={consent.id} style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid #dfe5ec", paddingTop: 10 }}>
-            <Note>{`${consent.display_name} (${consent.username}) — since ${consent.granted_at.slice(0, 10)}`}</Note>
-            <Button label="Revoke access" onPress={() => void revoke(consent)} small danger disabled={busy} />
+            <Note>{t("share.webSince", { name: consent.display_name, username: consent.username, date: consent.granted_at.slice(0, 10) })}</Note>
+            <Button label={t("share.webRevoke")} onPress={() => void revoke(consent)} small danger disabled={busy} />
           </div>
         ))}
         {past.length > 0 && (
-          <Note tone="muted">{`Revoked or ended: ${past.map((consent) => consent.display_name).join(", ")}.`}</Note>
+          <Note tone="muted">{t("share.webRevokedList", { names: past.map((consent) => consent.display_name).join(", ") })}</Note>
         )}
       </Card>
     </>

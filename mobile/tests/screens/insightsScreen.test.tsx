@@ -1412,7 +1412,9 @@ describe("M-36: weekday words localize at render time", () => {
       const root = await render(<InsightsScreen />);
       await flush();
       const text = textOf(root);
-      expect(text).toContain("Ha mencionado 'trabajo' 7 veces, la mayoría de las veces en lunes.");
+      // 2026-09-26 audit LOW (es grammar): "…la mayoría de las veces los
+      // lunes." — the weekday needs its article.
+      expect(text).toContain("Ha mencionado 'trabajo' 7 veces, la mayoría de las veces los lunes.");
       expect(text).not.toContain("Monday");
       await act(async () => root.unmount());
     } finally {
@@ -1465,7 +1467,7 @@ describe("theme-key labels localize at render time (ES theme set, 2026-09-21)", 
       const root = await render(<InsightsScreen />);
       await flush();
       const text = textOf(root);
-      expect(text).toContain("Ha mencionado 'el trabajo' 7 veces, la mayoría de las veces en domingo.");
+      expect(text).toContain("Ha mencionado 'el trabajo' 7 veces, la mayoría de las veces los domingo.");
       expect(text).not.toContain("'work'");
       await act(async () => root.unmount());
     } finally {

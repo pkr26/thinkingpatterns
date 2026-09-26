@@ -24,8 +24,14 @@ vi.mock("../src/api", async (importOriginal) => {
         wrap_pub_key: "P".repeat(124),
         wrap_key_blob: "KQ==",
       })),
+      // 2026-09-26 audit M-P1: lockDown fires this best-effort before the
+      // local teardown on every lock route (sign-out, idle, 401, bfcache).
+      logout: vi.fn(async () => null),
       patients: vi.fn(async () => []),
-      patientInsights: vi.fn(async () => ({ phase: "baseline", active_days: 0, streak: 0, days_remaining: 30, blob: null })),
+      patientInsights: vi.fn(async () => ({
+        phase: "baseline", active_days: 0, streak: 0, days_remaining: 30, blob: null, state_seq: 0,
+      })),
+      patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
       createNote: vi.fn(async () => ({})),
@@ -168,6 +174,44 @@ describe("App", () => {
     expect(textOf(root)).toContain("Your in-memory keys were cleared");
   });
 
+  it("2026-09-26 audit M-P1: sign-out revokes the bearer server-side before the local teardown", async () => {
+    // A copied bearer used to stay valid for its full 24h TTL after "sign
+    // out" — lockDown now fires POST /auth/logout (token-epoch bump) as
+    // part of every lock boundary.
+    const root = await login();
+    await press(root, "Sign out");
+    await flush();
+    expect(vi.mocked(api.logout)).toHaveBeenCalledTimes(1);
+    expect(hasSession()).toBe(false);
+    expect(textOf(root)).toContain("Signed out. Your in-memory keys were cleared.");
+  });
+
+  it("M-P1: a FAILING logout never blocks the local lockdown", async () => {
+    // The revocation is best-effort by contract: an unreachable backend at
+    // sign-out must not leave decrypted keys on screen waiting for it.
+    vi.mocked(api.logout).mockRejectedValueOnce(new Error("offline backend"));
+    const root = await login();
+    await press(root, "Sign out");
+    await flush();
+    expect(vi.mocked(api.logout)).toHaveBeenCalledTimes(1);
+    expect(hasSession()).toBe(false);
+    expect(textOf(root)).toContain("Signed out. Your in-memory keys were cleared.");
+    expect(textOf(root)).toContain("Sign in");
+  });
+
+  it("M-P1: the idle lock also revokes the bearer server-side", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60 * 1000); });
+      expect(textOf(root)).toContain("Locked after inactivity");
+      expect(vi.mocked(api.logout)).toHaveBeenCalledTimes(1);
+      expect(hasSession()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("L-75 fallback: without sessionStorage the old scrub-on-lock contract returns", async () => {
     // Some privacy modes expose no (or a dead) sessionStorage; the anchor
     // store then falls back to localStorage, which MUST keep the old
@@ -267,6 +311,10 @@ describe("App", () => {
     const root = await login();
     await expire();
     expect(textOf(root)).toContain("Session expired — please sign in again.");
+    // M-P1 (2026-09-26): the 401 latch teardown fires the same best-effort
+    // revocation while the dying session still exists — an already-dead
+    // token's 401 answer is swallowed like any other logout failure.
+    expect(vi.mocked(api.logout)).toHaveBeenCalledTimes(1);
 
     // Sign back in on the same rendered app — no reload, no re-registration.
     await typeInto(root, "Username", "drportal");

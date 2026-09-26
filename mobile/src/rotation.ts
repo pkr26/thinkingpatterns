@@ -27,6 +27,7 @@
  */
 import { api, ApiError } from "./api/client";
 import { decryptEntry, deriveKeysAsync } from "./crypto/MindPatternCrypto";
+import { engine } from "./crypto/engine";
 import { wrapDataKeyForTherapist } from "./crypto/sharing";
 import { zeroize } from "./crypto/kdf";
 import { rebindEntryVersions, forgetAllEntryVersions } from "./entryVersions";
@@ -37,11 +38,17 @@ import { verifyPasswordForVault } from "./reauth";
 import { vault } from "./vault";
 import { disableBiometricUnlock } from "./biometricUnlock";
 
-/** 16 random bytes — the KDF salt size shared with registration. */
+/** 16 random bytes — the KDF salt size shared with registration.
+ *  2026-09-26 audit H-2: the entropy now comes from the app's CSPRNG seam
+ *  (engine.randomBytes — quick-crypto's native JSI RNG on device,
+ *  node:crypto in tests; the same seam entryId.ts already uses). The old
+ *  implementation called globalThis.crypto.getRandomValues, which React
+ *  Native does not provide (RN 0.87 ships no Web Crypto global and
+ *  react-native-get-random-values is not a dependency) — the call sat
+ *  outside the typed-outcome try block, so password rotation crashed on
+ *  device with a raw TypeError instead of returning a typed failure. */
 function freshSalt(): Buffer {
-  const salt = Buffer.alloc(16);
-  globalThis.crypto.getRandomValues(new Uint8Array(salt.buffer, salt.byteOffset, 16));
-  return salt;
+  return Buffer.from(engine.randomBytes(16));
 }
 
 export type RotationStage = "verify" | "rekey" | "rewrap" | "credential" | "relogin";
@@ -114,26 +121,36 @@ export async function rotatePassword(input: {
   }
   if (!saltB64) return { ok: false, stage: "verify", reason: "offline" };
 
-  const oldKeys = await deriveKeysAsync(oldPassword, Buffer.from(saltB64, "base64"));
-  const newSalt = freshSalt();
-  const newKeys = await deriveKeysAsync(newPassword, newSalt);
-  const newSaltB64 = newSalt.toString("base64");
-  const newVerifierB64 = newKeys.authKey.toString("base64");
+  // 2026-09-26 audit H-2: the key derivations (and the fresh-salt draw they
+  // bracket) moved INSIDE the try block. freshSalt() used to run before it,
+  // so the on-device TypeError from the missing Web Crypto global escaped
+  // rotatePassword entirely as an unhandled rejection; now every derivation
+  // failure becomes a typed outcome (the "offline" bucket is the flow's
+  // established local-failure reason — see the stage-3 classifier below).
+  let oldKeys: Awaited<ReturnType<typeof deriveKeysAsync>> | null = null;
+  let newKeys: Awaited<ReturnType<typeof deriveKeysAsync>> | null = null;
+  let newSaltB64 = "";
+  let newVerifierB64 = "";
 
   try {
+    oldKeys = await deriveKeysAsync(oldPassword, Buffer.from(saltB64, "base64"));
+    const newSalt = freshSalt();
+    newKeys = await deriveKeysAsync(newPassword, newSalt);
+    newSaltB64 = newSalt.toString("base64");
+    newVerifierB64 = newKeys.authKey.toString("base64");
     // --- 3. rekey every stored blob old -> new -----------------------------
     let counts = { entries: 0, insights: 0, measures: 0 };
     let alreadyRekeyed = false;
     try {
-      const oldToken = (await api.openProcessingSession(oldKeys.dataKey.toString("base64"))).session_token;
-      const newToken = (await api.openProcessingSession(newKeys.dataKey.toString("base64"))).session_token;
+      const oldToken = (await api.openProcessingSession(oldKeys!.dataKey.toString("base64"))).session_token;
+      const newToken = (await api.openProcessingSession(newKeys!.dataKey.toString("base64"))).session_token;
       counts = await api.rekeyStoredData(oldToken, newToken, oldVerifierB64);
     } catch (err) {
       if (err instanceof ApiError && err.code === "rekey_key_mismatch") {
         // A previous attempt already moved the blobs to (this or another)
         // new key. Continue ONLY if the key we are about to make current
         // can actually read the journal.
-        if (!(await newKeyReadsJournal(userId, newKeys.dataKey))) {
+        if (!(await newKeyReadsJournal(userId, newKeys!.dataKey))) {
           return {
             ok: false,
             stage: "rekey",
@@ -161,7 +178,7 @@ export async function rotatePassword(input: {
         if (!consent.therapist_wrap_pub_key) continue;
         try {
           const wrap = wrapDataKeyForTherapist(
-            newKeys.dataKey,
+            newKeys!.dataKey,
             consent.therapist_wrap_pub_key,
             userId,
             consent.therapist_id,
@@ -230,7 +247,7 @@ export async function rotatePassword(input: {
     // (entry-version marks), clear what must be re-created on next use
     // (mood log, question feedback, unlock proof — all sealed under the
     // OLD data key).
-    await rebindEntryVersions(userId, oldKeys.dataKey, newKeys.dataKey).catch(() =>
+    await rebindEntryVersions(userId, oldKeys!.dataKey, newKeys!.dataKey).catch(() =>
       forgetAllEntryVersions(userId),
     );
     await clearMoodLog(userId).catch(() => {});
@@ -248,8 +265,21 @@ export async function rotatePassword(input: {
     await disableBiometricUnlock(userId).catch(() => {});
 
     return { ok: true, counts, rewrapped, rewrapFailures };
+  } catch (err) {
+    // H-2: a LOCAL failure before/outside the staged server flow (key
+    // derivation, the CSPRNG seam, unexpected internal errors) must be a
+    // typed outcome like every other failure — never an escaped throw.
+    return {
+      ok: false,
+      stage: "verify",
+      reason: err instanceof ApiError ? "server" : "offline",
+      detail: err instanceof ApiError ? err.message : undefined,
+    };
   } finally {
-    zeroize(oldKeys.masterKey, oldKeys.authKey, oldKeys.dataKey);
-    zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
+    // Nothing is derived yet → nothing to wipe (the H-2 restructure moved
+    // derivation inside the try, so a mid-derivation failure reaches here
+    // with one or both sets still null).
+    if (oldKeys) zeroize(oldKeys.masterKey, oldKeys.authKey, oldKeys.dataKey);
+    if (newKeys) zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
   }
 }

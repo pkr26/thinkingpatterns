@@ -5,6 +5,7 @@
  * the introduction for this account id.
  */
 import { useState } from "react";
+import { t } from "../strings";
 import { Button, Card, Note } from "../ui";
 
 export const ONBOARDING_FLAG_PREFIX = "mindpattern.onboarding.v1.";
@@ -17,34 +18,24 @@ export function markOnboardingSeen(userId: string, set: (key: string, value: str
   set(`${ONBOARDING_FLAG_PREFIX}${userId}`, "done");
 }
 
-const PANELS: { title: string; body: string }[] = [
-  {
-    title: "A journal that is yours alone",
-    body:
-      "Write daily. Everything you write is encrypted on this device before it leaves — the server stores only opaque ciphertext, forever. Not advice, not diagnosis: observations, each with its evidence.",
-  },
-  {
-    title: "Thirty honest days",
-    body:
-      "Patterns need data. For your first 30 active days you will see your streak and your local mood trend — and nothing else. After the threshold, MindPattern surfaces the patterns too slow for a human to notice: weekday themes, day-after links, returning worries.",
-  },
-  {
-    title: "You are in control",
-    body:
-      "Share with a therapist only if you choose (revocable, encrypted end to end). Crisis help is one tap away on every screen, offline. Export or delete everything at any time — deletion is real and immediate.",
-  },
+/** M-W5 (audit 2026-09-26): panel copy resolves through the t() catalog —
+ *  catalog KEYS here, never inline English. */
+const PANEL_KEYS: { titleKey: string; bodyKey: string }[] = [
+  { titleKey: "onboarding.webPanel1Title", bodyKey: "onboarding.webPanel1Body" },
+  { titleKey: "onboarding.webPanel2Title", bodyKey: "onboarding.webPanel2Body" },
+  { titleKey: "onboarding.webPanel3Title", bodyKey: "onboarding.webPanel3Body" },
 ];
 
 export function Onboarding(props: { onDone: () => void }): React.JSX.Element {
   const [step, setStep] = useState(0);
-  const panel = PANELS[step]!;
-  const last = step === PANELS.length - 1;
+  const panel = PANEL_KEYS[step]!;
+  const last = step === PANEL_KEYS.length - 1;
   return (
-    <Card title={panel.title}>
-      <Note>{panel.body}</Note>
+    <Card title={t(panel.titleKey)}>
+      <Note>{t(panel.bodyKey)}</Note>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Button label={last ? "Start journaling" : "Next"} onPress={() => (last ? props.onDone() : setStep(step + 1))} />
-        <Note tone="muted">{`Step ${step + 1} of ${PANELS.length}`}</Note>
+        <Button label={last ? t("onboarding.webStart") : t("onboarding.webNext")} onPress={() => (last ? props.onDone() : setStep(step + 1))} />
+        <Note tone="muted">{t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length })}</Note>
       </div>
     </Card>
   );

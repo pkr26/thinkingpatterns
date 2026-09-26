@@ -82,7 +82,7 @@ entirely:
 
 | Subprocessor | When engaged | Data disclosed | Transfer mechanism |
 |---|---|---|---|
-| LLM provider (`MINDPATTERN_LLM_URL`) | only if an individual user re-authenticates consent (off by default) | the brain's findings + sanitized journal-derived text during that analysis | provider DPA + region disclosed at consent time; if outside the EEA, SCCs (or an adequacy decision) must be executed by the OPERATOR before enabling |
+| LLM provider (`MINDPATTERN_LLM_URL`) | only if an individual user re-authenticates consent (off by default) | verbatim recent journal text (bounded: the newest entries up to a fixed count/character budget) plus the deterministic brain's findings, during that analysis; the model's OUTPUT is what is sanitized (labels length-capped, "recurring phrases" verified against the user's actual text) — the INPUT text is plaintext at the provider by design (see SECURITY_RESIDUALS `D2.plaintext-egress`) | provider DPA + region disclosed at consent time; if outside the EEA, SCCs (or an adequacy decision) must be executed by the OPERATOR before enabling |
 | Off-site object storage (S3-compatible, `deploy/backup-offsite/`) | only if the operator enables the offsite backup overlay | encrypted dump artifacts only (BACKUP_KEY-wrapped; the operator holds the key) | none if the bucket region is in-EEA; otherwise document the transfer basis with the storage provider's DPA |
 
 No other subprocessors exist: no analytics, no crash reporting, no
@@ -121,7 +121,7 @@ The patient web client (`web/`, WEB_PLAN D-4) adds a browser storage
 surface to this assessment. What the browser may persist, per category:
 
 - **Session token and derived keys: never persisted.** Both live only in
-  the tab's memory; refresh, a new tab, or a 10-minute idle lock drops
+  the tab's memory; refresh, a new tab, or a 5-minute idle lock drops
   them and re-authenticates. A storage-scrape red-team harness asserts
   after every flow that no storage carries token, verifier, or key
   material.

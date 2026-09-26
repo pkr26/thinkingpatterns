@@ -120,8 +120,14 @@ export function measurePayload(
 /** The score ceiling for a payload's measure name — used to clamp the
  *  patient's own history rows per instrument (a phq2 row must never
  *  render a phq9-scale number). Unknown names (future instruments)
- *  return null so callers skip the row rather than mis-scale it. */
+ *  return null so callers skip the row rather than mis-scale it.
+ *  2026-09-26 audit LOW: the lookup is an OWN-property check. The old
+ *  `in` operator leaked Object.prototype — `maxScoreForMeasure("constructor")`
+ *  returned undefined (≠ null), which falsified the caller's null gate and
+ *  produced a NaN share in the history render. */
 export function maxScoreForMeasure(measure: unknown): number | null {
   if (typeof measure !== "string") return null;
-  return (measure as MeasureId) in INSTRUMENTS ? INSTRUMENTS[measure as MeasureId].maxScore : null;
+  return Object.prototype.hasOwnProperty.call(INSTRUMENTS, measure)
+    ? INSTRUMENTS[measure as MeasureId]!.maxScore
+    : null;
 }

@@ -351,6 +351,26 @@ export interface InsightsSummary {
   streak: number;
   days_remaining: number;
   blob: string | null;
+  /** Analysis generation echoed OUTSIDE the ciphertext (backend
+   *  schemas.InsightsResponse): "must equal the ``state_seq`` inside the
+   *  decrypted payload and must never decrease" — the rollback-replay
+   *  sentinel the patient clients verify (web/src/stateSeqGuard.ts) and
+   *  that PatientView consumes after decrypting the blob (2026-09-26
+   *  audit L: the field used to be dropped here entirely, so the guard
+   *  could never fire on the therapist path). */
+  state_seq: number;
+}
+
+/** 2026-09-26 audit L: the insights `state_seq` echo is a security
+ *  sentinel, so it is validated like every other numeric wire field — a
+ *  canonical non-negative safe integer. A float, string, NaN, or negative
+ *  value must never reach the equality check in the view, where it could
+ *  silently pass (NaN !== NaN) or be coerced into a "match". */
+function validatedStateSeq(value: unknown, resource: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new ApiError(0, `server returned an invalid ${resource} state sequence`);
+  }
+  return value;
 }
 
 export interface PortalEntry {
@@ -375,11 +395,28 @@ export interface PortalMeasure {
 }
 
 /** One measures page request (audit L-76 / M-4, 2026-09-20): the backend
- *  serves this many rows per request at most (deterministic order
- *  measure_date DESC, received_at DESC, id DESC) and accepts limit/offset
- *  continuation.  100 stays well under the server cap on every backend
- *  generation, keeping each response small while the caller pages. */
+ *  serves this many rows per request at most (its own cap is 500) over the
+ *  deterministic order measure_date DESC, received_at DESC, id DESC.
+ *  100 stays well under the server cap on every backend generation,
+ *  keeping each response small while the caller pages. */
 export const THERAPIST_MEASURE_PAGE_SIZE = 100;
+
+/** 2026-09-26 audit L: the measures byte budget — the identical A-3
+ *  contract entries and notes already run. The server byte-truncates a
+ *  page to this many raw ciphertext bytes when the caller opts in with
+ *  `page_bytes`, and answers an explicit 413 to a legacy unopted request
+ *  that would exceed it (backend read_patient_measures). */
+export const THERAPIST_MEASURE_PAGE_BYTES = 2 * 1024 * 1024;
+
+export interface PatientMeasuresPage {
+  measures: PortalMeasure[];
+  /** Absent means this page completed the deterministic listing. */
+  nextOffset: number | null;
+  /** The immutable snapshot revision advertised by a revision-aware
+   *  backend (X-Measures-Revision); undefined is deliberate compatibility
+   *  mode for an older headerless backend. */
+  revision?: string;
+}
 
 export interface PatientEntriesPage {
   entries: PortalEntry[];
@@ -502,36 +539,120 @@ export interface PatientNotesPage {
 }
 
 export const api = {
+  /** 2026-09-26 audit M-P1: server-side revocation for every lock boundary
+   *  (sign-out button, 10-minute idle lock, 401 expiry latch, bfcache
+   *  restore). POST /auth/logout bumps the account's token epoch and kills
+   *  EVERY bearer at once (backend app/api/auth.py) — the default token TTL
+   *  is 24h, so without this a bearer copied off a shared clinic machine
+   *  stayed valid long after "sign out". Both patient clients call it
+   *  (web/src/api/client.ts, mobile/src/api/client.ts); the portal now does
+   *  too.
+   *
+   *  Deliberately does NOT ride the session's AbortController (the same
+   *  contract as the web client's logout): the caller fires this
+   *  immediately before clearSession(), whose abort would cancel the very
+   *  epoch bump the request exists to perform. Every other hardening stays
+   *  — 15 s deadline, no ambient credentials, redirect refusal, response
+   *  origin recheck — and the request runs on the token captured at call
+   *  time. Callers MUST treat it as best-effort: a failure (offline
+   *  backend, already-dead token) is theirs to swallow, never to block the
+   *  local lockdown with. The 401 latch is intentionally not wired here —
+   *  logout is fired from inside lockDown, and re-entering the handler
+   *  from it would recurse into a second teardown mid-lockdown. */
+  logout: async (): Promise<null> => {
+    const activeSession = session;
+    if (!activeSession) throw new ApiError(0, "not signed in");
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        `${activeSession.baseUrl}${API_PREFIX}/auth/logout`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${activeSession.token}` },
+        },
+        activeSession.baseUrl,
+      );
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(0, "server unreachable — check the server URL or your connection");
+    }
+    if (response.status === 204) return null;
+    const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        message(data.detail, response.status),
+        typeof data.code === "string" ? data.code : undefined,
+      );
+    }
+    return null;
+  },
   me: () => request<TherapistMe>("GET", "/therapist/me"),
   /** The newest 100 of this therapist's own audited actions (B-4). */
   accessLog: () => request<AccessLogRow[]>("GET", "/therapist/access-log?limit=100"),
   patients: () => request<Patient[]>("GET", "/therapist/patients"),
-  patientInsights: (userId: string) =>
-    request<InsightsSummary>("GET", `/therapist/patients/${encodeURIComponent(userId)}/insights`),
+  patientInsights: async (userId: string): Promise<InsightsSummary> => {
+    const summary = await request<InsightsSummary>(
+      "GET",
+      `/therapist/patients/${encodeURIComponent(userId)}/insights`,
+    );
+    if (summary === null || typeof summary !== "object") {
+      throw new ApiError(0, "server returned an invalid insights summary");
+    }
+    // 2026-09-26 audit L: surface the echoed generation as a validated
+    // integer — PatientView compares it against the seq embedded in the
+    // decrypted blob (rollback-replay detection).
+    return { ...summary, state_seq: validatedStateSeq(summary.state_seq, "insights") };
+  },
+  /** 2026-09-26 audit L: the measures traversal now runs the IDENTICAL
+   *  snapshot-revision contract as entries and notes (backend
+   *  read_patient_measures, ported A-3): byte-bounded pages opt in via
+   *  `page_bytes`, continuation comes from the validated X-Next-Offset
+   *  header, and every page after the first carries the pinned
+   *  `expected_revision` — a concurrent patient create answers 409
+   *  collection_changed instead of letting offset paging over the DESC
+   *  list duplicate or silently drop rows. The legacy limit/offset-only
+   *  shape (and the caller-side id-dedupe heuristic it forced) is gone. */
   patientMeasures: async (
     userId: string,
-    params: { offset?: number; limit?: number } = {},
-  ): Promise<PortalMeasure[]> => {
+    params: { offset?: number; expectedRevision?: string } = {},
+  ): Promise<PatientMeasuresPage> => {
     const offset = params.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0) {
       throw new ApiError(0, "invalid measure page offset");
     }
-    if (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || params.limit < 1)) {
-      throw new ApiError(0, "invalid measure page limit");
-    }
+    assertExpectedRevision(params.expectedRevision, "measures");
     const search = new URLSearchParams();
-    if (params.limit !== undefined) search.set("limit", String(params.limit));
-    // offset=0 is the default; omitting it keeps older backends (which
-    // reject unknown query params less gracefully) on their plain path.
+    search.set("limit", String(THERAPIST_MEASURE_PAGE_SIZE));
+    // Explicitly opt into a byte-short page. Older portals that do not know
+    // X-Next-Offset receive a clear 413 rather than silently losing rows.
+    search.set("page_bytes", String(THERAPIST_MEASURE_PAGE_BYTES));
     if (offset > 0) search.set("offset", String(offset));
-    const rows = await request<PortalMeasure[]>(
+    if (params.expectedRevision !== undefined) {
+      search.set("expected_revision", params.expectedRevision);
+    }
+    const response = await requestWithResponse<PortalMeasure[]>(
       "GET",
-      `/therapist/patients/${encodeURIComponent(userId)}/measures${search.size > 0 ? `?${search.toString()}` : ""}`,
+      `/therapist/patients/${encodeURIComponent(userId)}/measures?${search.toString()}`,
     );
-    if (!Array.isArray(rows)) {
+    if (!Array.isArray(response.data) || response.data.length > THERAPIST_MEASURE_PAGE_SIZE) {
       throw new ApiError(0, "server returned an invalid measures page");
     }
-    return rows;
+    return {
+      measures: response.data,
+      nextOffset: validatedNextOffset(
+        response.headers.get("X-Next-Offset"),
+        offset,
+        response.data.length,
+        THERAPIST_MEASURE_PAGE_SIZE,
+        "measures",
+      ),
+      revision: validatedRevision(
+        response.headers.get("X-Measures-Revision"),
+        params.expectedRevision,
+        "measures",
+      ),
+    };
   },
   patientEntries: async (
     userId: string,

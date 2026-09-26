@@ -4,6 +4,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryView } from "../src/views/Entry";
 import { queueLength } from "../src/offlineQueue";
+import { decryptEntry } from "../src/crypto/patient";
+import { sentimentScore } from "../src/brain/sentiment";
+import { recentMoods } from "../src/moodLog";
+import { crisisDialogShownOn } from "../src/crisisDialog";
+import { localDateISO } from "../src/dates";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
@@ -160,5 +165,81 @@ describe("EntryView: a 409 on a direct save is parked, never trusted (audit 2026
     expect(await queueLength("user-1")).toBe(1);
     // The editor cleared — the entry is safe in the ciphertext queue.
     expect(root.root.findAllByType("textarea")[0]!.props.value).toBe("");
+  });
+});
+
+describe("EntryView sentiment semantics (H-5, audit 2026-09-26)", () => {
+  it("an entry WITHOUT a mood pick stores payload sentiment null, and the mood log records the text estimate", async () => {
+    // Backend brain.py treats the payload's sentiment as the user's OWN
+    // report (therapists read it) — a machine-derived guess must never be
+    // written there. The estimate stays device-local: the mood log.
+    const TEXT = "I am happy and calm and light today";
+    const posted: { client_entry_id: string; blob: string }[] = [];
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init.body)) as { client_entry_id: string; blob: string };
+      posted.push({ client_entry_id: body.client_entry_id, blob: body.blob });
+      return jsonResponse({ id: "row" }, { status: 201 });
+    });
+    const root = await render(<EntryView onSaved={() => undefined} />);
+    await typeArea(root, "How was today?", TEXT);
+    await press(root, "Save entry");
+    await settle(40, 5);
+    expect(posted).toHaveLength(1);
+    const keys = vault.get();
+    const payload = await decryptEntry(keys.dataKey, "user-1", posted[0]!.client_entry_id, posted[0]!.blob, 1);
+    expect(payload.sentiment).toBeNull();
+    // The mood log WAS recorded — from the text estimate (mobile parity:
+    // the log is written on every save).
+    const days = await recentMoods(keys.dataKey, "user-1", 1);
+    expect(days).toHaveLength(1);
+    expect(days[0]!.date).toBe(localDateISO());
+    expect(days[0]!.value).toBeCloseTo(sentimentScore(TEXT), 10);
+  });
+
+  it("an explicit mood pick rides the payload verbatim", async () => {
+    const posted: { client_entry_id: string; blob: string }[] = [];
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init.body)) as { client_entry_id: string; blob: string };
+      posted.push({ client_entry_id: body.client_entry_id, blob: body.blob });
+      return jsonResponse({ id: "row" }, { status: 201 });
+    });
+    const root = await render(<EntryView onSaved={() => undefined} />);
+    await typeArea(root, "How was today?", "an ordinary day with one bright moment");
+    await press(root, "Add details (mood, sleep, energy, tags)");
+    await press(root, "Good"); // 0.5 on the explicit scale
+    await press(root, "Save entry");
+    await settle(40, 5);
+    expect(posted).toHaveLength(1);
+    const keys = vault.get();
+    const payload = await decryptEntry(keys.dataKey, "user-1", posted[0]!.client_entry_id, posted[0]!.blob, 1);
+    expect(payload.sentiment).toBe(0.5);
+    // The pick also wins in the mood log.
+    const days = await recentMoods(keys.dataKey, "user-1", 1);
+    expect(days[0]!.value).toBe(0.5);
+  });
+});
+
+describe("EntryView crisis-prompt cadence (LOW c, audit 2026-09-26)", () => {
+  it("prompts once per (account, day): a second crisis entry the same day saves without re-prompting", async () => {
+    const mock = stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
+    const root = await render(<EntryView onSaved={() => undefined} />);
+    // First crisis draft of the day: the support prompt gates the save.
+    await typeArea(root, "How was today?", "I want to kill myself");
+    await press(root, "Save entry");
+    await settle(40, 3);
+    expect(textOf(root)).toContain("sounds heavy");
+    expect(mock).not.toHaveBeenCalled();
+    expect(await crisisDialogShownOn("user-1", localDateISO())).toBe(true);
+    // The user confirms; the save proceeds.
+    await press(root, "Save entry");
+    await settle(40, 4);
+    expect(mock).toHaveBeenCalledTimes(1);
+    // A SECOND crisis entry the same day: throttled — straight through,
+    // no prompt card, no dismissal training.
+    await typeArea(root, "How was today?", "I want to kill myself again");
+    await press(root, "Save entry");
+    await settle(40, 4);
+    expect(mock).toHaveBeenCalledTimes(2);
+    expect(textOf(root)).not.toContain("sounds heavy");
   });
 });

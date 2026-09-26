@@ -115,10 +115,14 @@ export function decryptEntry(
   blobB64: string,
   /** The server-declared content generation of this row. When present the
    *  version-bound v2 AAD is tried first and the legacy three-part AAD is
-   *  the fallback (audit fix M-2: pre-2026-09-20 rows carry a v1 binding
-   *  while the row metadata still declares version 1); omitted → legacy
-   *  binding only. A blob that fails BOTH bindings is genuinely tampered
-   *  and throws. */
+   *  the fallback for version 1 ONLY (audit fix M-2, tightened 2026-09-26
+   *  as M-M1: legacy rows are generation 1 by construction — the server
+   *  mints content_version 1 on first store and only this client's v2 AAD
+   *  exists from generation 2 on). For contentVersion >= 2 the versioned
+   *  AAD is the only attempt: a compromised server pairing a stale pre-v2
+   *  blob with a fresh version echo must fail closed (TamperError), not be
+   *  laundered through the legacy fallback. Omitted version → legacy
+   *  binding only (pre-2026-09-20 servers). */
   contentVersion?: number,
 ): EntryPayload {
   const blob = Buffer.from(blobB64, "base64");
@@ -126,8 +130,12 @@ export function decryptEntry(
   if (contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1) {
     try {
       plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId, String(contentVersion)));
-    } catch {
-      plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
+    } catch (err) {
+      if (contentVersion === 1) {
+        plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
+      } else {
+        throw err;
+      }
     }
   } else {
     plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));

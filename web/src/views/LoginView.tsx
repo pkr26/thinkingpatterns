@@ -11,6 +11,7 @@ import { ApiError, auth, setSession, type TokenResponse } from "../api/client";
 import { deriveMasterKey, fromBase64, toBase64, zeroize } from "../crypto/core";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { randomBytes } from "../platform";
+import { t } from "../strings";
 import { vault } from "../vault";
 import { Button, Card, ErrorBanner, Field, Note } from "../ui";
 
@@ -43,25 +44,25 @@ const COMMON_PASSWORD_WORDS = [
   "mindpattern", "journal",
 ];
 
+/** M-W5 (audit 2026-09-26): policy copy resolves through the t() catalog
+ *  so a Spanish device reads its own password rules. */
 export function passwordPolicyError(password: string): string | null {
-  if (password.length < PASSWORD_MIN) return `Use at least ${PASSWORD_MIN} characters.`;
+  if (password.length < PASSWORD_MIN) return t("login.policyMinWeb", { min: PASSWORD_MIN });
   if (password.length < 16) {
     const variety =
       (/[a-z]/.test(password) ? 1 : 0)
       + (/[A-Z]/.test(password) ? 1 : 0)
       + (/[0-9]/.test(password) ? 1 : 0)
       + (/[^a-zA-Z0-9]/.test(password) ? 1 : 0);
-    if (variety < 3) return "Use at least three of: lowercase, uppercase, digits, symbols (or 16+ characters).";
+    if (variety < 3) return t("login.policyVarietyWeb");
   }
   const lowered = password.toLowerCase();
-  if (COMMON_PASSWORD_WORDS.some((word) => lowered.includes(word))) {
-    return "That password is too common or predictable — choose something unique.";
-  }
-  if (/^(.)\1+$/.test(password)) {
-    return "That password is too common or predictable — choose something unique.";
-  }
-  if (/^(0123|1234|2345|3456|4567|5678|6789|qwer|asdf|zxcv)/i.test(password)) {
-    return "That password is too common or predictable — choose something unique.";
+  if (
+    COMMON_PASSWORD_WORDS.some((word) => lowered.includes(word))
+    || /^(.)\1+$/.test(password)
+    || /^(0123|1234|2345|3456|4567|5678|6789|qwer|asdf|zxcv)/i.test(password)
+  ) {
+    return t("login.policyCommonWeb");
   }
   return null;
 }
@@ -110,17 +111,17 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
     if (err instanceof ApiError) {
       if (err.code === "rate_limited" && err.retryAfterMs !== undefined) {
         const seconds = Math.max(1, Math.round(err.retryAfterMs / 1000));
-        return `Too many attempts — try again in about ${seconds}s.`;
+        return t("login.rateLimitedWeb", { seconds });
       }
       return err.message;
     }
-    return "Something went wrong — try again.";
+    return t("login.genericWeb");
   };
 
   const submit = async (): Promise<void> => {
     setError("");
     if (!USERNAME_PATTERN.test(username)) {
-      setError("Username: 3–64 characters — letters, digits, dot, dash, underscore.");
+      setError(t("login.usernameRuleWeb"));
       return;
     }
     if (mode === "register") {
@@ -130,11 +131,11 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         return;
       }
       if (confirm !== password) {
-        setError("The two passwords do not match.");
+        setError(t("login.pwMismatchWeb"));
         return;
       }
     } else if (password.length === 0) {
-      setError("Enter your password.");
+      setError(t("login.enterPwWeb"));
       return;
     }
     setBusy(true);
@@ -151,11 +152,11 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         }
         const adoption = adoptSession(keys, token, username, props.onSuccess);
         if (adoption === "therapist-role") {
-          setError("This is a therapist account — use the therapist portal instead.");
+          setError(t("login.therapistRoleWeb"));
           return;
         }
         if (adoption === "invalid-response") {
-          setError("Sign-in failed — the server sent an invalid response. Try again.");
+          setError(t("login.invalidResponseWeb"));
           return;
         }
       } else {
@@ -170,11 +171,11 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         }
         const adoption = adoptSession(keys, token, username, props.onSuccess);
         if (adoption === "therapist-role") {
-          setError("This is a therapist account — use the therapist portal instead.");
+          setError(t("login.therapistRoleWeb"));
           return;
         }
         if (adoption === "invalid-response") {
-          setError("Sign-in failed — the server sent an invalid response. Try again.");
+          setError(t("login.invalidResponseWeb"));
           return;
         }
       }
@@ -186,21 +187,21 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
   };
 
   return (
-    <Card title={mode === "signin" ? "Sign in" : "Create your journal"}>
-      <Field label="Username" value={username} onChange={setUsername} autoComplete="username" placeholder="e.g. quiet.morning" />
-      <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
+    <Card title={mode === "signin" ? t("login.webSignInTitle") : t("login.webRegisterTitle")}>
+      <Field label={t("login.webUsername")} value={username} onChange={setUsername} autoComplete="username" placeholder="e.g. quiet.morning" />
+      <Field label={t("login.webPassword")} value={password} onChange={setPassword} type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
       {mode === "register" && (
         <>
-          <Field label="Confirm password" value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
-          <Note>12+ characters (16+, or three character classes, keeps it strong). If you forget it, nobody can recover it — that is the point.</Note>
+          <Field label={t("login.webConfirm")} value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
+          <Note>{t("login.webRegisterNote")}</Note>
         </>
       )}
       <ErrorBanner message={error} />
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Button label={busy ? "Working…" : mode === "signin" ? "Sign in" : "Create journal"} onPress={() => void submit()} disabled={busy} />
-        <Button label={mode === "signin" ? "Create an account" : "I have an account"} onPress={() => switchMode(mode === "signin" ? "register" : "signin")} small />
+        <Button label={busy ? t("settings.working") : mode === "signin" ? t("login.webSignInTitle") : t("login.webCreateJournal")} onPress={() => void submit()} disabled={busy} />
+        <Button label={mode === "signin" ? t("login.webCreateAccount") : t("login.webHaveAccount")} onPress={() => switchMode(mode === "signin" ? "register" : "signin")} small />
       </div>
-      <Note tone="muted">Your password never leaves this device. Only a derived verifier is sent — the server cannot read your journal.</Note>
+      <Note tone="muted">{t("login.webNeverLeaves")}</Note>
     </Card>
   );
 }

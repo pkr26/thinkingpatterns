@@ -31,14 +31,14 @@ vi.mock("../src/api", async (importOriginal) => {
         wrap_key_blob: "KQ==",
       })),
       patients: vi.fn(async () => []),
-      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==" })),
+      patientInsights: vi.fn(async () => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: 7 })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
       createNote: vi.fn(async () => ({})),
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
-      patientMeasures: vi.fn(async () => []),
+      patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       accessLog: vi.fn(async () => [
         { at: "2026-09-21T10:00:00Z", action: "read_notes", patient_name: "pat1" },
         { at: "2026-09-21T09:00:00Z", action: "wrap_key_rotate", patient_name: null },
@@ -65,6 +65,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
     decryptCaseloadSummary: vi.fn(async () => null),
     decryptMeasure: vi.fn(async () => null),
     decryptInsights: vi.fn(async () => ({
+      state_seq: 7,
       stats: {
         patterns: [
           { kind: "temporal", label: "work", occurrences: 9, confidence: 0.8, detail: { day: "Sunday", pattern_pid: "temporal:work", pattern_state: "confirmed", evidence_dates: ["2026-09-01", "2026-09-08"], first_seen: "2026-08-20", last_seen: "2026-09-08" } },
@@ -177,10 +178,13 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
   });
 
   it("FIX 15: recorded measures print in the session summary", async () => {
-    mockedApi.patientMeasures.mockResolvedValueOnce([
-      { id: "1", client_measure_id: "m-1", blob: "B1==", measure_date: "2026-09-04", received_at: "x" },
-      { id: "2", client_measure_id: "m-2", blob: "B2==", measure_date: "2026-09-11", received_at: "x" },
-    ] as never);
+    mockedApi.patientMeasures.mockResolvedValueOnce({
+      measures: [
+        { id: "1", client_measure_id: "m-1", blob: "B1==", measure_date: "2026-09-04", received_at: "x" },
+        { id: "2", client_measure_id: "m-2", blob: "B2==", measure_date: "2026-09-11", received_at: "x" },
+      ],
+      nextOffset: null,
+    } as never);
     vi.mocked(mockedCrypto.decryptMeasure)
       .mockResolvedValueOnce({ measure: "phq9", score: 14, completedAt: null, measureDate: "2026-09-04" })
       .mockResolvedValueOnce({ measure: "phq9", score: 9, completedAt: null, measureDate: "2026-09-11" });

@@ -56,6 +56,14 @@ MAX_UNLOCK_THRESHOLD_DAYS = 3_650  # 10 years max baseline (default 30)
 MAX_ENTRIES_PER_USER = 1_000_000  # 100x the 10k default storage quota
 MAX_USER_BLOB_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB (32x the 256 MiB quota)
 MAX_DB_POOL_TIMEOUT = 600  # seconds waiting for a pooled connection
+# 2026-09-26 audit (LOW, batch item f): max_body_bytes had only the shared
+# >=1024 floor — a typo'd env value of many GiB would boot and buffer
+# attacker-sized bodies at the ASGI edge. The ceiling sits above the whole
+# request-budget chain (analysis_blob_budget's own 64 MiB A-8 cap and the
+# base64-inflated entry bodies it must fit), so real deployments keep
+# every headroom they could legitimately want while a unit mistake fails
+# fast at boot like the other A-8 bounds.
+MAX_BODY_BYTES = 64 * 1024 * 1024
 
 
 def _int_env(name: str, default: int) -> int:
@@ -448,6 +456,10 @@ class Settings:
             raise RuntimeError(f"max_entries_per_user must be <= {MAX_ENTRIES_PER_USER}")
         if self.max_user_blob_bytes > MAX_USER_BLOB_BYTES:
             raise RuntimeError("max_user_blob_bytes must be <= 8 GiB")
+        # 2026-09-26 audit (LOW, batch item f): explicit ceiling — see the
+        # MAX_BODY_BYTES constant above (A-8-style fail-fast bound).
+        if self.max_body_bytes > MAX_BODY_BYTES:
+            raise RuntimeError(f"max_body_bytes must be <= {MAX_BODY_BYTES}")
         if self.db_pool_timeout > MAX_DB_POOL_TIMEOUT:
             raise RuntimeError(f"db_pool_timeout must be <= {MAX_DB_POOL_TIMEOUT}")
         # 2026-09-21 audit B-3: sub-second server timeouts are a self-DoS

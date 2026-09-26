@@ -144,8 +144,31 @@ or emulator), recorded as dated notes.
 | P4 | Journaling core (entry, offline queue, history) | ✅ done 2026-09-25 | M1 |
 | P5 | Multi-device sync engine & cross-client interop | ✅ done 2026-09-25 | M2 |
 | P6 | Analysis surfaces (insights, question, recompute) | ✅ done 2026-09-25 | M2 |
-| P7 | Measures, sharing, settings (full parity) | ☐ not started | M2 |
-| P10 | Deploy, release pipeline, docs | ☐ not started | M3 |
+| P7 | Measures, sharing, settings (full parity) | ✅ done 2026-09-25; E2E-verified 2026-09-26 | M2 |
+| P8 | Safety, i18n, accessibility | ✅ done 2026-09-25 | M3 |
+| P9 | Security & mutation campaigns, web + mobile | ✅ infra+harnesses 2026-09-25; campaign RUNS queued (deferral note below) | M3 |
+| P10 | Deploy, release pipeline, docs | ✅ done 2026-09-25; E2E-verified 2026-09-26 | M3 |
+
+> **2026-09-26: dashboard corrected.** P7/P10 were shipped with the
+> 2026-09-25 build-complete wave but had stayed "not started" here, and
+> the P8/P9 rows were missing entirely. P7's surfaces (measures
+> PHQ-9/GAD-7/PHQ-2, therapist share/grant/revoke with the ECDH
+> wrap round-trip into the portal, settings incl. export) and P10's
+> shipped artifact are independently verified end-to-end by the
+> black-box browser pass of 2026-09-26 (E2E_TEST_REPORT_2026-09-26.md,
+> T10–T20; 22/24 PASS, all three findings fixed same-day).
+>
+> **2026-09-26: P9.10 deferral registered.** The hand-written
+> sync-surface mutation campaign (`redteam/mutation_campaign_web_sync_<date>/`)
+> promised by 9.10 does NOT exist yet — no such directory has been
+> created, and no mutants are wired into the `mutation-pr.yml` diff-scope
+> gate for the sync surfaces. This is a DELIBERATE TRACKED DEFERRAL, not
+> a completed item: the Stryker infrastructure + weekly
+> `mutation-web.yml`/`mutation-mobile.yml` runs are in place and will
+> produce the first measured floors; 9.10's own box stays unchecked
+> until its campaign directory exists with every mutant killed. The
+> deferral is registered in `docs/SECURITY_RESIDUALS.md` ("Tracked
+> deferrals") so it cannot be silently dropped.
 
 Milestones: **M1 "daily journal on the web"** (P1–P4, single-client
 correctness incl. honest conflict errors) · **M2 "full parity +

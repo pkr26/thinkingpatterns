@@ -15,6 +15,7 @@ it feeds `SECURITY_RESIDUALS.md`.
 | Hostile sibling tab / tab-nabbing | Manipulates `window.opener`, races shared storage | COOP/CORP same-origin; session memory-only per tab; Web Locks serialize queue/reconcile |
 | Local-device snooper | Reads browser storage | Nothing decryptable persisted (D-4); queue/mood/version marks are ciphertext; drafts memory-only |
 | Replay attacker with a stolen bearer token | Reuses a token, replays queues | Server idempotency + single-use processing sessions; epoch death on logout/rotation; 409-verify before queue drops |
+| Multi-tenant insider (another account holder on the same instance, incl. a recycled username) | Tries to read or corrupt a neighbor tenant's data: replay a token against foreign ids, inject another account's ciphertext/AAD, re-register a deleted username and inherit its trail | Per-account ownership walls on every route; AAD binds every blob to the account id (foreign AAD/blobs fail closed); tokens are account-scoped with epoch death; hard cascade on deletion leaves nothing to inherit — cross-account bleed is adversarially tested by the red-team B3 (username recycling: new account must see 0 old entries) and C3 (cross-account AAD injection rejected; entry recycling self-affecting only) suites |
 | Phished password holder | Knows the password | Not in web scope beyond the server's verifier/KDF (the password IS the key holder's threat — disclosure copy says so) |
 
 ## Surface-by-surface

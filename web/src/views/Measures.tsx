@@ -34,6 +34,11 @@ interface InstrumentScores {
   max: number;
 }
 
+/** The safe walk cap for the history download (LOW a, audit 2026-09-26):
+ *  20 pages of up to 100 rows each — beyond this a hostile server feeding
+ *  endless continuations must hit a terminal probe, not a silent stop. */
+const MAX_MEASURE_PAGES = 20;
+
 export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element {
   const [active, setActive] = useState<MeasureId>("phq9");
   const [responses, setResponses] = useState<(number | null)[]>([]);
@@ -53,7 +58,7 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
     generation.current = run;
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     setError("");
@@ -62,7 +67,8 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
     try {
       let revision: string | undefined;
       let offset = 0;
-      for (let page = 0; page < 20; page += 1) {
+      let complete = false;
+      for (let page = 0; page < MAX_MEASURE_PAGES; page += 1) {
         const result = await api.listMeasuresPage({ offset, ...(revision !== undefined ? { expectedRevision: revision } : {}) });
         if (generation.current !== run) return;
         revision = result.revision;
@@ -88,17 +94,43 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
             // Tampered/foreign row: skipped, never rendered.
           }
         }
-        if (result.nextOffset === null) break;
+        if (result.nextOffset === null) {
+          complete = true;
+          break;
+        }
         offset = result.nextOffset;
+      }
+      // LOW a (audit 2026-09-26): the walk hit its page cap without a
+      // terminal page — a hostile server that keeps returning continuations
+      // must not park this view paging forever, and a legitimate end must
+      // be PROVEN. Port of the entries-walk terminal probe (api/client.ts
+      // listEntriesWalk): one extra page decides "complete" vs "lying
+      // continuation" (loud error, terminal handler above renders it).
+      if (!complete) {
+        const probe = await api.listMeasuresPage({ offset, ...(revision !== undefined ? { expectedRevision: revision } : {}) });
+        if (generation.current !== run) return;
+        if (probe.measures.length !== 0 || probe.nextOffset !== null) {
+          // A plain Error (not ApiError): the terminal handler below must
+          // render THIS text verbatim, not classify it as offline/5xx.
+          throw new Error(t("measures.walkLimit"));
+        }
       }
       if (generation.current !== run) return;
       decoded.sort((a, b) => a.date.localeCompare(b.date));
       setHistory(decoded);
     } catch (err) {
       if (generation.current !== run) return;
-      if (err instanceof ApiError && err.status === 0) {
-        setError("Could not load measures — check your connection.");
-        setHistory([]);
+      // M-W1 (audit 2026-09-26): EVERY terminal failure leaves the screen
+      // honest — history becomes [] with the error, never a permanent
+      // "Loading…" (a 500/429/409 used to wedge the view; mirrors
+      // History.tsx's terminal-failure handling).
+      setHistory([]);
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+      } else if (err instanceof ApiError && err.status === 0) {
+        setError(t("measures.loadOffline"));
+      } else {
+        setError(err instanceof Error ? err.message : t("measures.loadFailed"));
       }
     }
   }, []);
@@ -120,11 +152,11 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
   const save = async (): Promise<void> => {
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
-      setError("Your session locked — sign in again.");
+      setError(t("common.sessionLocked"));
       return;
     }
     if (!measureComplete(active, responses)) {
-      setError("Answer every question first — an honest incomplete beats a guessed whole.");
+      setError(t("measures.incomplete"));
       return;
     }
     setBusy(true);
@@ -142,13 +174,13 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
       }
       // Item 9 (self-harm) endorsement: point at support AFTER the save.
       if (safetyItemEndorsed(active, responses)) setItem9(true);
-      setSavedNote("Saved — encrypted like everything else.");
+      setSavedNote(t("measures.savedNote"));
       await load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setSavedNote("Already recorded today.");
+        setSavedNote(t("measures.alreadyToday"));
       } else {
-        setError(err instanceof Error ? err.message : "Could not save the measure.");
+        setError(err instanceof Error ? err.message : t("measures.saveFailed"));
       }
     } finally {
       setBusy(false);
@@ -163,18 +195,18 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
   return (
     <>
       {item9 && (
-        <Card title="Thank you for answering honestly">
-          <Note tone="warn">{"One of your answers mentions thoughts of harming yourself. That deserves support — the resources below are one tap away, any time."}</Note>
-          <Button label="Get support" onPress={props.onCrisis} small />
+        <Card title={t("measures.item9Title")}>
+          <Note tone="warn">{t("measures.item9Body")}</Note>
+          <Button label={t("measures.getSupport")} onPress={props.onCrisis} small />
         </Card>
       )}
-      <Card title="Wellbeing measures">
+      <Card title={t("settings.measures")}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {MEASURE_IDS.map((id) => (
             <Button key={id} label={MEASURE_NAMES[id]} onPress={() => setActive(id)} small disabled={active === id} />
           ))}
         </div>
-        <Note tone="muted">{"A standard questionnaire, recorded like everything else: encrypted on this device, shared only through the therapist consent you control. Scores are shown, never interpreted — that belongs to you and your clinician."}</Note>
+        <Note tone="muted">{t("measures.introWeb")}</Note>
         {Array.from({ length: instrument.items }, (_, index) => (
           <div key={index} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <Note>{itemText(index)}</Note>
@@ -193,18 +225,18 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         ))}
         <ErrorBanner message={error} />
         {savedNote && <Note role="status" tone="ok">{savedNote}</Note>}
-        <Button label={busy ? "Saving…" : "Save measure"} onPress={() => void save()} disabled={busy} />
+        <Button label={busy ? t("entry.saving") : t("measures.save")} onPress={() => void save()} disabled={busy} />
       </Card>
 
-      <Card title="Your trend">
-        {history === null && <Note role="status">Loading…</Note>}
-        {history?.length === 0 && <Note>No measures yet.</Note>}
+      <Card title={t("measures.trendTitle")}>
+        {history === null && <Note role="status">{t("common.loading")}</Note>}
+        {history?.length === 0 && <Note>{t("measures.emptyNote")}</Note>}
         {MEASURE_IDS.map((id) => {
           const rows = trend(id);
           if (!rows || rows.length === 0) return null;
           return (
             <div key={id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Note tone="muted">{`${MEASURE_NAMES[id]} — ${rows.length} record${rows.length === 1 ? "" : "s"}, shown as your own numbers over time:`}</Note>
+              <Note tone="muted">{t(rows.length === 1 ? "measures.trendOne" : "measures.trendMany", { name: MEASURE_NAMES[id], count: rows.length })}</Note>
               <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 48 }}>
                 {rows.map((row, index) => (
                   <div
@@ -222,9 +254,8 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
             </div>
           );
         })}
-        <Note tone="muted">{"Interpretation belongs to a clinician — this app deliberately shows only your numbers."}</Note>
+        <Note tone="muted">{t("measures.interpretationNote")}</Note>
       </Card>
     </>
   );
 }
-

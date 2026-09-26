@@ -401,7 +401,12 @@ VADER_BASE_ES: dict[str, float] = {
     "cabreada": -2.6,
     "harto": -2.6,
     "harta": -2.6,
-    "hartó": -2.4,
+    # 2026-09-26 audit M-B4: fold-invariance — token lookups run on
+    # diacritic-FOLDED text, so "hartó" always resolves through the folded
+    # twin "harto" below the fold. The accented twin's stale -2.4
+    # contradicted the folded canonical -2.6; aligned (the folded spelling
+    # is what scoring actually hits).
+    "hartó": -2.6,
     "hartar": -2.2,
     "disgustado": -2.2,
     "disgustada": -2.2,
@@ -509,7 +514,10 @@ VADER_BASE_ES: dict[str, float] = {
     "perder": -1.8,
     "perdido": -2.0,
     "perdida": -2.0,
-    "pérdida": -2.4,
+    # 2026-09-26 audit M-B4: aligned to the folded twin "perdida" (-2.0)
+    # — the accented spelling's -2.4 was unreachable post-fold and
+    # contradicted the canonical folded value lookups actually hit.
+    "pérdida": -2.0,
     "fallo": -2.0,
     "fallé": -2.2,
     "falle": -2.2,
@@ -576,7 +584,11 @@ INTENSIFIERS_ES: dict[str, float] = {
     "algo": 0.75,
     "ligeramente": 0.75,
     "medio": 0.8,
-    "medía": 0.8,
+    # 2026-09-26 audit M-B4: "medía" REMOVED — dead key. Tokenization folds
+    # it to "media", which was never a key, so it could not match anything;
+    # the intended intensifier is "medio" (already present above), and
+    # adding a graded "media" would collide with the noun/verb readings
+    # (media = "sock"/"I measure", not "half"). Dropped, not renamed.
 }
 
 # Contrast words ("pero" re-weighting, the English BUT_WORDS mechanism).
@@ -617,7 +629,11 @@ SENSE_WORDS_ES: frozenset[str] = frozenset(
     {
         # causal
         "porque",
-        "razón",
+        # 2026-09-26 audit M-B4: "razón" was a dead accented key — tokens
+        # are diacritic-folded before every lookup, so it never matched;
+        # the folded spelling "razon" now carries the entry ("razones" is
+        # already fold-invariant).
+        "razon",
         "razones",
         "causa",
         "causas",
@@ -668,7 +684,10 @@ SENSE_WORDS_ES: frozenset[str] = frozenset(
         "reflexioné",
         "reflexione",
         "entero",
-        "memoricé",
+        # 2026-09-26 audit M-B4: "memoricé" was a dead accented key (the
+        # folded spelling never existed); renamed to "memorice" like the
+        # "expliqué"/"explique" and "reflexioné"/"reflexione" pairs above.
+        "memorice",
     }
 )
 
@@ -856,7 +875,13 @@ LANGUAGE_FUNCTION_WORDS_ES: frozenset[str] = frozenset(
         "cuánto",
         "cuanto",
         "dónde",
-        "quées",
-        "quiénes",
+        # 2026-09-26 audit M-B4: "quées" was not a word (an accidental
+        # concatenation of "qué es") — its components "que" and "es" are
+        # both already in this set, so it is removed outright. "quiénes"
+        # was a dead accented key: tokens are diacritic-folded before the
+        # detection lookup, so the folded spelling "quienes" carries the
+        # entry now (the same both-spellings convention as "cuánto"/
+        # "cuanto" and "dónde"/"donde").
+        "quienes",
     }
 )

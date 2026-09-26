@@ -1,0 +1,8 @@
+# Portal build artifacts — never commit these (2026-09-26 audit INFO:
+# dist/, coverage/, and reports/ had previously been committed; the root
+# .gitignore already ignores them, and these local rules keep the portal
+# self-contained so a copied/standalone portal directory cannot regress
+# to committing its own build output).
+dist/
+coverage/
+reports/

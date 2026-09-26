@@ -14,17 +14,27 @@ below).
 ## What it is
 
 - `prometheus.yml` — scrape config for the API's `/metrics` (30s interval,
-  bearer token), plus an optional commented blackbox job for `/readyz`.
+  bearer token), plus optional commented jobs: the blackbox `/readyz`
+  probe, the blackbox `tls` cert-expiry probe, and the host-metrics
+  node_exporter scrape (see "Host-level failure modes").
 - `alerts.yml` — alert rules, each with a `runbook` annotation pointing at
   `docs/INCIDENT_RUNBOOK.md`.
+- `blackbox-modules.yml` — the blackbox exporter's module set as code:
+  `http_2xx` (byte-equivalent to the stock module, used by the `/readyz`
+  probe) and `tls` (the cert-expiry probe; see the file's header for why
+  it deliberately skips chain verification). Mounted read-only over the
+  path the image's own `--config.file` already points at, and
+  shape-checked by `verify.sh`.
 - `docker-compose.yml` — profile-gated services (a plain `up` starts
   nothing): `prometheus` + `grafana` behind the `monitoring` profile,
-  `blackbox` behind the `blackbox` profile.
+  `blackbox` behind the `blackbox` profile, `node-exporter` behind the
+  `node` profile.
 - `check-backup-freshness.sh` / `backup-heartbeat.sh` — backup-staleness
   detection (the backup service exports no metrics by design; see below).
 - `verify.sh` — no-docker validation: promtool when installed, plus a
   YAML/structure/metric-grounding pass that proves every alert expression
-  references only metric names `backend/app/metrics.py` actually exports.
+  references only metric names `backend/app/metrics.py` actually exports
+  (plus the exporter-provided names the optional host jobs use).
 
 ## Boot
 
@@ -48,6 +58,18 @@ docker compose -f deploy/monitoring/docker-compose.yml \
 
 # Optional /readyz probe (also uncomment its scrape job in prometheus.yml
 # and its alert group in alerts.yml):
+docker compose -f deploy/monitoring/docker-compose.yml \
+  --profile monitoring --profile blackbox up -d
+
+# Optional host metrics: disk alerts (also uncomment the mindpattern-node
+# scrape job and the mindpattern-host alert group):
+docker compose -f deploy/monitoring/docker-compose.yml \
+  --profile monitoring --profile node up -d
+
+# Optional TLS cert-expiry probe (same blackbox service; uncomment the
+# mindpattern-blackbox-tls scrape job — replace its example.com target
+# literals with your real origins — and the mindpattern-blackbox-tls
+# alert group):
 docker compose -f deploy/monitoring/docker-compose.yml \
   --profile monitoring --profile blackbox up -d
 ```
@@ -124,6 +146,10 @@ S1 exposure indicator).
 | `MindPatternLLMFailureRatioHigh` | `mindpattern_llm_calls_total{outcome="failure"}` ratio > 25%, floor > 2 calls/15m, for 15m | **S3** — consent-gated enrichment degraded; core journaling unaffected |
 | `MindPatternReadyzProbeFailing` *(commented; blackbox)* | `probe_success == 0` for 5m | **S2** — DB path broken while the process lives |
 | `MindPatternBackupHeartbeatStale` / `...Absent` *(commented; textfile)* | `time() - mindpattern_backup_last_success_timestamp_seconds > 26h` / `absent(...)` | **S2** — recovery capability degraded; an amplifier for any live incident |
+| `MindPatternHostDiskSpaceLow` *(commented; node)* | `node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.20` (real filesystems) for 30m | **S3** — time-bounded decay; Postgres degrades long before ENOSPC |
+| `MindPatternHostDiskSpaceCritical` *(commented; node)* | same ratio `< 0.05` for 10m | **S2** — ENOSPC imminent; db writes and bounded log rotation fail |
+| `MindPatternTlsCertExpiringSoon` *(commented; blackbox tls)* | `probe_ssl_earliest_cert_expiry - time() < 14d` for 30m | **S3** — inside the renewal window (warning) |
+| `MindPatternTlsCertExpiryImminent` *(commented; blackbox tls)* | `probe_ssl_earliest_cert_expiry - time() < 3d` for 30m | **S2** — expiry is a scheduled total-origin outage (critical) |
 
 Delivery is honest about its limits: **no Alertmanager runs by default**,
 so alerts evaluate inside Prometheus (visible in its UI and API at
@@ -133,6 +159,50 @@ alertmanager.example.yml` is the minimal starting config (severity routing
 that mirrors the runbook, an inhibit rule, and the exact compose +
 prometheus.yml snippets to enable it in its header comment): copy it to
 `alertmanager.yml`, fill in the receiver URLs, and add the service.
+
+## Host-level failure modes (opt-in)
+
+The API's own exposition cannot see the two failure classes that take the
+whole origin down from outside the container. Both ship as commented
+opt-ins, exactly like the `/readyz` probe: service behind a compose
+profile, scrape job + alert group commented until you enable them.
+
+1. **Host disk filling up** (`node` profile). The `node-exporter` service
+   mounts the HOST root filesystem read-only at `/host` (with `rslave`
+   propagation so container-runtime volumes are visible) and points every
+   collector at it — so `node_filesystem_avail_bytes` /
+   `node_filesystem_size_bytes` describe the real disks holding pgdata,
+   the pgbackups volume, and the bounded json-file logs. Two commented
+   rules in `alerts.yml` (`mindpattern-host` group): under 20% free on
+   any real filesystem for 30m is **S3** (Postgres and dumps degrade
+   long before ENOSPC); under 5% for 10m is **S2** (db writes fail
+   closed and the max-size-bounded log volumes can hit ENOSPC inside
+   the window). The fstype filter excludes tmpfs/overlay so the
+   container runtime's virtual mounts cannot fake or mask a real disk.
+   The exporter publishes nothing and sits on the internal network only.
+
+2. **TLS certificate expiry** (`blackbox` profile, `tls` module). The
+   same blackbox-exporter container also runs a TLS-connect probe
+   against your PUBLIC origins (replace the `portal.example.com:443` /
+   `app.example.com:443` literals in the commented
+   `mindpattern-blackbox-tls` scrape job) — the cert that can expire is
+   the one nginx serves, and the exporter performs a real handshake to
+   read `probe_ssl_earliest_cert_expiry`. Two commented rules: under
+   14 days is **S3** (the warning: a 90-day cert this close to expiry
+   has already missed several renewals); under 3 days is **S2** (the
+   critical: expiry is a scheduled total-origin outage — every client
+   fails TLS and the API reads as down). The `tls` module deliberately
+   skips chain verification (see `blackbox-modules.yml`): a probe that
+   fails verification yields no expiry series at all, which would
+   silence exactly the alert watching the broken cert; with the skip,
+   the gauge keeps reporting the real expiry (in the past after
+   expiry, tripping both rules) while chain VALIDITY stays the
+   clients' fail-closed job.
+
+`verify.sh` grounds the `node_*` and `probe_ssl_earliest_cert_expiry`
+names against their exporters (not `metrics.py`) and shape-checks
+`blackbox-modules.yml`, so a typo'd module name fails the gate rather
+than the probe.
 
 ## Backup freshness (the honest mechanism)
 

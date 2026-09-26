@@ -71,6 +71,7 @@ from ..services.threshold import Phase
 from .entries import _blob_length as _entry_blob_length
 from .entries import _increment_entries_revision
 from .entries import _user_locks as _entry_locks
+from .consents import SHARING_DISCLOSURE_VERSION
 from .measures import _increment_measures_revision
 
 router = APIRouter(tags=["insights"])
@@ -407,8 +408,13 @@ async def rekey(
             code="validation_error",
         )
     # Old-password proof BEFORE consuming the session tokens: a failed proof
-    # must not burn the client's uploaded keys.
-    await _require_verifier(user, verifier, request)
+    # must not burn the client's uploaded keys. M-B1 (2026-09-26): the proof
+    # runs against a freshly re-read row (short read transaction — this
+    # endpoint manages its own sessions), so a credential rotation that
+    # commits mid-flight retires the old verifier here; the in-fence
+    # _rekey_fresh_user epoch check (below) fences the rest.
+    async with sessionmaker() as verify_session:
+        await _require_verifier(user, verifier, request, verify_session)
 
     if not x_processing_token or not x_new_processing_token:
         raise ApiError(
@@ -1399,7 +1405,18 @@ async def recompute(
                 # row already exists — recomputing the rotation over a NEW
                 # pool is exactly how an already-served (possibly already-
                 # answered) question used to change mid-day.
-                question = questions.question_for_today(user.id, merged, today)
+                # 2026-09-26 audit M-B3: the stored question string is
+                # rendered in the corpus's DETECTED language (the brain
+                # reports it in stats) — Spanish users no longer receive
+                # English templates around Spanish labels after the
+                # threshold. "other" keeps the English pool (no template
+                # set exists for unclassifiable languages).
+                question_language = result.stats.get("language", "en")
+                if question_language not in ("en", "es"):
+                    question_language = "en"
+                question = questions.question_for_today(
+                    user.id, merged, today, language=question_language
+                )
                 question_payload = {
                     "for_date": today.isoformat(),
                     "question": question,
@@ -1443,11 +1460,24 @@ async def recompute(
                 separators=(",", ":"),
             ).encode("utf-8")
             async with sessionmaker() as session:
+                # 2026-09-26 audit M-B2: the summary WRITE now applies the
+                # same disclosure gate the measures READ has enforced since
+                # H-14 — a v1-disclosure consent never named measures or
+                # caseload summaries, so it must not receive one (even an
+                # opaque, therapist-encrypted one). Persisting summaries for
+                # legacy grants made the therapist LIST serve v2-shaped
+                # triage data the patient never agreed to share; skip those
+                # consents entirely (the status guard in the write below
+                # still protects a revoke that raced since this read).
                 consent_rows = (
                     await session.execute(
                         select(Consent.id, Consent.therapist_id, User.wrap_pub_key)
                         .join(User, Consent.therapist_id == User.id)
-                        .where(Consent.user_id == user.id, Consent.status == "active")
+                        .where(
+                            Consent.user_id == user.id,
+                            Consent.status == "active",
+                            Consent.disclosure == SHARING_DISCLOSURE_VERSION,
+                        )
                     )
                 ).all()
             for consent_id, therapist_id, wrap_pub in consent_rows:
@@ -1626,6 +1656,13 @@ async def local_recompute(
                 status_code=422, detail="analysis_dates must be ISO dates", code="validation_error"
             ) from None
 
+    # M-2 fence (2026-09-26 audit, LOW batch item c): capture the epoch this
+    # bearer authenticated under at ENTRY — the recompute sibling has
+    # enforced exactly this inside its fence since 2026-09-20, and a logout
+    # committed while this upload queued behind the recompute lock must
+    # fail the write closed instead of letting a retired session overwrite
+    # the stored brain state and patterns.
+    expected_epoch = user.token_epoch
     async with _recompute_locks.hold(f"insights:{user.id}"):
         fresh_user = (
             (
@@ -1638,6 +1675,8 @@ async def local_recompute(
         )
         if fresh_user is None or not fresh_user.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh_user.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         prior = await _latest_insight(session, fresh_user.id, "brain")
         prior_seq = prior.state_seq if prior is not None else 0
         if prior_seq != body.base_state_seq:

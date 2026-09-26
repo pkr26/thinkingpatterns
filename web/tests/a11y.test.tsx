@@ -29,6 +29,11 @@ import { Onboarding } from "../src/views/Onboarding";
 import { Privacy } from "../src/views/Privacy";
 import { HistoryView } from "../src/views/History";
 import { PatternsView } from "../src/views/Patterns";
+import { MeasuresView } from "../src/views/Measures";
+import { ShareView } from "../src/views/Share";
+import { SettingsView } from "../src/views/Settings";
+import { QuestionView } from "../src/views/Question";
+import { EntryView } from "../src/views/Entry";
 import { encryptEntry } from "../src/crypto/patient";
 import { encrypt, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
@@ -110,6 +115,57 @@ describe("jest-axe over the views", () => {
 
   it("the app shell (boot state) has no critical violations", async () => {
     const html = await renderA11y(<App />);
+    await expectNoCriticalViolations(html);
+  });
+});
+
+describe("jest-axe over the in-app views (LOW e, audit 2026-09-26)", () => {
+  // The suite used to stop at the pre-login surfaces; Measures, Share,
+  // Settings, Question and Entry render under a signed-in, unlocked
+  // session with terminal API failures (the beforeEach 404 stub) — their
+  // honest error/empty states are part of the accessible surface.
+  beforeEach(() => {
+    installSession("user-1");
+    vault.unlock(
+      { authKey: new Uint8Array(new ArrayBuffer(32)), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(9) },
+      "user-1",
+    );
+  });
+
+  it("the entry view has no critical violations", async () => {
+    const html = await renderA11y(<EntryView onSaved={() => undefined} />);
+    await expectNoCriticalViolations(html);
+  });
+
+  it("the measures view has no critical violations", async () => {
+    const html = await renderA11y(<MeasuresView onCrisis={() => undefined} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    });
+    await expectNoCriticalViolations(html);
+  });
+
+  it("the share view has no critical violations", async () => {
+    const html = await renderA11y(<ShareView />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    });
+    await expectNoCriticalViolations(html);
+  });
+
+  it("the settings view (unknown-LLM branch) has no critical violations", async () => {
+    const html = await renderA11y(<SettingsView onLockdown={() => undefined} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    });
+    await expectNoCriticalViolations(html);
+  });
+
+  it("the question view (generic-question branch) has no critical violations", async () => {
+    const html = await renderA11y(<QuestionView onRefreshed={() => undefined} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    });
     await expectNoCriticalViolations(html);
   });
 });

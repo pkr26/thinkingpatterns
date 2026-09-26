@@ -26,6 +26,14 @@ export const MAX_QUEUE_LENGTH = 200;
  *  alone counts rows, never bytes). 1 MB keeps the row comfortably under
  *  the platform limit while still holding hundreds of typical entries. */
 export const MAX_QUEUE_BYTES = 1_000_000;
+/** 2026-09-26 audit M-M2: the quarantine and rejected stores were UNBOUNDED
+ *  — a tamper/reject loop could grow their rows past the same cursor-window
+ *  limit and wedge the scope exactly like the pre-M-13 queue. Both stores
+ *  are now bounded with the same discipline (drop-oldest). Record count
+ *  first (each quarantine record can be a full oversize raw string), then
+ *  serialized bytes against the shared per-row ceiling. */
+export const MAX_QUARANTINE_RECORDS = 50;
+export const MAX_REJECTED_LENGTH = MAX_QUEUE_LENGTH;
 
 const RETRY_BASE_MS = 30_000;
 const RETRY_MAX_MS = 30 * 60_000;
@@ -224,6 +232,12 @@ function serializedBytes(items: QueuedEntry[]): number {
   return Buffer.byteLength(serializeItems(items), "utf8");
 }
 
+/** M-M2: the serialized byte size of a quarantine envelope (the same
+ *  measurement the queue's byte cap uses, for the quarantine row shape). */
+function quarantineBytes(records: string[]): number {
+  return Buffer.byteLength(JSON.stringify({ v: 1, records }), "utf8");
+}
+
 async function appendQuarantine(scope: QueueScope, raw: string, generation: number): Promise<void> {
   if (wipedSince(generation)) return;
   const previous = await AsyncStorage.getItem(scope.quarantine);
@@ -237,6 +251,12 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
     }
   })() : [];
   records.push(raw);
+  // 2026-09-26 audit M-M2: bound the quarantine row (drop-oldest) by both
+  // record count and serialized bytes — the preservation promise keeps the
+  // NEWEST records, and an unbounded row would recreate the wedge the caps
+  // exist to prevent.
+  while (records.length > MAX_QUARANTINE_RECORDS) records.shift();
+  while (records.length > 0 && quarantineBytes(records) > MAX_QUEUE_BYTES) records.shift();
   await AsyncStorage.setItem(scope.quarantine, JSON.stringify({ v: 1, records }));
 }
 
@@ -278,12 +298,27 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
     }
     return own;
   } catch {
-    await appendQuarantine(
-      scope,
-      raw ?? JSON.stringify({ v: 1, unreadable: true, key }),
-      generation,
-    );
-    if (!wipedSince(generation)) await AsyncStorage.removeItem(key);
+    // 2026-09-26 audit M-M2: the quarantine append itself must never escape
+    // readItems. An oversize/unreadable QUARANTINE row made getItem throw
+    // here too, so the recovery catch wedged every queue op for the scope —
+    // the exact failure it exists to prevent. A failed append degrades to a
+    // silent drop (console-free, nothing logged): keeping the scope usable
+    // outranks preserving one more quarantined record.
+    try {
+      await appendQuarantine(
+        scope,
+        raw ?? JSON.stringify({ v: 1, unreadable: true, key }),
+        generation,
+      );
+    } catch {
+      /* silent drop — see above */
+    }
+    try {
+      if (!wipedSince(generation)) await AsyncStorage.removeItem(key);
+    } catch {
+      /* the unreadable row stays; readItems still resolves, and the next
+         write to this key replaces it (recovery on first enqueue). */
+    }
     return [];
   }
 }
@@ -312,6 +347,12 @@ async function appendRejected(scope: QueueScope, items: QueuedEntry[], generatio
       ids.add(item.clientEntryId);
     }
   }
+  // 2026-09-26 audit M-M2: the rejected store is bounded like the queue
+  // (drop-oldest) — an unbounded rejected row could grow past the
+  // cursor-window limit and wedge the scope; recovery keeps the NEWEST
+  // rejections, which are the ones the user can still act on.
+  while (existing.length > MAX_REJECTED_LENGTH) existing.shift();
+  while (existing.length > 0 && serializedBytes(existing) > MAX_QUEUE_BYTES) existing.shift();
   if (!wipedSince(generation)) await writeItems(scope.rejected, existing);
 }
 
@@ -595,9 +636,16 @@ export async function flushQueueOnReconnect(): Promise<void> {
 export async function clearQueue(userId?: string): Promise<void> {
   await migrateUnscopedLegacyData();
   const scope = await scopeFor(await resolveUserId(userId));
-  // Stryker disable next-line AssignmentOperator: same rationale as abortInFlightFlush — direction of the generation change is unobservable through the inequality fence
-  queueGeneration += 1;
-  await AsyncStorage.multiRemove([scope.queue, scope.rejected, scope.quarantine, LEGACY_RECOVERY_KEY]);
+  // 2026-09-26 audit LOW: the generation bump + multiRemove now run INSIDE
+  // the storage mutex (the writeItems idiom). Outside it, an enqueue whose
+  // generation checks had already passed could commit its setItem between
+  // the bump and the multiRemove — resurrecting a queue the wipe had already
+  // promised to empty (account deletion leaving ciphertext behind).
+  return serialized(async () => {
+    // Stryker disable next-line AssignmentOperator: same rationale as abortInFlightFlush — direction of the generation change is unobservable through the inequality fence
+    queueGeneration += 1;
+    await AsyncStorage.multiRemove([scope.queue, scope.rejected, scope.quarantine, LEGACY_RECOVERY_KEY]);
+  });
 }
 
 export async function queueLength(userId?: string): Promise<number> {

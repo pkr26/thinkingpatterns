@@ -1051,6 +1051,19 @@ CURATED_SENTIMENT: dict[str, float] = {
 SENTIMENT_LEXICON_EN: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
 # The runtime lookup: English wins every collision by merge order.
 SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}
+# L-3 (2026-09-26): the SPANISH-scoring lookup — the mirror merge, Spanish
+# winning every collision. The single EN-winning SENTIMENT_LEXICON above
+# stays the pinned artifact (shared/brain_lexicon.json + the mobile TS
+# copy) and the default for language-neutral callers; ``_word_valence``
+# selects THIS map when the corpus's detected language is "es", so the 13
+# shared words ("perfecto", "genial", "fatal", "terrible", ...) score
+# their Spanish weights instead of muted English ones — mirroring how
+# theme_for() already selects the theme lexicon by language. NOTE for the
+# on-device port: mobile/src/brain currently scores with the merged map
+# alone; porting this language-gated selection is the follow-up that
+# keeps server/local-recompute ES corpora identical (the golden vectors
+# pin only default-language scoring, which is unchanged here).
+SENTIMENT_LEXICON_ES: dict[str, float] = {**SENTIMENT_LEXICON_EN, **VADER_BASE_ES}
 
 # Intensifiers/downtoners (VADER booster conventions, multiplicative).
 # "hardly"/"barely" are NOT downtoners: VADER treats them as negations
@@ -1119,6 +1132,21 @@ NEGATORS = frozenset(
 )
 NEGATORS_EN = NEGATORS
 NEGATORS = NEGATORS_EN | NEGATORS_ES
+# L-3 (2026-09-26): the negator set is language-SCOPED at scoring time.
+# The union above stays the pinned/default set (shared/brain_lexicon.json
+# word_sets), but "sin" and "ni" are English letter strings too — an
+# English corpus mentioning sin (the noun) or Ni (clipped in a note) was
+# silently negated by Spanish grammar rules. _negators_for() returns the
+# English-only set for "en" corpora; "es" keeps the union (every ES
+# negator is genuine Spanish); the None/"other" default keeps the union so
+# language-neutral callers (the cross-platform sentiment vectors, the TS
+# port) are byte-identical to the pre-change behavior.
+
+
+def _negators_for(language: str | None) -> frozenset[str]:
+    if language == "en":
+        return NEGATORS_EN
+    return NEGATORS
 
 # Absolutist language (Al-Mosaiwi & Johnstone 2018): elevated in
 # anxiety/depression and suicidal-ideation text; reported to the user as a
@@ -1846,20 +1874,24 @@ def theme_for(token: str, language: str = "en") -> str | None:
     return None
 
 
-def _word_valence(token: str) -> float:
+def _word_valence(token: str, language: str | None = None) -> float:
     # Emoji are their own tokens (extracted alongside WORD_RE); they have
     # no word forms and live in their own graded map.
     emoji = EMOJI_VALENCES.get(token)
     if emoji is not None:
         return emoji
+    # L-3 (2026-09-26): "es" corpora score against the ES-winning merge;
+    # every other language (and the None default of the vector/TS callers)
+    # keeps the pinned EN-winning SENTIMENT_LEXICON unchanged.
+    lexicon = SENTIMENT_LEXICON_ES if language == "es" else SENTIMENT_LEXICON
     for form in word_forms(token):
-        valence = SENTIMENT_LEXICON.get(form)
+        valence = lexicon.get(form)
         if valence is not None:
             return valence
     return 0.0
 
 
-def _valence_walk(tokens: list[str]) -> list[float]:
+def _valence_walk(tokens: list[str], language: str | None = None) -> list[float]:
     """The per-word graded valences of the sentiment walk (deterministic).
 
     This is the exact accumulation ``sentiment_score`` nets into its
@@ -1869,6 +1901,10 @@ def _valence_walk(tokens: list[str]) -> list[float]:
     suites.
     """
     sentiments: list[float] = []
+    # L-3 (2026-09-26): language-scoped negators — see _negators_for. The
+    # default (None/"other") is the historical union, byte-identical to
+    # the pre-change walk (pinned by the cross-platform sentiment vectors).
+    negators = _negators_for(language)
     # "but" re-weighting: find the LAST contrastive; damp before, boost after.
     split = max((i for i, t in enumerate(tokens) if t in BUT_WORDS), default=-1)
     segments: list[tuple[list[str], float]] = []
@@ -1882,7 +1918,7 @@ def _valence_walk(tokens: list[str]) -> list[float]:
 
     for seg, seg_weight in segments:
         for i, token in enumerate(seg):
-            valence = _word_valence(token)
+            valence = _word_valence(token, language)
             if valence == 0.0:
                 continue
             window = seg[max(0, i - BOOSTER_SCOPE) : i]
@@ -1893,7 +1929,7 @@ def _valence_walk(tokens: list[str]) -> list[float]:
             for prev in window:
                 if prev in INTENSIFIERS:
                     boost *= INTENSIFIERS[prev]
-                if prev in NEGATORS:
+                if prev in negators:
                     negated = True
             valence *= boost
             if negated:
@@ -1903,32 +1939,39 @@ def _valence_walk(tokens: list[str]) -> list[float]:
     return sentiments
 
 
-def sentiment_score(tokens: list[str]) -> float:
+def sentiment_score(tokens: list[str], language: str | None = None) -> float:
     """Graded lexicon sentiment in [-1, 1] (VADER-style, deterministic).
 
     Intensifiers scale the next sentiment word; negation flips it with
     damping ("not good" is mildly negative, not catastrophic — the
     VADER x-0.74 scalar); "but" re-weights the sentence so the clause
     after the contrast carries the meaning.
+
+    L-3 (2026-09-26): ``language`` selects the scoring merge and scopes
+    the negator set (see SENTIMENT_LEXICON_ES / _negators_for). The
+    default keeps the historical union+EN-winning behavior byte-identical
+    — the cross-platform sentiment vectors pin it.
     """
-    sentiments = _valence_walk(tokens)
+    sentiments = _valence_walk(tokens, language)
     if not sentiments:
         return 0.0
     total = sum(sentiments)
     return max(-1.0, min(1.0, total / SENTIMENT_SCALE))
 
 
-def sentiment_components(tokens: list[str]) -> tuple[float, float]:
+def sentiment_components(tokens: list[str], language: str | None = None) -> tuple[float, float]:
     """(positive, negative) affect magnitudes, each in [0, 1].
 
     Same deterministic walk as sentiment_score, summed by SIGN instead of
     netted. Positive and negative affect are separable constructs, not two
-    ends of one scale (Emmons & Diener 1985; differential dynamics: Abitante
-    et al. 2024) — the PA/NA inertia detectors need each stream. Computed
-    from TEXT-SCORED entries only: an explicit mood check-in is a single
-    valence judgment and cannot be honestly split.
+    ends of one scale (Emmons & Diener 1985; differential affect dynamics —
+    Abitante et al. 2024) — the PA/NA inertia detectors need each stream.
+    Computed from TEXT-SCORED entries only: an explicit mood check-in is a
+    single valence judgment that cannot be honestly split.
+
+    L-3 (2026-09-26): ``language`` as in sentiment_score.
     """
-    sentiments = _valence_walk(tokens)
+    sentiments = _valence_walk(tokens, language)
     if not sentiments:
         return (0.0, 0.0)
     positive = sum(v for v in sentiments if v > 0) / SENTIMENT_SCALE
@@ -1942,6 +1985,23 @@ def absolutist_density(tokens: list[str]) -> float:
         return 0.0
     hits = sum(1 for t in tokens if t in ABSOLUTIST_WORDS)
     return round(100.0 * hits / len(tokens), 2)
+
+
+def _dominant_tod(tod_seen: list[str]) -> tuple[str, int]:
+    """The dominant writing-window bucket and its count.
+
+    L-1 (2026-09-26): deterministic tie-break. The former
+    ``max(...) over set(tod_seen)`` returned whichever tied bucket the
+    SET happened to yield first — set iteration order for strings is
+    hash-randomization dependent, so two processes could disagree on a
+    tied dominant bucket, violating the module's absolute-determinism
+    contract (and, in principle, the on-device parity pins). Iterating
+    the SORTED candidates makes the lexicographically-first tied bucket
+    win on every platform — the same tie rule as phrases.py's
+    ``_representative``.
+    """
+    dominant = max(sorted(set(tod_seen)), key=lambda b: tod_seen.count(b))
+    return dominant, tod_seen.count(dominant)
 
 
 def extract_themes(tokens: list[str], language: str = "en") -> set[str]:
@@ -2444,10 +2504,9 @@ def _detect_themes(
                 if e.entry_date.weekday() == weekday and e.tod is not None
             ]
             if len(tod_seen) >= TEMPORAL_MIN_TOD_N:
-                dominant, dominant_k = max(
-                    ((bucket, tod_seen.count(bucket)) for bucket in set(tod_seen)),
-                    key=lambda pair: pair[1],
-                )
+                # L-1 (2026-09-26): _dominant_tod's lexicographic
+                # tie-break keeps this deterministic (see its docstring).
+                dominant, dominant_k = _dominant_tod(tod_seen)
                 if dominant_k / len(tod_seen) >= TEMPORAL_MIN_TOD_FRACTION:
                     tod_detail = {"time_of_day": dominant}
             signals.append(
@@ -4047,7 +4106,11 @@ def update(
             # back to scoring the text.
             sentiment = max(-1.0, min(1.0, entry.sentiment))
         else:
-            sentiment = sentiment_score(tokens)
+            # L-3 (2026-09-26): scoring under the DETECTED language — the
+            # merge selection and negator scoping live inside
+            # sentiment_score; the None default (vector/TS callers) keeps
+            # the pinned historical behavior.
+            sentiment = sentiment_score(tokens, language)
         # Themes under the DETECTED language's lexicon (Phase 2 ES theme
         # set): Spanish corpora read Spanish words, English corpora English
         # ones; client tags (English wire values) join unchanged.
@@ -4133,7 +4196,7 @@ def update(
                 # affect components either — (0.0, 0.0) would be fabricated
                 # neutral PA/NA days, the same lie as the mood series.
                 continue
-            pa, na = sentiment_components(tokens)
+            pa, na = sentiment_components(tokens, language)
             day_pa_buckets.setdefault(entry.entry_date, []).append(pa)
             day_na_buckets.setdefault(entry.entry_date, []).append(na)
     day_pa = sorted((day, sum(v) / len(v)) for day, v in day_pa_buckets.items())

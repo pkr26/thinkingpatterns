@@ -15,7 +15,8 @@
 #
 # Nothing here starts with a plain `up`: prometheus + grafana are gated
 # behind the `monitoring` profile, the blackbox probe behind `blackbox`
-# (same pattern as the `backups` profile in the production file).
+# (same pattern as the `backups` profile in the production file), and the
+# host-metrics node_exporter behind `node`.
 #
 #   docker compose -f deploy/monitoring/docker-compose.yml \
 #     --profile monitoring up -d
@@ -68,7 +69,12 @@ services:
       resources:
         limits:
           memory: 768M
+          cpus: 0.5
     mem_limit: 768M
+    cpus: 0.5
+    # Fork-bomb / leak containment (same posture as the production file's
+    # services): a metrics TSDB must not be able to exhaust host PIDs.
+    pids_limit: 256
     # The Prometheus UI is intentionally NOT published. To look at it, use
     # an SSH tunnel to the host and a temporary loopback publish, e.g.
     #   ports: ["127.0.0.1:9090:9090"]
@@ -125,11 +131,15 @@ services:
       resources:
         limits:
           memory: 512M
+          cpus: 0.5
     mem_limit: 512M
+    cpus: 0.5
+    pids_limit: 256
 
   blackbox:
-    # OPTIONAL uptime probe of /readyz. Enable together with the
-    # mindpattern-blackbox scrape job in prometheus.yml:
+    # OPTIONAL uptime probe of /readyz AND TLS cert-expiry probe (the
+    # `tls` module). Enable together with the matching scrape job(s) in
+    # prometheus.yml:
     #   --profile monitoring --profile blackbox up -d
     # Pinned 2026-09-22 (audit G-7/NEW-4): repo:tag@sha256. Re-pin
     # deliberately (README.md here, "Digest pinning"); verify.sh
@@ -144,6 +154,13 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # The stock image config has no generic TLS-connect module, so the
+    # module set ships as code: http_2xx (byte-equivalent to stock, used
+    # by the /readyz probe job) + tls (cert-expiry probe job — see
+    # blackbox-modules.yml for why it skips chain verification). Mounted
+    # over the path the image's own --config.file flag already points at.
+    volumes:
+      - ./blackbox-modules.yml:/etc/blackbox_exporter/config.yml:ro
     logging:
       driver: json-file
       options:
@@ -156,7 +173,57 @@ services:
       resources:
         limits:
           memory: 96M
+          cpus: 0.5
     mem_limit: 96M
+    cpus: 0.5
+    pids_limit: 256
+
+  node-exporter:
+    # OPTIONAL host-level metrics (disk, the one failure class the API's
+    # own exposition cannot see). Enable together with the
+    # mindpattern-node scrape job in prometheus.yml and the
+    # mindpattern-host alert group in alerts.yml:
+    #   --profile monitoring --profile node up -d
+    # Pinned 2026-09-26 (resolved from the Docker Hub registry API, the
+    # same flow as README.md here, "Digest pinning"): repo:tag@sha256,
+    # v1.9.x multi-arch manifest list.
+    image: prom/node-exporter:v1.9.1@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
+    # G-4 (2026-09-21 audit) quartet, like its siblings. The HOST root
+    # filesystem is mounted read-only at /host and the path flags below
+    # point every collector at it — inside the container the exporter sees
+    # the host's real filesystems (pgdata/pgbackups volumes, log dirs),
+    # which is the entire point. It publishes nothing and joins only the
+    # internal network: prometheus scrapes it at node-exporter:9100.
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+    volumes:
+      # rslave so mount events under / (container runtime volumes) are
+      # visible — stale mount data would make the disk alerts lie.
+      - /:/host:ro,rslave
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles: ["node"]
+    networks: [internal]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+          cpus: 0.5
+    mem_limit: 96M
+    cpus: 0.5
+    pids_limit: 256
 
 networks:
   # The production stack's default compose network, joined as external so

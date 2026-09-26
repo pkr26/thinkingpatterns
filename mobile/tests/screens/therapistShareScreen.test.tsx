@@ -134,9 +134,11 @@ describe("consent list", () => {
     const root = await render(<TherapistShareScreen navigation={nav} />);
     await flush();
     expect(textOf(root)).toContain("Dr. Active");
-    expect(textOf(root)).toContain("Sharing since 2026-09-01");
+    // 2026-09-26 audit LOW: the granted-at timestamp renders through the
+    // locale date format (en-US long form), not a raw ISO slice.
+    expect(textOf(root)).toContain("Sharing since September 1, 2026");
     expect(textOf(root)).toContain("Dr. Past");
-    expect(textOf(root)).toContain("Stopped 2026-09-10");
+    expect(textOf(root)).toContain("Stopped September 10, 2026");
     expect(touchableByLabel(root, "Stop sharing")).toBeTruthy();
   });
 });
@@ -497,7 +499,9 @@ describe("M-25: sharing-disclosure version gate (v2)", () => {
     const root = await render(<TherapistShareScreen navigation={nav} />);
     await flush();
     expect(textOf(root)).toContain("Dr. Active");
-    expect(textOf(root)).toContain("Sharing since 2026-09-01");
+    // 2026-09-26 audit LOW: the granted-at timestamp renders through the
+    // locale date format (en-US long form), not a raw ISO slice.
+    expect(textOf(root)).toContain("Sharing since September 1, 2026");
     expect(touchableByLabel(root, "Stop sharing")).toBeTruthy();
   });
 

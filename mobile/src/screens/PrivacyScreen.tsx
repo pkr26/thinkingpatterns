@@ -12,6 +12,8 @@ import { t as tr } from "../strings";
 
 // Resolved at module load — the app locale is resolved once at startup, so
 // the policy cannot switch languages mid-session.
+// 2026-09-26 audit (i18n guard): startup-fixed locale — this module-load
+// tr() table MUST be revisited if runtime language switching ever ships.
 const SECTIONS: readonly { title: string; body: string }[] = [
   {
     title: tr("privacy.s1Title"),

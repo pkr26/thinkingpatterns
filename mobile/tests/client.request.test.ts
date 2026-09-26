@@ -78,6 +78,22 @@ describe("stored base URL policy", () => {
     expect(await isInsecureHttpAllowed("http://nas.lan:8000")).toBe(false);
   });
 
+  // 2026-09-26 audit LOW: a corrupt persisted base URL (restored backup,
+  // tampering) used to hit `new URL(base)` BEFORE the graceful refusal —
+  // callers received a raw TypeError instead of the typed ApiError(0) every
+  // failure branch is written against.
+  it("a corrupt persisted base URL is a typed ApiError refusal, never a raw TypeError", async () => {
+    await storage.setItem("@mindpattern/base_url", "::::not a url");
+    await expect(getBaseUrl()).resolves.toBe("::::not a url"); // corrupt value persisted
+    const failure = await api.meta().catch((err: unknown) => err);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(failure).toMatchObject({
+      status: 0,
+      message: expect.stringContaining("refusing to send data to an invalid or cleartext remote server URL"),
+    });
+    expect(fetch).not.toHaveBeenCalled(); // nothing reached the network
+  });
+
   it("does not retain a legacy cleartext-consent exception", async () => {
     await setBaseUrl("http://nas.lan:8000", { allowInsecure: true });
     expect(await isInsecureHttpAllowed()).toBe(false);
@@ -732,6 +748,12 @@ describe("sensitive-request redirect hardening", () => {
     await expect(api.register("a", "c2FsdA==", "dg==")).rejects.toMatchObject({ status: 0 });
     await expect(api.deleteAccount("dg==")).rejects.toMatchObject({ status: 0 });
     await expect(api.setLlmConsent(true, "dg==")).rejects.toMatchObject({ status: 0 });
+    // 2026-09-26 audit LOW: the account export ships the bearer too — it
+    // must be refused on an unverifiable final URL like its siblings.
+    await expect(api.exportAccount()).rejects.toMatchObject({
+      status: 0,
+      message: expect.stringContaining("could not verify"),
+    });
   });
 
   it("still allows non-sensitive requests with an unverifiable URL", async () => {

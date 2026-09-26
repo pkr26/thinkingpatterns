@@ -28,7 +28,9 @@ vi.mock("../src/api", async (importOriginal) => {
         wrap_key_blob: "KQ==",
       })),
       patients: vi.fn(async () => []),
-      patientInsights: vi.fn(async () => ({ phase: "baseline", active_days: 0, streak: 0, days_remaining: 30, blob: null })),
+      // 2026-09-26 audit M-P1: lockDown fires this on every lock route.
+      logout: vi.fn(async () => null),
+      patientInsights: vi.fn(async () => ({ phase: "baseline", active_days: 0, streak: 0, days_remaining: 30, blob: null, state_seq: 0 })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
       createNote: vi.fn(async () => ({})),
