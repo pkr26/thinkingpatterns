@@ -3,7 +3,7 @@
 # installed while the image is built, never from the running backup loop: a
 # scheduled backup must not depend on a live package-repository fetch before
 # it can protect a database.
-FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+FROM postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
 
 USER root
 RUN apk add --no-cache openssl python3
