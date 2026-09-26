@@ -284,8 +284,8 @@ describe("SettingsView", () => {
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
     await settle(40, 3);
-    await typeInto(root, "New password", "a-brand-new-password-1");
-    await typeInto(root, "Confirm new password", "a-brand-new-password-1");
+    await typeInto(root, "New password", "a-brand-new-passcode-1");
+    await typeInto(root, "Confirm new password", "a-brand-new-passcode-1");
     await press(root, "Change password");
     await settle(60, 5);
     expect(order).toEqual(["session", "session", "rekey", "credential"]);

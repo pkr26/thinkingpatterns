@@ -101,15 +101,28 @@ recorded here so they are not silently dropped (audit round 2, F-6):
 
 - **Optional TOTP/MFA for therapist accounts** — DELIVERED 2026-09-22
   (final-verification remediation; see the README security section for
-  the full contract). Remaining, deliberately accepted residuals:
-  (1) a code replay inside one 30 s timestep can win a
-  read-check-then-persist race across workers (the login rate limit
-  bounds it; single-use outside that window is enforced);
-  (2) the wrapped secret is keyed to the server `token_secret`, so
-  rotating that secret invalidates enrollments — the same documented
-  caveat as the decoy salts (operators must also clear `users.totp_*`);
-  (3) a lost authenticator is an operator database action (no recovery
-  flow, by the no-account-recovery design).
+  the full contract). Pentest 2026-09-26 remediation: (1) is FIXED —
+  the replay fence is now an atomic conditional UPDATE
+  (`totp_last_counter < matched`, rowcount authority), verified by a
+  concurrent same-code test; a per-username second-factor failure bucket
+  (`MINDPATTERN_TOTP_FAILURE_LIMIT`, default 10/window) now caps
+  distributed code guessing — reachable only with a valid verifier, so
+  it creates no username-only lockout oracle; and single-use recovery
+  codes (8 × 10 chars, HMAC-stored, returned once at enable) replaced
+  the operator-only lost-authenticator path. Remaining, deliberately
+  accepted residuals: (1a) the failure bucket is per-username and
+  window-scoped — a verifier-holding attacker with many source IPs
+  still gets `limit` guesses per window forever (deliberate: an account
+  hard-lockout would hand that same attacker a lockout oracle against
+  the legitimate user); (2) the wrapped secret and the recovery-code
+  digests are keyed to the server `token_secret`, so rotating that
+  secret invalidates enrollments — the same documented caveat as the
+  decoy salts (operators must also clear `users.totp_*` AND the
+  `totp_backup_codes` table, which POST /account/totp/disable already
+  does in-transaction); (3) losing every recovery code AND the
+  authenticator is still an operator database action (by the
+  no-account-recovery design), but it is no longer the path for a
+  merely-lost phone.
 - **WEB_PLAN P9.10 hand-written sync-surface mutation campaign** —
   DEFERRED (registered 2026-09-26). The promised
   `redteam/mutation_campaign_web_sync_<date>/` campaign (mutants over

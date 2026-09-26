@@ -307,6 +307,32 @@ export const auth = {
       ? { "X-Therapist-Enrollment-Token": enrollmentToken.trim() }
       : {},
   ),
+
+  /** S-12 (pentest 2026-09-26): revoke a JUST-MINTED bearer the portal is
+   *  about to throw away — the patient-role rejection path used to drop the
+   *  token locally while it stayed live server-side for its full TTL. Same
+   *  hardening and keepalive contract as api.logout(), but on explicit
+   *  credentials (the session is not installed yet, and must never be).
+   *  Best-effort like logout(): callers swallow failures. */
+  logoutBearer: async (baseUrl: string, token: string): Promise<null> => {
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        `${baseUrl}${API_PREFIX}/auth/logout`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          keepalive: true,
+        },
+        baseUrl,
+      );
+    } catch {
+      return null;
+    }
+    if (response.status === 204) return null;
+    await response.json().catch(() => ({}));
+    return null;
+  },
 };
 
 // --- authenticated therapist endpoints (backend schemas) ----------------------
@@ -793,8 +819,15 @@ export const api = {
       "/account/totp/setup",
       { verifier: verifierB64 },
     ),
+  /** S-3 (pentest 2026-09-26): enable now answers 200 with the one-time
+   *  recovery-code set — the ONLY time these codes exist in the clear.
+   *  Each is a single-use 10-char code redeemable at sign-in in place of
+   *  the 6-digit authenticator code. */
   totpEnable: (verifierB64: string, code: string) =>
-    request<null>("POST", "/account/totp/enable", { verifier: verifierB64, code }),
+    request<{ backup_codes: string[] }>("POST", "/account/totp/enable", {
+      verifier: verifierB64,
+      code,
+    }),
   totpDisable: (verifierB64: string, code: string) =>
     request<null>("POST", "/account/totp/disable", { verifier: verifierB64, code }),
 };

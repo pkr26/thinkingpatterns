@@ -155,6 +155,33 @@ class User(Base):
     totp_last_counter: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class TotpBackupCode(Base):
+    """One single-use TOTP recovery code (2026-09-26 pentest S-3/L-4).
+
+    A lost authenticator previously required an operator to clear the
+    ``users.totp_*`` columns — an out-of-band, social-engineerable path.
+    Enrollment (POST /account/totp/enable) now mints a fresh set of
+    single-use codes, stores only their HMAC-SHA256 digests (same standing
+    as pairing-code digests: a database leak yields no live codes), and
+    returns the plaintext exactly once. Login accepts a code from this set
+    in place of the six-digit authenticator code; redemption is an atomic
+    conditional UPDATE on ``used_at`` so concurrent presentations of the
+    same code resolve to exactly one success. Rows die with the account
+    (FK cascade) and are purged on TOTP disable; the operator clear path
+    must clear this table too (see totp.py module docs).
+    """
+
+    __tablename__ = "totp_backup_codes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    digest: Mapped[str] = mapped_column(String(64))
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class Entry(Base):
     __tablename__ = "entries"
     __table_args__ = (

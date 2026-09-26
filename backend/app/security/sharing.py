@@ -77,6 +77,10 @@ PAIRING_CODE_CHARS = 8
 PAIRING_TTL_SECONDS = 900
 
 _PAIRING_DIGEST_INFO = b"mindpattern/pairing-digest/v1"
+# Domain-separated from pairing digests: recovery codes must not share an
+# HMAC subkey with grant codes, so one purpose's digest corpus teaches an
+# attacker nothing about the other (2026-09-26 pentest S-3).
+_BACKUP_DIGEST_INFO = b"mindpattern/totp-backup-digest/v1"
 
 
 class SharingError(ValueError):
@@ -293,6 +297,17 @@ def pairing_code_digest(code: str, secret: str) -> str:
     # code as the same flat 404.  Normalize here as well as at their boundary
     # so a direct caller can never turn a non-ASCII code into UnicodeEncodeError
     # (and therefore a 500) while deriving its harmless non-match digest.
+    return hmac.new(
+        digest_key, normalize_pairing_code(code).encode("ascii"), hashlib.sha256
+    ).hexdigest()
+
+
+def backup_code_digest(code: str, secret: str) -> str:
+    """HMAC-SHA256 of a TOTP recovery code under its own HKDF subkey of the
+    token secret. Same normalization contract as pairing codes: any
+    malformed/non-ASCII input digests to a guaranteed non-match, so a typo
+    can never raise (or collide) inside the login path."""
+    digest_key = hkdf_sha256(secret.encode("utf-8"), None, _BACKUP_DIGEST_INFO)
     return hmac.new(
         digest_key, normalize_pairing_code(code).encode("ascii"), hashlib.sha256
     ).hexdigest()

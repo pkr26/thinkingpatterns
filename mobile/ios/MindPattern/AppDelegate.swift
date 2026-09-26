@@ -20,6 +20,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   /// and for the themed color.
   private var snapshotShield: UIView?
 
+  /// S-7 (pentest 2026-09-26): iOS has no FLAG_SECURE — while the app is
+  /// FOREGROUND-ACTIVE, a QuickTime/AirPlay/screen-recording capture
+  /// sees decrypted journal text live. UIScreen.isCaptured is the one
+  /// signal the platform offers; when it turns on, the same opaque cover
+  /// goes up until recording stops. A deliberate cover beats hoping the
+  /// user notices the red status-bar pill.
+  private var captureShield: UIView?
+
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -51,6 +59,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       name: UIApplication.didBecomeActiveNotification,
       object: nil
     )
+    // S-7: screen recording / mirroring of the foreground app.
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(captureStateChanged),
+      name: UIScreen.capturedDidChangeNotification,
+      object: nil
+    )
 
     return true
   }
@@ -75,6 +90,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   @objc private func hideSnapshotShield() {
     snapshotShield?.removeFromSuperview()
     snapshotShield = nil
+  }
+
+  // S-7: the recording cover is INDEPENDENT of the transition shield so
+  // the two lifecycles (capture on/off, active/resigned) can overlap
+  // freely without one removing the other's cover.
+  @objc private func captureStateChanged() {
+    if UIScreen.main.isCaptured {
+      guard let window = window, captureShield == nil else { return }
+      let shield = UIView(frame: window.bounds)
+      shield.backgroundColor = UIColor(red: 0.11, green: 0.14, blue: 0.19, alpha: 1.0)
+      shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+      shield.isAccessibilityElement = false
+      window.addSubview(shield)
+      captureShield = shield
+    } else {
+      captureShield?.removeFromSuperview()
+      captureShield = nil
+    }
   }
 }
 

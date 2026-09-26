@@ -13,7 +13,10 @@ turn the second factor into a field in a SELECT. The wrap is domain-
 separated from token signing and from the decoy-salt subkey. Rotation of
 ``token_secret`` would invalidate wrapped secrets — the same documented
 caveat as the decoy salts (see SECURITY_RESIDUALS.md); if that rotation is
-ever exercised, operators must also clear ``users.totp_*``.
+ever exercised, operators must also clear ``users.totp_*`` AND the
+``totp_backup_codes`` table (recovery-code digests key off the same
+secret; a lost-authenticator clear must drop both, which POST
+/account/totp/disable already does in-transaction).
 """
 
 from __future__ import annotations
@@ -40,6 +43,34 @@ ALLOWED_DRIFT = 1
 
 WRAP_INFO = b"mindpattern/totp-at-rest/v1"
 WRAP_PREFIX = "v1:"
+
+# Recovery codes (2026-09-26 pentest S-3): generated at enable time from
+# the pairing alphabet (unambiguous, human-transcribable) at 10 chars ≈
+# 49.1 bits — unreachable inside the TOTP failure bucket's budget. Stored
+# as HMAC digests only (see sharing.backup_code_digest); shown to the
+# therapist exactly once at enrollment.
+from .sharing import PAIRING_ALPHABET as _CODE_ALPHABET  # noqa: E402
+
+BACKUP_CODE_COUNT = 8
+BACKUP_CODE_CHARS = 10
+
+
+def generate_backup_code() -> str:
+    """One recovery code: rejection-sampled from the pairing alphabet so
+    every symbol stays equally likely (same modulo-bias reclaim as
+    generate_pairing_code; the loop is bounded by fresh os.urandom)."""
+    import os
+
+    n = len(_CODE_ALPHABET)
+    limit = 256 - (256 % n)
+    chars: list[str] = []
+    while len(chars) < BACKUP_CODE_CHARS:
+        for byte in os.urandom(BACKUP_CODE_CHARS * 2):
+            if byte < limit:
+                chars.append(_CODE_ALPHABET[byte % n])
+                if len(chars) == BACKUP_CODE_CHARS:
+                    break
+    return "".join(chars)
 
 
 def generate_secret() -> tuple[bytes, str]:

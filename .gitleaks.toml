@@ -66,3 +66,14 @@ description = "ciphertext property names adjacent to variable references"
 regexes = [
   '''wrapKeyBlobB64''',
 ]
+
+[[allowlists]]
+description = "React Native Xcode environment shim (pentest S-14, 2026-09-26)"
+paths = [
+  '''mobile/ios/\.xcode\.env$''',
+]
+# Defense: the RN template COMMITS this file — the Xcode build phase sources
+# it for NODE_BINARY, so untracking it would break fresh clones. Its whole
+# content is `export NODE_BINARY=$(command -v node)` (verified 2026-09-26):
+# no secret, no machine-specific value. The redteam G3 probe and gitleaks
+# flag the FILENAME pattern (.env), not any finding inside it.

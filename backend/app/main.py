@@ -361,10 +361,15 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # X-Processing-Token drives recomputes; X-Account-Verifier is the
         # preferred DELETE /account re-auth transport — a browser client
         # could not send either in a cross-origin request without this.
+        # X-New-Processing-Token rides POST /processing/rekey (2026-09-26
+        # pentest D-1): omitting it made the data-key rotation unpreflightable
+        # for allow-listed browser clients, functionally pushing users to
+        # SKIP the remedy after a suspected compromise.
         allow_headers=[
             "Authorization",
             "Content-Type",
             "X-Processing-Token",
+            "X-New-Processing-Token",
             "X-Account-Verifier",
             "X-Therapist-Enrollment-Token",
         ],

@@ -4,6 +4,112 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-26 (iii) — deep-penetration remediation: every actionable finding fixed and re-tested
+
+The deep penetration campaign (`PENTEST_DEEP_2026-09-26.md`: four parallel
+static audits + a fresh 13-probe live exploit suite on top of the 96-verdict
+redteam baseline) found no Critical/High remote exploits. Every actionable
+finding is fixed below; each fix carries a pinning test that fails against
+the pre-fix code.
+
+### Backend
+
+- **D-1 — CORS omitted `X-New-Processing-Token`.** Allow-listed browser
+  clients could not preflight `POST /processing/rekey`, functionally
+  blocking data-key rotation after a suspected compromise. Added to
+  `allow_headers` (`app/main.py`); preflight pinned in
+  `tests/test_pentest_2026_09_26_fixes.py`.
+- **D-3 — TOTP same-code race (live-confirmed: two concurrent logins with
+  one fresh code both returned 200).** The replay fence is now an atomic
+  conditional UPDATE (`totp_last_counter IS NULL OR < matched`), rowcount
+  authoritative — the pinning test fires two concurrent logins and asserts
+  exactly one 200 / one 401.
+- **D-4 — no per-account TOTP guessing throttle.** New per-username
+  failure bucket (`totp_failure_limit`, env `MINDPATTERN_TOTP_FAILURE_LIMIT`,
+  default 10/window) checked inside the second-factor branch — reachable
+  only with a valid verifier, so it is not a lockout oracle for
+  unauthenticated spray.
+- **S-3 — lost authenticator required an operator clear.** Enable now mints
+  8 single-use recovery codes (10 chars from the pairing alphabet,
+  ~49.1 bits each): HMAC-SHA256 digests only at rest (domain-separated
+  HKDF subkey), returned EXACTLY once in the enable response, redeemed at
+  login in place of the 6-digit code via an atomic `used_at` UPDATE,
+  cascade-deleted with the account, purged on disable. New table
+  `totp_backup_codes` (alembic `e8b2d6f4a1c7`; schema-parity gate green,
+  `SCHEMA_HEAD` updated).
+- **D-2 mitigation — `credential_rotated` access-log row.** A stolen
+  verifier's full takeover chain (login → rotate → victim lockout,
+  live-demonstrated in the campaign) is architecturally inherent to
+  no-PAKE, but the rotation is now auditable in the victim's access log,
+  in the same transaction as the swap.
+
+### Web client
+
+- **S-1 — password rotation bypassed the password policy.** The rotation
+  gate checked length only, silently lowering the offline-guessing floor
+  exactly where it matters most. `rotatePassword` now applies the full
+  registration policy (`passwordPolicyError`), matching mobile; the old
+  fixture passwords in the parity tests violated the policy and were
+  rotated to policy-passing passphrases (the policy rejecting them IS
+  the fix working).
+
+### Portal
+
+- **S-3 — recovery codes surfaced in the UI.** Enable renders the one-time
+  set with a shown-once warning; the sign-in code field accepts both the
+  6-digit code and a 10-char recovery code; disable destroys the set.
+- **S-4 — interrupted password change stranded the sharing key on reload.**
+  The recovery salt is mirrored into sessionStorage (never localStorage),
+  so a reload of the still-open tab re-arms the repair form; scrubbed at
+  every lock boundary in `App.tsx` and on completed repair.
+- **S-12 — patient-role login minted a bearer that stayed live.** The role
+  rejection path now fires best-effort `auth.logoutBearer` (epoch bump)
+  before surfacing the error, closing the asymmetric session-end gap.
+
+### Mobile
+
+- **S-5 — offline unlock guessing ran at a flat 500 ms cadence.** New
+  `src/unlockBackoff.ts`: durable per-account consecutive-failure counter
+  in the encrypted secure store, doubling pause per failure
+  (500 ms → 30 s cap, saturating at 12), cleared on any successful unlock;
+  the offline wrong-proof and online-401 paths funnel through one
+  record+pause site. Curve and persistence unit-pinned; screen wiring
+  pinned in `tests/screens/unlockScreen.test.tsx`.
+- **S-7 — iOS had no screen-recording cover while foreground-active.**
+  `AppDelegate` now observes `UIScreen.capturedDidChangeNotification` and
+  raises the same opaque shield during capture/recording (independent of
+  the transition snapshot shield). Native change — needs on-device
+  verification in the next build.
+
+### Hygiene
+
+- **S-14 — `mobile/ios/.xcode.env` flagged by secret scans.** Verified
+  content (one `export NODE_BINARY=$(command -v node)` line — no secret);
+  the file is the RN template's committed build shim, so untracking it
+  would break fresh clones. Allowlisted with a written defense in
+  `.gitleaks.toml` and in the redteam G3 probe instead.
+
+### Deliberately not code-changed (documented trades, see the pentest report)
+
+- **D-2 (full fix)** — PAKE (OPAQUE) migration to retire the
+  password-equivalent verifier: an architecture decision, not a patch.
+- **S-2** — TLS SPKI pinning for the consented key-shipment hop: JS
+  `fetch` cannot inspect certificates, so this needs per-platform native
+  networking work plus a pins-distribution decision for a self-hostable
+  deployment; the report carries a concrete implementation plan.
+- **S-6** — plaintext entry dates in the offline queue: the meaningful
+  fix (metadata encryption) interacts with the data-key rekey/queue
+  interplay and needs its own design pass; documented residual.
+- **S-9/S-10/S-11/S-13** — documented residuals (enumeration oracle,
+  intended `/meta` ops data, synthetic-event lock semantics, legacy
+  `/api` mount sunset policy).
+
+Suite results after this pass: web 449 passed + tsc clean, portal 342
+passed + tsc clean, mobile 1729 passed + tsc clean, backend full suite
+green including the new `tests/test_pentest_2026_09_26_fixes.py`; ruff +
+mypy clean; the 13-probe pentest suite re-run confirms the rotation-header
+preflight now passes and the TOTP race is closed.
+
 ## 2026-09-26 (ii) — audit-of-the-audit: every residual finding fixed and re-tested
 
 An independent verification pass over the 2026-09-26 remediation commit

@@ -136,7 +136,7 @@ async def test_totp_enable_consumes_its_timestep(client, monkeypatch):
         json={"verifier": th.auth_key_b64, "code": code},
         headers=th.headers,
     )
-    assert enable.status_code == 204, enable.text
+    assert enable.status_code == 200, enable.text
 
     replay = await client.post(
         "/api/auth/login",
@@ -168,7 +168,7 @@ async def test_totp_disable_refuses_the_code_that_just_logged_in(client, monkeyp
         json={"verifier": th.auth_key_b64, "code": totp._code_for_counter(secret, counter)},
         headers=th.headers,
     )
-    assert enable.status_code == 204, enable.text
+    assert enable.status_code == 200, enable.text
 
     next_counter = _freeze_totp_clock(
         monkeypatch, 1_800_100_000.0 + totp.STEP_SECONDS + 1

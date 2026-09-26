@@ -19,6 +19,21 @@ vi.mock("../../src/unlockProof", () => ({
   unlockProofExists: vi.fn(async () => false),
 }));
 
+// S-5 (2026-09-26 pentest): the escalating failure pad is unit-pinned in
+// tests/unlockBackoff.test.ts; here it is stubbed flat so screen tests do
+// not really sleep, while the RECORD/CLEAR wiring stays assertable.
+const recordUnlockFailure = vi.fn(async () => 1);
+const clearUnlockFailures = vi.fn(async () => {});
+vi.mock("../../src/unlockBackoff", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/unlockBackoff")>();
+  return {
+    ...actual,
+    unlockFailureDelayMs: () => 0,
+    recordUnlockFailure: (username: string) => recordUnlockFailure(username),
+    clearUnlockFailures: (username: string) => clearUnlockFailures(username),
+  };
+});
+
 // Biometric unlock (2026-09-19): defaults to "unsupported device" so every
 // pre-existing test sees the plain password gate.
 const biometricsSupported = vi.fn(async () => false);
@@ -170,6 +185,39 @@ describe("UnlockScreen", () => {
 
   // C1: the offline path must VERIFY the password — any string must no
   // longer unlock the vault.
+  it("S-5 (pentest 2026-09-26): a wrong password RECORDS an escalating failure; a later success CLEARS the count", async () => {
+    // Online wrong password: the catch's 401 arm records the failure.
+    vi.mocked(api.login).mockRejectedValue(new ApiError(401, "invalid credentials"));
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "wrong guess");
+    await pressLabel(root, "Unlock");
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(recordUnlockFailure).toHaveBeenCalledWith("alice");
+
+    // Offline wrong proof: the SAME single record site catches it.
+    recordUnlockFailure.mockClear();
+    vi.mocked(api.saltFor).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.getCachedSalt).mockResolvedValue(SALT_B64);
+    vi.mocked(verifyUnlockProof).mockResolvedValue("wrong");
+    await typeInto(root, "password", "another guess");
+    await pressLabel(root, "Unlock");
+    await flush();
+    expect(recordUnlockFailure).toHaveBeenCalledTimes(1);
+
+    // Success forgives the whole count.
+    vi.mocked(api.saltFor).mockRejectedValue(new Error("x")); // restore strict?
+    vi.mocked(api.saltFor).mockReset();
+    vi.mocked(api.getCachedSalt).mockResolvedValue(SALT_B64);
+    vi.mocked(api.login).mockReset();
+    vi.mocked(verifyUnlockProof).mockResolvedValue("ok");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    expect(clearUnlockFailures).toHaveBeenCalledWith("alice");
+  });
+
   it("REFUSES a wrong password offline (sealed proof fails)", async () => {
     vi.mocked(api.saltFor).mockRejectedValue(new ApiError(0, "server unreachable"));
     vi.mocked(api.getCachedSalt).mockResolvedValue(SALT_B64);

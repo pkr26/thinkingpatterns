@@ -47,6 +47,11 @@ function wipeKeys(
   keys?.authKey?.fill(0);
 }
 
+/** S-3 (pentest 2026-09-26): the second-factor field accepts BOTH forms —
+ *  the 6-digit authenticator code or a 10-char single-use recovery code
+ *  (case-insensitive; the server normalizes). */
+const TOTP_OR_RECOVERY = /^(\d{6}|[A-Z0-9]{10})$/i;
+
 export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenResponse, baseUrl: string) => void | Promise<void> }): React.JSX.Element {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
@@ -80,7 +85,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
   // Audit fix 18 (2026-09-21): the fields live in a real <form>, so Enter
   // submits. These guards mirror the submit buttons' disabled logic — an
   // incomplete form stays inert instead of firing a doomed request.
-  const canSignIn = Boolean(username && password && baseUrl && (!totpNeeded || /^\d{6}$/.test(totpCode)));
+  const canSignIn = Boolean(username && password && baseUrl && (!totpNeeded || TOTP_OR_RECOVERY.test(totpCode)));
   const canRegister = Boolean(username && password && password2 && !passwordError && baseUrl && sharingAvailable === true);
 
   // Never guess that a random server can create a clinician account.  The
@@ -138,6 +143,11 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       );
       derivedKeys.authKey.fill(0);
       if (token.role !== "therapist") {
+        // S-12 (pentest 2026-09-26): the server has already minted a 24 h
+        // bearer. Dropping it locally left it live server-side; revoke it
+        // best-effort (epoch bump — same contract as every other portal
+        // lock boundary) before surfacing the role error.
+        void auth.logoutBearer(baseUrl, token.token).catch(() => undefined);
         throw new ApiError(403, "this is a patient account — the portal is for therapist accounts");
       }
       setSession(token.token, baseUrl);
@@ -151,13 +161,13 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
         // The password half validated; the account wants its second factor.
         setTotpNeeded(true);
         keepPassword = true;
-        setError("Enter the 6-digit code from your authenticator app.");
+        setError("Enter the 6-digit code from your authenticator app — or one of your recovery codes.");
       } else if (err instanceof ApiError && err.code === "totp_code_invalid" && totpNeeded) {
         // Still inside the TOTP stage: the password was right, only the
         // code was wrong/stale/consumed — let the user try the next code
         // without retyping the password.
         keepPassword = true;
-        setError("That code was wrong or already used — enter the current one.");
+        setError("That code was wrong or already used — enter the current one (or a recovery code).");
       } else {
         setError(err instanceof Error ? err.message : "sign-in failed");
       }
@@ -275,9 +285,9 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
             <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
             {mode === "login" && totpNeeded && (
               <Field
-                label="Authenticator code"
+                label="Authenticator code (or recovery code)"
                 value={totpCode}
-                onChange={(value) => setTotpCode(value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(value) => setTotpCode(value.trim().slice(0, 10))}
                 placeholder="123456"
                 autoComplete="one-time-code"
               />

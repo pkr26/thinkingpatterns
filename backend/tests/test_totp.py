@@ -134,7 +134,10 @@ async def test_totp_full_lifecycle(client, app):
         json={"verifier": th.auth_key_b64, "code": _current_code(secret)},
         headers=await _ther_headers(th),
     )
-    assert good.status_code == 204, good.text
+    assert good.status_code == 200, good.text
+    codes = good.json()["backup_codes"]
+    assert len(codes) == 8 and len(set(codes)) == 8
+    assert all(len(c) == 10 for c in codes)
 
     # Login without a code: machine-readable distinct answer.
     missing = await client.post(
@@ -232,7 +235,8 @@ async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client):
         json={"verifier": th.auth_key_b64, "code": _current_code(secret_a)},
         headers=await _ther_headers(th),
     )
-    assert enable.status_code == 204
+    assert enable.status_code == 200
+    assert len(enable.json()["backup_codes"]) == 8
 
     # While ENABLED, setup refuses (409): an attacker holding only the
     # password half must not be able to strip the factor by re-arming and
@@ -284,7 +288,8 @@ async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client):
         json={"verifier": th2.auth_key_b64, "code": _current_code(_b32_decode(p2["secret_base32"]))},
         headers=await _ther_headers(th2),
     )
-    assert confirm.status_code == 204, confirm.text
+    assert confirm.status_code == 200, confirm.text
+    assert len(confirm.json()["backup_codes"]) == 8
 
 
 async def test_totp_is_therapist_only(client):

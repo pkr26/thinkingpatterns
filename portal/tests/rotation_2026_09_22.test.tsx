@@ -203,7 +203,7 @@ describe("NEW-3/F.4: the Account security panel is on-demand", () => {
     );
     await flush();
     await openSecurityPanel(root);
-    expect(textOf(root)).toContain("No interrupted change is remembered in this tab");
+    expect(textOf(root)).toContain("No interrupted change is remembered for this account");
     const recover = root.root.findAllByType("button").find((n) => n.children.join("") === "Recover sharing key")!;
     expect(recover.props.disabled).toBe(true);
   });

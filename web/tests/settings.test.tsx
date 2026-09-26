@@ -25,7 +25,10 @@ import { press, render, settle, textOf, typeInto } from "./helpers/rtr";
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
 const OLD_KEY = new Uint8Array(new ArrayBuffer(32)).fill(5);
-const NEW_PASSWORD = "a-fresh-long-password-7";
+/** M-1 (pentest 2026-09-26): rotation now enforces the full policy, so the
+ *  fixture credential must PASS it (3 classes, no common-word family —
+ *  the previous "…-password-7" fixture contained a blocked word). */
+const NEW_PASSWORD = "a-fresh-long-passphrase-7";
 const PENDING_SALT_KEY = "mindpattern.rotatePendingSalt.user-1";
 
 /** B-1 (2026-09-26 follow-up): the resume ladder's production mechanism is
@@ -96,6 +99,33 @@ afterEach(() => {
 });
 
 describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
+  it("M-1 (pentest 2026-09-26): rotation enforces the FULL password policy — policy-barred passwords are rejected before any network step", async () => {
+    const fetchSpy = baseStubs();
+    const root = await render(<SettingsView onLockdown={vi.fn()} />);
+    await settle(40, 3);
+
+    // "password1234": only two character classes — the exact password a
+    // length-only gate used to accept on the rotation path.
+    await typeInto(root, "New password", "password1234");
+    await typeInto(root, "Confirm new password", "password1234");
+    await press(root, "Change password");
+    await settle(40, 2);
+    expect(textOf(root)).toContain("three of");
+
+    // "Password123!": full variety but a blocked common-word family.
+    await typeInto(root, "New password", "Password123!");
+    await typeInto(root, "Confirm new password", "Password123!");
+    await press(root, "Change password");
+    await settle(40, 2);
+    expect(textOf(root)).toContain("too common or predictable");
+
+    // Rotation must never have started: no processing session was opened.
+    const opened = fetchSpy.mock.calls.filter(([u]) =>
+      String(u).endsWith("/processing/sessions"),
+    );
+    expect(opened).toHaveLength(0);
+  });
+
   it("rekey succeeds but the credential rotation fails → LOCKDOWN with the honest moved-key message, and the derived new keys are zeroized", async () => {
     baseStubs({ credential: () => jsonResponse({ detail: "later step exploded" }, { status: 500 }) });
     const core = await import("../src/crypto/core");

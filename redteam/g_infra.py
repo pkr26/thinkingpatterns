@@ -192,10 +192,20 @@ def g3_config_and_hygiene() -> None:
     # Repo hygiene
     r = subprocess.run(["git", "ls-files"], cwd=str(ROOT), capture_output=True, text=True)
     tracked = r.stdout.splitlines()
-    bad = [f for f in tracked if f.endswith((".env", ".pem", ".key", ".db", ".sqlite3"))
-           or f.startswith(".env")]
+    # S-14 (pentest 2026-09-26): mobile/ios/.xcode.env is the React Native
+    # template's COMMITTED build shim (the Xcode phase sources it for
+    # NODE_BINARY; untracking breaks fresh clones). Verified content: one
+    # `export NODE_BINARY=$(command -v node)` line, no secret — same
+    # allowlist decision as .gitleaks.toml's entry for it.
+    ALLOWED_ENV_PATHS = {"mobile/ios/.xcode.env"}
+    bad = [f for f in tracked
+           if (f.endswith((".env", ".pem", ".key", ".db", ".sqlite3"))
+               or f.startswith(".env"))
+           and f not in ALLOWED_ENV_PATHS]
     verdict("G3.tracked-secrets", "BLOCKED" if not bad else "FINDING",
-            f"git-tracked secret/db files: {bad or 'none'} ({len(tracked)} files tracked)")
+            f"git-tracked secret/db files: {bad or 'none'} "
+            f"(+ {len(ALLOWED_ENV_PATHS)} reviewed RN template shim) "
+            f"({len(tracked)} files tracked)")
 
     dockerignore = BACKEND / ".dockerignore"
     di = dockerignore.read_text() if dockerignore.exists() else ""

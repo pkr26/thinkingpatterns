@@ -13,7 +13,7 @@ import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
 import { theme } from "./ui";
-import { localStore, visitAnchorStore } from "./platform";
+import { localStore, sessionStore, visitAnchorStore } from "./platform";
 
 type View =
   | { kind: "login"; error?: string }
@@ -83,6 +83,12 @@ export function App(): React.JSX.Element {
     // restore.
     if (hasSession()) {
       void api.logout().catch(() => {});
+    }
+    // S-4 (pentest 2026-09-26): the interrupted-rotation recovery salt is
+    // repair material for a live session, not something any lock boundary
+    // should keep around — scrub it alongside the credentials teardown.
+    if (retiring) {
+      sessionStore.removePrefix(`mindpattern.interruptedRotateSalt.${retiring.userId}`);
     }
     clearSession();
     replacePortalSession(null);

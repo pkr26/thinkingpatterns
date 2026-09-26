@@ -231,8 +231,8 @@ describe("SettingsView branches", () => {
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
     await settle(40, 3);
-    await typeInto(root, "New password", "another-new-password-9");
-    await typeInto(root, "Confirm new password", "another-new-password-9");
+    await typeInto(root, "New password", "another-new-passphrase-9");
+    await typeInto(root, "Confirm new password", "another-new-passphrase-9");
     await press(root, "Change password");
     await settle(60, 4);
     expect(onLockdown).toHaveBeenCalledTimes(1);
@@ -277,8 +277,8 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
     await settle(40, 3);
-    await typeInto(root, "New password", "rotation-with-rewrap-9");
-    await typeInto(root, "Confirm new password", "rotation-with-rewrap-9");
+    await typeInto(root, "New password", "rotation-with-rewrap-9x");
+    await typeInto(root, "Confirm new password", "rotation-with-rewrap-9x");
     await press(root, "Change password");
     await settle(60, 5);
     expect(order).toEqual(["session", "session", "rekey", "rewrap", "credential"]);

@@ -45,6 +45,11 @@ import { vault } from "../vault";
 import { useSession } from "../store";
 import { storeUnlockProof, verifyUnlockProof } from "../unlockProof";
 import {
+  clearUnlockFailures,
+  recordUnlockFailure,
+  unlockFailureDelayMs,
+} from "../unlockBackoff";
+import {
   biometricsSupported,
   disableBiometricUnlock,
   hasBiometricUnlock,
@@ -55,10 +60,9 @@ import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/butt
 import { requestFailureCopy } from "../components/errors";
 import { t as tr } from "../strings";
 
-/** Throttles offline password guessing: each failed offline proof check
- *  pauses before the dialog appears (PBKDF2 already costs ~100ms+ per
- *  guess; this pads the feedback loop). */
-const FAILED_PROOF_DELAY_MS = 500;
+/** S-5 (2026-09-26 pentest): the flat guessing pad moved into
+ *  unlockBackoff.ts as BASE_UNLOCK_FAIL_DELAY_MS and now ESCALATES — see
+ *  the catch in unlock() for the single record+pause site. */
 
 export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -145,8 +149,9 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     if (!password || busy) return;
     setBusy(true);
     let derived: Keys | null = null;
+    let username: string | null = null;
     try {
-      const username = await api.getUsername();
+      username = await api.getUsername();
       if (!username) throw new Error(tr("unlock.noAccount"));
       let saltB64: string;
       let offline = false;
@@ -193,7 +198,10 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
           throw new Error(tr("unlock.offlineNotEnabled"));
         }
         if (proof === "wrong") {
-          await new Promise((resolve) => setTimeout(resolve, FAILED_PROOF_DELAY_MS));
+          // S-5 (2026-09-26 pentest): wrong-proof and online-401 both funnel
+          // into the catch's single escalating record+pause — one failure,
+          // one increment, one delay. First failure pays the historical
+          // 500 ms exactly; subsequent ones double up to 30 s, durably.
           // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
           throw new ApiError(401, tr("common.wrongPassword"));
         }
@@ -202,12 +210,21 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
       setBiometricError(false); // the promised password path worked — retract the biometric nudge
+      // S-5: an honest success forgives the whole failure count.
+      if (username) await clearUnlockFailures(username).catch(() => {});
       await refreshActiveDays();
     } catch (err) {
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
       vault.lock(); // a failed unlock must never leave stale keys live
       // 401 = wrong password (our own sealed proof throws the same). Other
       // ApiErrors map to calm copy; our own local Error text passes through.
+      if (err instanceof ApiError && err.status === 401) {
+        // S-5: the ONLINE wrong-password path escalates through the same
+        // durable counter (the server throttles per-IP; this throttles
+        // per-DEVICE, covering the offline oracle's online twin).
+        const failures = username ? await recordUnlockFailure(username).catch(() => 1) : 1;
+        await new Promise((resolve) => setTimeout(resolve, unlockFailureDelayMs(failures)));
+      }
       const message =
         err instanceof ApiError && err.status === 401
           ? tr("common.wrongPassword")

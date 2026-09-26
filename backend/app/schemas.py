@@ -59,8 +59,11 @@ class LoginRequest(StrictRequestModel):
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
     # Optional therapist second factor (2026-09-22). Absent on the first
     # attempt; the server answers 401 totp_required when the account has
-    # TOTP enabled, and the client re-sends with this field filled.
-    totp_code: str | None = Field(default=None, min_length=6, max_length=6)
+    # TOTP enabled, and the client re-sends with this field filled. Width
+    # covers BOTH accepted forms (2026-09-26 pentest S-3): the six-digit
+    # authenticator code or a 10-char single-use recovery code; anything
+    # that is neither simply fails the second factor.
+    totp_code: str | None = Field(default=None, min_length=6, max_length=16)
 
 
 class TokenResponse(BaseModel):
@@ -215,6 +218,15 @@ class TotpSetupResponse(BaseModel):
     # otpauth:// URI for apps that accept it; the portal renders both as
     # copyable text (no QR dependency).
     otpauth_uri: str
+
+
+class TotpEnableResponse(BaseModel):
+    """Enable confirmation + the one-time recovery-code set (2026-09-26
+    pentest S-3). The codes are returned EXACTLY ONCE, here: the server
+    keeps only HMAC digests, so a lost set cannot be re-displayed — losing
+    every code AND the authenticator is the documented operator path."""
+
+    backup_codes: list[str]
 
 
 class LlmConsentRequest(StrictRequestModel):

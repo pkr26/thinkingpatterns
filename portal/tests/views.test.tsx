@@ -16,6 +16,7 @@ vi.mock("../src/api", async (importOriginal) => {
       meta: vi.fn(async () => ({ sharing_available: true })),
       saltFor: vi.fn(async () => ({ salt: "QUJDREVGR0hJSktMTU5P" })),
       login: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
+      logoutBearer: vi.fn(async () => null),
       registerTherapist: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
     },
     api: {

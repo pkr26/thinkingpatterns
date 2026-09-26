@@ -24,12 +24,21 @@ import {
   unwrapPatientDataKey,
 } from "../crypto";
 import type { Bytes, CaseloadSummary } from "../crypto";
-import { currentOrigin, randomBytes, visitAnchorStore } from "../platform";
+import { currentOrigin, randomBytes, sessionStore, visitAnchorStore } from "../platform";
 import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
 import { verifyInsightsGeneration, type PortalSession } from "./PatientView";
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+
+/** S-4 (pentest 2026-09-26): the interrupted-change recovery salt, keyed by
+ *  therapist. sessionStorage — never localStorage: the salt is the only
+ *  material that makes an interrupted re-wrap repairable, and it must die
+ *  with the browser session rather than persisting on a shared clinic
+ *  machine. Degradation is the previous posture (memory only) where
+ *  sessionStorage is locked away. */
+const interruptedSaltKey = (userId: string): string =>
+  `mindpattern.interruptedRotateSalt.${userId}`;
 
 /** Per-patient caseload triage summary (2026-09-17): pattern count,
  *  sensitive-card presence, and new-since-reviewed — derived by fetching
@@ -101,10 +110,14 @@ export function PatientsView(props: {
    *  whose credential PUT failed — the interrupted-change window. The
    *  stored blob is sealed under (intended-new password + THIS salt), so
    *  the salt is the only thing that makes the intended-new KEK
-   *  re-derivable and the account repairable. Memory only: a page reload
-   *  forfeits recovery, exactly like the no-recovery warning at
-   *  registration (audit F-4). */
-  const [interruptedSaltB64, setInterruptedSaltB64] = useState<string | null>(null);
+   *  re-derivable and the account repairable. S-4 (pentest 2026-09-26):
+   *  mirrored into sessionStorage so an accidental reload of the still-open
+   *  tab no longer forfeits recovery — it still dies with the browser
+   *  session (and is scrubbed at every lock boundary), preserving the
+   *  audit F-4 no-recovery stance for anything short of that. */
+  const [interruptedSaltB64, setInterruptedSaltB64] = useState<string | null>(
+    () => (props.session ? sessionStore.get(interruptedSaltKey(props.session.userId)) : null),
+  );
   // --- Optional TOTP second factor (2026-09-21 audit C-2/F-4, 2026-09-22) ---
   // totpStatus: null = not yet asked, then the server's answer via /me
   // once the panel opens. totpPending holds the setup response — the
@@ -113,6 +126,10 @@ export function PatientsView(props: {
   const [totpPending, setTotpPending] = useState<{ secretBase32: string; otpauthUri: string } | null>(null);
   const [totpPw, setTotpPw] = useState("");
   const [totpCode, setTotpCode] = useState("");
+  /** S-3 (pentest 2026-09-26): the one-time recovery-code set from enable —
+   *  held in state until the panel closes/sign-out, shown exactly once
+   *  (the server keeps only digests; there is no re-display, ever). */
+  const [totpBackupCodes, setTotpBackupCodes] = useState<string[] | null>(null);
 
   /** Same derivation as the sign-in path, with the same P-1 hygiene: the
    *  salt bytes and master never outlive this function; only the returned
@@ -216,10 +233,12 @@ export function PatientsView(props: {
         // intended-new KEK — the only state that keeps the account
         // repairable (see interruptedSaltB64).
         setInterruptedSaltB64(newSaltB64);
+        if (props.session) sessionStore.set(interruptedSaltKey(props.session.userId), newSaltB64);
         throw new Error(
           `the password change did not complete (${err instanceof Error ? err.message : "credential rotation failed"}) — `
             + "your sharing key is now wrapped under the NEW password while your sign-in password is unchanged. "
-            + "Recover it with “Recover sharing key” below BEFORE leaving this page.",
+            + "Recover it with “Recover sharing key” below BEFORE leaving this page (the recovery state survives a "
+            + "reload of this tab, but not closing it).",
         );
       }
       // Success: the server bumped the token epoch — every bearer,
@@ -267,6 +286,7 @@ export function PatientsView(props: {
       const resealedBlob = await sealPrivateKeyForUpload(currentKeys.wrapKek, pkcs8, username);
       await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob);
       setInterruptedSaltB64(null);
+      if (props.session) sessionStore.removePrefix(interruptedSaltKey(props.session.userId));
       setSecNotice("Sharing key recovered — it is sealed under your current sign-in password again. Your sign-in password never changed; you can retry the password change.");
     } catch (err) {
       setSecError(err instanceof Error ? err.message : "could not recover the sharing key");
@@ -352,11 +372,14 @@ export function PatientsView(props: {
     setSecNotice("");
     try {
       const verifier = await totpVerifierFor();
-      await api.totpEnable(verifier, totpCode);
+      const { backup_codes: backupCodes } = await api.totpEnable(verifier, totpCode);
       setTotpStatus(true);
       setTotpPending(null);
+      setTotpBackupCodes(backupCodes?.length ? backupCodes : null);
       setSecNotice(
-        "Two-factor authentication is on: sign-in now asks for a 6-digit code from your authenticator. Keep a backup of the secret somewhere safe — a lost authenticator needs an operator to clear.",
+        "Two-factor authentication is on: sign-in now asks for a 6-digit code from your authenticator "
+          + "(or one of the recovery codes below). Save the recovery codes now — they are shown exactly once, "
+          + "and losing every code AND the authenticator still needs an operator to clear.",
       );
     } catch (err) {
       setSecError(err instanceof Error ? err.message : "could not enable two-factor");
@@ -376,7 +399,8 @@ export function PatientsView(props: {
       const verifier = await totpVerifierFor();
       await api.totpDisable(verifier, totpCode);
       setTotpStatus(false);
-      setSecNotice("Two-factor authentication is off. Sign-in is password-only again.");
+      setTotpBackupCodes(null);
+      setSecNotice("Two-factor authentication is off. Sign-in is password-only again (the recovery-code set was destroyed with it).");
     } catch (err) {
       setSecError(err instanceof Error ? err.message : "could not disable two-factor");
     } finally {
@@ -816,13 +840,15 @@ export function PatientsView(props: {
               </Note>
               {interruptedSaltB64 ? (
                 <Note tone="warn">
-                  An interrupted change from this tab is repairable right now — do it before closing or
-                  reloading this page.
+                  An interrupted change from this browser session is repairable right now — the
+                  recovery state survives a reload of this tab, but not closing the browser session.
                 </Note>
               ) : (
                 <Note>
-                  No interrupted change is remembered in this tab. After a reload the re-wrapped key is
-                  not recoverable — an account with no recovery path stays that way (audit F-4).
+                  No interrupted change is remembered for this account in this browser session
+                  (S-4: a change interrupted in another tab of the same session is repairable
+                  there). Anything older is not recoverable — an account with no recovery path
+                  stays that way (audit F-4).
                 </Note>
               )}
               <Field label="Current password (the one you sign in with)" value={recCurrent} onChange={setRecCurrent} type="password" autoComplete="current-password" />
@@ -869,9 +895,9 @@ export function PatientsView(props: {
                 <>
                   <Note>
                     Optional second factor for sign-in: after it is enabled, your password AND a 6-digit
-                    code from an authenticator app are both required. Disabling it later needs both
-                    halves again — and a lost authenticator has no self-service recovery (operator
-                    action only), matching this portal&apos;s no-recovery design.
+                    code from an authenticator app are both required. Enabling also mints a set of
+                    single-use recovery codes (shown once) so a lost authenticator no longer needs an
+                    operator to clear. Disabling two-factor needs both halves again.
                   </Note>
                   <Field label="Current password (to authorize setup)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
                   <Button
@@ -919,12 +945,33 @@ export function PatientsView(props: {
               {totpStatus === true && (
                 <>
                   <Note tone="ok" role="status">
-                    Enabled — sign-in requires your password and a current 6-digit code.
+                    Enabled — sign-in requires your password and a current 6-digit code (or an unused
+                    recovery code).
                   </Note>
-                  <Note tone="danger">
-                    Turning two-factor off needs your password AND a current code. If the authenticator
-                    is lost, only an operator can clear it — there is no self-service recovery.
-                  </Note>
+                  {totpBackupCodes && (
+                    <>
+                      <Note tone="warn">
+                        Recovery codes — shown EXACTLY ONCE, never again. Each works one time in place
+                        of a 6-digit code at sign-in. Copy them somewhere safe NOW: losing every code
+                        AND the authenticator leaves an operator clear as the only path.
+                      </Note>
+                      <div
+                        aria-label="One-time recovery codes"
+                        style={{ fontFamily: "monospace", color: theme.text, fontSize: 13, letterSpacing: 1, margin: "4px 0", columns: 2 }}
+                      >
+                        {totpBackupCodes.map((code) => (
+                          <p key={code} style={{ margin: "2px 0" }}>{code}</p>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {!totpBackupCodes && (
+                    <Note tone="danger">
+                      Turning two-factor off needs your password AND a current code. If the authenticator
+                      is lost, sign in with a recovery code — losing every code AND the authenticator
+                      needs an operator to clear.
+                    </Note>
+                  )}
                   <Field label="Current password (to disable two-factor)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
                   <Field
                     label="6-digit code (to disable two-factor)"

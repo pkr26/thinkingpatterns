@@ -19,6 +19,7 @@ vi.mock("../src/api", async (importOriginal) => {
       meta: vi.fn(async () => ({ sharing_available: true })),
       saltFor: vi.fn(async () => ({ salt: "QUJDREVGR0hJSktMTU5P" })),
       login: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
+      logoutBearer: vi.fn(async () => null),
       registerTherapist: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
     },
     api: {
@@ -43,7 +44,7 @@ vi.mock("../src/api", async (importOriginal) => {
         secret_base32: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
         otpauth_uri: "otpauth://totp/MindPattern:drportal?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=MindPattern&algorithm=SHA1&digits=6&period=30",
       })),
-      totpEnable: vi.fn(async () => null),
+      totpEnable: vi.fn(async () => ({ backup_codes: ["A2B3C4D5E6", "F7G8H9J2K3", "M4N5P6Q7R8", "S2T3U4V5W6", "X7Y8Z9A2B3", "C4D5E6F7G8", "H9J2K3M4N5", "P6Q7R8S2T3"] })),
       totpDisable: vi.fn(async () => null),
     },
   };
@@ -104,13 +105,13 @@ describe("LoginView TOTP step (2026-09-22)", () => {
     await press(root, "Sign in");
     await flush(6);
     // The code field appeared with the explanatory prompt…
-    expect(textOf(root)).toContain("Enter the 6-digit code from your authenticator app.");
+    expect(textOf(root)).toContain("Enter the 6-digit code from your authenticator app — or one of your recovery codes.");
     expect(root.root.findAllByType("input").some((i) => i.props.placeholder === "123456")).toBe(true);
     // …and the first login went out WITHOUT a code.
     expect(mockedAuth.login).toHaveBeenCalledWith(expect.any(String), "drportal", expect.any(String), undefined);
 
     // Second attempt: a valid code completes the sign-in.
-    await typeInto(root, "Authenticator code", "123456");
+    await typeInto(root, "Authenticator code (or recovery code)", "123456");
     await press(root, "Verify code");
     await flush(6);
     expect(mockedAuth.login).toHaveBeenLastCalledWith(expect.any(String), "drportal", expect.any(String), "123456");
@@ -141,7 +142,7 @@ describe("LoginView TOTP step (2026-09-22)", () => {
     await flush(6);
     expect(root2.root.findAllByType("input").some((i) => i.props.placeholder === "123456")).toBe(true);
     // …a stale code keeps it armed with the honest message…
-    await typeInto(root2, "Authenticator code", "111111");
+    await typeInto(root2, "Authenticator code (or recovery code)", "111111");
     mockedAuth.login.mockImplementationOnce(() => {
       throw Object.assign(new ApiError(401, "invalid totp code"), { code: "totp_code_invalid" });
     });
@@ -203,7 +204,7 @@ describe("PatientsView TOTP enrollment (2026-09-22)", () => {
     );
     await flush();
     await openSecurityPanel(root);
-    expect(textOf(root)).toContain("Enabled — sign-in requires your password and a current 6-digit code.");
+    expect(textOf(root)).toContain("Enabled — sign-in requires your password and a current 6-digit code (or an unused");
 
     await typeInto(root, "Current password (to disable two-factor)", "deep-password-1");
     await typeInto(root, "6-digit code (to disable two-factor)", "654321");

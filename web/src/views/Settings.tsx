@@ -14,6 +14,7 @@ import { decryptEntry } from "../crypto/patient";
 import { wrapDataKeyForTherapist } from "../crypto/sharing";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { rebindEntryVersions, forgetAllEntryVersions } from "../entryVersions";
+import { passwordPolicyError } from "./LoginView";
 import { requeueRejected, rejectedEntries, queueLength, clearQueue } from "../offlineQueue";
 import { downloadTextFile, localStore, randomBytes } from "../platform";
 import { clearMoodLog, rewrapMoodLog } from "../moodLog";
@@ -201,8 +202,14 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
       setError(t("common.sessionLocked"));
       return;
     }
-    if (newPassword.length < 12) {
-      setError(t("settings.pwTooShort"));
+    // M-1 (2026-09-26 pentest): the FULL registration policy applies on the
+    // rotation path too — a length-only gate here let users rotate to
+    // policy-barred passwords (password1234, aaaaaaaaaaaa), silently
+    // lowering the offline-guessing floor on the credential-changing path.
+    // Mobile enforces the identical check (SettingsScreen.tsx).
+    const policy = passwordPolicyError(newPassword);
+    if (policy) {
+      setError(policy);
       return;
     }
     if (newPassword !== confirmPassword) {

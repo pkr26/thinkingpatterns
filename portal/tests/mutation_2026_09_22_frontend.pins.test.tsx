@@ -155,7 +155,7 @@ beforeEach(() => {
   mockedApi.rotateCredential.mockReset().mockResolvedValue(null);
   mockedApi.rotateWrapKey.mockReset().mockResolvedValue(null);
   mockedApi.totpSetup.mockReset().mockResolvedValue({ secret_base32: "SECRET", otpauth_uri: "otpauth://x" });
-  mockedApi.totpEnable.mockReset().mockResolvedValue(null);
+  mockedApi.totpEnable.mockReset().mockResolvedValue({ backup_codes: ["A2B3C4D5E6", "F7G8H9J2K3", "M4N5P6Q7R8", "S2T3U4V5W6", "X7Y8Z9A2B3", "C4D5E6F7G8", "H9J2K3M4N5", "P6Q7R8S2T3"] });
   mockedApi.totpDisable.mockReset().mockResolvedValue(null);
   mockedCrypto.deriveMasterKey.mockReset().mockResolvedValue(new Uint8Array(32));
   mockedCrypto.derivePortalKeys.mockReset().mockResolvedValue({ authKey: new Uint8Array(32), wrapKek: new Uint8Array(32), noteKey: new Uint8Array(32) });
@@ -616,7 +616,7 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     expect(passwordPolicyError("aaaaaaaaaaaaaaaa")).toBe(""); // 16, still one class — passphrase lane
   });
 
-  it("the authenticator input keeps only digits, capped at six", async () => {
+  it("the second-factor input accepts BOTH forms: 6-digit code or 10-char recovery code, trimmed, capped at ten (S-3, pentest 2026-09-26)", async () => {
     mockedAuth.login.mockRejectedValueOnce(Object.assign(new ApiError(401, "totp"), { code: "totp_required" }));
     const root = await render(<LoginView onReady={vi.fn()} />);
     await typeInto(root, "Username", "drportal");
@@ -625,12 +625,19 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     await flush();
     const { act } = await import("react");
     const codeInput = () => root.root.findAllByType("input").find((n) => n.props.autoComplete === "one-time-code")!;
+    // A recovery code keeps its letters (the server normalizes case) and is
+    // capped at its true length of ten.
     await act(async () => { codeInput()!.props.onChange({ target: { value: "9a8b7c6d5e4f3g" } }); });
-    expect(codeInput()!.props.value).toBe("987654"); // digits only, first six
+    expect(codeInput()!.props.value).toBe("9a8b7c6d5e");
+    // Whitespace is trimmed (paste artifacts), never silently re-joined.
     await act(async () => { codeInput()!.props.onChange({ target: { value: "12 34" } }); });
-    expect(codeInput()!.props.value).toBe("1234");
+    expect(codeInput()!.props.value).toBe("12 34");
     const verify = root.root.findAllByType("button").find((n) => (n.children as unknown[]).join("") === "Verify code")!;
-    expect(verify.props.disabled).toBe(true); // incomplete code cannot submit
+    expect(verify.props.disabled).toBe(true); // 5 chars is neither form — cannot submit
+    await act(async () => { codeInput()!.props.onChange({ target: { value: "987654" } }); });
+    expect(verify.props.disabled).toBe(false); // a 6-digit code submits…
+    await act(async () => { codeInput()!.props.onChange({ target: { value: "a2b3c4d5e6" } }); });
+    expect(verify.props.disabled).toBe(false); // …and so does a full recovery code
   });
 
   it("an incomplete form never enables its submit button", async () => {

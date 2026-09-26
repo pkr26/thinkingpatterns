@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 import anyio
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,11 +44,13 @@ from ..cache import (
     make_rate_limiter,
     record_keyed_failure,
 )
+from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_user
 from ..locks import lifecycle_locks
-from ..models import User
+from ..models import TotpBackupCode, User, utcnow
 from ..schemas import LoginRequest, RegisterRequest, SaltLookupRequest, SaltResponse, TokenResponse
 from ..security.kdf import hkdf_sha256
+from ..security.sharing import backup_code_digest
 from ..security.tokens import issue_token
 from ..security.totp import unwrap_secret, verify_code
 
@@ -310,6 +312,20 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
                     code="totp_required",
                 )
             settings = request.app.state.settings
+            # Per-username second-factor failure throttle (2026-09-26
+            # pentest D-4). Safe where a per-username PASSWORD deny bucket
+            # is not: this branch is reachable only with a VALID verifier,
+            # so a username-only attacker can never spend this budget —
+            # there is no lockout oracle for unauthenticated spray. It
+            # caps distributed code guessing (10/min/IP × N IPs) that the
+            # per-IP bucket cannot see.
+            totp_fail_key = f"totp-fail:{user.username}"
+            check_keyed_limit_without_count(
+                request,
+                totp_fail_key,
+                settings.totp_failure_limit,
+                settings.auth_rate_window,
+            )
             secret = unwrap_secret(user.totp_secret, settings.token_secret)
             matched = (
                 verify_code(secret, code) if secret is not None else None
@@ -319,21 +335,76 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
                 and matched <= user.totp_last_counter
             )
             if matched is None or replayed:
-                raise ApiError(
-                    status_code=401,
-                    detail="invalid totp code",
-                    code="totp_code_invalid",
+                # Recovery codes (2026-09-26 pentest S-3): a 10-char
+                # single-use code redeems in place of the authenticator
+                # code. Atomic redemption (conditional UPDATE authority),
+                # so concurrent presentations of one code resolve to
+                # exactly one success.
+                redeemed = False
+                digest_candidate = backup_code_digest(code, settings.token_secret)
+                live_codes = (
+                    (
+                        await session.execute(
+                            select(TotpBackupCode).where(
+                                TotpBackupCode.user_id == user.id,
+                                TotpBackupCode.used_at.is_(None),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
                 )
-            # Replay fence: persist the consumed timestep. Two logins with
-            # the same code inside the drift window race this UPDATE — the
-            # second read may still see the old counter; the login rate
-            # limit bounds that residual, documented in SECURITY_RESIDUALS.
-            await session.execute(
-                update(User)
-                .where(User.id == user.id, User.totp_enabled.is_(True))
-                .values(totp_last_counter=matched)
-            )
-            await session.commit()
+                for row in live_codes:
+                    if hmac.compare_digest(row.digest, digest_candidate):
+                        burn = await session.execute(
+                            update(TotpBackupCode)
+                            .where(
+                                TotpBackupCode.id == row.id,
+                                TotpBackupCode.used_at.is_(None),
+                            )
+                            .values(used_at=utcnow())
+                        )
+                        await session.commit()
+                        redeemed = db_rowcount(burn) == 1
+                        break
+                if not redeemed:
+                    record_keyed_failure(
+                        request, totp_fail_key, settings.auth_rate_window
+                    )
+                    raise ApiError(
+                        status_code=401,
+                        detail="invalid totp code",
+                        code="totp_code_invalid",
+                    )
+            else:
+                # Replay fence, ATOMIC (2026-09-26 pentest D-3): the
+                # conditional UPDATE is the authority — two logins racing
+                # the same code serialize on the row and exactly one wins
+                # (the loser's WHERE clause no longer matches after the
+                # winner's commit). The pre-check above stays as a cheap
+                # fast-path rejection only.
+                fence = await session.execute(
+                    update(User)
+                    .where(
+                        User.id == user.id,
+                        User.totp_enabled.is_(True),
+                        or_(
+                            User.totp_last_counter.is_(None),
+                            User.totp_last_counter < matched,
+                        ),
+                    )
+                    .values(totp_last_counter=matched)
+                )
+                await session.commit()
+                if db_rowcount(fence) != 1:
+                    record_keyed_failure(
+                        request, totp_fail_key, settings.auth_rate_window
+                    )
+                    raise ApiError(
+                        status_code=401,
+                        detail="invalid totp code",
+                        code="totp_code_invalid",
+                    )
         return _issue(request, user)
 
 

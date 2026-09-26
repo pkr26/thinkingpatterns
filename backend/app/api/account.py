@@ -31,7 +31,16 @@ from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
-from ..models import AccessLog, Consent, Entry, Insight, Measure, User, utcnow
+from ..models import (
+    AccessLog,
+    Consent,
+    Entry,
+    Insight,
+    Measure,
+    TotpBackupCode,
+    User,
+    utcnow,
+)
 from ..schemas import (
     AccountDeleteRequest,
     CredentialRotateRequest,
@@ -42,6 +51,7 @@ from ..schemas import (
     PatientAccessLogOut,
     ShareRecord,
     TotpConfirmRequest,
+    TotpEnableResponse,
     TotpSetupRequest,
     TotpSetupResponse,
     entry_out,
@@ -53,7 +63,10 @@ from .auth import (
     auth_work_slot,
     hash_verifier_off_loop,
 )
+from ..security.sharing import backup_code_digest
 from ..security.totp import (
+    BACKUP_CODE_COUNT,
+    generate_backup_code,
     generate_secret,
     otpauth_uri,
     unwrap_secret,
@@ -724,6 +737,21 @@ async def rotate_credential(
                 token_epoch=User.token_epoch + 1,
             )
         )
+        # Audit visibility for the one credential event whose attacker
+        # value is highest (2026-09-26 pentest D-2): a stolen verifier can
+        # drive this endpoint to a permanent takeover + victim lockout.
+        # The row lands in the same transaction as the swap so the trail
+        # cannot be split from it; a locked-out victim (or an operator
+        # recovering the account) can then see exactly WHEN the standing
+        # credential changed.
+        session.add(
+            AccessLog(
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="credential_rotated",
+            )
+        )
         await session.commit()
         # The credential every live bearer authenticated under is gone: kill
         # the sessions and any resident processing keys in the same lifecycle
@@ -1053,7 +1081,8 @@ async def totp_setup(
 
 @router.post(
     "/totp/enable",
-    status_code=204,
+    response_model=TotpEnableResponse,
+    status_code=200,
     dependencies=[
         Depends(make_rate_limiter("account-totp", "auth_rate_limit", "auth_rate_window"))
     ],
@@ -1064,7 +1093,14 @@ async def totp_enable(
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
 ):
-    """Confirm enrollment by presenting a code from the PENDING secret."""
+    """Confirm enrollment by presenting a code from the PENDING secret.
+
+    2026-09-26 pentest S-3: enabling also mints the one-time recovery-code
+    set and returns it in this response — the ONLY time the codes exist in
+    plaintext anywhere. The 204 this endpoint used to answer became this
+    body; clients that treated 204 as success keep working (200 is also a
+    success status) and simply gain the codes.
+    """
     # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2):
     # _require_verifier's populate_existing re-read refreshes this same ORM
     # object in place, so capturing afterwards would compare the
@@ -1112,6 +1148,22 @@ async def totp_enable(
                 detail="totp setup changed, confirm again",
                 code="version_conflict",
             )
+        # Recovery-code set (2026-09-26 pentest S-3): minted inside the
+        # same fence and transaction as the arm itself, so an enabled
+        # account ALWAYS has exactly one intact set. Any stale rows (a
+        # disable→re-enable cycle already purges, this is belt-and-braces
+        # against operator-restored snapshots) die before the insert.
+        backup_codes = [generate_backup_code() for _ in range(BACKUP_CODE_COUNT)]
+        await session.execute(
+            delete(TotpBackupCode).where(TotpBackupCode.user_id == user.id)
+        )
+        for code in backup_codes:
+            session.add(
+                TotpBackupCode(
+                    user_id=user.id,
+                    digest=backup_code_digest(code, settings.token_secret),
+                )
+            )
         session.add(
             AccessLog(
                 actor_id=user.id,
@@ -1121,6 +1173,7 @@ async def totp_enable(
             )
         )
         await session.commit()
+    return TotpEnableResponse(backup_codes=backup_codes)
 
 
 @router.post(
@@ -1186,6 +1239,12 @@ async def totp_disable(
             update(User)
             .where(User.id == user.id)
             .values(totp_secret=None, totp_enabled=None, totp_last_counter=None)
+        )
+        # The recovery-code set dies with the factor (2026-09-26 pentest
+        # S-3): leaving live single-use codes behind a disabled factor
+        # would make re-enrollment's fresh set ambiguous. Same transaction.
+        await session.execute(
+            delete(TotpBackupCode).where(TotpBackupCode.user_id == user.id)
         )
         session.add(
             AccessLog(

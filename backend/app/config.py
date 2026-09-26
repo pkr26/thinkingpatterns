@@ -196,6 +196,12 @@ class Settings:
 
     auth_rate_limit: int = 10
     auth_rate_window: int = 60
+    # Per-USERNAME second-factor failure budget (2026-09-26 pentest D-4).
+    # Distinct from auth_rate_limit on purpose: the per-IP bucket cannot
+    # see distributed TOTP guessing, and this keyed bucket (reachable only
+    # with a valid verifier, so no lockout oracle for unauthenticated
+    # spray) must stay independently observable and configurable.
+    totp_failure_limit: int = 10
     entries_rate_limit: int = 120
     entries_rate_window: int = 60
     processing_rate_limit: int = 10
@@ -365,6 +371,7 @@ class Settings:
             "unlock_threshold_days",
             "auth_rate_limit",
             "auth_rate_window",
+            "totp_failure_limit",
             "entries_rate_limit",
             "entries_rate_window",
             "processing_rate_limit",
@@ -420,6 +427,7 @@ class Settings:
                 raise RuntimeError(f"{name} must be <= {MAX_RATE_WINDOW_SECONDS}")
         for name in (
             "auth_rate_limit",
+            "totp_failure_limit",
             "entries_rate_limit",
             "processing_rate_limit",
             "read_rate_limit",
@@ -594,6 +602,7 @@ class Settings:
             ),
             export_rate_limit=_int_env("MINDPATTERN_EXPORT_RATE_LIMIT", 5),
             export_rate_window=_int_env("MINDPATTERN_EXPORT_RATE_WINDOW", 60),
+            totp_failure_limit=_int_env("MINDPATTERN_TOTP_FAILURE_LIMIT", 10),
             ops_rate_limit=_int_env("MINDPATTERN_OPS_RATE_LIMIT", 240),
             ops_rate_window=_int_env("MINDPATTERN_OPS_RATE_WINDOW", 60),
             access_log_retention_days=_int_env("MINDPATTERN_ACCESS_LOG_RETENTION_DAYS", 730),

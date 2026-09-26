@@ -142,6 +142,9 @@ def test_settings_defaults_are_pinned(clean_env):
         "unlock_threshold_days": 30,
         "auth_rate_limit": 10,
         "auth_rate_window": 60,
+        # Added 2026-09-26 (pentest D-4): per-username second-factor failure
+        # budget, independent of the per-IP auth bucket.
+        "totp_failure_limit": 10,
         "entries_rate_limit": 120,
         "entries_rate_window": 60,
         "processing_rate_limit": 10,
@@ -620,10 +623,14 @@ async def test_cors_middleware_contract(settings):
     # Pin updated 2026-09-08: X-Account-Verifier joined the list — it is the
     # preferred DELETE /account re-auth transport and a browser client must
     # be allowed to send it cross-origin (origins themselves stay opt-in).
+    # Pin updated 2026-09-26 (pentest D-1): X-New-Processing-Token joined —
+    # POST /processing/rekey consumes it, and its omission made data-key
+    # rotation unpreflightable for allow-listed browser clients.
     assert cors.kwargs["allow_headers"] == [
         "Authorization",
         "Content-Type",
         "X-Processing-Token",
+        "X-New-Processing-Token",
         "X-Account-Verifier",
         "X-Therapist-Enrollment-Token",
     ]
