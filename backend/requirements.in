@@ -6,11 +6,11 @@
 # requirements.lock.txt is the installable artifact; this file makes the
 # intent reviewable without making Docker/PyPI resolve a floating range.
 aiosqlite==0.22.1
-alembic==1.19.2
-asyncpg==0.30.0
+alembic==1.20.0
+asyncpg==0.31.0
 cryptography==50.0.1
 fastapi==0.141.1
-greenlet==3.3.2
+greenlet==3.5.6
 httpx==0.28.1
-sqlalchemy==2.0.52
-uvicorn[standard]==0.52.4
+sqlalchemy==2.0.54
+uvicorn[standard]==0.53.0
