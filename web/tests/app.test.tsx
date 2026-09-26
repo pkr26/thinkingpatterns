@@ -88,12 +88,42 @@ describe("App", () => {
     await flush();
     expect(textOf(root)).toContain("Today's entry");
 
-    // Sign out, sign back in: onboarding must not repeat.
+    // Sign out (W-6): every mindpattern.* localStorage flag goes with the
+    // session — a shared browser keeps no trace an account used it.
     await press(root, "Sign out (all devices)");
     await flush();
     expect(textOf(root)).toContain("Sign in");
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
+    const storage = (globalThis as { window?: { localStorage?: Storage } }).window?.localStorage;
+    const leftover = storage ? Array.from({ length: storage.length }, (_, i) => storage.key(i)!).filter((key) => key.startsWith("mindpattern.")) : [];
+    expect(leftover).toEqual([]);
+    // The wiped onboarding flag means onboarding honestly repeats after an
+    // explicit sign-out (the flag no longer exists to suppress it):
+    await signIn(root);
+    await flush();
+    expect(textOf(root)).toContain("Step 1 of 3");
+    await press(root, "Next");
+    await press(root, "Next");
+    await press(root, "Start journaling");
+    await flush();
+    expect(textOf(root)).toContain("Today's entry");
+
+    // A session-expiry funnel is NOT a sign-out: the flags survive, so
+    // signing back in after a 401 does not repeat onboarding.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => jsonResponse({ detail: "expired", code: "unauthorized" }, { status: 401 })),
+    );
+    await act(async () => {
+      await expect(api.meta()).rejects.toThrow();
+    });
+    await flush();
+    expect(textOf(root)).toContain("Your session ended");
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (String(url).endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    }));
     await signIn(root);
     await flush();
     expect(textOf(root)).toContain("Today's entry");
@@ -160,6 +190,37 @@ describe("App", () => {
     await flush();
     expect(textOf(root)).toContain("Locked after inactivity");
     expect(vault.isUnlocked()).toBe(false);
+  });
+
+  it("the hidden-tab guard locks the session the moment the tab is backgrounded (W-1)", async () => {
+    // Mobile parity: backgrounding locks the vault immediately. The web
+    // equivalent — visibilitychange to hidden — must funnel to sign-in with
+    // the keys gone, not leave decrypted text rendered in a hidden tab.
+    authStubs();
+    const root = await render(<App />);
+    await vi.advanceTimersByTimeAsync(50);
+    await flush();
+    await signIn(root);
+    await press(root, "Next");
+    await press(root, "Next");
+    await press(root, "Start journaling");
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    const shimWindow = (globalThis as { window?: { dispatchEvent: (event: unknown) => boolean } }).window;
+    await act(async () => {
+      shimWindow!.dispatchEvent({ type: "visibilitychange", visibilityState: "hidden" });
+    });
+    await flush();
+    expect(textOf(root)).toContain("this tab went to the background");
+    expect(vault.isUnlocked()).toBe(false);
+    expect(hasSession()).toBe(false);
+    // Coming back visible must NOT silently resurrect the session:
+    await act(async () => {
+      shimWindow!.dispatchEvent({ type: "visibilitychange", visibilityState: "visible" });
+    });
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(textOf(root)).toContain("Sign in");
   });
 
   // Audit 2026-09-25: sessionActive had drifted to miss the later-phase

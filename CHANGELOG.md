@@ -4,6 +4,58 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-25 (c) — mobile-parity security audit of the web client: all six findings fixed
+
+`AUDIT_WEB_PARITY_2026-09-25.md` compared the patient web client control-by-
+control against the standard the mobile client was held to. Core architecture
+(crypto stack, key custody, transport hardening, queue/integrity, sharing,
+crisis safety) was already at parity; six deviations were found and are all
+fixed and tested here (web 406 green, coverage 89.3/80.2/88.3/93.3 over the
+85/75/85/90 floors; build clean, 156.65 kB gz):
+
+- **W-1 (Medium) — hidden-tab lock (mobile background-lock parity)**: the
+  web client now locks the session the moment the tab is hidden
+  (`visibilitychange → hidden`), exactly like mobile locks on AppState
+  background — decrypted text no longer stays rendered (and readable in
+  tab-hover previews) while the user is elsewhere. The idle window
+  tightened from 10 to 5 minutes at mobile parity, and `mousemove` no
+  longer counts as activity (a mouse jiggler used to defeat the idle
+  lock; only click/keydown/scroll/touchstart reset it now).
+- **W-2 (Medium) — anti-phishing error sanitizer (mobile F2 parity)**:
+  server-supplied `detail` is now run through the mobile client's
+  sanitizer before any banner render — URLs of ANY scheme, scheme-less
+  domains (any alpha TLD, no allowlist), phone-like digit runs, bidi
+  overrides, and invisible/zero-width characters are stripped, then
+  capped at 200 chars + ellipsis. The 2026-09-19 mobile corpus (bit.ly,
+  mindpattern-support.de, discord.gg, word-joiner domain splits) now pins
+  the web client too (`detailToMessage` in `api/client.ts`).
+- **W-3 (Med-Low) — password shape rules (mobile L-6 parity)**: web
+  registration now enforces the common-word blocklist ("password",
+  "qwerty", "123456"…, "mindpattern", "journal"), whole-password
+  single-character runs, and keyboard walks — the shape rules a
+  zero-knowledge server can never enforce. The policy is now genuinely
+  identical to mobile's.
+- **W-4 (Med-Low) — fingerprint attestation gate (mobile C-7 parity)**:
+  granting therapist access now requires BOTH attestations — an explicit
+  "we read the fingerprint back and it matched" confirmation AND the
+  disclosure terms. Passive display plus a warning no longer suffices.
+- **W-5 (Low) — server `user_id` validation (mobile L-7 parity)**: a
+  login/register response whose `user_id` falls outside the 32-hex
+  contract is refused fail-closed (keys zeroized, vault locked, no
+  session) — a hostile server can no longer feed malformed ids into the
+  vault owner binding, AAD contexts, or storage keys.
+- **W-6 (Low) — sign-out flag hygiene**: explicit sign-out and account
+  deletion now wipe this browser's non-content `mindpattern.*`
+  localStorage flags (onboarding/mute/threshold stamps), matching
+  mobile's origin-bound state wipe — a shared computer keeps no trace an
+  account used it. Idle/expiry locks deliberately keep the flags (they
+  are not sign-outs), and onboarding therefore honestly repeats after an
+  explicit sign-out.
+
+Threat-model and plan docs updated (`WEB_THREAT_MODEL.md` key-custody
+residual now names the 5-min idle + hidden-tab bounds; `WEB_PLAN.md` 2.7
+carries the correction note).
+
 ## 2026-09-25 (b) — independent-audit remediation of the web client commit
 
 Every finding from the independent audit of the patient web client commit

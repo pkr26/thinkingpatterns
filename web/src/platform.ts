@@ -116,6 +116,24 @@ export function isOnline(): boolean {
 /** Subscribe to a window event through the seam (online / offline /
  *  visibilitychange / pageshow). Returns an unsubscribe function; a
  *  no-op when there is no usable window. */
+/** Is the page currently hidden? The browser truth is
+ * `document.visibilityState`; the node test runtime has no document, so
+ * the seam also accepts the state carried on the synthetic event the
+ * test shim dispatches (the same pattern the bfcache guard uses for
+ * `persisted`). A missing/unknown state reads as visible — never locks
+ * on a guess. */
+export function pageHidden(event?: unknown): boolean {
+  try {
+    const doc = (globalThis as { document?: { visibilityState?: unknown } }).document;
+    if (doc && typeof doc.visibilityState === "string") {
+      return doc.visibilityState === "hidden";
+    }
+  } catch {
+    // Fall through to the event-borne state.
+  }
+  return (event as { visibilityState?: unknown } | undefined)?.visibilityState === "hidden";
+}
+
 export function onWindowEvent(type: string, listener: (event?: unknown) => void): () => void {
   try {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") {

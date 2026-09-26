@@ -165,7 +165,7 @@ two-writer decision changes mobile's reality too.
 | `src/aad.ts` | `web/src/crypto/aad.ts` | None — byte-identical Python-compatible AAD, verify against vectors |
 | `src/api.ts` | `web/src/api/client.ts` | Keep hardening (same-origin-only base, 15 s timeout, `redirect:"error"`, `cache:"no-store"`, `credentials:"omit"`, `referrerPolicy:"no-referrer"`, response-URL origin recheck, one-shot 401 latch, session AbortController, header-pagination validation); ADD the ~20 patient endpoints mobile's client carries |
 | `src/platform.ts` | `web/src/platform.ts` | Extend: download/stream-export seam, `navigator.locks`, visibility/online events |
-| `src/App.tsx` session/lock patterns | `web/src/App.tsx` | 10-min idle lock, bfcache `pageshow` guard, lockdown wipes keys + aborts requests — re-derived for patient views |
+| `src/App.tsx` session/lock patterns | `web/src/App.tsx` | 10-min idle lock, bfcache `pageshow` guard, lockdown wipes keys + aborts requests — re-derived for patient views (tightened 2026-09-25 audit W-1: 5-min idle, mousemove no longer counts, hidden-tab lock added) |
 | `src/ui.tsx` | `web/src/ui.tsx` | Fork primitives (Button/Card/Field/Note/ErrorBanner); new patient theme tokens + responsive layout primitives |
 | `index.html` + `public/_headers` + nginx triple, `tests/securityConfig.test.ts` | same | Third instance of the aligned triple, pinned by the same test shape |
 | `vite.config.ts`, `stryker.config.json`, `tests/helpers/setup.ts` | same | Dev `/api` proxy → :8000; coverage thresholds parity |
@@ -286,8 +286,9 @@ byte-pinned to the shared vectors, with keys that cannot outlive the tab.
 > payload contracts), `web/src/brain/` copied verbatim from mobile and
 > pinned by `tests/brainVectors.test.ts` (sentiment to 1e-12, stats to
 > 1e-9), vault + idle-lock/bfcache hooks in `src/vault.ts` +
-> `src/sessionLock.ts` (10-min idle, activity reset, persisted-pageshow
-> lock — inert until P3 activates them with a session).
+> `src/sessionLock.ts` (5-min idle since the 2026-09-25 audit, activity
+> reset, persisted-pageshow lock, hidden-tab lock — inert until P3
+> activates them with a session).
 
 - [x] 2.1 Port `aad.ts`; verify byte-equality against portal's via the
       vector cases (non-ASCII + astral planes included)
@@ -315,6 +316,11 @@ byte-pinned to the shared vectors, with keys that cannot outlive the tab.
       scroll/touch reset), bfcache `pageshow persisted` synchronous lock,
       lockdown aborts in-flight requests and zeroizes keys, one-shot 401
       latch → lockdown with message
+      *(Correction 2026-09-25, audit W-1: idle tightened to 5 min at mobile
+      parity; `mousemove` removed from the activity set — a jiggler must
+      not defeat the lock; a hidden-tab `visibilitychange` lock added —
+      mobile locks the vault immediately on background, and so does the
+      web client now.)*
 - [x] 2.8 Copy `src/brain/` (lexicon, sentiment, stats) +
       `tests/brainVectors.test.ts` pinning `shared/brain_vectors.json`
       (9-decimal floats)

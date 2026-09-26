@@ -7,6 +7,7 @@ import {
   apiBaseUrl,
   auth,
   clearSession,
+  detailToMessage,
   listEntriesWalk,
   normalizeApiBaseUrl,
   parseRetryAfter,
@@ -121,13 +122,14 @@ describe("error envelope contract", () => {
     clearSession();
   });
 
-  it("an unknown code degrades to undefined; detail is truncated to 200 chars", async () => {
+  it("an unknown code degrades to undefined; detail is capped at 200 chars + ellipsis (mobile-parity sanitizer)", async () => {
     setSession("t", "u", "n");
     const long = "x".repeat(300);
     stubFetch(() => jsonResponse({ detail: long, code: "made_up_code" }, { status: 400 }));
     const err = await api.meta().catch((e: unknown) => e as ApiError);
     expect((err as ApiError).code).toBeUndefined();
-    expect((err as ApiError).message.length).toBe(200);
+    expect((err as ApiError).message.length).toBe(201); // 200 + the ellipsis
+    expect((err as ApiError).message.endsWith("…")).toBe(true);
     clearSession();
   });
 
@@ -484,5 +486,78 @@ describe("listEntriesWalk (S-5: the bounded snapshot walk)", () => {
     const entries = await listEntriesWalk();
     expect(entries).toHaveLength(200);
     expect(pages).toBe(201);
+  });
+});
+
+describe("F2: error-banner sanitizer (W-2, mobile parity)", () => {
+  it("strips bare domains and phone-like digit runs", () => {
+    expect(detailToMessage("go to evil.com/support for help", 400)).not.toContain("evil.com");
+    expect(detailToMessage("call 555-0134 now", 400)).not.toContain("555");
+    expect(detailToMessage("see https://evil.example/x", 400)).not.toContain("evil");
+    expect(detailToMessage("open mindpattern-support://x", 400)).not.toContain("://");
+  });
+
+  it("no TLD allowlist — EVERY domain TLD is stripped (2026-09-19 corpus)", () => {
+    expect(detailToMessage("Account locked. Unlock at bit.ly/mp-verify", 403))
+      .not.toContain("bit.ly");
+    expect(detailToMessage("Verify your account at mindpattern-support.de/login", 403))
+      .not.toContain("mindpattern-support.de");
+    expect(detailToMessage("Join the support chat: discord.gg/mindpattern", 403))
+      .not.toContain("discord.gg");
+    expect(detailToMessage("Recover data at mp-recover.to/help", 403))
+      .not.toContain("mp-recover.to");
+    expect(detailToMessage("see status.example.xyzzy now", 400)).not.toContain("example.xyzzy");
+  });
+
+  it("invisible characters cannot split a domain", () => {
+    expect(detailToMessage("Unlock at bit\u2060.ly/mp-verify", 403))
+      .not.toContain(".ly");
+    expect(detailToMessage("Unlock at bit\u2060.ly/mp-verify", 403))
+      .not.toContain("\u2060");
+    expect(detailToMessage("Unlock at evil\ufeff.com/verify", 403))
+      .not.toContain("evil");
+    expect(detailToMessage("go bit\u200b.ly now", 400)).not.toContain(".ly");
+  });
+
+  it("bidi overrides cannot flip the banner's reading order", () => {
+    const out = detailToMessage("safe\u202etext\u202c: call 555-0134", 400);
+    expect(out).not.toContain("\u202e");
+    expect(out).not.toContain("\u202c");
+    expect(out).not.toContain("555");
+  });
+
+  it("honest text still reads fine after the strip", () => {
+    const out = detailToMessage("your journal entry was saved; sync continues in 5 minutes", 201);
+    expect(out).toContain("journal entry was saved");
+    expect(out).toContain("5 minutes");
+    const taken = detailToMessage("username is taken; try another in 5 minutes", 409);
+    expect(taken).toContain("username is taken");
+    expect(taken).toContain("5 minutes");
+  });
+
+  it("a fully-sanitized-away detail falls back to the status message", () => {
+    expect(detailToMessage("https://evil.example/everything", 400)).toBe("request failed (400)");
+    expect(detailToMessage("", 500)).toBe("request failed (500)");
+  });
+
+  it("FastAPI array details sanitize too, and length is capped at 200 + ellipsis", () => {
+    const out = detailToMessage([{ msg: "go to evil.com now" }, { msg: "and call 555-0134" }], 422);
+    expect(out).not.toContain("evil.com");
+    expect(out).not.toContain("555");
+    expect(out).not.toContain("invalid field"); // joined msgs, not the placeholder
+    const long = detailToMessage(`x`.repeat(500), 400);
+    expect(long.length).toBe(201);
+    expect(long.endsWith("…")).toBe(true);
+    expect(detailToMessage([{ nope: 1 }, "str"], 422)).toContain("invalid field");
+  });
+
+  it("the request path carries sanitized copy end to end (no raw detail in ApiError.message)", async () => {
+    setSession("tok", "0123456789abcdef0123456789abcdef", "alice");
+    stubFetch(() => jsonResponse({ detail: "Account locked. Unlock at bit.ly/mp-verify or call 555-0134", code: "forbidden" }, { status: 403 }));
+    const err = await api.meta().catch((e: unknown) => e) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.message).not.toContain("bit.ly");
+    expect(err.message).not.toContain("555-0134");
+    expect(err.message).not.toContain("http");
   });
 });

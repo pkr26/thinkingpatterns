@@ -23,8 +23,9 @@ it feeds `SECURITY_RESIDUALS.md`.
 re-authenticates. Nothing decryptable in localStorage, sessionStorage, or
 IndexedDB — the storage-scrape harness asserts this after every flow.
 Residual: a memory image of the live tab contains plaintext (inherent to
-any client); the idle lock (10 min) and bfcache guard bound the exposure
-window.
+any client); the 5-minute idle lock (mobile parity), the bfcache guard,
+and the hidden-tab lock (visibilitychange → hidden locks immediately —
+W-1, audit 2026-09-25) bound the exposure window.
 
 **The one key shipment (processing sessions).** The data key travels only
 on the explicit "Refresh patterns" button, inside a single-use TTL

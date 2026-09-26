@@ -110,7 +110,7 @@ describe("MeasuresView", () => {
 describe("ShareView", () => {
   const SPKI = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE" + "A".repeat(80); // not used for real crypto here
 
-  it("lookup shows the therapist + fingerprint; grant requires the disclosure", async () => {
+  it("lookup shows the therapist + fingerprint; grant requires BOTH attestations (W-4)", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     stubFetch((url, init) => {
       calls.push({ url, init });
@@ -127,9 +127,31 @@ describe("ShareView", () => {
     await settle(40, 3);
     expect(textOf(root)).toContain("Dr. River");
     expect(textOf(root)).toContain("fingerprint");
-    // The grant button is disabled until the disclosure is accepted:
     const confirm = root.root.findAllByType("button").find((node) => node.children.join("") === "Confirm and share");
+    const checkboxes = root.root.findAllByType("input").filter((node) => node.props.type === "checkbox");
+    // Two gates now: fingerprint-match attestation + disclosure terms.
+    expect(checkboxes).toHaveLength(2);
+    const { act } = await import("react");
+    const toggle = async (index: number, checked: boolean): Promise<void> => {
+      const checkbox = checkboxes[index]!;
+      await act(async () => {
+        checkbox.props.onChange({ target: { checked } });
+      });
+    };
+    // Disabled with NEITHER attestation:
     expect(confirm?.props.disabled).toBe(true);
+    // Disabled with ONLY the fingerprint attestation (mobile C-7 parity
+    // means neither gate is optional):
+    await toggle(0, true);
+    expect(confirm?.props.disabled).toBe(true);
+    // Disabled with ONLY the disclosure:
+    await toggle(0, false);
+    await toggle(1, true);
+    expect(confirm?.props.disabled).toBe(true);
+    // Enabled only with BOTH:
+    await toggle(0, true);
+    expect(confirm?.props.disabled).toBe(false);
+    // Nothing was granted anywhere along the way — no premature POST:
     expect(calls.some((call) => call.url.endsWith("/consents") && call.init.method === "POST")).toBe(false);
   });
 

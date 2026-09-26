@@ -84,12 +84,16 @@ describe("ShareView grant flow (the full path)", () => {
     await typeInto(root, "Pairing code", "ZZ99ZZ99");
     await press(root, "Look up");
     await settle(40, 3);
-    // Accept the disclosure (the checkbox inside the label):
-    const checkbox = root.root.findAllByType("input").find((node) => node.props.type === "checkbox")!;
+    // Accept BOTH gates (W-4): the fingerprint-match attestation first,
+    // then the disclosure terms — grant stays disabled otherwise.
+    const checkboxes = root.root.findAllByType("input").filter((node) => node.props.type === "checkbox");
+    expect(checkboxes).toHaveLength(2);
     const { act } = await import("react");
-    await act(async () => {
-      checkbox.props.onChange({ target: { checked: true } });
-    });
+    for (const checkbox of checkboxes) {
+      await act(async () => {
+        checkbox.props.onChange({ target: { checked: true } });
+      });
+    }
     await press(root, "Confirm and share");
     await settle(60, 4);
     expect(grantBody).not.toBeNull();

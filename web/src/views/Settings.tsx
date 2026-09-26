@@ -13,7 +13,7 @@ import { deriveMasterKey, toBase64 } from "../crypto/core";
 import { wrapDataKeyForTherapist } from "../crypto/sharing";
 import { rebindEntryVersions } from "../entryVersions";
 import { requeueRejected, rejectedEntries, queueLength } from "../offlineQueue";
-import { downloadTextFile, randomBytes } from "../platform";
+import { downloadTextFile, localStore, randomBytes } from "../platform";
 import { clearMoodLog } from "../moodLog";
 import { clearFeedback } from "../questionFeedback";
 import { derivePatientKeys } from "../crypto/keys";
@@ -186,6 +186,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
       if (owner) {
         await Promise.allSettled([clearFeedback(owner), clearMoodLog(owner)]);
       }
+      // W-6 (audit 2026-09-25): account deletion leaves no per-account
+      // trace in this browser either — the non-content mindpattern.* flags
+      // (onboarding/mute/threshold stamps) go with the account.
+      localStore.removePrefix("mindpattern.");
       props.onLockdown("Your account and everything in it were deleted. Only the access audit log (who read what, when — no content) survives, for accountability.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete the account.");

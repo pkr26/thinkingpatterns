@@ -17,6 +17,11 @@ import { Button, Card, ErrorBanner, Field, Note } from "../ui";
 /** Mirrors the backend's USERNAME_PATTERN (schemas.py): honest client-side
  *  validation so the server's validation_error never surprises anyone. */
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,64}$/;
+/** Server account ids are 32-hex (uuid4().hex). The login response is
+ * hostile-server-controllable text like any other server payload: a
+ * malformed id must never reach the vault owner binding or storage keys
+ * (mobile L-7 parity, fix W-5, audit 2026-09-25). */
+const USER_ID_PATTERN = /^[0-9a-f]{32}$/;
 const PASSWORD_MIN = 12;
 
 export interface LoginSuccess {
@@ -24,8 +29,20 @@ export interface LoginSuccess {
   username: string;
 }
 
-/** On-device password policy (identical to mobile): 12+ characters, and
- *  below 16 at least three of the four character classes. */
+/** On-device password policy (identical to mobile, incl. its L-6 shape
+ * rules): 12+ characters, below 16 at least three of the four character
+ * classes, and never the trivially-guessable families — a zero-knowledge
+ * design leaves the server only the derived verifier, so the POLICY is
+ * entirely client-side (fix W-3, audit 2026-09-25). These are the
+ * families the mobile on-device unlock oracle would otherwise crack in
+ * minutes on a stolen phone. */
+const COMMON_PASSWORD_WORDS = [
+  "password", "qwerty", "123456", "12345678", "123456789", "letmein",
+  "iloveyou", "welcome", "admin", "monkey", "dragon", "sunshine",
+  "princess", "football", "baseball", "master", "abc123", "111111",
+  "mindpattern", "journal",
+];
+
 export function passwordPolicyError(password: string): string | null {
   if (password.length < PASSWORD_MIN) return `Use at least ${PASSWORD_MIN} characters.`;
   if (password.length < 16) {
@@ -36,23 +53,42 @@ export function passwordPolicyError(password: string): string | null {
       + (/[^a-zA-Z0-9]/.test(password) ? 1 : 0);
     if (variety < 3) return "Use at least three of: lowercase, uppercase, digits, symbols (or 16+ characters).";
   }
+  const lowered = password.toLowerCase();
+  if (COMMON_PASSWORD_WORDS.some((word) => lowered.includes(word))) {
+    return "That password is too common or predictable — choose something unique.";
+  }
+  if (/^(.)\1+$/.test(password)) {
+    return "That password is too common or predictable — choose something unique.";
+  }
+  if (/^(0123|1234|2345|3456|4567|5678|6789|qwer|asdf|zxcv)/i.test(password)) {
+    return "That password is too common or predictable — choose something unique.";
+  }
   return null;
 }
 
 /** Adopt a successful token response: install the session, hand the keys
- *  to the vault (which zeroizes the master key), or wipe everything. */
-function adoptSession(keys: PatientKeys, token: TokenResponse, username: string, onSuccess: (s: LoginSuccess) => void): boolean {
+ * to the vault (which zeroizes the master key), or wipe everything. */
+type AdoptionResult = "ok" | "therapist-role" | "invalid-response";
+function adoptSession(keys: PatientKeys, token: TokenResponse, username: string, onSuccess: (s: LoginSuccess) => void): AdoptionResult {
   if (token.role !== "user") {
     // A therapist account cannot use the patient app — fail closed, and
     // leave nothing behind.
     zeroize(keys.authKey, keys.dataKey, keys.masterKey);
     vault.lock();
-    return false;
+    return "therapist-role";
+  }
+  if (!USER_ID_PATTERN.test(token.user_id)) {
+    // A hostile or broken server returned an account id outside the
+    // contract — refuse it before it can reach the vault owner binding,
+    // AAD contexts, or storage keys, and leave nothing behind.
+    zeroize(keys.authKey, keys.dataKey, keys.masterKey);
+    vault.lock();
+    return "invalid-response";
   }
   setSession(token.token, token.user_id, username);
   vault.unlock(keys, token.user_id); // zeroizes masterKey
   onSuccess({ userId: token.user_id, username });
-  return true;
+  return "ok";
 }
 
 export function LoginView(props: { onSuccess: (success: LoginSuccess) => void }): React.JSX.Element {
@@ -113,8 +149,13 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           zeroize(keys.authKey, keys.dataKey, keys.masterKey);
           throw err;
         }
-        if (!adoptSession(keys, token, username, props.onSuccess)) {
+        const adoption = adoptSession(keys, token, username, props.onSuccess);
+        if (adoption === "therapist-role") {
           setError("This is a therapist account — use the therapist portal instead.");
+          return;
+        }
+        if (adoption === "invalid-response") {
+          setError("Sign-in failed — the server sent an invalid response. Try again.");
           return;
         }
       } else {
@@ -127,8 +168,13 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           zeroize(keys.authKey, keys.dataKey, keys.masterKey);
           throw err;
         }
-        if (!adoptSession(keys, token, username, props.onSuccess)) {
+        const adoption = adoptSession(keys, token, username, props.onSuccess);
+        if (adoption === "therapist-role") {
           setError("This is a therapist account — use the therapist portal instead.");
+          return;
+        }
+        if (adoption === "invalid-response") {
+          setError("Sign-in failed — the server sent an invalid response. Try again.");
           return;
         }
       }

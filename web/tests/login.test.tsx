@@ -12,10 +12,13 @@ import { press, render, settle, textOf, typeInto } from "./helpers/rtr";
 
 const SALT_B64 = "AAECAwQFBgcICQoLDA0ODw=="; // 16 bytes, from the shared vectors
 const GOOD_PASSWORD = "correct horse battery staple";
+/** Server account ids are 32-hex (uuid4().hex) — the contract adoptSession
+ *  now enforces (W-5); fixtures must match it. */
+const TEST_USER_ID = "0123456789abcdef0123456789abcdef";
 
 const tokenResponse = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   token: "tok-1",
-  user_id: "user-7",
+  user_id: TEST_USER_ID,
   expires_in: 86400,
   role: "user",
   ...overrides,
@@ -48,6 +51,27 @@ describe("password policy", () => {
     expect(passwordPolicyError("abcdefghijkl99!")).toBeNull();
     expect(passwordPolicyError("aA1!aaaaaaaaaaaaaaaaa")).toBeNull();
   });
+
+  it("L-6 shape rules (mobile parity, W-3): blocklisted words are rejected even with passing variety", () => {
+    // 17 chars, three classes — passes length+variety, dies on "password":
+    expect(passwordPolicyError("passwordpassword1!")).toContain("too common");
+    expect(passwordPolicyError("MyJournal2026!x")).toContain("too common"); // "journal"
+    expect(passwordPolicyError("correct-horse-MindPattern-7")).toContain("too common"); // "mindpattern"
+    expect(passwordPolicyError("welcome-to-the-Jungle99")).toContain("too common"); // "welcome"
+    expect(passwordPolicyError("qwerty123456!X")).toContain("too common"); // keyboard walk "qwer"
+    expect(passwordPolicyError("12345678abcd!Q")).toContain("too common"); // keyboard walk "1234"
+    expect(passwordPolicyError("zzzzzzzzzzzz!9Q")).toBeNull(); // repeated run, not the whole password
+  });
+
+  it("L-6: an entire-password single-character run is rejected", () => {
+    // Only reachable above the variety floor with one class + 16+ chars:
+    expect(passwordPolicyError("aaaaaaaaaaaaaaaa")).toContain("too common");
+  });
+
+  it("L-6: honest strong passphrases still pass", () => {
+    expect(passwordPolicyError("correct horse battery staple")).toBeNull();
+    expect(passwordPolicyError("quiet-morning-lantern-42")).toBeNull();
+  });
 });
 
 describe("sign in", () => {
@@ -59,10 +83,10 @@ describe("sign in", () => {
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
     await settle();
-    expect(onSuccess).toHaveBeenCalledWith({ userId: "user-7", username: "alice" });
+    expect(onSuccess).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "alice" });
     expect(hasSession()).toBe(true);
     expect(vault.isUnlocked()).toBe(true);
-    expect(vault.ownerUserId()).toBe("user-7");
+    expect(vault.ownerUserId()).toBe(TEST_USER_ID);
   });
 
   it("wrong credentials show the server message and leave nothing behind", async () => {
@@ -91,6 +115,42 @@ describe("sign in", () => {
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
     expect(textOf(root)).toContain("therapist portal");
+  });
+
+  it("W-5: a malformed server user_id is refused fail-closed — no session, no keys", async () => {
+    // A hostile server can put anything in user_id; it must never reach
+    // the vault owner binding, AAD contexts, or storage keys.
+    authRoutes({ login: tokenResponse({ user_id: "user-7" }) });
+    const onSuccess = vi.fn();
+    const root = await render(<LoginView onSuccess={onSuccess} />);
+    await typeInto(root, "Username", "alice");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await press(root, "Sign in");
+    await settle();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(hasSession()).toBe(false);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(textOf(root)).toContain("invalid response");
+  });
+
+  it("W-5: a user_id carrying storage-key/AAD injection payloads is refused", async () => {
+    for (const hostile of [
+      `a".repeat(1)+"`, // JSON-array AAD smuggle attempt
+      "../../etc/passwd",
+      "x".repeat(64),
+      "0123456789ABCDEF0123456789ABCDEF", // uppercase is outside the hex contract
+      "",
+    ]) {
+      authRoutes({ login: tokenResponse({ user_id: hostile }) });
+      const onSuccess = vi.fn();
+      const root = await render(<LoginView onSuccess={onSuccess} />);
+      await typeInto(root, "Username", "alice");
+      await typeInto(root, "Password", GOOD_PASSWORD);
+      await press(root, "Sign in");
+      await settle();
+      expect(onSuccess).not.toHaveBeenCalled();
+      expect(hasSession()).toBe(false);
+    }
   });
 
   it("rate limiting renders the retry window", async () => {
@@ -133,8 +193,24 @@ describe("register", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await press(root, "Create journal");
     await settle();
-    expect(onSuccess).toHaveBeenCalledWith({ userId: "user-7", username: "newuser" });
+    expect(onSuccess).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "newuser" });
     expect(vault.isUnlocked()).toBe(true);
+  });
+
+  it("W-5: a malformed user_id from register is refused fail-closed too", async () => {
+    authRoutes({ register: tokenResponse({ user_id: "not-hex" }) });
+    const onSuccess = vi.fn();
+    const root = await render(<LoginView onSuccess={onSuccess} />);
+    await registerMode(root);
+    await typeInto(root, "Username", "newuser");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await typeInto(root, "Confirm password", GOOD_PASSWORD);
+    await press(root, "Create journal");
+    await settle();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(hasSession()).toBe(false);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(textOf(root)).toContain("invalid response");
   });
 
   it("shows the policy error for a weak password", async () => {

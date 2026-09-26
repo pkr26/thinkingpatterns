@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
-import { useBfcacheGuard, useIdleLock, type LockReason } from "./sessionLock";
+import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from "./sessionLock";
 import { isOnline, localStore, onWindowEvent } from "./platform";
 import { AppFrame, Button, Card, ErrorBanner, Note } from "./ui";
 import { CrisisCard } from "./crisis";
@@ -51,12 +51,14 @@ const BOOT_MS = 40;
  * Web-Locks-serialized inside flushQueueOnReconnect. */
 const QUEUE_FLUSH_INTERVAL_MS = 30_000;
 
-function noticeFor(reason: "idle" | "bfcache" | "expired" | "deleted"): string {
+function noticeFor(reason: LockReason | "expired" | "deleted"): string {
   switch (reason) {
     case "idle":
       return "Locked after inactivity — sign in again to continue.";
     case "bfcache":
       return "Locked — the page was restored from the browser's back/forward cache.";
+    case "hidden":
+      return "Locked — this tab went to the background, so your keys were dropped. Sign in again to continue.";
     case "expired":
       return "Your session ended — the token expired, or the password was changed / signed out on another device. Sign in again.";
     case "deleted":
@@ -106,6 +108,11 @@ export function App(): React.JSX.Element {
   const onLock = useCallback((reason: LockReason) => lockDown(noticeFor(reason)), [lockDown]);
   useIdleLock(sessionActive, onLock);
   useBfcacheGuard(sessionActive, onLock);
+  // W-1 (audit 2026-09-25): mobile locks the vault the moment the app is
+  // backgrounded; the web equivalent — the tab going hidden — must do the
+  // same, or decrypted text stays rendered (and readable in tab previews)
+  // indefinitely while the user is elsewhere.
+  useHiddenTabLock(sessionActive, onLock);
 
   // Reconnect: flush the offline queue (throttled + Web Locks-serialized
   // inside flushQueueOnReconnect), only while a session exists.
@@ -179,6 +186,11 @@ export function App(): React.JSX.Element {
     // Logout bumps the token epoch account-wide (every device, including
     // the mobile app, signs out too) — the button copy says so.
     void api.logout().catch(() => undefined);
+    // W-6 (audit 2026-09-25): sign-out wipes this browser's non-content
+    // mindpattern.* flags (onboarding/mute/threshold stamps) like mobile
+    // wipes its origin-bound state — a shared computer keeps no trace that
+    // an account used it. Idle/expiry locks deliberately keep them.
+    localStore.removePrefix("mindpattern.");
     lockDown(null);
   }, [lockDown]);
 

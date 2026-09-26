@@ -2,10 +2,12 @@
  * Therapist sharing (WEB_PLAN P7.2): the patient side of the zero-knowledge
  * consent. Pairing shows the therapist's NAME and their key FINGERPRINT —
  * the out-of-band check (read it back to each other; a matching fingerprint
- * is the human proof the key was not substituted). Granting wraps the data
- * key to the therapist's public key (ECDH→HKDF→AES-GCM) and requires the
- * password-derived verifier: a stolen token cannot share. Revoke is
- * verifier-gated too and says plainly what revocation can and cannot do.
+ * is the human proof the key was not substituted). Granting requires BOTH
+ * attestations — an explicit "fingerprints matched" confirmation (mobile
+ * C-7 parity, fix W-4, audit 2026-09-25) and the disclosure terms — then
+ * wraps the data key to the therapist's public key (ECDH→HKDF→AES-GCM)
+ * with the password-derived verifier: a stolen token cannot share. Revoke
+ * is verifier-gated too and says plainly what revocation can and cannot do.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ListedConsent } from "../api/client";
@@ -19,6 +21,7 @@ export function ShareView(): React.JSX.Element {
   const [code, setCode] = useState("");
   const [lookup, setLookup] = useState<{ name: string; fingerprint: string; therapistId: string; wrapPubKey: string } | null>(null);
   const [disclosureAccepted, setDisclosureAccepted] = useState(false);
+  const [fingerprintVerified, setFingerprintVerified] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export function ShareView(): React.JSX.Element {
     setStatus(null);
     setLookup(null);
     setDisclosureAccepted(false);
+    setFingerprintVerified(false);
     if (!code.trim()) {
       setError("Type the pairing code your therapist shows.");
       return;
@@ -84,6 +88,7 @@ export function ShareView(): React.JSX.Element {
       setCode("");
       setLookup(null);
       setDisclosureAccepted(false);
+      setFingerprintVerified(false);
       await load();
     } catch (err) {
       if (err instanceof ApiError && err.code === "disclosure_outdated") {
@@ -126,12 +131,18 @@ export function ShareView(): React.JSX.Element {
             <Note>{`Their key fingerprint: ${lookup.fingerprint}`}</Note>
             <Note tone="warn">{"Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."}</Note>
             <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: themeBody }}>
+              <input type="checkbox" checked={fingerprintVerified} onChange={(e) => setFingerprintVerified(e.target.checked)} />
+              <span>
+                {"We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"}
+              </span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: themeBody }}>
               <input type="checkbox" checked={disclosureAccepted} onChange={(e) => setDisclosureAccepted(e.target.checked)} />
               <span>
                 {"I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what was already seen."}
               </span>
             </label>
-            <Button label="Confirm and share" onPress={() => void grant()} disabled={busy || !disclosureAccepted} />
+            <Button label="Confirm and share" onPress={() => void grant()} disabled={busy || !disclosureAccepted || !fingerprintVerified} />
           </>
         )}
         <ErrorBanner message={error} />
