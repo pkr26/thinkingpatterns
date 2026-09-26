@@ -16,7 +16,7 @@ import { __setLocaleForTests } from "../src/strings";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { render, settle, textOf } from "./helpers/rtr";
+import { render, settle, textOf, textOfNode } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -63,8 +63,11 @@ describe("views consume the active locale (M-W5, audit 2026-09-26)", () => {
     // localized label/placeholder through their props instead.
     const area = root.root.findAllByType("textarea")[0]!;
     expect(String(area.props.placeholder)).toContain("Escriba con libertad");
-    const label = area.parent as unknown as { children: React.ReactNode[] };
-    expect(label.children.some((child) => typeof child === "string" && child.includes("¿Cómo estuvo hoy?"))).toBe(true);
+    // The label wraps its text in a styled span (redesign 2026-09-26) —
+    // assert the localized label through the subtree's text.
+    const label = area.parent;
+    expect(label).not.toBeNull();
+    expect(textOfNode(label).includes("¿Cómo estuvo hoy?")).toBe(true);
     // The chips follow the locale (E-3 parity): today's Spanish starters
     // are exactly what renders.
     const { promptChipsFor } = await import("../src/promptChips");

@@ -14,6 +14,12 @@
  * device-local (the on-device read line and the mood-log fallback).
  *
  * Drafts are memory-only: no plaintext at rest, ever (disclosed in the UI).
+ *
+ * Redesign 2026-09-26: the check-in is a visible one-tap visual card
+ * (faces for mood and energy, dots for sleep, chips for activities) —
+ * no longer hidden behind a "Show details" toggle — and selection is
+ * aria-pressed sage, never the danger color. A time-aware greeting and
+ * streak chip open the screen.
  */
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
@@ -23,16 +29,22 @@ import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { localDateISO } from "../dates";
 import { newClientEntryId } from "../entryId";
 import { recordMood, localStreak } from "../moodLog";
-import { ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, ACTIVITY_TAGS, activityTagLabel, optionLabel } from "../mood";
+import { ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, ACTIVITY_TAGS, activityTagLabel } from "../mood";
 import { enqueue, queueLength } from "../offlineQueue";
 import { promptChipsFor } from "../promptChips";
 import { isOnline } from "../platform";
 import { detectLanguage, sentimentScore } from "../brain/sentiment";
-import { getLocale, t } from "../strings";
+import { dateLocaleTag, getLocale, t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, ErrorBanner, Note, TextArea } from "../ui";
+import { Button, Card, Chip, DotScale, ErrorBanner, Icon, MoodScale, Note, PillNote, TextArea } from "../ui";
 
 export type SaveResult = "sent" | "queued";
+
+function greetingKey(hour: number): string {
+  if (hour < 12) return "entry.greetingMorning";
+  if (hour < 18) return "entry.greetingAfternoon";
+  return "entry.greetingEvening";
+}
 
 export function EntryView(props: { onSaved: (result: SaveResult, date: string) => void }): React.JSX.Element {
   const [text, setText] = useState("");
@@ -40,7 +52,6 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
   const [energyPick, setEnergyPick] = useState<number | null>(null);
   const [sleepPick, setSleepPick] = useState<number | null>(null);
   const [tags, setTags] = useState<string[]>([]);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [crisisPrompt, setCrisisPrompt] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -159,17 +170,64 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
     }
   };
 
+  const now = new Date();
+  const dateLine = new Intl.DateTimeFormat(dateLocaleTag(), { weekday: "long", month: "long", day: "numeric" }).format(now);
+
   return (
     <>
+      {/* Time-aware greeting + date + streak chip — the calm opening beat. */}
+      <div className="stack" style={{ gap: 6, padding: "6px 20px 0" }}>
+        <span className="note note--lead" style={{ fontSize: "var(--text-2xl)", fontWeight: 800, letterSpacing: "-0.02em" }}>
+          {t(greetingKey(now.getHours()))}
+        </span>
+        <span className="row row--wrap" style={{ gap: 10 }}>
+          <span className="note note--muted">{dateLine}</span>
+          {streak !== null && streak > 0 && (
+            <PillNote role="status" icon="flame">{t(streak === 1 ? "common.streakOne" : "common.streakMany", { count: streak })}</PillNote>
+          )}
+          {queuedCount > 0 && (
+            <PillNote role="status" tone="warn" icon="alert">{t(queuedCount === 1 ? "entry.queuedOne" : "entry.queuedMany", { count: queuedCount })}</PillNote>
+          )}
+        </span>
+      </div>
+
       {crisisPrompt && (
-        <Card title={t("entry.crisisPromptTitle")}>
+        <Card title={t("entry.crisisPromptTitle")} tone="sensitive">
           <Note tone="danger">{t("entry.crisisPromptBody")}</Note>
           <Note tone="muted">{t("entry.crisisPromptProceed")}</Note>
         </Card>
       )}
+
+      {/* The one-tap check-in — visible by default (Daylio-style
+          frictionless); every dimension is optional and never blocks saving. */}
+      <Card title={t("entry.checkinTitle")}>
+        <span className="checkin-optional">{t("entry.optionalHint")}</span>
+        <div className="checkin-grid">
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <span className="checkin-label">{t("entry.moodQuestion")}</span>
+            <MoodScale options={MOOD_OPTIONS} value={moodPick} onChange={setMoodPick} />
+          </div>
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <span className="checkin-label">{t("entry.energyQuestion")}</span>
+            <MoodScale options={ENERGY_OPTIONS} value={energyPick} onChange={setEnergyPick} />
+          </div>
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <span className="checkin-label">{t("entry.sleepQuestion")}</span>
+            <DotScale options={SLEEP_OPTIONS} value={sleepPick} onChange={setSleepPick} />
+          </div>
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <span className="checkin-label">{t("entry.activitiesQuestion")}</span>
+            <div className="row row--wrap">
+              {ACTIVITY_TAGS.map((tag) => (
+                <Chip key={tag} label={activityTagLabel(tag)} selected={tags.includes(tag)} onPress={() => toggleTag(tag)} />
+              ))}
+            </div>
+          </div>
+        </div>
+        <Note tone="muted">{t("entry.detailsNote")}</Note>
+      </Card>
+
       <Card title={t("entry.title")}>
-        {streak !== null && streak > 0 && <Note role="status">{t(streak === 1 ? "common.streakOne" : "common.streakMany", { count: streak })}</Note>}
-        {queuedCount > 0 && <Note tone="warn">{t(queuedCount === 1 ? "entry.queuedOne" : "entry.queuedMany", { count: queuedCount })}</Note>}
         <TextArea
           label={t("entry.question")}
           value={text}
@@ -177,64 +235,24 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
           placeholder={t("entry.placeholderWeb")}
           rows={8}
         />
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <div className="row row--wrap">
           {chips.map((chip) => (
-            <Button key={chip} label={chip} small onPress={() => setText(`${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `)} />
+            <Chip key={chip} label={chip} onPress={() => setText(`${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `)} />
           ))}
         </div>
         {sentiment !== null && (
-          <Note tone="muted">{t("entry.onDeviceRead", { leaning: sentiment > 0.05 ? t("entry.leanLighter") : sentiment < -0.05 ? t("entry.leanHeavier") : t("entry.leanEven") })}</Note>
-        )}
-
-        <Button label={detailsOpen ? t("entry.hideDetails") : t("entry.showDetailsWeb")} onPress={() => setDetailsOpen(!detailsOpen)} small />
-        {detailsOpen && (
-          <>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {MOOD_OPTIONS.map((option) => (
-                <Button
-                  key={option.label}
-                  label={optionLabel(option)}
-                  small
-                  danger={moodPick === option.value}
-                  onPress={() => setMoodPick(moodPick === option.value ? null : option.value)}
-                />
-              ))}
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {ENERGY_OPTIONS.map((option) => (
-                <Button
-                  key={option.label}
-                  label={optionLabel(option)}
-                  small
-                  danger={energyPick === option.value}
-                  onPress={() => setEnergyPick(energyPick === option.value ? null : option.value)}
-                />
-              ))}
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {SLEEP_OPTIONS.map((option) => (
-                <Button
-                  key={option.label}
-                  label={optionLabel(option)}
-                  small
-                  danger={sleepPick === option.value}
-                  onPress={() => setSleepPick(sleepPick === option.value ? null : option.value)}
-                />
-              ))}
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {ACTIVITY_TAGS.map((tag) => (
-                <Button key={tag} label={activityTagLabel(tag)} small danger={tags.includes(tag)} onPress={() => toggleTag(tag)} />
-              ))}
-            </div>
-            <Note tone="muted">{t("entry.detailsNote")}</Note>
-          </>
+          <PillNote role="status" icon="info">
+            {t("entry.onDeviceRead", { leaning: sentiment > 0.05 ? t("entry.leanLighter") : sentiment < -0.05 ? t("entry.leanHeavier") : t("entry.leanEven") })}
+          </PillNote>
         )}
 
         <ErrorBanner message={error} />
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <Button label={busy ? t("entry.saving") : t("entry.save")} onPress={() => void save()} disabled={busy} />
-          <Note tone="muted">{isOnline() ? t("entry.draftMemoryNote") : t("entry.offlineQueueNote")}</Note>
+        <div className="stack" style={{ gap: "var(--space-2)" }}>
+          <Button label={busy ? t("entry.saving") : t("entry.save")} icon="check" onPress={() => void save()} disabled={busy} block />
+          <span className="row" style={{ gap: 6, justifyContent: "center" }}>
+            <Icon name={isOnline() ? "shield" : "alert"} size={14} />
+            <span className="note note--muted">{isOnline() ? t("entry.draftMemoryNote") : t("entry.offlineQueueNote")}</span>
+          </span>
         </div>
       </Card>
     </>

@@ -8,6 +8,11 @@
  * H-5 (audit 2026-09-26): the payload's sentiment is only ever an explicit
  * check-in pick now, so the mood calendar sources like mobile — payload
  * pick first, the device-local mood log's day value as fallback.
+ *
+ * Redesign 2026-09-26: the calendar gains weekday headers, a color legend,
+ * a month entry count, and tap-a-day filtering; entries render as cards
+ * with a mood rail; delete is a two-step arm/confirm (matching the portal's
+ * pattern) instead of a single unconfirmed press.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
@@ -17,15 +22,27 @@ import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind"
 import { recentMoods, removeMoodDay } from "../moodLog";
 import { localDateISO } from "../dates";
 import { moodLabel } from "../mood";
-import { t } from "../strings";
+import { dateLocaleTag, t } from "../strings";
 import { vault } from "../vault";
-import { theme, Button, Card, ErrorBanner, Field, Note, TextArea } from "../ui";
+import { moodFill, currentPalette } from "../tokens";
+import { Button, Card, Chip, ErrorBanner, Field, Icon, Note, Skeleton, TextArea } from "../ui";
 
 interface DecodedEntry {
   clientEntryId: string;
   entryDate: string;
   contentVersion: number;
   payload: EntryPayload;
+}
+
+/** Locale-aware weekday initials (Mon..Sun order, matching monthGrid). */
+function weekdayLabels(): string[] {
+  const formatter = new Intl.DateTimeFormat(dateLocaleTag(), { weekday: "short" });
+  // 2023-01-02 was a Monday — walk one full week from it.
+  const monday = new Date(Date.UTC(2023, 0, 2));
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(monday.getTime() + index * 86_400_000);
+    return formatter.format(day).slice(0, 3);
+  });
 }
 
 export function HistoryView(): React.JSX.Element {
@@ -37,9 +54,11 @@ export function HistoryView(): React.JSX.Element {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [editing, setEditing] = useState<DecodedEntry | null>(null);
   const [editText, setEditText] = useState("");
   const [conflict, setConflict] = useState<{ theirs: DecodedEntry; mine: string } | null>(null);
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // The device-local mood log's day values — the calendar's fallback source
   // (H-5: payload pick first, log value second), like mobile's logMoods.
@@ -118,11 +137,13 @@ export function HistoryView(): React.JSX.Element {
 
   const visible = useMemo(() => {
     if (!entries) return null;
+    let pool = entries;
+    if (selectedDay) pool = pool.filter((entry) => entry.entryDate === selectedDay);
     return filterEntries(
-      entries.map((entry) => ({ clientEntryId: entry.clientEntryId, entryDate: entry.entryDate, text: entry.payload.text })),
+      pool.map((entry) => ({ clientEntryId: entry.clientEntryId, entryDate: entry.entryDate, text: entry.payload.text })),
       query,
     ).map((hit) => entries.find((entry) => entry.clientEntryId === hit.clientEntryId)!);
-  }, [entries, query]);
+  }, [entries, query, selectedDay]);
 
   const calendar = useMemo(() => {
     if (!entries) return null;
@@ -134,8 +155,15 @@ export function HistoryView(): React.JSX.Element {
       // without one fall back to the mood log's device-local estimate
       // (mobile MoodCalendar parity — the log is recorded on every save).
       value: day.iso !== null ? (byDate.get(day.iso)?.payload.sentiment ?? logMoods[day.iso] ?? null) : null,
+      hasEntry: day.iso !== null && byDate.has(day.iso),
     }));
   }, [entries, cursor, logMoods]);
+
+  const monthEntryCount = useMemo(() => {
+    if (!entries) return 0;
+    const prefix = `${cursor.year}-${String(cursor.month).padStart(2, "0")}`;
+    return entries.filter((entry) => entry.entryDate.startsWith(prefix)).length;
+  }, [entries, cursor]);
 
   const startEdit = (entry: DecodedEntry): void => {
     setEditing(entry);
@@ -222,6 +250,7 @@ export function HistoryView(): React.JSX.Element {
       await api.deleteEntry(entry.clientEntryId);
       await forgetEntryVersion(owner, keys.dataKey, entry.clientEntryId);
       await removeMoodDay(keys.dataKey, owner, entry.entryDate).catch(() => undefined);
+      setArmedDelete(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("history.deleteFailed"));
@@ -231,89 +260,141 @@ export function HistoryView(): React.JSX.Element {
   };
 
   const today = localDateISO();
-  const moodColor = (value: number | null): string => {
-    if (value === null) return theme.cardDeep;
-    if (value > 0.3) return "#8fc7a8";
-    if (value > 0.05) return "#c7dfc1";
-    if (value > -0.05) return "#e3e6ea";
-    if (value > -0.3) return "#e6cbc2";
-    return "#dba89c";
-  };
+  const palette = currentPalette();
+  const weekdays = useMemo(weekdayLabels, []);
 
   return (
     <>
       <Card title={t("history.calendarTitle")}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Button label="‹" onPress={() => setCursor(stepMonth(cursor.year, cursor.month, -1))} small />
-          <Note>{monthLabel(cursor.year, cursor.month)}</Note>
-          <Button label="›" onPress={() => setCursor(stepMonth(cursor.year, cursor.month, 1))} small />
+        <div className="cal-toolbar">
+          <button
+            type="button"
+            className="cal-arrow"
+            aria-label={t("history.prevMonth")}
+            onClick={() => setCursor(stepMonth(cursor.year, cursor.month, -1))}
+          >
+            <Icon name="chevron-left" size={17} />
+          </button>
+          <span className="cal-month">{monthLabel(cursor.year, cursor.month)}</span>
+          <button
+            type="button"
+            className="cal-arrow"
+            aria-label={t("history.nextMonth")}
+            onClick={() => setCursor(stepMonth(cursor.year, cursor.month, 1))}
+          >
+            <Icon name="chevron-right" size={17} />
+          </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
-          {calendar?.map((day) => (
-            <div
-              key={day.iso ?? `blank-${day.day}`}
-              title={day.iso ?? ""}
-              style={{
-                aspectRatio: "1",
-                borderRadius: 6,
-                backgroundColor: day.iso !== null ? moodColor(day.value) : "transparent",
-                border: `1px solid ${day.iso === today ? theme.accent : theme.border}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                color: theme.muted,
-              }}
-            >
-              {day.iso !== null ? day.day : ""}
-            </div>
+        <div className="cal-grid" role="grid" aria-label={t("history.calendarTitle")}>
+          {weekdays.map((label) => (
+            <span key={label} className="cal-weekday" aria-hidden="true">{label}</span>
           ))}
+          {calendar?.map((day) => {
+            if (day.iso === null) return <span key={`blank-${day.day}`} />;
+            const fill = day.hasEntry || day.value !== null ? moodFill(day.value) : undefined;
+            const selected = selectedDay === day.iso;
+            return (
+              <button
+                key={day.iso}
+                type="button"
+                className={[
+                  "cal-day",
+                  day.hasEntry ? "cal-day--entry" : "",
+                  day.iso === today ? "cal-day--today" : "",
+                  selected ? "cal-day--selected" : "",
+                ].filter(Boolean).join(" ")}
+                style={fill !== undefined ? { backgroundColor: fill } : undefined}
+                aria-label={`${day.iso}${day.hasEntry ? ` — ${t("history.dayHasEntry")}` : ""}`}
+                aria-pressed={selected}
+                onClick={() => day.hasEntry && setSelectedDay(selected ? null : day.iso)}
+                disabled={!day.hasEntry}
+              >
+                {day.day}
+              </button>
+            );
+          })}
+        </div>
+        <div className="row row--wrap row--between">
+          <span className="cal-legend">
+            <span className="cal-legend__swatch" style={{ background: palette.mood2 }} aria-hidden="true" />
+            {t("history.legendLighter")}
+            <span className="cal-legend__swatch" style={{ background: palette.moodMinus2, marginLeft: 8 }} aria-hidden="true" />
+            {t("history.legendHeavier")}
+          </span>
+          <span className="cal-legend">
+            {monthEntryCount > 0 ? t(monthEntryCount === 1 ? "history.monthEntriesOne" : "history.monthEntriesMany", { count: monthEntryCount }) : ""}
+          </span>
         </div>
         <Note tone="muted">{t("history.calendarNote")}</Note>
       </Card>
 
       <Card title={t("history.title")}>
+        {selectedDay && (
+          <div className="row row--wrap">
+            <Chip label={t("history.showingDay", { date: selectedDay })} selected onPress={() => setSelectedDay(null)} icon="x" />
+          </div>
+        )}
         <Field label={t("history.search")} value={query} onChange={setQuery} placeholder={t("history.searchPlaceholderWeb")} />
         {rolledBack.length > 0 && <Note tone="warn">{t(rolledBack.length === 1 ? "history.rollbackOne" : "history.rollbackMany", { count: rolledBack.length })}</Note>}
         <ErrorBanner message={error} />
-        {visible === null && !error && <Note role="status">{t("common.loading")}</Note>}
+        {visible === null && !error && (
+          <>
+            <Note role="status">{t("common.loading")}</Note>
+            <Skeleton lines={4} title />
+          </>
+        )}
         {visible?.length === 0 && <Note>{query ? t("history.noMatch") : t("history.empty")}</Note>}
         {visible?.map((entry) => (
-          <section key={entry.clientEntryId} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 13, color: theme.text }}>{entry.entryDate}</strong>
-              <Note tone="muted">
+          <article key={entry.clientEntryId} className="entry-card">
+            <div className="entry-card__head">
+              <span className="row" style={{ gap: 8 }}>
+                <span className="mood-dot" style={{ background: moodFill(entry.payload.sentiment ?? null) }} aria-hidden="true" />
+                <span className="entry-card__date">{entry.entryDate}</span>
+              </span>
+              <span className="mood-badge">
                 {entry.payload.sentiment != null ? moodLabel(entry.payload.sentiment) : t("history.noRead")}
                 {entry.contentVersion > 1 ? ` · ${t("history.editedTimes", { count: entry.contentVersion - 1 })}` : ""}
-              </Note>
+              </span>
             </div>
             <Note>{entry.payload.text.length > 240 ? `${entry.payload.text.slice(0, 240)}…` : entry.payload.text}</Note>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button label={t("history.edit")} onPress={() => startEdit(entry)} small disabled={busy || editing !== null || conflict !== null} />
-              <Button label={t("common.delete")} onPress={() => void remove(entry)} small danger disabled={busy} />
+            <div className="row">
+              <Button label={t("history.edit")} onPress={() => startEdit(entry)} small variant="ghost" disabled={busy || editing !== null || conflict !== null} />
+              {armedDelete === entry.clientEntryId ? (
+                <>
+                  <Button label={t("common.deletePermanently")} onPress={() => void remove(entry)} small danger disabled={busy} />
+                  <Button label={t("common.cancel")} onPress={() => setArmedDelete(null)} small variant="ghost" />
+                </>
+              ) : (
+                <Button label={t("common.delete")} onPress={() => setArmedDelete(entry.clientEntryId)} small danger disabled={busy} />
+              )}
             </div>
-          </section>
+          </article>
         ))}
       </Card>
 
       {editing && (
         <Card title={t("history.editTitle", { date: editing.entryDate })}>
           <TextArea label={t("history.yourEntry")} value={editText} onChange={setEditText} rows={8} />
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="row">
             <Button label={busy ? t("entry.saving") : t("history.saveEdit")} onPress={() => void submitEdit()} disabled={busy} />
-            <Button label={t("common.cancel")} onPress={() => setEditing(null)} small />
+            <Button label={t("common.cancel")} onPress={() => setEditing(null)} small variant="ghost" />
           </div>
         </Card>
       )}
 
       {conflict && (
         <Card title={t("history.conflictTitle")}>
-          <Note tone="warn">{t("history.conflictTheirs")}</Note>
-          <Note>{conflict.theirs.payload.text}</Note>
-          <Note tone="warn">{t("history.conflictMine")}</Note>
-          <Note>{conflict.mine}</Note>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Button label={t("history.keepTheirs")} onPress={() => { setConflict(null); void load(); }} small />
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <span className="section-label">{t("history.conflictTheirs")}</span>
+            <Note>{conflict.theirs.payload.text}</Note>
+          </div>
+          <hr className="divider" />
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <span className="section-label">{t("history.conflictMine")}</span>
+            <Note>{conflict.mine}</Note>
+          </div>
+          <div className="row row--wrap">
+            <Button label={t("history.keepTheirs")} onPress={() => { setConflict(null); void load(); }} small variant="ghost" />
             <Button label={t("history.applyMine")} onPress={() => void applyMineOnTop()} small />
           </div>
           <Note tone="muted">{t("history.noOverwriteNote")}</Note>

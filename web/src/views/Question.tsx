@@ -10,6 +10,11 @@
  * a consumer — the 404 (baseline, no question yet) and offline branches
  * render today's on-device question (localized) instead of dead code,
  * exactly like mobile QuestionScreen's baseline/offline captions.
+ *
+ * Redesign 2026-09-26: the question renders as a calm hero card; the
+ * feedback buttons are real aria-pressed toggles with check icons (the
+ * "✓ " label-prefix hack is retired); the refresh consent card leads
+ * with a shield cue.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
@@ -22,7 +27,7 @@ import { reconcile } from "../sync";
 import { isOnline } from "../platform";
 import { getLocale, t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, ErrorBanner, Note } from "../ui";
+import { Button, Card, Chip, ErrorBanner, Icon, Note } from "../ui";
 
 export function QuestionView(props: { onRefreshed: (message: string) => void }): React.JSX.Element {
   const [question, setQuestion] = useState<{ text: string; pid?: string; forDate: string } | null>(null);
@@ -47,7 +52,7 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       const today = await api.questionToday();
       if (generation.current !== run) return;
       const payload = await decryptQuestion(vault.get().dataKey, owner, today.for_date, today.blob);
-      setQuestion({ text: payload.question, pid: payload.pattern_pid, forDate: payload.for_date });
+      setQuestion({ text: payload.question, pid: payload.pattern_pid, forDate: today.for_date });
       setGeneric(null);
     } catch (err) {
       if (generation.current !== run) return;
@@ -123,11 +128,11 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       <Card title={t("question.titleWeb")}>
         {question ? (
           <>
-            <Note>{question.text}</Note>
+            <Note tone="lead">{question.text}</Note>
             {question.pid ? (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Button label={answered === "resonated" ? `✓ ${t("question.resonated")}` : t("question.resonated")} onPress={() => void tap(true)} small disabled={answered !== null} />
-                <Button label={answered === "not-me" ? `✓ ${t("question.notMe")}` : t("question.notMe")} onPress={() => void tap(false)} small disabled={answered !== null} />
+              <div className="row row--wrap">
+                <Chip label={t("question.resonated")} icon="heart" selected={answered === "resonated"} disabled={answered !== null} onPress={() => void tap(true)} />
+                <Chip label={t("question.notMe")} icon="x" selected={answered === "not-me"} disabled={answered !== null} onPress={() => void tap(false)} />
               </div>
             ) : (
               <Note tone="muted">{t("question.noPidNote")}</Note>
@@ -136,7 +141,7 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
           </>
         ) : generic ? (
           <>
-            <Note>{generic.text}</Note>
+            <Note tone="lead">{generic.text}</Note>
             <Note tone="muted">{t(generic.offline ? "question.captionOffline" : "question.captionBaseline")}</Note>
           </>
         ) : (
@@ -146,8 +151,11 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       </Card>
 
       <Card title={t("question.refreshTitle")}>
-        <Note>{t("question.refreshBody")}</Note>
-        <Button label={busy ? t("question.refreshing") : t("question.refreshPatterns")} onPress={() => void refreshPatterns()} disabled={busy} />
+        <span className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+          <span style={{ color: "var(--primary-strong)", flex: "none", paddingTop: 2 }}><Icon name="shield" size={22} /></span>
+          <Note>{t("question.refreshBody")}</Note>
+        </span>
+        <Button label={busy ? t("question.refreshing") : t("question.refreshPatterns")} icon="refresh" onPress={() => void refreshPatterns()} disabled={busy} />
       </Card>
     </>
   );

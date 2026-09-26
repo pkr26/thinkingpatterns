@@ -148,9 +148,9 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
 
     // The PHI-bearing sections are explicitly marked non-printing…
     const evidence = root.root.findAllByType("section").find((n) => deepText(n).includes("Evidence entries"));
-    expect(evidence?.props.className).toBe("no-print");
+    expect(String(evidence?.props.className)).toContain("no-print");
     const composer = root.root.findAllByType("section").find((n) => deepText(n).includes("Notes on this pattern"));
-    expect(composer?.props.className).toBe("no-print");
+    expect(String(composer?.props.className)).toContain("no-print");
 
     // …and the print stylesheet hides EVERY direct chart section except the
     // .print-only summary, so no card can reach paper even unmarked.

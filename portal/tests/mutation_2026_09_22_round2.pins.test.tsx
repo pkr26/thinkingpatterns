@@ -411,20 +411,21 @@ describe("round 2: App idle lock and session races", () => {
 // ---------------------------------------------------------------------------
 
 describe("round 2: ui theme and tones", () => {
-  it("the theme table is exactly the clinical palette", () => {
+  it("the theme table is exactly the clinical palette (redesign 2026-09-26: refreshed values + the warn token the old table froze absent)", () => {
     expect(ui.theme).toEqual({
-      bg: "#0d1117",
-      card: "#161b26",
-      cardDeep: "#10141d",
-      text: "#e7ecf5",
-      body: "#c3ccdb",
-      muted: "#7d8899",
+      bg: "#0d1219",
+      card: "#151b28",
+      cardDeep: "#101622",
+      text: "#e8edf6",
+      body: "#c6cfdd",
+      muted: "#8a95a3",
       accent: "#4f8cff",
-      accentBright: "#6ea0ff",
-      danger: "#e0604f",
-      ok: "#4fae7c",
-      border: "#232a38",
-      radius: 10,
+      accentBright: "#7db0ff",
+      danger: "#e5685a",
+      ok: "#55b384",
+      warn: "#d9a35e",
+      border: "#232b3b",
+      radius: 12,
     });
   });
 
@@ -438,14 +439,17 @@ describe("round 2: ui theme and tones", () => {
       <ui.Note>plain</ui.Note>
     </React.Fragment>);
     const buttons = root.root.findAllByType("button");
-    expect(buttons.find((n) => n.props.children === "Go")!.props.style.cursor).toBe("pointer");
-    expect(buttons.find((n) => n.props.children === "No")!.props.style.cursor).toBe("default");
-    const noteColor = (tone: string) =>
-      root.root.findAllByType("p").find((n) => (n.children as unknown[]).join("") === ({ ok: "fine", danger: "alarm", warn: "warn", plain: "plain" } as Record<string, string>)[tone])!.props.style.color;
-    expect(noteColor("ok")).toBe(ui.theme.ok);
-    expect(noteColor("danger")).toBe(ui.theme.danger);
-    expect(noteColor("warn")).toBe(ui.theme.accentBright);
-    expect(noteColor("plain")).toBe(ui.theme.muted);
+    // Buttons render through token classes now: the disabled state is the
+    // native attribute (the browser never fires clicks on it).
+    expect(buttons.find((n) => n.props.children === "Go")!.props.disabled).not.toBe(true);
+    expect(buttons.find((n) => n.props.children === "No")!.props.disabled).toBe(true);
+    const noteClass = (tone: string) =>
+      root.root.findAllByType("p").find((n) => (n.children as unknown[]).join("") === ({ ok: "fine", danger: "alarm", warn: "warn", plain: "plain" } as Record<string, string>)[tone])!.props.className;
+    expect(noteClass("ok")).toContain("note--ok");
+    expect(noteClass("danger")).toContain("note--danger");
+    // The redesign corrects the old tone drift: warn is warn, not accent.
+    expect(noteClass("warn")).toContain("note--warn");
+    expect(noteClass("plain")).toContain("note");
   });
 });
 

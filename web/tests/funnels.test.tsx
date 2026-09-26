@@ -10,7 +10,7 @@ import { buildAad } from "../src/crypto/aad";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { flush, press, render, settle, textOf } from "./helpers/rtr";
+import { flush, press, pressAria, render, settle, textOf, textOfNode } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(6);
@@ -151,10 +151,10 @@ describe("HistoryView edges", () => {
     await press(root, "Cancel");
     expect(textOf(root)).not.toContain("Edit 2026-09-25");
     const monthBefore = textOf(root).match(/([A-Z][a-z]+ 20\d\d)/)?.[1];
-    await press(root, "‹");
+    await pressAria(root, "Previous month");
     await flush();
     expect(textOf(root)).not.toContain(monthBefore ?? "impossible");
-    await press(root, "›");
+    await pressAria(root, "Next month");
     await flush();
   });
 });
@@ -177,7 +177,7 @@ describe("final function-coverage batch", () => {
     const root = await render(<QuestionView onRefreshed={() => undefined} />);
     await settle(40, 3);
     // No pid → no feedback buttons at all:
-    expect(root.root.findAllByType("button").some((node) => node.children.join("").includes("resonated"))).toBe(false);
+    expect(root.root.findAllByType("button").some((node) => textOfNode(node).includes("resonated"))).toBe(false);
   });
 
   it("PatternsView: unmuting restores the card", async () => {
@@ -204,20 +204,18 @@ describe("final function-coverage batch", () => {
 });
 
 describe("EntryView interactions (the small handlers)", () => {
-  it("details toggle, chip insert, option deselect, and tag toggling all behave", async () => {
+  it("chip insert, option deselect, and tag toggling all behave (check-in is always visible)", async () => {
     stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
     const { EntryView } = await import("../src/views/Entry");
     const root = await render(<EntryView onSaved={() => undefined} />);
     await settle(40, 3);
-    await press(root, "Add details (mood, sleep, energy, tags)");
     await press(root, "Good");
     await press(root, "Good"); // deselect
     await press(root, "work");
     await press(root, "work"); // untoggle
     await press(root, "rest");
-    await press(root, "Hide details");
     // A prompt chip appends to the draft:
-    const chip = root.root.findAllByType("button").find((node) => /…$/.test(node.children.join("")));
+    const chip = root.root.findAllByType("button").find((node) => /…$/.test(textOfNode(node)));
     if (chip) {
       const { act } = await import("react");
       await act(async () => {

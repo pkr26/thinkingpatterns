@@ -1,11 +1,15 @@
-/** Tiny renderer helpers for portal view tests (react-test-renderer). */
+/** Tiny renderer helpers for portal view tests (react-test-renderer).
+ *
+ *  Redesign 2026-09-26: components may wrap their labels in styled spans,
+ *  so label/text matching walks the subtree recursively instead of reading
+ *  direct string children only. */
 import { act } from "react";
 import RTR from "react-test-renderer";
 import type { ReactTestInstance } from "react-test-renderer";
 
 type ReactTestRenderer = ReturnType<typeof RTR.create>;
 
-type NodeWithChildren = { children: React.ReactNode[] };
+type NodeWithChildren = { children: unknown[] };
 
 export async function render(ui: React.ReactElement): Promise<ReactTestRenderer> {
   let root!: ReactTestRenderer;
@@ -23,6 +27,21 @@ export async function flush(times = 3): Promise<void> {
   }
 }
 
+/** All text inside a rendered node, depth-first (spans/svg-safe). */
+export const textOfNode = (node: unknown): string => {
+  const children = (node as NodeWithChildren | null)?.children;
+  if (!Array.isArray(children)) return "";
+  return children
+    .map((child) => (typeof child === "string" ? child : textOfNode(child)))
+    .join("");
+};
+
+const allStrings = (node: unknown): string[] => {
+  const children = (node as NodeWithChildren | null)?.children;
+  if (!Array.isArray(children)) return [];
+  return children.flatMap((child) => (typeof child === "string" ? [child] : allStrings(child)));
+};
+
 const textNodes = (root: ReactTestRenderer): ReactTestInstance[] =>
   root.root
     .findAllByType("span")
@@ -34,11 +53,16 @@ const textNodes = (root: ReactTestRenderer): ReactTestInstance[] =>
     .concat(root.root.findAllByType("button"))
     .concat(root.root.findAllByType("div"));
 
-const joined = (n: ReactTestInstance): string =>
-  (n as unknown as NodeWithChildren).children.join("");
+const joined = (n: ReactTestInstance): string => textOfNode(n);
 
 export function textOf(root: ReactTestRenderer): string {
   return textNodes(root).map(joined).join(" | ");
+}
+
+/** Every text string in the tree, ONCE, in document order — occurrence
+ *  COUNTS stay exact (textOf re-reports nested text at every level). */
+export function stringsOf(root: ReactTestRenderer): string[] {
+  return allStrings(root.root);
 }
 
 export async function press(root: ReactTestRenderer, label: string): Promise<void> {
@@ -58,12 +82,7 @@ export function buttonByLabel(root: ReactTestRenderer, label: string): boolean {
 export async function typeInto(root: ReactTestRenderer, labelText: string, value: string): Promise<void> {
   const field = root.root.findAllByType("input").find((n) => {
     const label = n.parent;
-    return (
-      label !== null &&
-      (label as unknown as NodeWithChildren).children.some(
-        (c) => typeof c === "string" && c.includes(labelText),
-      )
-    );
+    return label !== null && label.type === "label" && textOfNode(label).includes(labelText);
   });
   if (!field) throw new Error(`no input whose label contains ${JSON.stringify(labelText)}`);
   await act(async () => {

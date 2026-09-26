@@ -80,7 +80,7 @@ export default defineConfig({
     // Dev proxy: same-origin /api against the local backend — no CORS
     // configuration needed during development.
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": process.env.WEB_API_PROXY ?? "http://localhost:8000",
     },
     // No CSP header in dev: the served meta policy — rewritten with
     // inline-script hashes by devInlineScriptHashes() — governs (a

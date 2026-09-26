@@ -924,9 +924,10 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     await flush(6);
     await press(root, "See the evidence");
     await flush(8);
-    const text = textOf(root);
-    expect(text.match(/decrypted e-2/g)?.length).toBe(1);
-    expect(text.indexOf("decrypted e-1")).toBeLessThan(text.indexOf("decrypted e-2"));
+    // Count at the string level: textOf re-reports nested text per node.
+    const strings = rtr.stringsOf(root);
+    expect(strings.filter((str) => str.includes("decrypted e-2")).length).toBe(1);
+    expect(strings.findIndex((str) => str.includes("decrypted e-1"))).toBeLessThan(strings.findIndex((str) => str.includes("decrypted e-2")));
   });
 
   it("history cannot be requested twice concurrently; empty history says so", async () => {
@@ -1013,7 +1014,9 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     const text = textOf(root);
     expect(text).toContain("Sleep issues");
     expect(text).toContain("sleep again");
-    expect(text.match(/exercise/g)?.length).toBe(1); // print summary only, never the interactive list
+    // Print summary only, never the interactive list — counted at the
+    // string level (textOf re-reports nested text per node).
+    expect(rtr.stringsOf(root).filter((str) => str.includes("exercise")).length).toBe(1);
   });
 
   it("pattern-anchored notes never bleed into the general list or vice versa", async () => {

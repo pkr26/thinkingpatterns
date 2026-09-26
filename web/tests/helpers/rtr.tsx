@@ -1,12 +1,19 @@
 /** Tiny renderer helpers for web view tests (react-test-renderer),
- *  mirroring the portal's helper. */
+ *  mirroring the portal's helper.
+ *
+ *  Redesign 2026-09-26: components may wrap their labels in styled spans
+ *  and carry decorative SVGs, so label/text matching walks the subtree
+ *  recursively instead of reading direct string children only. The
+ *  behavioral contracts stay: press() refuses disabled buttons (their
+ *  handler is absent by design), and field lookups still require the
+ *  control to be wrapped by its <label>. */
 import { act } from "react";
 import RTR from "react-test-renderer";
 import type { ReactTestInstance } from "react-test-renderer";
 
 type ReactTestRenderer = ReturnType<typeof RTR.create>;
 
-type NodeWithChildren = { children: React.ReactNode[] };
+type NodeWithChildren = { children: unknown[] };
 
 export async function render(ui: React.ReactElement): Promise<ReactTestRenderer> {
   let root!: ReactTestRenderer;
@@ -35,6 +42,15 @@ export async function flush(times = 3): Promise<void> {
   }
 }
 
+/** All text inside a rendered node, depth-first (spans/svg-safe). */
+export const textOfNode = (node: unknown): string => {
+  const children = (node as NodeWithChildren | null)?.children;
+  if (!Array.isArray(children)) return "";
+  return children
+    .map((child) => (typeof child === "string" ? child : textOfNode(child)))
+    .join("");
+};
+
 const textNodes = (root: ReactTestRenderer): ReactTestInstance[] =>
   root.root
     .findAllByType("span")
@@ -46,8 +62,7 @@ const textNodes = (root: ReactTestRenderer): ReactTestInstance[] =>
     .concat(root.root.findAllByType("button"))
     .concat(root.root.findAllByType("div"));
 
-const joined = (n: ReactTestInstance): string =>
-  (n as unknown as NodeWithChildren).children.join("");
+const joined = (n: ReactTestInstance): string => textOfNode(n);
 
 export function textOf(root: ReactTestRenderer): string {
   return textNodes(root).map(joined).join(" | ");
@@ -67,7 +82,7 @@ export async function press(root: ReactTestRenderer, label: string): Promise<voi
 }
 
 /** Whether the labeled button is in its disabled state (the F3 gate
- * lives here, so tests assert state instead of forcing a click). */
+ *  lives here, so tests assert state instead of forcing a click). */
 export function isDisabled(root: ReactTestRenderer, label: string): boolean {
   const button = root.root.findAllByType("button").find((n) => joined(n) === label);
   if (!button) throw new Error(`no button labeled ${JSON.stringify(label)}`);
@@ -78,17 +93,34 @@ export function buttonByLabel(root: ReactTestRenderer, label: string): boolean {
   return root.root.findAllByType("button").some((n) => joined(n) === label);
 }
 
+/** Press an icon-only button matched by its aria-label (redesign
+ *  2026-09-26: calendar pagers and other icon controls carry no text). */
+export async function pressAria(root: ReactTestRenderer, ariaLabel: string): Promise<void> {
+  const button = root.root.findAllByType("button").find((n) => n.props["aria-label"] === ariaLabel);
+  if (!button) throw new Error(`no button with aria-label ${JSON.stringify(ariaLabel)}`);
+  if (typeof button.props.onClick !== "function") {
+    throw new Error(`button ${JSON.stringify(ariaLabel)} is disabled — there is no click path to press`);
+  }
+  await act(async () => {
+    button.props.onClick();
+  });
+}
+
+/** Flip the (single) role=switch control — the LLM consent toggle. */
+export async function pressSwitch(root: ReactTestRenderer): Promise<void> {
+  const toggle = root.root.findAllByType("button").find((n) => n.props.role === "switch");
+  if (!toggle) throw new Error("no role=switch control rendered");
+  await act(async () => {
+    toggle.props.onClick();
+  });
+}
+
 /** Type into a <label>-wrapped input, matched by the label's text (the
  *  Field component renders exactly that shape). */
 export async function typeInto(root: ReactTestRenderer, labelText: string, value: string): Promise<void> {
   const field = root.root.findAllByType("input").find((n) => {
     const label = n.parent;
-    return (
-      label !== null &&
-      (label as unknown as NodeWithChildren).children.some(
-        (c) => typeof c === "string" && c.includes(labelText),
-      )
-    );
+    return label !== null && label.type === "label" && textOfNode(label).includes(labelText);
   });
   if (!field) throw new Error(`no input whose label contains ${JSON.stringify(labelText)}`);
   await act(async () => {
@@ -101,12 +133,7 @@ export async function typeInto(root: ReactTestRenderer, labelText: string, value
 export async function typeArea(root: ReactTestRenderer, labelText: string, value: string): Promise<void> {
   const field = root.root.findAllByType("textarea").find((n) => {
     const label = n.parent;
-    return (
-      label !== null &&
-      (label as unknown as NodeWithChildren).children.some(
-        (c) => typeof c === "string" && c.includes(labelText),
-      )
-    );
+    return label !== null && label.type === "label" && textOfNode(label).includes(labelText);
   });
   if (!field) throw new Error(`no textarea whose label contains ${JSON.stringify(labelText)}`);
   await act(async () => {

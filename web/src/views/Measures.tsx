@@ -4,6 +4,11 @@
  * the trend is the patient's own data. Item 9 (self-harm) endorsement
  * gently points at the offline crisis resources AFTER the response is
  * safely saved. Scores travel encrypted under AAD "measure".
+ *
+ * Redesign 2026-09-26: instruments switch through a segmented control,
+ * answers are aria-pressed chips (never the danger color), completion
+ * shows a progress track, and the trend renders as a real SVG bar chart
+ * with dates and the latest score highlighted.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
@@ -20,7 +25,7 @@ const MEASURE_NAMES: Record<MeasureId, string> = {
 import { localDateISO } from "../dates";
 import { randomBytes } from "../platform";
 import { vault } from "../vault";
-import { theme, Button, Card, ErrorBanner, Note } from "../ui";
+import { Button, Card, Chip, ErrorBanner, Note, ProgressTrack, SegmentedControl, Skeleton } from "../ui";
 
 interface DecodedMeasure {
   id: string;
@@ -29,15 +34,48 @@ interface DecodedMeasure {
   date: string;
 }
 
-interface InstrumentScores {
+interface TrendPoint {
   score: number;
   max: number;
+  date: string;
 }
 
 /** The safe walk cap for the history download (LOW a, audit 2026-09-26):
  *  20 pages of up to 100 rows each — beyond this a hostile server feeding
  *  endless continuations must hit a terminal probe, not a silent stop. */
 const MAX_MEASURE_PAGES = 20;
+
+/** The patient's own trend: plain bars, dates visible, latest highlighted.
+ *  No severity bands, no interpretation (charter). */
+function TrendChart({ points }: { points: TrendPoint[] }): React.JSX.Element {
+  const barWidth = 14;
+  const gap = 6;
+  const width = points.length * (barWidth + gap);
+  const height = 64;
+  return (
+    <svg className="chart" viewBox={`0 0 ${Math.max(width, 140)} ${height + 16}`} role="img" aria-label={t("measures.trendA11y")} style={{ maxWidth: 560 }}>
+      {points.map((point, index) => {
+        const magnitude = Math.max(3, Math.round((point.score / point.max) * (height - 8)));
+        const x = index * (barWidth + gap);
+        const isLast = index === points.length - 1;
+        return (
+          <g key={point.date + index}>
+            <rect x={x} y={height - magnitude} width={barWidth} height={magnitude} rx={3.5} className={`chart__bar${isLast ? " chart__bar--last" : ""}`}>
+              <title>{`${point.date}: ${point.score}/${point.max}`}</title>
+            </rect>
+            {isLast && (
+              <text x={x + barWidth / 2} y={height - magnitude - 5} textAnchor="middle" className="chart__axis">
+                {point.score}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      <text x={0} y={height + 12} className="chart__axis">{points[0]!.date.slice(5)}</text>
+      <text x={Math.max(width, 140)} y={height + 12} textAnchor="end" className="chart__axis">{points[points.length - 1]!.date.slice(5)}</text>
+    </svg>
+  );
+}
 
 export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element {
   const [active, setActive] = useState<MeasureId>("phq9");
@@ -149,6 +187,8 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
     setResponses((current) => current.map((existing, i) => (i === index ? value : existing)));
   };
 
+  const answeredCount = responses.filter((value) => value !== null).length;
+
   const save = async (): Promise<void> => {
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
@@ -187,70 +227,67 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
     }
   };
 
-  const trend = (id: MeasureId): InstrumentScores[] | null => {
+  const trend = (id: MeasureId): TrendPoint[] | null => {
     if (!history) return null;
-    return history.filter((row) => row.measureId === id).map((row) => ({ score: row.score, max: INSTRUMENTS[id].maxScore }));
+    return history.filter((row) => row.measureId === id).map((row) => ({ score: row.score, max: INSTRUMENTS[id].maxScore, date: row.date.slice(0, 10) }));
   };
 
   return (
     <>
       {item9 && (
-        <Card title={t("measures.item9Title")}>
+        <Card title={t("measures.item9Title")} tone="sensitive">
           <Note tone="warn">{t("measures.item9Body")}</Note>
           <Button label={t("measures.getSupport")} onPress={props.onCrisis} small />
         </Card>
       )}
       <Card title={t("settings.measures")}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {MEASURE_IDS.map((id) => (
-            <Button key={id} label={MEASURE_NAMES[id]} onPress={() => setActive(id)} small disabled={active === id} />
-          ))}
-        </div>
+        <SegmentedControl
+          options={MEASURE_IDS.map((id) => ({ id, label: MEASURE_NAMES[id] }))}
+          activeId={active}
+          onSelect={(id) => setActive(id as MeasureId)}
+          a11yLabel={t("settings.measures")}
+        />
         <Note tone="muted">{t("measures.introWeb")}</Note>
         {Array.from({ length: instrument.items }, (_, index) => (
-          <div key={index} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div key={index} className="stack" style={{ gap: "var(--space-2)" }}>
             <Note>{itemText(index)}</Note>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <div className="row row--wrap">
               {instrument.options.map((option, optionIndex) => (
-                <Button
+                <Chip
                   key={option}
                   label={optionLabel(option)}
-                  small
-                  danger={responses[index] === optionIndex}
+                  selected={responses[index] === optionIndex}
                   onPress={() => answer(index, optionIndex)}
                 />
               ))}
             </div>
           </div>
         ))}
+        <ProgressTrack
+          progress={instrument.items > 0 ? answeredCount / instrument.items : 0}
+          label={t("measures.progressA11y", { answered: answeredCount, total: instrument.items })}
+        />
+        <span className="note note--muted">{t("measures.progressNote", { answered: answeredCount, total: instrument.items })}</span>
         <ErrorBanner message={error} />
         {savedNote && <Note role="status" tone="ok">{savedNote}</Note>}
-        <Button label={busy ? t("entry.saving") : t("measures.save")} onPress={() => void save()} disabled={busy} />
+        <Button label={busy ? t("entry.saving") : t("measures.save")} onPress={() => void save()} disabled={busy} block />
       </Card>
 
       <Card title={t("measures.trendTitle")}>
-        {history === null && <Note role="status">{t("common.loading")}</Note>}
+        {history === null && (
+          <>
+            <Note role="status">{t("common.loading")}</Note>
+            <Skeleton lines={3} title />
+          </>
+        )}
         {history?.length === 0 && <Note>{t("measures.emptyNote")}</Note>}
         {MEASURE_IDS.map((id) => {
           const rows = trend(id);
           if (!rows || rows.length === 0) return null;
           return (
-            <div key={id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div key={id} className="stack" style={{ gap: "var(--space-2)" }}>
               <Note tone="muted">{t(rows.length === 1 ? "measures.trendOne" : "measures.trendMany", { name: MEASURE_NAMES[id], count: rows.length })}</Note>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 48 }}>
-                {rows.map((row, index) => (
-                  <div
-                    key={index}
-                    title={`${row.score}/${row.max}`}
-                    style={{
-                      width: 14,
-                      height: `${Math.max(8, Math.round((row.score / row.max) * 100))}%`,
-                      backgroundColor: theme.accentBright,
-                      borderRadius: 3,
-                    }}
-                  />
-                ))}
-              </div>
+              <TrendChart points={rows} />
             </div>
           );
         })}

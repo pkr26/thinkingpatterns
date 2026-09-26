@@ -3,10 +3,14 @@
  * onboarding). The completion flag is a per-account non-content stamp in
  * localStorage — it names no health data, only that this browser has seen
  * the introduction for this account id.
+ *
+ * Redesign 2026-09-26: progress dots, a soft abstract gradient panel per
+ * step (decorative shapes only — no people imagery), and a full-width
+ * continue button.
  */
 import { useState } from "react";
 import { t } from "../strings";
-import { Button, Card, Note } from "../ui";
+import { Button, Card, Icon, Note, ProgressDots } from "../ui";
 
 export const ONBOARDING_FLAG_PREFIX = "mindpattern.onboarding.v1.";
 
@@ -32,11 +36,20 @@ export function Onboarding(props: { onDone: () => void }): React.JSX.Element {
   const last = step === PANEL_KEYS.length - 1;
   return (
     <Card title={t(panel.titleKey)}>
-      <Note>{t(panel.bodyKey)}</Note>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Button label={last ? t("onboarding.webStart") : t("onboarding.webNext")} onPress={() => (last ? props.onDone() : setStep(step + 1))} />
-        <Note tone="muted">{t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length })}</Note>
+      {/* Soft abstract gradient panel — decorative, calm, never literal. */}
+      <div className="panel-art" aria-hidden="true">
+        <Icon name={step === 0 ? "shield" : step === 1 ? "book" : "heart"} size={44} />
       </div>
+      <Note tone="lead">{t(panel.bodyKey)}</Note>
+      <div className="row row--between">
+        <ProgressDots total={PANEL_KEYS.length} current={step} label={t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length })} />
+        <span className="note note--muted">{t("onboarding.webStep", { current: step + 1, total: PANEL_KEYS.length })}</span>
+      </div>
+      <Button
+        label={last ? t("onboarding.webStart") : t("onboarding.webNext")}
+        onPress={() => (last ? props.onDone() : setStep(step + 1))}
+        block
+      />
     </Card>
   );
 }

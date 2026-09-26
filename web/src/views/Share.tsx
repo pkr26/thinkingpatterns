@@ -8,6 +8,10 @@
  * wraps the data key to the therapist's public key (ECDH→HKDF→AES-GCM)
  * with the password-derived verifier: a stolen token cannot share. Revoke
  * is verifier-gated too and says plainly what revocation can and cannot do.
+ *
+ * Redesign 2026-09-26: styled checkboxes, the fingerprint in a mono block
+ * with a copy affordance, grants as cards with initials avatars, and a
+ * two-step revoke confirm.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ListedConsent } from "../api/client";
@@ -15,7 +19,7 @@ import { toBase64 } from "../crypto/core";
 import { keyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, ErrorBanner, Field, Note } from "../ui";
+import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Icon, Note, PillNote } from "../ui";
 
 export function ShareView(): React.JSX.Element {
   const [consents, setConsents] = useState<ListedConsent[] | null>(null);
@@ -26,6 +30,8 @@ export function ShareView(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [armedRevoke, setArmedRevoke] = useState<string | null>(null);
   const generation = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
@@ -53,6 +59,7 @@ export function ShareView(): React.JSX.Element {
     setError("");
     setStatus(null);
     setLookup(null);
+    setCopied(false);
     setDisclosureAccepted(false);
     setFingerprintVerified(false);
     if (!code.trim()) {
@@ -76,6 +83,17 @@ export function ShareView(): React.JSX.Element {
     }
   };
 
+  const copyFingerprint = async (): Promise<void> => {
+    if (!lookup) return;
+    try {
+      await navigator.clipboard?.writeText(lookup.fingerprint);
+      setCopied(true);
+    } catch {
+      // Clipboard unavailable (permissions, non-secure context): the
+      // fingerprint stays selectable on screen either way.
+    }
+  };
+
   const grant = async (): Promise<void> => {
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked() || !lookup) return;
@@ -88,6 +106,7 @@ export function ShareView(): React.JSX.Element {
       setStatus(t("share.webGrantedStatus", { name: lookup.name }));
       setCode("");
       setLookup(null);
+      setCopied(false);
       setDisclosureAccepted(false);
       setFingerprintVerified(false);
       await load();
@@ -109,6 +128,7 @@ export function ShareView(): React.JSX.Element {
     try {
       await api.revokeConsent(consent.id, toBase64(vault.get().authKey));
       setStatus(t("share.webRevokedStatus", { name: consent.display_name }));
+      setArmedRevoke(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("share.webRevokeFailed"));
@@ -125,38 +145,52 @@ export function ShareView(): React.JSX.Element {
       <Card title={t("share.webTitle")}>
         <Note tone="muted">{t("share.webZeroKnowledge")}</Note>
         <Field label={t("share.webPairingCode")} value={code} onChange={setCode} placeholder={t("share.webPairingPlaceholder")} />
-        <Button label={busy ? t("settings.working") : t("share.webLookUp")} onPress={() => void doLookup()} disabled={busy} small />
+        <Button label={busy ? t("settings.working") : t("share.webLookUp")} onPress={() => void doLookup()} disabled={busy} small variant="ghost" />
         {lookup && (
           <>
             <Note role="status">{t("share.webTherapist", { name: lookup.name })}</Note>
-            <Note>{t("share.webFingerprint", { fingerprint: lookup.fingerprint })}</Note>
+            <div className="stack" style={{ gap: "var(--space-1)" }}>
+              <span className="fingerprint">{lookup.fingerprint}</span>
+              <span className="row" style={{ gap: 8 }}>
+                <Button label={copied ? t("share.copiedFingerprint") : t("share.copyFingerprint")} onPress={() => void copyFingerprint()} small variant="ghost" icon="copy" />
+              </span>
+            </div>
             <Note tone="warn">{t("share.webFingerprintWarn")}</Note>
-            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: themeBody }}>
-              <input type="checkbox" checked={fingerprintVerified} onChange={(e) => setFingerprintVerified(e.target.checked)} />
-              <span>
-                {t("share.webFingerprintConfirm")}
-              </span>
-            </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: themeBody }}>
-              <input type="checkbox" checked={disclosureAccepted} onChange={(e) => setDisclosureAccepted(e.target.checked)} />
-              <span>
-                {t("share.webDisclosureConfirm")}
-              </span>
-            </label>
-            <Button label={t("share.webConfirmShare")} onPress={() => void grant()} disabled={busy || !disclosureAccepted || !fingerprintVerified} />
+            <Checkbox checked={fingerprintVerified} onChange={setFingerprintVerified}>
+              {t("share.webFingerprintConfirm")}
+            </Checkbox>
+            <Checkbox checked={disclosureAccepted} onChange={setDisclosureAccepted}>
+              {t("share.webDisclosureConfirm")}
+            </Checkbox>
+            <Button label={t("share.webConfirmShare")} onPress={() => void grant()} disabled={busy || !disclosureAccepted || !fingerprintVerified} icon="share" />
           </>
         )}
         <ErrorBanner message={error} />
-        {status && <Note role="status" tone="ok">{status}</Note>}
+        {status && <PillNote role="status" tone="ok" icon="check">{status}</PillNote>}
       </Card>
 
       <Card title={t("share.webGrantsTitle")}>
         {consents === null && <Note role="status">{t("common.loading")}</Note>}
         {consents !== null && active.length === 0 && <Note>{t("share.webNoGrants")}</Note>}
         {active.map((consent) => (
-          <div key={consent.id} style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid #dfe5ec", paddingTop: 10 }}>
-            <Note>{t("share.webSince", { name: consent.display_name, username: consent.username, date: consent.granted_at.slice(0, 10) })}</Note>
-            <Button label={t("share.webRevoke")} onPress={() => void revoke(consent)} small danger disabled={busy} />
+          <div key={consent.id} className="entry-card">
+            <div className="row" style={{ gap: 12, alignItems: "center" }}>
+              <Avatar name={consent.display_name || consent.username} />
+              <div className="stack" style={{ gap: 2, flex: 1 }}>
+                <strong style={{ fontSize: "var(--text-md)", color: "var(--text)" }}>{consent.display_name || consent.username}</strong>
+                <Note tone="muted">{t("share.webSinceDate", { date: consent.granted_at.slice(0, 10) })}</Note>
+              </div>
+            </div>
+            {armedRevoke === consent.id ? (
+              <div className="row row--wrap">
+                <Button label={t("share.webRevoke")} onPress={() => void revoke(consent)} small danger disabled={busy} />
+                <Button label={t("common.cancel")} onPress={() => setArmedRevoke(null)} small variant="ghost" />
+              </div>
+            ) : (
+              <div className="row row--end">
+                <Button label={t("share.webRevoke")} onPress={() => setArmedRevoke(consent.id)} small danger disabled={busy} />
+              </div>
+            )}
           </div>
         ))}
         {past.length > 0 && (
@@ -166,5 +200,3 @@ export function ShareView(): React.JSX.Element {
     </>
   );
 }
-
-const themeBody = "#3d4a5c";

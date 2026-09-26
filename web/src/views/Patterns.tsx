@@ -12,6 +12,11 @@
  * ("topic:divorce") and used to sit in plaintext localStorage — it now
  * lives in the encrypted kv seam (patternMutes.ts, data-key sealed). The
  * server-side mute sync (recordPatternMute → recompute blob) is unchanged.
+ *
+ * Redesign 2026-09-26: baseline progress renders as a calm progress track
+ * with an SVG diverging-bar mood trend (dates + per-bar titles); the
+ * disclosure is styled; sensitive patterns render on a soft lavender card
+ * — the non-quoting contract is untouched.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
@@ -24,7 +29,8 @@ import { reconcile, type ReconcileOutcome } from "../sync";
 import { recordThresholdNotice, thresholdNoticeShown } from "../thresholdNotice";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { theme, Button, Card, ErrorBanner, Note } from "../ui";
+import { moodFill } from "../tokens";
+import { Button, Card, ErrorBanner, Icon, Note, ProgressTrack, Skeleton } from "../ui";
 
 /** One surfaced pattern, as the brain's encrypted payload carries it. */
 export interface PatternPayload {
@@ -84,12 +90,46 @@ function methodText(kind: string): string {
 }
 
 /** Belt-and-braces with mobile and the backend (audit 2026-09-25): trust
- * the payload's `sensitive` flag, but ALSO run the suppress-tier matcher on
- * the label — an insights blob that carries a crisis-adjacent phrase
- * without the flag (legacy payload, LLM extra, upstream regression) must
- * still never have its text echoed by this view. */
+ *  the payload's `sensitive` flag, but ALSO run the suppress-tier matcher on
+ *  the label — an insights blob that carries a crisis-adjacent phrase
+ *  without the flag (legacy payload, LLM extra, upstream regression) must
+ *  still never have its text echoed by this view. */
 function isSensitivePattern(pattern: PatternPayload): boolean {
   return pattern.detail.sensitive === true || matchesCrisisSuppress(pattern.label);
+}
+
+/** Diverging bar chart of the device-local mood trend (never synced):
+ *  bars grow up/down from the zero baseline, colored by the mood scale. */
+function MoodTrendChart({ days }: { days: { date: string; value: number }[] }): React.JSX.Element {
+  const barWidth = 10;
+  const gap = 4;
+  const width = days.length * (barWidth + gap);
+  const height = 88;
+  const mid = height / 2;
+  const scale = 34; // |value| ≤ 1 → max 34px of bar
+  return (
+    <svg
+      className="chart"
+      viewBox={`0 0 ${Math.max(width, 120)} ${height + 16}`}
+      role="img"
+      aria-label={t("insights.localTrendA11y")}
+      style={{ maxWidth: 520 }}
+    >
+      <line x1={0} y1={mid} x2={Math.max(width, 120)} y2={mid} className="chart__baseline" />
+      {days.map((day, index) => {
+        const magnitude = Math.max(2, Math.abs(day.value) * scale);
+        const x = index * (barWidth + gap);
+        const y = day.value >= 0 ? mid - magnitude : mid;
+        return (
+          <rect key={day.date} x={x} y={y} width={barWidth} height={magnitude} rx={2.5} className="chart__bar" style={{ fill: moodFill(day.value) }}>
+            <title>{`${day.date}: ${day.value.toFixed(2)}`}</title>
+          </rect>
+        );
+      })}
+      <text x={0} y={height + 12} className="chart__axis">{days[0]!.date.slice(5)}</text>
+      <text x={Math.max(width, 120)} y={height + 12} textAnchor="end" className="chart__axis">{days[days.length - 1]!.date.slice(5)}</text>
+    </svg>
+  );
 }
 
 export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element {
@@ -206,22 +246,14 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
         {phase === "baseline" || phase === null ? (
           <>
             <Note role="status">{progress ? t("insights.baselineProgress", { active: progress.activeDays, remaining: progress.remaining, activeUnit: progress.activeDays === 1 ? "" : "s" }) : t("insights.baselineReading")}</Note>
-            {localTrend.length > 1 && (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 48 }} aria-label={t("insights.localTrendA11y")}>
-                {localTrend.map((day) => (
-                  <div
-                    key={day.date}
-                    title={`${day.date}: ${day.value.toFixed(2)}`}
-                    style={{
-                      width: 10,
-                      height: `${Math.max(8, Math.round(50 + day.value * 50))}%`,
-                      backgroundColor: day.value >= 0 ? "#8fc7a8" : "#dba89c",
-                      borderRadius: 3,
-                    }}
-                  />
-                ))}
-              </div>
+            {progress && (
+              <ProgressTrack
+                progress={progress.activeDays + progress.remaining > 0 ? progress.activeDays / (progress.activeDays + progress.remaining) : 0}
+                label={t("insights.baselineProgressA11y", { active: progress.activeDays, remaining: progress.remaining })}
+              />
             )}
+            {localTrend.length > 1 && <MoodTrendChart days={localTrend} />}
+            {(patterns === null || localTrend.length === 0) && <Skeleton lines={2} />}
             <Note tone="muted">{t("insights.baselineNote")}</Note>
           </>
         ) : (
@@ -238,6 +270,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
                   label={t("insights.unmuteLabel", { label: isSensitivePattern(pattern) ? t("insights.privatePattern") : pattern.label })}
                   onPress={() => void toggleMute(pattern.detail.pattern_pid)}
                   small
+                  variant="ghost"
                 />
               ))}
           </>
@@ -252,27 +285,32 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
         const method = methodText(pattern.kind);
         const sensitive = isSensitivePattern(pattern);
         return (
-          <Card key={pid} title={sensitive ? t("insights.sensitiveTitle") : pattern.label}>
+          <Card key={pid} title={sensitive ? t("insights.sensitiveTitle") : pattern.label} tone={sensitive ? "sensitive" : undefined}>
             {sensitive ? (
               <>
                 <Note tone="warn">{t("insights.sensitiveBodyWeb")}</Note>
-                <Button label={t("measures.getSupport")} onPress={props.onCrisis} small />
+                <Button label={t("measures.getSupport")} onPress={props.onCrisis} small variant="ghost" />
               </>
             ) : (
               <Note>{pattern.label}</Note>
             )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <div className="row row--wrap">
               {state && <Note tone="muted">{`${t("insights.evidencePrefix")}: ${state}${pattern.detail.is_new ? ` · ${t("insights.newFlag").trim()}` : ""}`}</Note>}
               <Note tone="muted">{t(pattern.occurrences === 1 ? "insights.seenOne" : "insights.seenMany", { count: pattern.occurrences })}</Note>
               {pattern.detail.last_seen && <Note tone="muted">{t("insights.lastSeen", { date: pattern.detail.last_seen })}</Note>}
             </div>
-            <details style={{ color: theme.muted, fontSize: 13 }}>
-              <summary style={{ cursor: "pointer" }}>{t("insights.whySeeing")}</summary>
-              <Note tone="muted">{t("insights.evidenceLine", { days: pattern.detail.sample_days ?? 180, count: pattern.occurrences, confidence: (pattern.confidence * 100).toFixed(0), method, firstSeen: pattern.detail.first_seen ?? "—" })}</Note>
-              <Note tone="muted">{t("insights.evidenceFootnoteWeb")}</Note>
+            <details className="disclosure">
+              <summary>
+                <Icon name="chevron-down" size={14} />
+                {t("insights.whySeeing")}
+              </summary>
+              <div className="disclosure__body">
+                <Note tone="muted">{t("insights.evidenceLine", { days: pattern.detail.sample_days ?? 180, count: pattern.occurrences, confidence: (pattern.confidence * 100).toFixed(0), method, firstSeen: pattern.detail.first_seen ?? "—" })}</Note>
+                <Note tone="muted">{t("insights.evidenceFootnoteWeb")}</Note>
+              </div>
             </details>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button label={muted.has(pattern.detail.pattern_pid ?? "") ? t("insights.unmute") : t("insights.muteVerbWeb")} onPress={() => void toggleMute(pattern.detail.pattern_pid)} small />
+            <div className="row">
+              <Button label={muted.has(pattern.detail.pattern_pid ?? "") ? t("insights.unmute") : t("insights.muteVerbWeb")} onPress={() => void toggleMute(pattern.detail.pattern_pid)} small variant="ghost" />
             </div>
           </Card>
         );

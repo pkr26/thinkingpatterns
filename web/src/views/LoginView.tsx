@@ -5,6 +5,11 @@
  * app, pinned by shared/vectors.json). Keys land in the memory-only vault;
  * the master key is zeroized the moment the subkeys exist, and EVERY
  * failure path wipes all three.
+ *
+ * Redesign 2026-09-26: a centered brand panel opens the screen, the mode
+ * switch is a segmented control, the fields live in a real <form> (Enter
+ * submits — the old web card forgot the form), and registration shows a
+ * password-strength meter fed by the existing client-side policy checker.
  */
 import { useState } from "react";
 import { ApiError, auth, setSession, type TokenResponse } from "../api/client";
@@ -13,15 +18,15 @@ import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { randomBytes } from "../platform";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, ErrorBanner, Field, Note } from "../ui";
+import { Button, Card, ErrorBanner, Field, Logo, Note } from "../ui";
 
 /** Mirrors the backend's USERNAME_PATTERN (schemas.py): honest client-side
  *  validation so the server's validation_error never surprises anyone. */
 const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]{3,64}$/;
 /** Server account ids are 32-hex (uuid4().hex). The login response is
- * hostile-server-controllable text like any other server payload: a
- * malformed id must never reach the vault owner binding or storage keys
- * (mobile L-7 parity, fix W-5, audit 2026-09-25). */
+ *  hostile-server-controllable text like any other server payload: a
+ *  malformed id must never reach the vault owner binding or storage keys
+ *  (mobile L-7 parity, fix W-5, audit 2026-09-25). */
 const USER_ID_PATTERN = /^[0-9a-f]{32}$/;
 const PASSWORD_MIN = 12;
 
@@ -31,12 +36,12 @@ export interface LoginSuccess {
 }
 
 /** On-device password policy (identical to mobile, incl. its L-6 shape
- * rules): 12+ characters, below 16 at least three of the four character
- * classes, and never the trivially-guessable families — a zero-knowledge
- * design leaves the server only the derived verifier, so the POLICY is
- * entirely client-side (fix W-3, audit 2026-09-25). These are the
- * families the mobile on-device unlock oracle would otherwise crack in
- * minutes on a stolen phone. */
+ *  rules): 12+ characters, below 16 at least three of the four character
+ *  classes, and never the trivially-guessable families — a zero-knowledge
+ *  design leaves the server only the derived verifier, so the POLICY is
+ *  entirely client-side (fix W-3, audit 2026-09-25). These are the
+ *  families the mobile on-device unlock oracle would otherwise crack in
+ *  minutes on a stolen phone. */
 const COMMON_PASSWORD_WORDS = [
   "password", "qwerty", "123456", "12345678", "123456789", "letmein",
   "iloveyou", "welcome", "admin", "monkey", "dragon", "sunshine",
@@ -67,8 +72,18 @@ export function passwordPolicyError(password: string): string | null {
   return null;
 }
 
+/** Visual strength (1–4) for the registration meter — display-only; the
+ *  enforceable contract stays passwordPolicyError above. */
+function strengthOf(password: string): 0 | 1 | 2 | 3 | 4 {
+  if (password.length === 0) return 0;
+  if (password.length < PASSWORD_MIN) return 1;
+  if (passwordPolicyError(password) !== null) return 2;
+  if (password.length < 16) return 3;
+  return 4;
+}
+
 /** Adopt a successful token response: install the session, hand the keys
- * to the vault (which zeroizes the master key), or wipe everything. */
+ *  to the vault (which zeroizes the master key), or wipe everything. */
 type AdoptionResult = "ok" | "therapist-role" | "invalid-response";
 function adoptSession(keys: PatientKeys, token: TokenResponse, username: string, onSuccess: (s: LoginSuccess) => void): AdoptionResult {
   if (token.role !== "user") {
@@ -186,22 +201,51 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
     }
   };
 
+  const strength = strengthOf(password);
+  const strengthLabel = strength === 0 ? "" : t(`login.strength${strength}`);
+
   return (
-    <Card title={mode === "signin" ? t("login.webSignInTitle") : t("login.webRegisterTitle")}>
-      <Field label={t("login.webUsername")} value={username} onChange={setUsername} autoComplete="username" placeholder={t("login.webUsernamePlaceholder")} />
-      <Field label={t("login.webPassword")} value={password} onChange={setPassword} type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
-      {mode === "register" && (
-        <>
-          <Field label={t("login.webConfirm")} value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
-          <Note>{t("login.webRegisterNote")}</Note>
-        </>
-      )}
-      <ErrorBanner message={error} />
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Button label={busy ? t("settings.working") : mode === "signin" ? t("login.webSignInTitle") : t("login.webCreateJournal")} onPress={() => void submit()} disabled={busy} />
-        <Button label={mode === "signin" ? t("login.webCreateAccount") : t("login.webHaveAccount")} onPress={() => switchMode(mode === "signin" ? "register" : "signin")} small />
+    <div className="login-wrap">
+      <div className="login-hero">
+        <Logo size={56} />
+        <span className="login-hero__title">MindPattern</span>
+        <span className="login-hero__tagline">{t("login.brandTagline")}</span>
       </div>
-      <Note tone="muted">{t("login.webNeverLeaves")}</Note>
-    </Card>
+      <Card title={mode === "signin" ? t("login.webSignInTitle") : t("login.webRegisterTitle")}>
+        {/* A real form: Enter submits (the old card omitted it). The
+            visible action stays a plain Button; this hidden native submit
+            is what Enter activates — never tabbable, never clickable. */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) void submit();
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}
+        >
+          <button type="submit" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }} />
+          <Field label={t("login.webUsername")} value={username} onChange={setUsername} autoComplete="username" placeholder={t("login.webUsernamePlaceholder")} />
+          <Field label={t("login.webPassword")} value={password} onChange={setPassword} type="password" placeholder="••••••••••••" autoComplete={mode === "signin" ? "current-password" : "new-password"} />
+          {mode === "register" && (
+            <>
+              <Field label={t("login.webConfirm")} value={confirm} onChange={setConfirm} type="password" placeholder="••••••••••••" autoComplete="new-password" />
+              {strength > 0 && (
+                <div className="strength" role="status" aria-label={t("login.strengthA11y", { level: strengthLabel })}>
+                  <span className={`strength__bar${strength === 1 ? " strength__bar--1" : strength === 2 ? " strength__bar--2" : strength === 3 ? " strength__bar--3" : " strength__bar--4"}`} />
+                  <span className={`strength__bar${strength >= 2 ? strength === 2 ? " strength__bar--2" : strength === 3 ? " strength__bar--3" : " strength__bar--4" : ""}`} />
+                  <span className={`strength__bar${strength >= 3 ? (strength === 3 ? " strength__bar--3" : " strength__bar--4") : ""}`} />
+                  <span className={`strength__bar${strength === 4 ? " strength__bar--4" : ""}`} />
+                  <span className="note note--muted" style={{ whiteSpace: "nowrap" }}>{strengthLabel}</span>
+                </div>
+              )}
+              <Note>{t("login.webRegisterNote")}</Note>
+            </>
+          )}
+          <ErrorBanner message={error} />
+          <Button label={busy ? t("settings.working") : mode === "signin" ? t("login.webSignInTitle") : t("login.webCreateJournal")} onPress={() => void submit()} disabled={busy} block />
+          <Button label={mode === "signin" ? t("login.webCreateAccount") : t("login.webHaveAccount")} onPress={() => switchMode(mode === "signin" ? "register" : "signin")} small variant="ghost" block />
+        </form>
+        <Note tone="muted">{t("login.webNeverLeaves")}</Note>
+      </Card>
+    </div>
   );
 }

@@ -1045,16 +1045,8 @@ export function PatientView(props: {
             onChange={(e) => setNoteQuery(e.target.value)}
             placeholder="Search notes…"
             aria-label="Search notes"
-            style={{
-              backgroundColor: theme.cardDeep,
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-              borderRadius: theme.radius,
-              padding: "6px 10px",
-              fontSize: 13,
-              width: "100%",
-              marginBottom: 8,
-            }}
+            className="input"
+            style={{ fontSize: 14 }}
           />
         )}
         {selected && patternNotes.length === 0 && <NoteText>No notes on this pattern yet.</NoteText>}
@@ -1071,16 +1063,7 @@ export function PatientView(props: {
                   placeholder="Editing note…"
                   aria-label={`Edit note from ${dayOf(note.created_at)}`}
                   rows={3}
-                  style={{
-                    backgroundColor: theme.cardDeep,
-                    color: theme.text,
-                    border: `1px solid ${theme.border}`,
-                    borderRadius: theme.radius,
-                    padding: 10,
-                    fontSize: 14,
-                    fontFamily: "inherit",
-                    width: "100%",
-                  }}
+                  className="textarea"
                 />
                 <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
                   <Button label={busy ? "Saving…" : "Save edit"} small onPress={() => void saveNoteEdit(note)} disabled={busy || !editing.text.trim()} />
@@ -1174,15 +1157,7 @@ export function PatientView(props: {
               type="button"
               onClick={() => setDraft(draft.trim() ? `${draft.trimEnd()}
 ${tpl}` : tpl)}
-              style={{
-                backgroundColor: theme.cardDeep,
-                color: theme.body,
-                border: `1px solid ${theme.border}`,
-                borderRadius: theme.radius,
-                padding: "4px 10px",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
+              className="tpl-chip"
             >
               {tpl.split("\n")[0]!.split(":")[0]}
             </button>
@@ -1198,15 +1173,7 @@ ${tpl}` : tpl)}
                 const source = (selected ? patternNotes : generalNotes).at(-1);
                 if (source) setDraft(source.text);
               }}
-              style={{
-                backgroundColor: theme.cardDeep,
-                color: theme.body,
-                border: `1px solid ${theme.border}`,
-                borderRadius: theme.radius,
-                padding: "4px 10px",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
+              className="tpl-chip"
             >
               Copy forward last note
             </button>
@@ -1218,15 +1185,7 @@ ${tpl}` : tpl)}
           placeholder={selected ? "Note about this pattern…" : "Note about this patient…"}
           aria-label={selected ? "New note about this pattern" : "New note about this patient"}
           rows={3}
-          style={{
-            backgroundColor: theme.cardDeep,
-            color: theme.text,
-            border: `1px solid ${theme.border}`,
-            borderRadius: theme.radius,
-            padding: 10,
-            fontSize: 14,
-            fontFamily: "inherit",
-          }}
+          className="textarea"
         />
         <div>
           <Button label={busy ? "Saving…" : "Save note"} onPress={saveNote} disabled={busy || !draft.trim()} />

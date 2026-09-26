@@ -12,7 +12,7 @@ import { INSTRUMENTS } from "../src/measures";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { isDisabled, press, render, settle, textOf, typeInto } from "./helpers/rtr";
+import { isDisabled, press, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(8);
@@ -38,7 +38,8 @@ const memoryBackend = (): KvBackend => {
  *  repeat option labels — press() alone would only ever hit item 1). */
 async function pressNth(root: Awaited<ReturnType<typeof render>>, label: string, occurrence: number): Promise<void> {
   const { act } = await import("react");
-  const matches = root.root.findAllByType("button").filter((node) => node.children.join("") === label);
+  const { textOfNode } = await import("./helpers/rtr");
+  const matches = root.root.findAllByType("button").filter((node) => textOfNode(node) === label);
   const target = matches[occurrence];
   if (!target) throw new Error(`no button #${occurrence} labeled ${JSON.stringify(label)}`);
   await act(async () => {
@@ -127,7 +128,7 @@ describe("ShareView", () => {
     await settle(40, 3);
     expect(textOf(root)).toContain("Dr. River");
     expect(textOf(root)).toContain("fingerprint");
-    const confirm = root.root.findAllByType("button").find((node) => node.children.join("") === "Confirm and share");
+    const confirm = root.root.findAllByType("button").find((node) => textOfNode(node) === "Confirm and share");
     const checkboxes = root.root.findAllByType("input").filter((node) => node.props.type === "checkbox");
     // Two gates now: fingerprint-match attestation + disclosure terms.
     expect(checkboxes).toHaveLength(2);
@@ -194,6 +195,7 @@ describe("ShareView", () => {
     await settle(40, 3);
     expect(textOf(root)).toContain("Dr. River");
     await press(root, "Revoke access");
+    await press(root, "Revoke access"); // two-step confirm (redesign 2026-09-26)
     await settle(40, 3);
     expect(textOf(root)).toContain("cannot be unread");
   });
@@ -214,7 +216,7 @@ describe("SettingsView", () => {
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
     expect(textOf(root)).toContain("off");
-    await press(root, "Enable LLM analysis");
+    await pressSwitch(root);
     await settle(40, 3);
     expect(textOf(root)).toContain("ENABLED for your account");
   });

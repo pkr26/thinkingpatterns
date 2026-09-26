@@ -90,6 +90,7 @@ describe("App", () => {
 
     // Sign out (W-6): every mindpattern.* localStorage flag goes with the
     // session — a shared browser keeps no trace an account used it.
+    await press(root, "More");
     await press(root, "Sign out (all devices)");
     await flush();
     expect(textOf(root)).toContain("Sign in");
@@ -237,7 +238,8 @@ describe("App", () => {
       await press(root, "Next");
       await press(root, "Start journaling");
       await flush();
-      expect(textOf(root)).toContain(navLabel); // the nav row is present
+      await press(root, "More");
+      expect(textOf(root)).toContain(navLabel); // the More menu lists it
       await press(root, navLabel);
       await flush();
       expect(vault.isUnlocked()).toBe(true);
@@ -297,6 +299,7 @@ describe("App", () => {
     await press(root, "Next");
     await press(root, "Start journaling");
     await flush();
+    await press(root, "More");
     await press(root, "Privacy");
     expect(textOf(root)).toContain("Privacy, honestly");
     await press(root, "Back");
@@ -333,6 +336,7 @@ describe("App", () => {
     await press(root, "Start journaling");
     await flush();
     const fetchMock = (globalThis as unknown as { fetch?: { mock: { calls: [string][] } } }).fetch;
+    await press(root, "More");
     await press(root, "Sign out (all devices)");
     await flush();
     expect(textOf(root)).toContain("Sign in");

@@ -1,35 +1,116 @@
 /**
- * Minimal UI kit — calm, light, patient-facing, no dependencies. Buttons
- * are real <button>s (keyboard accessibility for free); cards are
- * sections with h2 titles (no skipped heading levels). Forked from the
- * portal's kit with a patient theme (WEB_PLAN P1.5).
+ * The UI kit — warm, calm, patient-facing, no dependencies (redesign
+ * 2026-09-26). Components render through the token-driven classes in
+ * public/app.css (light + dark themes) instead of literal inline colors;
+ * the old `theme` hex object is retired in favor of src/tokens.ts, which
+ * mirrors the CSS custom properties for JS-drawn charts.
+ *
+ * Contracts kept from the previous kit: Buttons are real <button>s whose
+ * handler is ABSENT (not merely ignored) when disabled; cards are
+ * sections with h2 titles; Field/TextArea wrap controls in their labels;
+ * Note preserves line breaks; ErrorBanner announces with role=alert;
+ * AppFrame keeps the skip link, the sticky header, and the crisis entry
+ * point one interaction from every screen.
+ *
+ * New in the redesign: selection is NEVER the danger color — option
+ * chips carry aria-pressed with a soft sage fill and a check icon
+ * (fixing the old red-selection bug), and Dialog/Toast/Toggle/Checkbox
+ * give the app real overlays, feedback, and switch affordances.
  */
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "./strings";
+import { MOOD_FACE_COLORS } from "./tokens";
 
-export const theme = {
-  bg: "#f5f7fa",
-  card: "#ffffff",
-  cardDeep: "#eef2f7",
-  text: "#1c2430",
-  body: "#3d4a5c",
-  muted: "#748294",
-  accent: "#3d6fb4",
-  accentBright: "#5a8fd6",
-  danger: "#c0453a",
-  ok: "#3f8f68",
-  warn: "#b07d2b",
-  border: "#dfe5ec",
-  radius: 12,
+/* ------------------------------------------------------------------ icons
+   A tiny hand-rolled stroke icon set (no icon dependency). Decorative by
+   contract: aria-hidden, and every control carrying one also carries a
+   text/aria label. */
+export type IconName =
+  | "home" | "book" | "sparkles" | "help" | "clipboard" | "share" | "sliders"
+  | "shield" | "flame" | "sun" | "moon" | "chevron-left" | "chevron-right"
+  | "chevron-down" | "check" | "x" | "heart" | "alert" | "info" | "copy"
+  | "more" | "logout" | "edit" | "trash" | "search" | "refresh" | "phone";
+
+const ICON_PATHS: Record<IconName, ReactNode> = {
+  home: <><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10v10h13V10" /></>,
+  book: <><path d="M6.5 3H18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3z" /><path d="M8 3v18" /><path d="M11.5 8.5h4" /></>,
+  sparkles: <><path d="M12 3l1.7 4.6L18.3 9l-4.6 1.4L12 15l-1.7-4.6L5.7 9l4.6-1.4L12 3z" /><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" /></>,
+  help: <><circle cx="12" cy="12" r="9" /><path d="M9.6 9.6a2.4 2.4 0 1 1 3.3 2.2c-.8.34-1.3.95-1.3 1.9" /><path d="M11.6 16.6v.1" /></>,
+  clipboard: <><path d="M9 4.5H7A1.5 1.5 0 0 0 5.5 6v13A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V6A1.5 1.5 0 0 0 17 4.5h-2" /><rect x="9" y="3" width="6" height="3" rx="1" /></>,
+  share: <><circle cx="18" cy="5.5" r="2.4" /><circle cx="6" cy="12" r="2.4" /><circle cx="18" cy="18.5" r="2.4" /><path d="M8.2 10.8l7.6-4.1" /><path d="M8.2 13.2l7.6 4.1" /></>,
+  sliders: <><path d="M4 7h7" /><path d="M16.5 7H20" /><circle cx="13.5" cy="7" r="2.2" /><path d="M4 17h3" /><path d="M12.5 17H20" /><circle cx="9.5" cy="17" r="2.2" /></>,
+  shield: <><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z" /><path d="M9 11.6l2.1 2.1 4-4.2" /></>,
+  flame: <><path d="M12 3c1 3 4.2 4.6 4.2 8.2a4.7 4.7 0 0 1-9.4 0c0-1.6.6-3 1.5-4.2.4 1 1.1 1.6 2 1.8C10.4 7 11.5 5 12 3z" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2.5V5" /><path d="M12 19v2.5" /><path d="M2.5 12H5" /><path d="M19 12h2.5" /><path d="M5 5l1.7 1.7" /><path d="M17.3 17.3 19 19" /><path d="M19 5l-1.7 1.7" /><path d="M6.7 17.3 5 19" /></>,
+  moon: <path d="M20 13.6A8 8 0 1 1 10.4 4a6.6 6.6 0 0 0 9.6 9.6z" />,
+  "chevron-left": <path d="M14.5 5.5 8 12l6.5 6.5" />,
+  "chevron-right": <path d="M9.5 5.5 16 12l-6.5 6.5" />,
+  "chevron-down": <path d="M6 9.5l6 6 6-6" />,
+  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
+  x: <><path d="M6 6l12 12" /><path d="M18 6 6 18" /></>,
+  heart: <path d="M12 20s-7-4.3-9-8.5C1.6 8.6 3.6 5.5 6.8 5.5c1.9 0 3.6 1 4.2 2.6.6-1.6 2.3-2.6 4.2-2.6 3.2 0 5.2 3.1 3.8 6-2 4.2-7 8.5-7 8.5z" />,
+  alert: <><path d="M12 4 2.8 20h18.4z" /><path d="M12 10v4.2" /><path d="M12 17.4v.1" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11.2V16" /><path d="M12 8.2v.1" /></>,
+  copy: <><rect x="9" y="9" width="10.5" height="10.5" rx="2" /><path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1" /></>,
+  more: <><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></>,
+  logout: <><path d="M9.5 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3.5" /><path d="M15.5 8l4 4-4 4" /><path d="M19.5 12h-10" /></>,
+  edit: <><path d="M4 20h4.5L20 8.5a2.12 2.12 0 0 0-3-3L5.5 17 4 20z" /><path d="M14.5 7l3 3" /></>,
+  trash: <><path d="M4.5 7h15" /><path d="M9.5 7V4.5h5V7" /><path d="M7 7l1 13h8l1-13" /><path d="M10.3 10.5v6" /><path d="M13.7 10.5v6" /></>,
+  search: <><circle cx="11" cy="11" r="6.5" /><path d="M15.8 15.8 21 21" /></>,
+  refresh: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4.5h-4.5" /></>,
+  phone: <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z" />,
 };
 
+export function Icon(props: { name: IconName; size?: number }): React.JSX.Element {
+  return (
+    <svg
+      width={props.size ?? 18}
+      height={props.size ?? 18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {ICON_PATHS[props.name]}
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------------ brand
+   Abstract bloom mark — soft, non-clinical, no people imagery
+   (trauma-informed: decorative shapes only). */
+export function Logo({ size = 30 }: { size?: number }): React.JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <circle cx="16" cy="16" r="16" fill="var(--primary-soft)" />
+      <path d="M16 24c-5 0-8-3.2-8-8 4.8 0 7.8 3 8 8z" fill="var(--primary)" />
+      <path d="M16 24c5 0 8-3.2 8-8-4.8 0-7.8 3-8 8z" fill="var(--primary)" opacity="0.72" />
+      <path d="M16 8v16" stroke="var(--primary-strong)" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ----------------------------------------------------------------- button */
 export function Button(props: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   danger?: boolean;
   small?: boolean;
+  variant?: "primary" | "ghost" | "quiet";
+  icon?: IconName;
+  block?: boolean;
 }): React.JSX.Element {
+  const classes = ["btn"];
+  if (props.danger) classes.push("btn--danger");
+  else if (props.variant === "ghost") classes.push("btn--ghost");
+  else if (props.variant === "quiet") classes.push("btn--quiet");
+  if (props.small) classes.push("btn--small");
+  if (props.block) classes.push("btn--block");
   return (
     <button
       type="button"
@@ -37,42 +118,59 @@ export function Button(props: {
       // so no synthetic click path can fire it.
       onClick={props.disabled ? undefined : props.onPress}
       disabled={props.disabled === true}
-      style={{
-        backgroundColor: props.danger ? theme.danger : theme.accent,
-        color: "#fff",
-        border: "none",
-        borderRadius: theme.radius,
-        padding: props.small ? "6px 12px" : "10px 16px",
-        fontSize: props.small ? 13 : 15,
-        fontWeight: 600,
-        cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.5 : 1,
-      }}
+      className={classes.join(" ")}
     >
+      {props.icon && <Icon name={props.icon} size={props.small ? 15 : 17} />}
       {props.label}
     </button>
   );
 }
 
-export function Card(props: { children: ReactNode; deep?: boolean; title?: string }): React.JSX.Element {
+/* ------------------------------------------------------------------- chip
+   One-tap option button (activity tags, measure answers, feedback).
+   Selected = aria-pressed + soft sage fill + check — never danger red. */
+export function Chip(props: {
+  label: string;
+  onPress: () => void;
+  selected?: boolean;
+  disabled?: boolean;
+  icon?: IconName;
+}): React.JSX.Element {
   return (
-    <section
-      style={{
-        backgroundColor: props.deep ? theme.cardDeep : theme.card,
-        borderRadius: theme.radius,
-        border: `1px solid ${theme.border}`,
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
+    <button
+      type="button"
+      onClick={props.disabled ? undefined : props.onPress}
+      disabled={props.disabled === true}
+      aria-pressed={props.selected === true}
+      className="chip"
     >
-      {props.title && <h2 style={{ margin: 0, color: theme.text, fontSize: 15, fontWeight: 600 }}>{props.title}</h2>}
+      {props.icon && <Icon name={props.icon} size={15} />}
+      {props.label}
+      <span className="chip__check"><Icon name="check" size={14} /></span>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------- card */
+export function Card(props: {
+  children: ReactNode;
+  deep?: boolean;
+  title?: string;
+  tone?: "sensitive" | "danger";
+}): React.JSX.Element {
+  const classes = ["card"];
+  if (props.deep) classes.push("card--deep");
+  if (props.tone === "sensitive") classes.push("card--sensitive");
+  if (props.tone === "danger") classes.push("card--danger");
+  return (
+    <section className={classes.join(" ")}>
+      {props.title && <h2 className="card__title">{props.title}</h2>}
       {props.children}
     </section>
   );
 }
 
+/* ------------------------------------------------------------------ forms */
 export function Field(props: {
   label: string;
   value: string;
@@ -82,23 +180,15 @@ export function Field(props: {
   autoComplete?: string;
 }): React.JSX.Element {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, color: theme.muted, fontSize: 12, fontWeight: 700 }}>
-      {props.label}
+    <label className="field">
+      <span className="field__label">{props.label}</span>
       <input
         type={props.type ?? "text"}
         value={props.value}
         placeholder={props.placeholder}
         autoComplete={props.autoComplete}
         onChange={(e) => props.onChange(e.target.value)}
-        style={{
-          backgroundColor: theme.cardDeep,
-          color: theme.text,
-          border: `1px solid ${theme.border}`,
-          borderRadius: theme.radius,
-          padding: "10px 12px",
-          fontSize: 15,
-          fontWeight: 400,
-        }}
+        className="input"
       />
     </label>
   );
@@ -114,75 +204,434 @@ export function TextArea(props: {
   rows?: number;
 }): React.JSX.Element {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 4, color: theme.muted, fontSize: 12, fontWeight: 700 }}>
-      {props.label}
+    <label className="field">
+      <span className="field__label">{props.label}</span>
       <textarea
         value={props.value}
         placeholder={props.placeholder}
         rows={props.rows ?? 8}
         onChange={(e) => props.onChange(e.target.value)}
-        style={{
-          backgroundColor: theme.cardDeep,
-          color: theme.text,
-          border: `1px solid ${theme.border}`,
-          borderRadius: theme.radius,
-          padding: "10px 12px",
-          fontSize: 15,
-          fontWeight: 400,
-          fontFamily: "inherit",
-          lineHeight: 1.5,
-          resize: "vertical",
-        }}
+        className="textarea"
       />
     </label>
   );
 }
 
-export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn"; role?: "status" }): React.JSX.Element {
-  const color =
-    props.tone === "ok" ? theme.ok
-      : props.tone === "danger" ? theme.danger
-        : props.tone === "warn" ? theme.warn
-          : theme.muted;
+/* ------------------------------------------------------------------ notes */
+export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn" | "lead"; role?: "status" }): React.JSX.Element {
+  const classes = ["note"];
+  if (props.tone && props.tone !== "lead") classes.push(`note--${props.tone}`);
+  if (props.tone === "lead") classes.push("note--lead");
   // Journal text and prompts are multi-line by nature; line breaks must
   // survive rendering.
-  return <p role={props.role} style={{ margin: 0, color, fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{props.children}</p>;
+  return <p role={props.role} className={classes.join(" ")} style={{ whiteSpace: "pre-wrap" }}>{props.children}</p>;
+}
+
+/** Soft inline status pill (sentiment read, streaks, queue states). */
+export function PillNote(props: { children: ReactNode; tone?: "muted" | "ok" | "warn"; icon?: IconName; role?: "status" }): React.JSX.Element {
+  const classes = ["pill-note"];
+  if (props.tone === "ok") classes.push("pill-note--ok");
+  if (props.tone === "warn") classes.push("pill-note--warn");
+  return (
+    <span role={props.role} className={classes.join(" ")}>
+      {props.icon && <Icon name={props.icon} size={14} />}
+      {props.children}
+    </span>
+  );
 }
 
 export function ErrorBanner({ message }: { message: string }): React.JSX.Element | null {
   if (!message) return null;
   return (
-    <div
-      role="alert"
-      style={{
-        backgroundColor: "#fbeeea",
-        color: "#8f3a32",
-        border: `1px solid ${theme.danger}`,
-        borderRadius: theme.radius,
-        padding: "10px 14px",
-        fontSize: 14,
-      }}
-    >
+    <div role="alert" className="banner banner--error">
       {message}
     </div>
   );
 }
 
-/** App chrome: sticky header (product name + the crisis entry point that
- *  must be one interaction from every screen — WEB_PLAN P8.1, present
- *  from day one) and the responsive content column from index.html's
- *  breakpoint skeleton. 2026-09-26 audit follow-up (B-5): this chrome is
- *  on EVERY screen, so its copy (skip link, crisis button) resolves
- *  through t() — safety-visible text must not be hardcoded English. */
+/* ----------------------------------------------------------------- switch */
+export function Toggle(props: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}): React.JSX.Element {
+  return (
+    <div className="row row--between">
+      <span className="note" style={{ whiteSpace: "pre-wrap" }}>{props.label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={props.checked}
+        aria-label={props.label}
+        onClick={props.disabled ? undefined : () => props.onChange(!props.checked)}
+        disabled={props.disabled === true}
+        className="toggle"
+      />
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- checkbox */
+export function Checkbox(props: { checked: boolean; onChange: (checked: boolean) => void; children: ReactNode }): React.JSX.Element {
+  return (
+    <label className="checkbox">
+      <input
+        type="checkbox"
+        className="checkbox__input"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
+      <span className="checkbox__box" aria-hidden="true">
+        <span className="checkbox__check"><Icon name="check" size={13} /></span>
+      </span>
+      <span>{props.children}</span>
+    </label>
+  );
+}
+
+/* ------------------------------------------------------- segmented control */
+export function SegmentedControl(props: {
+  options: { id: string; label: string }[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  a11yLabel: string;
+}): React.JSX.Element {
+  return (
+    <div className="segmented" role="radiogroup" aria-label={props.a11yLabel}>
+      {props.options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="radio"
+          aria-checked={option.id === props.activeId}
+          className="segmented__opt"
+          onClick={() => props.onSelect(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- navigation */
+export interface NavItem { id: string; label: string; icon: IconName }
+
+export function NavTabs(props: { items: NavItem[]; activeId: string | null; onSelect: (id: string) => void }): React.JSX.Element {
+  return (
+    <nav className="nav-tabs" aria-label={t("nav.a11y")}>
+      {props.items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className="nav-tabs__item"
+          aria-current={item.id === props.activeId ? "page" : undefined}
+          onClick={() => props.onSelect(item.id)}
+        >
+          <Icon name={item.icon} size={16} />
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+export function BottomNav(props: { items: NavItem[]; activeId: string | null; onSelect: (id: string) => void; more: ReactNode }): React.JSX.Element {
+  return (
+    <nav className="bottom-nav" aria-label={t("nav.a11y")}>
+      {props.items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className="bottom-nav__item"
+          aria-current={item.id === props.activeId ? "page" : undefined}
+          onClick={() => props.onSelect(item.id)}
+        >
+          <Icon name={item.icon} size={21} />
+          {item.label}
+        </button>
+      ))}
+      {props.more}
+    </nav>
+  );
+}
+
+export interface MoreMenuItem { id: string; label: string; icon?: IconName; danger?: boolean }
+
+/** Overflow menu (desktop: after the tabs; mobile: above the bottom bar). */
+export function MoreMenu(props: {
+  label: string;
+  items: MoreMenuItem[];
+  activeIds: readonly string[];
+  onSelect: (id: string) => void;
+  up?: boolean;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const active = props.activeIds.length > 0;
+
+  useEffect(() => {
+    if (!open || typeof document === "undefined") return;
+    const onDown = (event: MouseEvent): void => {
+      if (root.current && event.target instanceof Node && !root.current.contains(event.target)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`more${props.up ? " more--up" : ""}`} ref={root}>
+      <button
+        type="button"
+        className="nav-tabs__item"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-current={active && !open ? "page" : undefined}
+        onClick={() => setOpen(!open)}
+      >
+        <Icon name="more" size={16} />
+        {props.label}
+        <Icon name="chevron-down" size={13} />
+      </button>
+      {open && (
+        <div className="more__menu" role="menu">
+          {props.items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className={`more__item${item.danger ? " more__item--danger" : ""}`}
+              aria-current={props.activeIds.includes(item.id) ? "page" : undefined}
+              onClick={() => {
+                setOpen(false);
+                props.onSelect(item.id);
+              }}
+            >
+              {item.icon && <Icon name={item.icon} size={16} />}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------------- dialog
+   Accessible modal: role=dialog + aria-modal, focus is trapped while
+   open and restored on close, Escape closes, backdrop click closes.
+   Effects no-op where the DOM doesn't exist (node test environment). */
+export function Dialog(props: { title: string; onClose: () => void; children: ReactNode }): React.JSX.Element {
+  const panel = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = (): HTMLElement[] => {
+      if (!panel.current) return [];
+      return Array.from(
+        panel.current.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"),
+      ).filter((el) => !el.hasAttribute("disabled"));
+    };
+    focusables()[0]?.focus();
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        props.onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const list = focusables();
+      if (list.length === 0) return;
+      const first = list[0]!;
+      const last = list[list.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      previous?.focus();
+    };
+  }, [props.onClose]);
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) props.onClose();
+      }}
+    >
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={props.title} className="dialog">
+        <h2 className="dialog__title">{props.title}</h2>
+        {props.children}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ toast */
+export interface ToastItem { id: number; message: string; tone: "ok" | "warn" | "info" }
+
+export function ToastHost({ items }: { items: ToastItem[] }): React.JSX.Element | null {
+  if (items.length === 0) return null;
+  return (
+    <div className="toast-host" role="status" aria-live="polite">
+      {items.map((toast) => (
+        <div key={toast.id} className="toast">
+          <Icon name={toast.tone === "ok" ? "check" : toast.tone === "warn" ? "alert" : "info"} size={16} />
+          {toast.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- skeleton */
+export function Skeleton(props: { lines?: number; title?: boolean }): React.JSX.Element {
+  const lines = props.lines ?? 3;
+  return (
+    <div aria-hidden="true" className="stack">
+      {props.title === true && <div className="skeleton skeleton--title" />}
+      {Array.from({ length: lines }, (_, index) => (
+        <div key={index} className={`skeleton${index === lines - 1 ? " skeleton--line-short" : " skeleton--line"}`} />
+      ))}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- progress pieces */
+export function ProgressDots(props: { total: number; current: number; label: string }): React.JSX.Element {
+  return (
+    <div className="dots" role="img" aria-label={props.label}>
+      {Array.from({ length: props.total }, (_, index) => (
+        <span key={index} className={`dots__dot${index === props.current ? " dots__dot--on" : ""}`} />
+      ))}
+    </div>
+  );
+}
+
+export function ProgressTrack(props: { progress: number; label: string }): React.JSX.Element {
+  const clamped = Math.max(0, Math.min(1, props.progress));
+  return (
+    <div className="stack">
+      <div className="progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(clamped * 100)} aria-label={props.label}>
+        <div className="progress-fill" style={{ width: `${Math.round(clamped * 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------- check-in controls
+   The one-tap visual scales (Daylio-style frictionless check-in). Faces
+   carry per-level ring colors; selection is aria-pressed + scale, never
+   a color-only cue (the label under the face bolds too). */
+export interface ScaleOption { value: number; labelKey: string }
+
+function faceMouth(position: number): string {
+  // position 0..1 across the scale, Heavy → Light.
+  if (position <= 0) return "M8.5 16 Q12 13 15.5 16";
+  if (position < 0.25) return "M8.5 15.8 Q12 13.6 15.5 15.8";
+  if (position < 0.5) return "M8.5 15.3 H15.5";
+  if (position < 0.75) return "M8.5 14.8 Q12 17.2 15.5 14.8";
+  return "M8 14.6 Q12 18.4 16 14.6";
+}
+
+export function MoodScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
+  const last = props.options.length - 1;
+  return (
+    <div className="mood-scale" role="group">
+      {props.options.map((option, index) => {
+        const colors = MOOD_FACE_COLORS[last <= 0 ? 2 : Math.round((index * 4) / last)]!;
+        const pressed = props.value === option.value;
+        return (
+          <button
+            key={option.labelKey}
+            type="button"
+            className="mood-item"
+            aria-pressed={pressed}
+            aria-label={t(option.labelKey)}
+            onClick={() => props.onChange(pressed ? null : option.value)}
+            style={{ "--face": colors.face, "--face-soft": colors.faceSoft, "--face-strong": colors.faceStrong } as React.CSSProperties}
+          >
+            <span className="mood-face" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round">
+                <circle cx="12" cy="12" r="9.2" />
+                <circle cx="8.8" cy="9.6" r="1.15" fill="currentColor" stroke="none" />
+                <circle cx="15.2" cy="9.6" r="1.15" fill="currentColor" stroke="none" />
+                <path d={faceMouth(last <= 0 ? 0.5 : index / last)} />
+              </svg>
+            </span>
+            <span className="mood-item__label">{t(option.labelKey)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The 1–5 sleep scale (and any short numeric pick): labeled round dots. */
+export function DotScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
+  return (
+    <div className="dot-scale" role="group">
+      {props.options.map((option, index) => {
+        const pressed = props.value === option.value;
+        return (
+          <button
+            key={option.labelKey}
+            type="button"
+            className="dot-item"
+            aria-pressed={pressed}
+            onClick={() => props.onChange(pressed ? null : option.value)}
+          >
+            <span className="dot" aria-hidden="true">{index + 1}</span>
+            <span className="dot-item__label">{t(option.labelKey)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ avatar */
+export function Avatar({ name }: { name: string }): React.JSX.Element {
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join("") || "?";
+  return <span className="avatar" aria-hidden="true">{initials}</span>;
+}
+
+/* --------------------------------------------------------------- app frame */
+/** App chrome: sticky header (brand + the crisis entry point that must be
+ *  one interaction from every screen — WEB_PLAN P8.1, present from day
+ *  one) and the responsive content column. Safety-visible copy resolves
+ *  through t() — never hardcoded English. */
 export function AppFrame(props: { title: string; onCrisis: () => void; children: ReactNode }): React.JSX.Element {
   return (
     <>
       {/* The skip link is the first tabbable element; visual users never
           see it until it has focus (keyboard a11y floor, P8.3). */}
-      <a href="#app-content" style={{ position: "absolute", left: -9999, top: 0, background: theme.card, color: theme.text, padding: "8px 12px", zIndex: 100 }}>{t("nav.skipToContent")}</a>
+      <a href="#app-content" className="skip-link">{t("nav.skipToContent")}</a>
       <header className="app-header">
-        <h1 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: theme.text }}>{props.title}</h1>
-        <Button label={t("nav.getHelp")} onPress={props.onCrisis} small />
+        <h1 className="brand__name" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Logo />
+          {props.title}
+        </h1>
+        {/* The crisis entry point stays one tap from every screen; ghost
+            styling keeps it ever-present without competing with the
+            screen's primary action. */}
+        <Button label={t("nav.getHelp")} onPress={props.onCrisis} small variant="ghost" />
       </header>
       <main className="app-main" id="app-content">{props.children}</main>
     </>

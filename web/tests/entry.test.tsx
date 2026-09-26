@@ -123,7 +123,6 @@ describe("EntryView", () => {
     });
     const root = await render(<EntryView onSaved={() => undefined} />);
     await typeArea(root, "How was today?", "With details");
-    await press(root, "Add details (mood, sleep, energy, tags)");
     await press(root, "Good");
     await press(root, "Energized");
     await press(root, "work");
@@ -205,7 +204,6 @@ describe("EntryView sentiment semantics (H-5, audit 2026-09-26)", () => {
     });
     const root = await render(<EntryView onSaved={() => undefined} />);
     await typeArea(root, "How was today?", "an ordinary day with one bright moment");
-    await press(root, "Add details (mood, sleep, energy, tags)");
     await press(root, "Good"); // 0.5 on the explicit scale
     await press(root, "Save entry");
     await settle(40, 5);

@@ -2,21 +2,27 @@
  * App shell: a state machine — booting → login → (onboarding) → the app
  * views (today / history / privacy), with the crisis overlay reachable
  * from every state. All key material lives in the memory-only vault
- * (WEB_PLAN D-4): refresh or a new tab forgets everything and asks for the
- * password again.
+ * (WEB_PLAN D-4): refresh or a new tab forgets everything and asks for
+ * the password again.
  *
  * Account-wide death is lazy and honest (D-8): a 401 (token expired, or
  * signed out / password rotated on ANOTHER device) and a 410 (account
  * deleted from another device) each funnel the whole UI back to sign-in
  * with an explanation — never a banner over live keys.
+ *
+ * Redesign 2026-09-26: navigation is real tabs on desktop (Today /
+ * History / Patterns / Question + a More menu) and a bottom tab bar on
+ * phones; save/refresh confirmations surface as gentle toasts; the
+ * crisis resources open as an overlay dialog. The view state machine,
+ * session funnels, and privacy posture are untouched.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { adoptLegacyPlaintextMutes } from "./patternMutes";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from "./sessionLock";
 import { isOnline, localStore, onWindowEvent } from "./platform";
-import { AppFrame, Button, Card, ErrorBanner, Note } from "./ui";
+import { AppFrame, BottomNav, Card, ErrorBanner, MoreMenu, NavTabs, Note, ToastHost, type IconName, type NavItem, type ToastItem } from "./ui";
 import { CrisisCard } from "./crisis";
 import { LoginView } from "./views/LoginView";
 import { hasSeenOnboarding, markOnboardingSeen, Onboarding } from "./views/Onboarding";
@@ -36,10 +42,10 @@ type View =
   | { kind: "booting" }
   | { kind: "login"; notice?: string }
   | { kind: "onboarding" }
-  | { kind: "today"; savedNote?: string }
+  | { kind: "today" }
   | { kind: "history" }
   | { kind: "patterns" }
-  | { kind: "question"; refreshedNote?: string }
+  | { kind: "question" }
   | { kind: "measures" }
   | { kind: "share" }
   | { kind: "settings" }
@@ -48,10 +54,12 @@ type View =
 /** Brief boot beat so the first paint is never a flash of the wrong state. */
 const BOOT_MS = 40;
 /** How often a live session re-attempts the offline queue. Bounds the
- * stranding window for entries parked while the browser still believed it
- * was online (audit 2026-09-25); the flush itself is throttled further and
- * Web-Locks-serialized inside flushQueueOnReconnect. */
+ *  stranding window for entries parked while the browser still believed it
+ *  was online (audit 2026-09-25); the flush itself is throttled further and
+ *  Web-Locks-serialized inside flushQueueOnReconnect. */
 const QUEUE_FLUSH_INTERVAL_MS = 30_000;
+/** Gentle toast lifetime — enough to read, never in the way. */
+const TOAST_MS = 4200;
 
 function noticeFor(reason: LockReason | "expired" | "deleted"): string {
   switch (reason) {
@@ -68,11 +76,35 @@ function noticeFor(reason: LockReason | "expired" | "deleted"): string {
   }
 }
 
+const PRIMARY_VIEWS: { kind: View["kind"]; labelKey: string; icon: IconName }[] = [
+  { kind: "today", labelKey: "nav.today", icon: "home" },
+  { kind: "history", labelKey: "nav.history", icon: "book" },
+  { kind: "patterns", labelKey: "nav.patterns", icon: "sparkles" },
+  { kind: "question", labelKey: "nav.question", icon: "help" },
+];
+const MORE_VIEWS: { kind: View["kind"]; labelKey: string; icon: IconName; danger?: boolean }[] = [
+  { kind: "measures", labelKey: "nav.measures", icon: "clipboard" },
+  { kind: "share", labelKey: "nav.share", icon: "share" },
+  { kind: "settings", labelKey: "nav.settings", icon: "sliders" },
+  { kind: "privacy", labelKey: "nav.privacy", icon: "shield" },
+];
+
+const PRIMARY_KINDS = new Set(PRIMARY_VIEWS.map((item) => item.kind));
+const MORE_KINDS = new Set(MORE_VIEWS.map((item) => item.kind));
+
 export function App(): React.JSX.Element {
   const [view, setView] = useState<View>({ kind: "booting" });
   const [crisisOpen, setCrisisOpen] = useState(false);
   const [username, setUsername] = useState("");
   const [errorNote, setErrorNote] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const nextToastId = useRef(0);
+
+  const notify = useCallback((message: string, tone: ToastItem["tone"] = "ok"): void => {
+    const id = (nextToastId.current += 1);
+    setToasts((current) => [...current.slice(-2), { id, message, tone }]);
+    setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), TOAST_MS);
+  }, []);
 
   // Boot: this client has no persisted session (D-4) — after the beat, the
   // only honest state is sign-in.
@@ -103,9 +135,7 @@ export function App(): React.JSX.Element {
   // The views that hold a live session: everything past login. This is ONE
   // list on purpose (audit 2026-09-25: it had drifted to miss measures/
   // share/settings, leaving keys in memory with no idle lock there).
-  const inApp =
-    view.kind === "today" || view.kind === "history" || view.kind === "patterns"
-    || view.kind === "question" || view.kind === "measures" || view.kind === "share" || view.kind === "settings";
+  const inApp = PRIMARY_KINDS.has(view.kind) || MORE_KINDS.has(view.kind);
   const sessionActive = inApp || view.kind === "onboarding" || view.kind === "privacy";
   const onLock = useCallback((reason: LockReason) => lockDown(noticeFor(reason)), [lockDown]);
   useIdleLock(sessionActive, onLock);
@@ -209,57 +239,61 @@ export function App(): React.JSX.Element {
     // drain anything parked earlier immediately instead of waiting for the
     // periodic flush (the `online` event may never have fired).
     if (result === "sent") void flushQueueOnReconnect();
-    setView((current) =>
-      current.kind === "today"
-        ? { ...current, savedNote: result === "sent" ? t("app.saved") : t("app.savedOffline") }
-        : current,
-    );
-  }, []);
+    notify(result === "sent" ? t("app.saved") : t("app.savedOffline"), result === "sent" ? "ok" : "warn");
+  }, [notify]);
+
+  const navItems: NavItem[] = PRIMARY_VIEWS.map((item) => ({ id: item.kind, label: t(item.labelKey), icon: item.icon }));
+  const moreItems = [
+    ...MORE_VIEWS.map((item) => ({ id: item.kind, label: t(item.labelKey), icon: item.icon })),
+    { id: "signout", label: t("nav.signOutAll"), icon: "logout" as IconName, danger: true },
+  ];
+  const onNavSelect = useCallback((id: string) => {
+    if (id === "signout") {
+      signOut();
+      return;
+    }
+    setView({ kind: id as View["kind"] });
+  }, [signOut]);
+  const activeMore = MORE_KINDS.has(view.kind) ? [view.kind as string] : [];
 
   return (
     <AppFrame title="MindPattern" onCrisis={() => setCrisisOpen(true)}>
-      {crisisOpen ? (
-        <CrisisCard onClose={() => setCrisisOpen(false)} />
-      ) : view.kind === "booting" ? (
-        <Card>
-          <Note role="status">{t("app.starting")}</Note>
-        </Card>
+      {view.kind === "booting" ? (
+        <div className="view-enter">
+          <Card>
+            <Note role="status">{t("app.starting")}</Note>
+          </Card>
+        </div>
       ) : view.kind === "login" ? (
-        <>
+        <div className="view-enter">
           {view.notice && <ErrorBanner message={view.notice} />}
           <LoginView onSuccess={onLoginSuccess} />
-        </>
+        </div>
       ) : view.kind === "onboarding" ? (
-        <Onboarding onDone={onOnboardingDone} />
+        <div className="view-enter">
+          <Onboarding onDone={onOnboardingDone} />
+        </div>
       ) : view.kind === "privacy" ? (
-        <Privacy onBack={() => setView({ kind: "today" })} />
+        <div className="view-enter">
+          <Privacy onBack={() => setView({ kind: "today" })} />
+        </div>
       ) : (
-        <>
+        // The crisis overlay renders ON TOP of this content (below), so
+        // opening help never loses the user's place in the app.
+        <div className="view-enter" key={view.kind} style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
           {errorNote && <ErrorBanner message={errorNote} />}
-          <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-            <Button label={t("nav.today")} onPress={() => setView({ kind: "today" })} small={view.kind !== "today"} disabled={view.kind === "today"} />
-            <Button label={t("nav.history")} onPress={() => setView({ kind: "history" })} small disabled={view.kind === "history"} />
-            <Button label={t("nav.patterns")} onPress={() => setView({ kind: "patterns" })} small disabled={view.kind === "patterns"} />
-            <Button label={t("nav.question")} onPress={() => setView({ kind: "question" })} small disabled={view.kind === "question"} />
-            <Button label={t("nav.measures")} onPress={() => setView({ kind: "measures" })} small disabled={view.kind === "measures"} />
-            <Button label={t("nav.share")} onPress={() => setView({ kind: "share" })} small disabled={view.kind === "share"} />
-            <Button label={t("nav.settings")} onPress={() => setView({ kind: "settings" })} small disabled={view.kind === "settings"} />
-            <span style={{ flex: 1 }} />
-            <Button label={t("nav.privacy")} onPress={() => setView({ kind: "privacy" })} small />
-            <Button label={t("nav.signOutAll")} onPress={signOut} small danger />
-          </nav>
+          {/* Desktop chrome: tabs + More. Hidden on phones, where the
+              bottom bar (with its own More) takes over. */}
+          <div className="nav-row row row--wrap row--between">
+            <NavTabs items={navItems} activeId={PRIMARY_KINDS.has(view.kind) ? view.kind : null} onSelect={onNavSelect} />
+            <MoreMenu label={t("nav.more")} items={moreItems} activeIds={activeMore} onSelect={onNavSelect} />
+          </div>
           {view.kind === "today" ? (
-            <>
-              {view.savedNote && <Note role="status" tone="ok">{view.savedNote}</Note>}
-              <EntryView onSaved={onSaved} />
-            </>
+            <EntryView onSaved={onSaved} />
           ) : view.kind === "patterns" ? (
             <PatternsView onCrisis={() => setCrisisOpen(true)} />
           ) : view.kind === "question" ? (
-            <>
-              {view.refreshedNote && <Note role="status" tone="ok">{view.refreshedNote}</Note>}
-              <QuestionView onRefreshed={(message) => setView({ kind: "question", refreshedNote: message })} />
-            </>
+            <QuestionView onRefreshed={(message) => notify(message)} />
           ) : view.kind === "measures" ? (
             <MeasuresView onCrisis={() => setCrisisOpen(true)} />
           ) : view.kind === "share" ? (
@@ -269,9 +303,19 @@ export function App(): React.JSX.Element {
           ) : (
             <HistoryView />
           )}
-        </>
+          {username && <Note tone="muted">{t("app.signedInAs", { name: username })}</Note>}
+        </div>
       )}
-      {inApp && username && <Note tone="muted">{t("app.signedInAs", { name: username })}</Note>}
+      {crisisOpen && <CrisisCard onClose={() => setCrisisOpen(false)} />}
+      {inApp && (
+        <BottomNav
+          items={navItems}
+          activeId={PRIMARY_KINDS.has(view.kind) ? view.kind : null}
+          onSelect={onNavSelect}
+          more={<MoreMenu label={t("nav.more")} items={moreItems} activeIds={activeMore} onSelect={onNavSelect} up />}
+        />
+      )}
+      <ToastHost items={toasts} />
     </AppFrame>
   );
 }

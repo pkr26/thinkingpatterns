@@ -78,3 +78,6 @@ mobile/android/app/release/
 mobile/android/keystore.properties
 *.keystore
 !mobile/android/app/debug.keystore
+
+# ZCode local session artifacts
+.zcode/

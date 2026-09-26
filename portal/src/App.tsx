@@ -206,12 +206,12 @@ export function App(): React.JSX.Element {
     return (
       <>
         {notice && (
-          <div style={{ backgroundColor: "#1d2433", color: "#a8c0f0", padding: "10px 16px", fontSize: 14 }}>
+          <div className="banner banner--info" role="status" style={{ borderRadius: 0 }}>
             {notice}
           </div>
         )}
         {unlockError && (
-          <div style={{ backgroundColor: "#2a1a17", color: "#f0b6ad", padding: "10px 16px", fontSize: 14 }}>
+          <div className="banner banner--error" role="alert" style={{ borderRadius: 0 }}>
             {unlockError}
           </div>
         )}

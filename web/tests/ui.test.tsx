@@ -1,6 +1,10 @@
-/** UI kit: primitives render, respond, and carry the patient theme. */
+/** UI kit: primitives render, respond, and carry the patient theme.
+ *  Redesign 2026-09-26: components render through token-driven CSS
+ *  classes (public/app.css), so variant assertions target classNames —
+ *  the old literal-hex `theme` object is retired (src/tokens.ts mirrors
+ *  the CSS for charts; tests/designTokens.test.ts pins them together). */
 import { describe, expect, it, vi } from "vitest";
-import { AppFrame, Button, Card, ErrorBanner, Field, Note, theme } from "../src/ui";
+import { AppFrame, Button, Card, Chip, ErrorBanner, Field, Note } from "../src/ui";
 import { flush, press, render, textOf, typeInto } from "./helpers/rtr";
 
 describe("Button", () => {
@@ -23,9 +27,21 @@ describe("Button", () => {
     expect(onPress).not.toHaveBeenCalled();
   });
 
-  it("renders a danger variant with the danger color", async () => {
+  it("renders a danger variant through the danger class", async () => {
     const root = await render(<Button label="Delete" onPress={() => undefined} danger />);
-    expect(root.root.findByType("button").props.style.backgroundColor).toBe(theme.danger);
+    expect(root.root.findByType("button").props.className).toContain("btn--danger");
+  });
+});
+
+describe("Chip", () => {
+  it("carries selection through aria-pressed, never the danger color", async () => {
+    const onPress = vi.fn();
+    const root = await render(<Chip label="outdoors" onPress={onPress} selected />);
+    const chip = root.root.findByType("button");
+    expect(chip.props["aria-pressed"]).toBe(true);
+    expect(chip.props.className).not.toContain("danger");
+    await press(root, "outdoors");
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -81,9 +97,9 @@ describe("Note", () => {
     const notes = root.root.findAllByType("p");
     expect(notes[0]!.props.style.whiteSpace).toBe("pre-wrap");
     expect(notes[0]!.props.role).toBe("status");
-    expect(notes[1]!.props.style.color).toBe(theme.ok);
-    expect(notes[2]!.props.style.color).toBe(theme.danger);
-    expect(notes[3]!.props.style.color).toBe(theme.warn);
+    expect(notes[1]!.props.className).toContain("note--ok");
+    expect(notes[2]!.props.className).toContain("note--danger");
+    expect(notes[3]!.props.className).toContain("note--warn");
   });
 });
 

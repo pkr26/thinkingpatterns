@@ -108,8 +108,10 @@ describe("HistoryView", () => {
     stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
     const root = await render(<HistoryView />);
     await settle(40, 4);
-    const tiles = root.root.findAllByType("div").filter(
-      (node) => typeof node.props.title === "string" && /^\d{4}-\d{2}-\d{2}$/.test(node.props.title),
+    // Calendar cells are real buttons carrying their ISO day as the
+    // aria-label (redesign 2026-09-26; the old title-tooltip divs are gone).
+    const tiles = root.root.findAllByType("button").filter(
+      (node) => typeof node.props["aria-label"] === "string" && /^\d{4}-\d{2}-\d{2}($| — )/.test(node.props["aria-label"]),
     );
     expect(tiles.length).toBeGreaterThanOrEqual(28);
   });
@@ -137,11 +139,13 @@ describe("HistoryView", () => {
     const root = await render(<HistoryView />);
     await settle(40, 5);
     const tile = (iso: string) =>
-      root.root.findAllByType("div").find((node) => node.props.title === iso);
-    // Explicit pick 0.6 → green, not the log's dark red.
-    expect(tile(pickDay)?.props.style.backgroundColor).toBe("#8fc7a8");
+      root.root.findAllByType("button").find(
+        (node) => node.props["aria-label"] === iso || node.props["aria-label"] === `${iso} — entry`,
+      );
+    // Explicit pick 0.6 → the warm sage "lighter" fill, not the log's dark rose.
+    expect(tile(pickDay)?.props.style.backgroundColor).toBe("#8fb98d");
     // No pick → the mood log's -0.8 shows through instead of a blank tile.
-    expect(tile(noPickDay)?.props.style.backgroundColor).toBe("#dba89c");
+    expect(tile(noPickDay)?.props.style.backgroundColor).toBe("#cd8f82");
   });
 
   it("an edit race (409) shows both versions and never silently overwrites", async () => {
@@ -189,7 +193,10 @@ describe("HistoryView", () => {
     const root = await render(<HistoryView />);
     await settle(40, 4);
     expect(textOf(root)).toContain("to be removed");
+    // Delete is two-step now (redesign 2026-09-26): the first press arms,
+    // the explicit confirmation fires the request.
     await press(root, "Delete");
+    await press(root, "Delete permanently");
     await settle(40, 4);
     expect(textOf(root)).not.toContain("to be removed");
   });

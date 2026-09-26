@@ -1,10 +1,16 @@
 /**
- * Settings (WEB_PLAN P7.3–7.6): LLM consent (re-authenticated), the access
- * log ("who accessed my data"), the web-first ciphertext export download,
- * queue recovery, verifier-gated account deletion with the retention
- * honesty note, and the full password-rotation flow — rekey the corpus
- * (two single-use processing sessions), re-wrap every active therapist
- * grant, THEN rotate the credential (which kills every session everywhere).
+ * Settings (WEB_PLAN P7.3–7.6): appearance (Light/Dark/Auto theme), LLM
+ * consent (re-authenticated), the access log ("who accessed my data"),
+ * the web-first ciphertext export download, queue recovery,
+ * verifier-gated account deletion with the retention honesty note, and
+ * the full password-rotation flow — rekey the corpus (two single-use
+ * processing sessions), re-wrap every active therapist grant, THEN
+ * rotate the credential (which kills every session everywhere).
+ *
+ * Redesign 2026-09-26: sectioned cards (Appearance / Privacy & data /
+ * Access log / Account / an isolated red Danger zone), the LLM consent
+ * becomes a real switch, the theme preference is a segmented control,
+ * and the access log renders as a timeline.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ListedConsent } from "../api/client";
@@ -23,7 +29,8 @@ import { clearMutedPids, readMutedPids, writeMutedPids } from "../patternMutes";
 import { forgetAnalysisGeneration } from "../stateSeqGuard";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, ErrorBanner, Field, Note } from "../ui";
+import { applyThemePref, readThemePref, writeThemePref, type ThemePref } from "../theme";
+import { Button, Card, ErrorBanner, Field, Note, PillNote, SegmentedControl, Toggle } from "../ui";
 
 /** Resume-ladder step (H-4/M-W2, audit 2026-09-26 — port of mobile
  *  rotation.ts newKeyReadsJournal): can the CANDIDATE new key decrypt at
@@ -80,6 +87,7 @@ async function newKeyReadsJournal(userId: string, newDataKey: Bytes): Promise<bo
 const pendingSaltKey = (userId: string): string => `mindpattern.rotatePendingSalt.${userId}`;
 
 export function SettingsView(props: { onLockdown: (notice: string) => void }): React.JSX.Element {
+  const [themePref, setThemePref] = useState<ThemePref>(() => readThemePref());
   const [llm, setLlm] = useState<{ available: boolean; enabled: boolean } | null>(null);
   // 2026-09-26 audit LOW b: a FAILED meta/consent read is an explicit
   // unknown state with a retry — the LLM section used to vanish silently.
@@ -135,6 +143,13 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
   useEffect(() => {
     void load();
   }, [load]);
+
+  const chooseTheme = (pref: string): void => {
+    const next = pref === "light" || pref === "dark" ? pref : "auto";
+    setThemePref(next);
+    writeThemePref(next);
+    applyThemePref(next);
+  };
 
   const toggleLlm = async (enabled: boolean): Promise<void> => {
     if (!vault.isUnlocked()) return;
@@ -374,13 +389,32 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
 
   return (
     <>
-      <Card title={t("settings.title")}>
+      <ErrorBanner message={error} />
+      {status && <PillNote role="status" tone="ok" icon="check">{status}</PillNote>}
+
+      <Card title={t("settings.appearanceTitle")}>
+        <Note tone="muted">{t("settings.themeNote")}</Note>
+        <SegmentedControl
+          options={[
+            { id: "light", label: t("settings.themeLight") },
+            { id: "dark", label: t("settings.themeDark") },
+            { id: "auto", label: t("settings.themeSystem") },
+          ]}
+          activeId={themePref}
+          onSelect={chooseTheme}
+          a11yLabel={t("settings.appearanceTitle")}
+        />
+      </Card>
+
+      <Card title={t("settings.privacyDataTitle")}>
         {llmLoad === "known" && llm && (
           llm.available ? (
-            <>
-              <Note>{llm.enabled ? t("settings.llmStatusEnabled") : t("settings.llmStatusOff")}</Note>
-              <Button label={llm.enabled ? t("settings.llmDisable") : t("settings.llmEnable")} onPress={() => void toggleLlm(!llm.enabled)} small danger={llm.enabled} disabled={busy} />
-            </>
+            <Toggle
+              checked={llm.enabled}
+              onChange={(enabled) => void toggleLlm(enabled)}
+              disabled={busy}
+              label={llm.enabled ? t("settings.llmStatusEnabled") : t("settings.llmStatusOff")}
+            />
           ) : (
             <Note tone="muted">{t("settings.llmNotOffered")}</Note>
           )
@@ -391,22 +425,20 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
         {llmLoad === "unknown" && (
           <>
             <Note tone="warn">{t("settings.llmUnknown")}</Note>
-            <Button label={t("settings.llmRetry")} onPress={() => void load()} small disabled={busy} />
+            <Button label={t("settings.llmRetry")} onPress={() => void load()} small variant="ghost" disabled={busy} />
           </>
         )}
         {llmLoad === "loading" && <Note role="status">{t("common.loading")}</Note>}
-        <ErrorBanner message={error} />
-        {status && <Note role="status" tone="ok">{status}</Note>}
-      </Card>
-
-      <Card title={t("settings.dataTitle")}>
-        <Button label={t("settings.export")} onPress={() => void exportData()} small disabled={busy} />
+        <hr className="divider" />
+        <div className="row row--wrap">
+          <Button label={t("settings.export")} onPress={() => void exportData()} small variant="ghost" disabled={busy} />
+        </div>
         <Note tone="muted">{t("settings.exportNote")}</Note>
         {queued !== null && queued > 0 && <Note tone="warn">{t(queued === 1 ? "settings.queuedOne" : "settings.queuedMany", { count: queued })}</Note>}
         {rejected > 0 && (
           <>
             <Note tone="warn">{t(rejected === 1 ? "settings.rejectedOne" : "settings.rejectedMany", { count: rejected })}</Note>
-            <Button label={t("settings.requeue")} onPress={() => void recoverQueue()} small disabled={busy} />
+            <Button label={t("settings.requeue")} onPress={() => void recoverQueue()} small variant="ghost" disabled={busy} />
           </>
         )}
       </Card>
@@ -414,10 +446,17 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
       <Card title={t("settings.accessTitle")}>
         {accessRows === null && <Note role="status">{t("common.loading")}</Note>}
         {accessRows?.length === 0 && <Note>{t("settings.accessEmpty")}</Note>}
-        {accessRows?.map((row, index) => (
-          <Note key={index} tone="muted">{`${row.at.slice(0, 19).replace("T", " ")} — ${row.action}${row.actor && row.actor !== "self" ? ` (${row.actor})` : ""}`}</Note>
-        ))}
-        {accessCursor && <Button label={t("settings.showMore")} onPress={() => void loadAccess(accessCursor)} small />}
+        {accessRows && accessRows.length > 0 && (
+          <div className="timeline">
+            {accessRows.map((row, index) => (
+              <div key={index} className="timeline__row">
+                <span className="mono" style={{ color: "var(--muted)", flex: "none" }}>{row.at.slice(0, 19).replace("T", " ")}</span>
+                <span>{row.action}{row.actor && row.actor !== "self" ? ` (${row.actor})` : ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {accessCursor && <Button label={t("settings.showMore")} onPress={() => void loadAccess(accessCursor)} small variant="ghost" />}
       </Card>
 
       <Card title={t("settings.rotateTitle")}>
@@ -427,7 +466,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
         <Button label={busy ? t("settings.working") : t("settings.changePasswordButton")} onPress={() => void rotatePassword()} disabled={busy} />
       </Card>
 
-      <Card title={t("settings.deleteTitle")}>
+      <Card title={t("settings.deleteTitle")} tone="danger">
         <Note tone="danger">{t("settings.deleteNote")}</Note>
         <Field label={t("settings.deleteConfirmLabel")} value={deleteText} onChange={setDeleteText} autoComplete="off" />
         {/* Disabled until the confirmation text is exactly DELETE (E2E

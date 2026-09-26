@@ -1,0 +1,190 @@
+/* ============================================================================
+   MindPattern Therapist Portal — design system (redesign 2026-09-26).
+
+   The portal keeps its clinical dark identity but moves onto the same
+   token architecture as the patient app: CSS custom properties in this
+   file, mirrored by the `theme` export in src/ui.tsx for the views'
+   inline styles. The portal CSP permits 'unsafe-inline' styles, but this
+   external sheet keeps the component kit class-based like the web app.
+   ============================================================================ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0d1219;
+  --surface: #151b28;
+  --surface-deep: #101622;
+
+  --text: #e8edf6;
+  --body-c: #c6cfdd;
+  --muted: #8a95a3;
+
+  --primary: #4f8cff;
+  --primary-hover: #6a9eff;
+  --primary-soft: #17253c;
+  --primary-border: #2c4266;
+  --primary-ring: rgba(79, 140, 255, 0.28);
+
+  --danger: #e5685a;
+  --danger-hover: #ee7c6f;
+  --danger-strong: #f0a89e;
+  --danger-soft: #2c1a17;
+  --danger-border: #5e332c;
+
+  --ok: #55b384;
+  --ok-strong: #7cc7a2;
+
+  --warn: #d9a35e;
+  --warn-strong: #e5b87e;
+  --warn-soft: #2c2317;
+
+  --border: #232b3b;
+  --border-strong: #323c50;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --text-xs: 13px;
+  --text-sm: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--body-c);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--text-md);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, p { margin: 0; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+
+/* ------------------------------------------------------------- layout */
+.portal-main { max-width: 860px; margin: 0 auto; padding: 24px 20px 64px; display: flex; flex-direction: column; gap: 16px; }
+.portal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.portal-head h1 { font-size: 20px; color: var(--text); letter-spacing: -0.01em; }
+@media (max-width: 767px) {
+  .portal-main { padding: 16px 14px 48px; }
+  .portal-head { flex-direction: column; align-items: flex-start; }
+}
+
+/* ------------------------------------------------------------- buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: none; cursor: pointer; font: inherit; font-weight: 600;
+  border-radius: var(--radius-pill); padding: 10px 18px; font-size: var(--text-md);
+  background: var(--primary); color: #fff; box-shadow: var(--shadow-sm);
+  transition: background-color 140ms ease, transform 120ms ease, opacity 140ms ease, box-shadow 200ms ease;
+}
+.btn:hover:not(:disabled) { background: var(--primary-hover); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn--danger { background: var(--danger); }
+.btn--danger:hover:not(:disabled) { background: var(--danger-hover); }
+.btn--ghost { background: transparent; color: var(--primary); border: 1.5px solid var(--border-strong); box-shadow: none; }
+.btn--ghost:hover:not(:disabled) { background: var(--primary-soft); border-color: var(--primary); }
+.btn--small { padding: 6px 13px; font-size: var(--text-sm); }
+
+/* --------------------------------------------------------------- cards */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 18px;
+  display: flex; flex-direction: column; gap: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.card__title { margin: 0; font-size: var(--text-lg); font-weight: 700; color: var(--text); }
+.card--deep { background: var(--surface-deep); box-shadow: none; }
+.card--danger { background: var(--danger-soft); border-color: var(--danger-border); }
+
+/* --------------------------------------------------------------- forms */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field__label { font-size: var(--text-xs); font-weight: 700; color: var(--muted); }
+.input, .textarea, .select {
+  background: var(--surface-deep); color: var(--text);
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  padding: 10px 13px; font: inherit; font-size: var(--text-md); font-weight: 400;
+  width: 100%;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.textarea { resize: vertical; line-height: 1.6; }
+.select { cursor: pointer; appearance: none; background-image: none; padding-right: 32px; }
+.input:focus, .textarea:focus, .select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
+.input::placeholder, .textarea::placeholder { color: var(--muted); opacity: 0.75; }
+
+/* --------------------------------------------------------------- notes */
+.note { margin: 0; font-size: var(--text-sm); line-height: 1.6; color: var(--body-c); white-space: pre-wrap; }
+.note--muted { color: var(--muted); }
+.note--ok { color: var(--ok-strong); font-weight: 600; }
+.note--danger { color: var(--danger-strong); font-weight: 600; }
+.note--warn { color: var(--warn-strong); font-weight: 600; }
+
+.banner { border-radius: var(--radius); padding: 11px 16px; font-size: var(--text-sm); font-weight: 600; }
+.banner--error { background: var(--danger-soft); color: var(--danger-strong); border: 1px solid var(--danger-border); border-left-width: 4px; }
+.banner--info { background: var(--primary-soft); color: #a8c0f0; border: 1px solid var(--primary-border); border-left-width: 4px; }
+
+/* ------------------------------------------------------------ caseload */
+.section-label { font-size: var(--text-xs); font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 8px; }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.toolbar__search { flex: 1; min-width: 180px; }
+.pairing-code { font-size: 26px; letter-spacing: 7px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.fingerprint {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-sm); letter-spacing: 0.05em; color: var(--text);
+  background: var(--surface-deep); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 9px 13px; word-break: break-all;
+}
+.mono { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+
+.patient-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.patient-card__name { font-size: var(--text-md); font-weight: 700; color: var(--text); }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  font-size: 12px; font-weight: 700; border-radius: var(--radius-pill); padding: 3px 10px;
+}
+.badge--sensitive { background: var(--warn-soft); color: var(--warn-strong); }
+.badge--new { background: var(--primary-soft); color: #a8c0f0; }
+.badge--stopped { background: var(--surface-deep); color: var(--muted); }
+
+/* --------------------------------------------------------------- chart */
+.evidence-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: var(--text-sm); }
+.evidence-grid dt { color: var(--muted); font-weight: 600; }
+.evidence-grid dd { margin: 0; color: var(--body-c); }
+@media (max-width: 767px) { .evidence-grid { grid-template-columns: 1fr; gap: 4px; } }
+
+.sparkline { background: var(--surface-deep); border-radius: var(--radius); padding: 8px; }
+
+/* ------------------------------------------- native widget alignment */
+input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; }
+details.disclosure > summary { cursor: pointer; color: var(--primary); font-weight: 600; font-size: var(--text-sm); }
+details.disclosure > summary:hover { color: var(--primary-hover); }
+
+/* -------------------------------------------------------------- utility */
+.tpl-chip {
+  background: var(--surface-deep); color: var(--body-c);
+  border: 1.5px solid var(--border-strong); border-radius: var(--radius-pill);
+  padding: 6px 13px; font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+}
+.tpl-chip:hover { border-color: var(--primary); color: #a8c0f0; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row--wrap { flex-wrap: wrap; }
+.row--between { justify-content: space-between; }
+.row--end { justify-content: flex-end; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.divider { border: none; border-top: 1px solid var(--border); width: 100%; margin: 4px 0; }
+
+/* Motion is decorative only; respect the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

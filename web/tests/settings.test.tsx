@@ -419,6 +419,7 @@ describe("SettingsView LLM unknown state (LOW b, audit 2026-09-26)", () => {
     await press(root, "Try again");
     await settle(40, 4);
     expect(textOf(root)).not.toContain("Could not confirm whether this server offers LLM analysis");
-    expect(textOf(root)).toContain("Enable LLM analysis");
+    // The section renders the consent switch (redesign 2026-09-26).
+    expect(root.root.findAllByType("button").some((node) => node.props.role === "switch")).toBe(true);
   });
 });

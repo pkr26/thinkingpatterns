@@ -90,9 +90,11 @@ export default defineConfig({
   },
   server: {
     // Dev proxy: same-origin /api against the local backend — no CORS
-    // configuration needed during development.
+    // configuration needed during development. WEB_API_PROXY overrides the
+    // target for machines where :8000 is taken (README's LIVE_DRILL notes
+    // do the same for the backend port).
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": process.env.WEB_API_PROXY ?? "http://localhost:8000",
     },
     // No CSP header in dev: the served index.html's meta policy —
     // rewritten with inline-script hashes by devInlineScriptHashes() —

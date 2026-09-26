@@ -606,9 +606,9 @@ export function PatientsView(props: {
   const stopped = patients.filter((p) => p.status !== "active");
 
   return (
-    <main style={{ backgroundColor: theme.bg, minHeight: "100vh", color: theme.body, padding: 24, maxWidth: 860, margin: "0 auto" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <h1 style={{ color: theme.text, fontSize: 20, margin: 0 }}>Patients — {props.displayName}</h1>
+    <main className="portal-main" style={{ minHeight: "100vh" }}>
+      <header className="portal-head">
+        <h1>Patients — {props.displayName}</h1>
         <Button label="Sign out" small onPress={props.onSignOut} />
       </header>
 
@@ -618,12 +618,12 @@ export function PatientsView(props: {
           name, and confirm with their password. The code works once and expires in 15 minutes.
         </Note>
         {pairingCode && (
-          <p data-testid="pairing-code" style={{ margin: 0, color: theme.text, fontSize: 28, letterSpacing: 6, fontWeight: 700 }}>
+          <p data-testid="pairing-code" className="pairing-code">
             {pairingCode}
           </p>
         )}
         {fingerprint && (
-          <p data-testid="key-fingerprint" style={{ margin: "2px 0 0", color: theme.text, fontSize: 15, letterSpacing: 2, fontWeight: 600 }}>
+          <p data-testid="key-fingerprint" className="fingerprint">
             {fingerprint}
           </p>
         )}
@@ -652,7 +652,7 @@ export function PatientsView(props: {
         </div>
       )}
 
-      <h3 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>ACTIVE</h3>
+      <h3 className="section-label" style={{ marginTop: 22 }}>ACTIVE</h3>
       {activeAll.length > 1 && (
         <div style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <Button label={scanning ? "Scanning caseload…" : "Scan caseload for triage"} small onPress={() => void scanCaseload()} disabled={scanning} />
@@ -664,15 +664,8 @@ export function PatientsView(props: {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="username…"
               aria-label="Search patients by username"
-              style={{
-                backgroundColor: theme.cardDeep,
-                color: theme.text,
-                border: `1px solid ${theme.border}`,
-                borderRadius: theme.radius,
-                padding: "6px 10px",
-                fontSize: 13,
-                fontFamily: "inherit",
-              }}
+              className="input"
+              style={{ padding: "7px 11px", fontSize: 14 }}
             />
           </label>
           <label style={{ color: theme.muted, fontSize: 12 }}>
@@ -681,14 +674,8 @@ export function PatientsView(props: {
               value={sort}
               onChange={(e) => setSort(e.target.value as typeof sort)}
               aria-label="Sort patients"
-              style={{
-                backgroundColor: theme.cardDeep,
-                color: theme.text,
-                border: `1px solid ${theme.border}`,
-                borderRadius: theme.radius,
-                padding: "4px 6px",
-                fontSize: 13,
-              }}
+              className="select"
+              style={{ padding: "7px 30px 7px 11px", fontSize: 14 }}
             >
               <option value="shared">newest share</option>
               <option value="username">username</option>
@@ -742,7 +729,7 @@ export function PatientsView(props: {
 
       {stopped.length > 0 && (
         <>
-          <h3 style={{ color: theme.muted, fontSize: 13, letterSpacing: 1, marginTop: 22 }}>STOPPED SHARING</h3>
+          <h3 className="section-label" style={{ marginTop: 22 }}>STOPPED SHARING</h3>
           {stopped.map((patient) => (
             <Card key={patient.user_id} deep>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -814,8 +801,8 @@ export function PatientsView(props: {
           </div>
         ) : (
           <>
-            <div>
-              <strong style={{ color: theme.text, fontSize: 13 }}>Change password</strong>
+            <div className="stack">
+              <h3 className="section-label" style={{ marginTop: 0 }}>Change password</h3>
               <Note>
                 Your sharing key is re-wrapped under the new password first, then the login credential is
                 rotated — on success every session, including this one, is signed out. There is still no
@@ -831,8 +818,9 @@ export function PatientsView(props: {
                 disabled={secBusy || !props.session || !pwCurrent || !pwNew || !pwConfirm}
               />
             </div>
-            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
-              <strong style={{ color: theme.text, fontSize: 13 }}>Recover sharing key</strong>
+            <div className="stack">
+              <hr className="divider" />
+              <h3 className="section-label" style={{ marginTop: 0 }}>Recover sharing key</h3>
               <Note>
                 Repairs an interrupted password change: if the change failed after the sharing key was
                 re-wrapped, this seals the same key back under the password you actually sign in with, so
@@ -860,8 +848,9 @@ export function PatientsView(props: {
                 disabled={secBusy || !props.session || !interruptedSaltB64 || !recCurrent || !recIntended}
               />
             </div>
-            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
-              <strong style={{ color: theme.text, fontSize: 13 }}>Rotate sharing key (suspected compromise)</strong>
+            <div className="stack">
+              <hr className="divider" />
+              <h3 className="section-label" style={{ marginTop: 0 }}>Rotate sharing key (suspected compromise)</h3>
               <Note>
                 Publishes a brand-new sharing keypair sealed under your current password. Existing grants
                 stay readable only after each patient re-wraps their data key via the pairing fingerprint
@@ -886,8 +875,9 @@ export function PatientsView(props: {
                 disabled={secBusy || !props.session || !compConfirmed || !compCurrent}
               />
             </div>
-            <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 10 }}>
-              <strong style={{ color: theme.text, fontSize: 13 }}>Two-factor authentication (authenticator app)</strong>
+            <div className="stack">
+              <hr className="divider" />
+              <h3 className="section-label" style={{ marginTop: 0 }}>Two-factor authentication (authenticator app)</h3>
               {totpStatus === null && (
                 <Note role="status">Checking this account&apos;s two-factor status…</Note>
               )}

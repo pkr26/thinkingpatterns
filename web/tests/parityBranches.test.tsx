@@ -11,7 +11,7 @@ import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { enqueue, rejectedEntries } from "../src/offlineQueue";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, render, settle, textOf, typeInto } from "./helpers/rtr";
+import { press, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -33,7 +33,7 @@ const memoryBackend = (): KvBackend => {
 
 async function pressNth(root: Awaited<ReturnType<typeof render>>, label: string, occurrence: number): Promise<void> {
   const { act } = await import("react");
-  const matches = root.root.findAllByType("button").filter((node) => node.children.join("") === label);
+  const matches = root.root.findAllByType("button").filter((node) => textOfNode(node) === label);
   const target = matches[occurrence];
   if (!target) throw new Error(`no button #${occurrence} labeled ${JSON.stringify(label)}`);
   await act(async () => {
@@ -182,7 +182,7 @@ describe("SettingsView branches", () => {
     coreStubs();
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
-    await press(root, "Enable LLM analysis");
+    await pressSwitch(root);
     await settle(40, 3);
     expect(textOf(root)).toContain("does not offer LLM analysis");
   });
@@ -194,7 +194,7 @@ describe("SettingsView branches", () => {
     expect(textOf(root)).toContain("entry.create");
     await press(root, "Show more");
     await settle(40, 3);
-    expect(root.root.findAllByType("button").some((node) => node.children.join("") === "Show more")).toBe(false);
+    expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Show more")).toBe(false);
   });
 
   it("queue recovery re-queues rejected entries", async () => {
