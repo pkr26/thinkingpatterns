@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <!-- A header is also shipped in public/_headers for static hosts (and
+         by nginx in production). The meta policy is a defense-in-depth
+         fallback when a host is mis-set. Pinned by
+         tests/securityConfig.test.ts. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'"
+    />
+    <title>MindPattern</title>
+    <style>
+      body { margin: 0; background: #f5f7fa; color: #1c2430; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+
+      /* Responsive shell skeleton (WEB_PLAN P1.5). The patient app is
+         phone-width-first (a companion to the mobile app) but earns a
+         wider canvas on tablet/desktop: .app-main widens by breakpoint.
+         Views compose inside it; per-view layouts arrive with their
+         phases. */
+      .app-header {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px; padding: 12px 16px;
+        background: #ffffff; border-bottom: 1px solid #dfe5ec;
+        position: sticky; top: 0; z-index: 10;
+      }
+      .app-main { max-width: 680px; margin: 0 auto; padding: 16px; }
+      @media (min-width: 768px)  { .app-main { max-width: 860px;  padding: 24px; } }
+      @media (min-width: 1280px) { .app-main { max-width: 1040px; } }
+
+      /* Keyboard users get a visible focus ring; touch users don't. */
+      :focus-visible { outline: 2px solid #3d6fb4; outline-offset: 2px; }
+
+      /* Motion is decorative only; respect the OS preference from day one. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

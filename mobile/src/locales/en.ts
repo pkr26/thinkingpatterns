@@ -339,6 +339,13 @@ export const en: Record<string, string> = {
   "history.noMatchDay": "Nothing matches that day.",
   "history.unreadableOne": "{count} entry couldn't be read on this device.",
   "history.unreadableMany": "{count} entries couldn't be read on this device.",
+  "history.rekeyedElsewhere": "Every entry failed to decrypt — your journal was re-encrypted after a password change on another device. Sign out and sign back in with your new password.",
+  "history.conflictTitle": "This entry changed on another device",
+  "history.conflictBody": "Their saved version:\n{theirs}\n\nYour version:\n{yours}\n\nOverwrite their version with yours?",
+  "history.conflictKeepTheirs": "Keep theirs",
+  "history.conflictOverwrite": "Overwrite with mine",
+  "history.deletedElsewhereTitle": "Deleted on another device",
+  "history.deletedElsewhereBody": "This entry was deleted from another device, so your edit was not saved.",
 
   // --------------------------------------------------------------- insights
   "insights.tryAgainA11y": "Try loading your patterns again",

@@ -27,6 +27,13 @@ changes, and before any v2 security review.
 | `H1.metadata-inference` | h_privacy | The server holds per-entry dates and sizes (metadata inference) — documented in README security note #7; content stays opaque. |
 | `G3.tracked-secrets` | g_infra | The tracked-secrets hygiene rule matches any git-tracked path ending in `.env`, which catches `mobile/ios/.xcode.env` — the React Native Xcode template that resolves `NODE_BINARY` for script phases. It is REQUIRED to be versioned (the per-developer override is the unversioned `.xcode.env.local`), contains no credential, key, or connection string (only `export NODE_BINARY=$(command -v node)`), and was inspected line-by-line when registered. Re-review if that file ever grows anything beyond the NODE_BINARY export. |
 
+## Web client residuals (2026-09-25)
+
+The patient web client's accepted residuals (open-tab offline, English
+chrome in v1, the in-memory plaintext window, single-tab drafts, the
+pending first Stryker floor) are named and reasoned in
+`docs/WEB_THREAT_MODEL.md` — the honest register this file keeps.
+
 ## Tracked deferrals (not harness FINDINGs)
 
 Hardening the audit plan asked for that shipped as "next" rather than v1,

@@ -297,6 +297,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // rendered raw) and counted so the user knows the list is short by
       // exactly that many.
       const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
+      // WEB_PLAN S-8 (2026-09-25): EVERY row failing to decrypt with a live
+      // session is the remote-rekey signature — the data key changed on
+      // another device. Surface the actionable funnel instead of an empty
+      // journal that looks like data loss.
+      if (rows.length > 0 && failed === rows.length) {
+        showStatus(tr("history.rekeyedElsewhere"), "neutral");
+      }
       // Newest day first; same-day entries order by server arrival.
       decrypted.sort((a, b) => b.entryDate.localeCompare(a.entryDate) || b.receivedAt.localeCompare(a.receivedAt));
       setEntries(decrypted);
@@ -656,16 +663,69 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // The first encryption stays OUTSIDE the network try: a local vault
       // failure keeps its own honest message (the pre-M-2 contract).
       let blobB64 = encryptFor(nextVersion);
+      const applyEdit = async (): Promise<void> => {
+        await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
+      };
       try {
         try {
-          await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
+          await applyEdit();
         } catch (err) {
           if (err instanceof ApiError && err.code === "version_conflict") {
+            // WEB_PLAN S-3 (two-writer honesty, 2026-09-25): before
+            // retrying over the other device's edit, DECRYPT their saved
+            // text and — when it differs — show both versions and let the
+            // user choose. Overwriting silently is data loss wearing a
+            // success message.
             const current = await api.getEntry(entry.clientEntryId);
             const serverVersion = typeof current.content_version === "number" ? current.content_version : 0;
-            nextVersion = serverVersion + 1;
-            blobB64 = encryptFor(nextVersion);
-            await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
+            let theirText: string | null = null;
+            try {
+              theirText = decryptEntry(
+                vault.get(),
+                userId,
+                current.client_entry_id,
+                current.blob,
+                typeof current.content_version === "number" ? current.content_version : undefined,
+              ).text;
+            } catch {
+              theirText = null; // undecryptable: cannot compare — fall through to the retry
+            }
+            const retry = (): void => {
+              nextVersion = serverVersion + 1;
+              blobB64 = encryptFor(nextVersion);
+              void applyEdit()
+                .then(() => {
+                  entry.contentVersion = nextVersion;
+                  void observeEntryVersions(userId, vault.get().dataKey, [
+                    { clientEntryId: entry.clientEntryId, contentVersion: nextVersion },
+                  ]).catch(() => {});
+                  showStatus(tr("history.savedStatus"), "ok");
+                })
+                .catch((retryErr: unknown) => {
+                  Alert.alert(
+                    tr("history.couldNotUpdateTitle"),
+                    tr("history.updateFailedBody", { reason: requestFailureCopy(retryErr) }),
+                  );
+                });
+            };
+            if (theirText !== null && theirText !== trimmed) {
+              Alert.alert(
+                tr("history.conflictTitle"),
+                tr("history.conflictBody", { theirs: theirText, yours: trimmed }),
+                [
+                  { text: tr("history.conflictKeepTheirs"), style: "cancel", onPress: (): void => undefined },
+                  { text: tr("history.conflictOverwrite"), style: "destructive", onPress: retry },
+                ],
+                { cancelable: true },
+              );
+              return; // the user decides; nothing was overwritten
+            }
+            retry();
+          } else if (err instanceof ApiError && err.status === 404) {
+            // WEB_PLAN S-4: deleted on another device — the edit is not
+            // saved and the user learns why.
+            Alert.alert(tr("history.deletedElsewhereTitle"), tr("history.deletedElsewhereBody"));
+            return;
           } else {
             throw err;
           }

@@ -338,6 +338,13 @@ export const es: Record<string, string> = {
   "history.noMatchDay": "Nada coincide con ese día.",
   "history.unreadableOne": "{count} entrada no se pudo leer en este dispositivo.",
   "history.unreadableMany": "{count} entradas no se pudieron leer en este dispositivo.",
+  "history.rekeyedElsewhere": "Ninguna entrada se pudo descifrar — su diario fue recifrado tras un cambio de contraseña en otro dispositivo. Cierre sesión y vuelva a iniciarla con su nueva contraseña.",
+  "history.conflictTitle": "Esta entrada cambió en otro dispositivo",
+  "history.conflictBody": "Su versión guardada:\n{theirs}\n\nSu versión nueva:\n{yours}\n\n¿Reemplazar la versión guardada con la suya?",
+  "history.conflictKeepTheirs": "Conservar la otra",
+  "history.conflictOverwrite": "Reemplazar con la mía",
+  "history.deletedElsewhereTitle": "Eliminada en otro dispositivo",
+  "history.deletedElsewhereBody": "Esta entrada fue eliminada desde otro dispositivo, por lo que su edición no se guardó.",
 
   // --------------------------------------------------------------- insights
   "insights.tryAgainA11y": "Intentar cargar sus patrones de nuevo",

@@ -158,6 +158,58 @@ jobs:
         working-directory: portal
         run: npm audit --audit-level=moderate
 
+  web:
+    # Patient web client (WEB_PLAN.md) — same gate shape as the portal:
+    # typecheck, tests (security-config pins, platform seam, XSS floor),
+    # production build, and a hard dependency audit.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      - name: Typecheck
+        working-directory: web
+        run: npx tsc --noEmit
+      - name: Web tests (security-config pins + coverage thresholds)
+        working-directory: web
+        run: npm test
+      - name: Production build
+        working-directory: web
+        run: npm run build
+      - name: Web dependency audit
+        working-directory: web
+        run: npm audit --audit-level=moderate
+
+  web-contract-vectors:
+    # WEB_PLAN P9.2 (four-way verification): the web client's crypto/brain
+    # suites ARE the fourth leg of the cross-platform vector check —
+    # backend (pytest), mobile (vitest), portal (vitest), web (vitest) all
+    # pass the SAME shared/vectors.json + brain_vectors.json +
+    # interop_fixtures.json. Kept as its own job so a web crypto drift is
+    # visible as exactly that, not a generic test failure.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      - name: Cross-platform vectors (crypto + brain + interop fixtures)
+        working-directory: web
+        run: npx vitest run tests/crypto.test.ts tests/crypto.pins.test.ts tests/brainVectors.test.ts tests/interop.test.ts tests/contractPins.test.ts
+
   contract-gates:
     # The repo's two standalone proof tools, wired as gates (they were built
     # for this and previously ran only by hand):

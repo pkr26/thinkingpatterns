@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node_modules/.bin/vitest run --coverage.enabled=false --silent"
+  },
+  "inPlace": true,
+  "mutate": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "coverageAnalysis": "off",
+  "reporters": [
+    "clear-text",
+    "progress",
+    "json"
+  ],
+  "thresholds": {
+    "break": 0
+  },
+  "timeoutMS": 45000,
+  "concurrency": 2,
+  "tempDirName": "stryker-tmp",
+  "allowConsoleColors": false
+}

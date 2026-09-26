@@ -791,7 +791,9 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     expect(api.deleteEntry).not.toHaveBeenCalled();
   });
 
-  it("a 404 from atomic replacement preserves the draft and original", async () => {
+  it("a 404 (deleted on another device) says so honestly and preserves the draft", async () => {
+    // WEB_PLAN S-4 (2026-09-25): the edit target was deleted from another
+    // device — the old generic "Could not update" hid the reason.
     oneEntry();
     vi.mocked(api.updateEntry).mockRejectedValue(new ApiError(404, "already gone"));
     const root = await render(<HistoryScreen navigation={nav} />);
@@ -804,8 +806,8 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     await flush();
     expect(api.updateEntry).toHaveBeenCalledTimes(1);
     expect(api.createEntry).not.toHaveBeenCalled();
-    expect(lastAlert()[0]).toBe("Could not update");
-    expect(lastAlert()[1]).toContain("original entry is unchanged");
+    expect(lastAlert()[0]).toBe("Deleted on another device");
+    expect(lastAlert()[1]).toContain("deleted from another device");
   });
 
   it("a failed atomic replacement keeps the text and never removes the old version", async () => {

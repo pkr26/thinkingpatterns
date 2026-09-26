@@ -528,10 +528,12 @@ async function request(
   if (response.status === 204) return opts.includeResponse ? { data: null, response } : null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && token !== null) {
-      // The bearer token we sent was rejected: the session is dead. Lock
-      // the vault app-wide BEFORE the caller sees the error — a hook
-      // failure must never mask the 401 itself.
+    if ((response.status === 401 || response.status === 410) && token !== null) {
+      // The bearer token we sent was rejected: the session is dead. A 401
+      // is expiry/epoch death; a 410 is account deletion from another
+      // device (WEB_PLAN D-8 parity with the web client) — both must lock
+      // the vault app-wide BEFORE the caller sees the error, and a hook
+      // failure must never mask the ApiError itself.
       try {
         // Stryker disable next-line OptionalChaining: the call is wrapped in a catch that swallows everything, so onUnauthorized() on a null handler throws the same-swallowed TypeError
         onUnauthorized?.();

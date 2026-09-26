@@ -1,0 +1,69 @@
+{
+  "v": 1,
+  "web_generated": {
+    "data_key": "bWluZHBhdHRlcm4taW50ZXJvcC1maXh0dXJlLWtleSE=",
+    "user_id": "interop-user-1",
+    "entry_v1": {
+      "client_entry_id": "interop-entry-v1",
+      "blob": "Se4hbdSYHpzJUwhA4hHtBXN+72YC/XX5rW1TimVx6Eipyo6ha+1JhNzqXe49n3WwGg5R7o2Rt3isg8XPeTE/zvCo4Wz0hUYsT4S6yPwbdGWOdDSz6LPKWedwoIV5+50WbR0PDbIl1Tesl2K+HWjUNmGNZPYagFSQChMFcB8=",
+      "payload": "{\"v\":1,\"text\":\"Legacy-bound interop entry.\",\"sentiment\":0.25,\"created_at\":\"2026-09-25T10:00:00Z\"}"
+    },
+    "entry_v2": {
+      "client_entry_id": "interop-entry-v2",
+      "content_version": 2,
+      "blob": "yWXgbv6sc0Jnzq4XL01+8x6IgJdONX9eRSU7/WrlBK5NZMVKwkleO2bVSJaK1Wsq+x4t5SCq9mxTdyjJDl5dPhKc8kQDzrF8sYiHZdUXfdQV4AoEwwN6IHsSrWkyKAkahvfIETyZXFJJZ4Krj0e3IJmSKdR6pLb9rqEqxSsleL76bNqlxvlSsu4JQu7Xzg0qbiyeWyUY9eef2Vlvun/RTwusbdBlEUmgz3edBXjWQyUB/wvsCp0WEA==",
+      "payload": "{\"v\":2,\"text\":\"Structured interop entry.\",\"sentiment\":-0.25,\"created_at\":\"2026-09-25T11:00:00Z\",\"energy\":1,\"sleep\":3,\"tags\":[\"work\",\"rest\"],\"tod\":\"morning\"}"
+    },
+    "insights": {
+      "blob": "AAAAAAAAAAAAAAEAglgojGE+2FD7AqxwdWKWU/ni9OJsC+QT1e1I1GmmjQSditYHsrg4oWjTXvLwOhdxw3glhof8PjKHBhaLqg==",
+      "payload": "{\"v\":2,\"stats\":{\"patterns\":[]},\"state_seq\":9}"
+    },
+    "question": {
+      "for_date": "2026-09-25",
+      "blob": "AAAAAAAAAAAAAAIA2PGovfI1MD4bCcZ1XtVm6AGypyFYouyD4H5xOPG/nfLbbQ7hORSsp3edjViZrTpcU9ih79ttWQDQi9w8nPxqiCGDp6TM82He9nFMcddzBnviLO/zRXPi/U7FR+r1dvv6SCzUluFXFNj8pmEZSyc=",
+      "payload": "{\"for_date\":\"2026-09-25\",\"question\":\"What took up space today?\",\"pattern_pid\":\"temporal:work\"}"
+    },
+    "wrap": {
+      "therapist_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgXcaemMY9sFOEQSqVCCzVxAKRdHk3IbTi9YQ5t3bXHhShRANCAARR8Va0h7LqP22R5KkFc0uLyswvIBjQ8EqCtb+eg0xMFEF3MiuAO0W/XJBTGAJu35aEHi9c9hkoihuKh+fUu3W2",
+      "therapist_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEUfFWtIey6j9tkeSpBXNLi8rMLyAY0PBKgrW/noNMTBRBdzIrgDtFv1yQUxgCbt+WhB4vXPYZKIobiofn1Lt1tg==",
+      "ephemeral_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgSbrF0xc8YMlp2d/N1/4Sui3DivP+IcbI3gHvokqKOzmhRANCAATjOUg8eyUyOs0sjVua6Jsg7pyHmxrhMT52Dsr5gDb3uMkKr4LVToSqbVWe6TsbqkeoH9CoXWlHmYwbmRf7njEU",
+      "ephemeral_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4zlIPHslMjrNLI1bmuibIO6ch5sa4TE+dg7K+YA297jJCq+C1U6Eqm1Vnuk7G6pHqB/QqF1pR5mMG5kX+54xFA==",
+      "therapist_id": "interop-therapist",
+      "wrapped": "AAAAAAAAAAAAAAMA3opYh9AEjo/zn4Tbsphi9q/R434TZHUgdwS6UcCQvl8Ixh/oMCcMEAPkAtRkljYS"
+    },
+    "fingerprint": "DF59 63FA 29B2 AD3B 9BA4 7A1B D310 9AE2"
+  },
+  "mobile_generated": {
+    "data_key": "bWluZHBhdHRlcm4taW50ZXJvcC1maXh0dXJlLWtleSE=",
+    "user_id": "interop-user-1",
+    "entry_v1": {
+      "client_entry_id": "interop-entry-v1",
+      "blob": "jAeKEBChrSItidBtqyNIFd7tZc2TAr24IfFu33U0+iwkdGa5tKbB+m6mMmocfG351GkHkF3Z3vtGms/Xcdt5eRaEHJQPBpr14RV8Zstrzu0cDmzLEZfc+Ns/qV4+DP81VCVSDhIUv9DZPWxT6nLKYrYpuaAdZcjGI6pgO7A=",
+      "payload": "{\"v\":1,\"text\":\"Legacy-bound interop entry.\",\"sentiment\":0.25,\"created_at\":\"2026-09-25T10:00:00Z\"}"
+    },
+    "entry_v2": {
+      "client_entry_id": "interop-entry-v2",
+      "content_version": 2,
+      "blob": "MwQqc+cFiaAzgGOxOYHtwtvhU9HniE+1BKvYEsDmx/5Azx1BoI1n6uA+6dURMLUeC3FxiudyhkoLKihOU3v/M7r1GYa2hcMrblYqI81F13++9DUTJsZaHSu+UU0xsoIVpquPOVh+zYOKDc4JEnke/s1md7p/dc1RkC3X+9eoLnfqDVZjzo/jMx4dYjQade2NHiXNmN12nIp/D+4xPI67zdcYc0zEFYE02ZtgfVu2KyguvrpMxc2sYA==",
+      "payload": "{\"v\":2,\"text\":\"Structured interop entry.\",\"sentiment\":-0.25,\"created_at\":\"2026-09-25T11:00:00Z\",\"energy\":1,\"sleep\":3,\"tags\":[\"work\",\"rest\"],\"tod\":\"morning\"}"
+    },
+    "insights": {
+      "blob": "AAAAAAAAAAAAAAEAglgojGE+2FD7AqxwdWKWU/ni9OJsC+QT1e1I1GmmjQSditYHsrg4oWjTXvLwOhdxw3glhof8PjKHBhaLqg==",
+      "payload": "{\"v\":2,\"stats\":{\"patterns\":[]},\"state_seq\":9}"
+    },
+    "question": {
+      "for_date": "2026-09-25",
+      "blob": "AAAAAAAAAAAAAAIA2PGovfI1MD4bCcZ1XtVm6AGypyFYouyD4H5xOPG/nfLbbQ7hORSsp3edjViZrTpcU9ih79ttWQDQi9w8nPxqiCGDp6TM82He9nFMcddzBnviLO/zRXPi/U7FR+r1dvv6SCzUluFXFNj8pmEZSyc=",
+      "payload": "{\"for_date\":\"2026-09-25\",\"question\":\"What took up space today?\",\"pattern_pid\":\"temporal:work\"}"
+    },
+    "wrap": {
+      "therapist_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgfgw7iEXqUhVsbxNGc28XfAtQOCDjANh8XwpLTjBSXiahRANCAAS4oYgbMON/E6Sps8KWxVWNXXq2neNfo2ZUvF8F5PF13VzPJH9sgLEyDWOoZZgv+I7JKXoO7myjAxigyXknwUq9",
+      "therapist_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuKGIGzDjfxOkqbPClsVVjV16tp3jX6NmVLxfBeTxdd1czyR/bICxMg1jqGWYL/iOySl6Du5sowMYoMl5J8FKvQ==",
+      "ephemeral_priv_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgXkI4eQD10ydRLm/fR6ABoaDDNP60S0M1stI6i5iKaHyhRANCAASk+hlvPHWNQdqq9MV0CWI/Euu6mH9Lc9//alhU6C729WRr2vBH1Sg+6TyN1fJV51qwtvRFMAKl7NNu+ezpr3+X",
+      "ephemeral_pub_spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEpPoZbzx1jUHaqvTFdAliPxLruph/S3Pf/2pYVOgu9vVka9rwR9UoPuk8jdXyVedasLb0RTACpezTbvns6a9/lw==",
+      "therapist_id": "interop-therapist",
+      "wrapped": "AAAAAAAAAAAAAAMATeNozBHBeoCovSYWQA/JBzuQPyRnMWod+Po+XpzYGcVpicEzQ3/MvpYiHnG0UMXm"
+    },
+    "fingerprint": "929A B3BE 631C 83B0 2EEE 0B74 E235 960F"
+  }
+}

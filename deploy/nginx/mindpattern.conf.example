@@ -151,3 +151,107 @@ server {
         try_files $uri $uri/ /index.html;
     }
 }
+
+# ---------------------------------------------------------------------------
+# Patient web client (web/) — LIVE BLOCK (WEB_PLAN P10.1). Its own HTTPS
+# subdomain with its own /api proxy, so the patient app is same-origin with
+# the API exactly like the portal (WEB_PLAN D-5) and
+# MINDPATTERN_CORS_ORIGINS stays empty. Static root: the release tarball's
+# dist/, extracted to /srv/mindpattern/web/dist (same "extract, never build
+# on prod" rule as the portal). The header set MUST stay aligned with
+# web/public/_headers and web/index.html's meta fallback — pinned by
+# web/tests/securityConfig.test.ts. The proxy stanza mirrors the portal's
+# (edge rate limit shared zone, canonical Host literal, rightmost-IP
+# forwarding, 300s read timeout for the streamed export, buffering off).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name app.example.com;
+    return 301 https://app.example.com$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name app.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/app.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/app.example.com/chain.pem;
+    resolver 9.9.9.9 1.1.1.1 valid=300s;
+    resolver_timeout 5s;
+
+    server_tokens off;
+    client_max_body_size 2m;
+    client_body_timeout 30s;
+    send_timeout 30s;
+    access_log off;
+
+    # The patient client intentionally uses inline style attributes for its
+    # dynamic theme. Keep this aligned with web/public/_headers: a stricter
+    # second CSP would intersect and block the UI.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Cache-Control "no-store" always;
+    add_header Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    root /srv/mindpattern/web/dist;
+    index index.html;
+
+    # Same exact-/api ownership rule as the portal block (the SPA fallback
+    # must never answer the API mount with HTML).
+    location = /api {
+        limit_req zone=edge_api burst=20 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host app.example.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+        proxy_no_cache 1;
+        proxy_cache_bypass 1;
+    }
+
+    location /api/ {
+        limit_req zone=edge_api burst=20 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host app.example.com;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        # The streamed account export holds the connection open for the
+        # whole download (same 300s patience as the portal).
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+        proxy_no_cache 1;
+        proxy_cache_bypass 1;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

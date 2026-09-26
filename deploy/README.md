@@ -182,6 +182,22 @@ docker compose --env-file .env \
 bash backend/scripts/rehearse_restore.sh --env-file .env --dev
 ```
 
+## The patient web client (2026-09-25, WEB_PLAN P10)
+
+The web app ships exactly like the portal: a static bundle extracted onto
+the host, served by the same nginx, each app on its own subdomain with its
+own `/api` proxy (the `app.example.com` server block in
+`nginx/mindpattern.conf.example`). Same-origin proxying means
+`MINDPATTERN_CORS_ORIGINS` stays empty — do not add a web origin to it.
+
+- Release artifact: `mindpattern-web-<tag>.tar.gz` (+ `.sha256`) attached
+  to the GitHub release. Verify the digest, then extract `dist/` to
+  `/srv/mindpattern/web/dist` — never build on the prod host.
+- The header set must stay aligned with `web/public/_headers` and the
+  `index.html` meta fallback (pinned by `web/tests/securityConfig.test.ts`).
+- No backend, container, or environment changes: the web client needs
+  nothing beyond the existing API service and this static hosting.
+
 ## Production edge configuration
 
 `nginx/mindpattern.conf.example` is the checked-in edge configuration for a
