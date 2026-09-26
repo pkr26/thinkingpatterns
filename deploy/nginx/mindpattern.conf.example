@@ -197,18 +197,24 @@ server {
     send_timeout 30s;
     access_log off;
 
-    # The patient client intentionally uses inline style attributes for its
-    # dynamic theme. Keep this aligned with web/public/_headers: a stricter
-    # second CSP would intersect and block the UI.
-    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'" always;
+    # Keep this aligned with web/public/_headers: a stricter second CSP
+    # would intersect and block the UI. Since 2026-09-26 there is no
+    # 'unsafe-inline' anywhere — the stylesheet is the same-origin
+    # /app.css and all dynamic styling is React's CSSOM inline-style path,
+    # which style-src does not govern.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "no-referrer" always;
     add_header X-Frame-Options "DENY" always;
     add_header Cache-Control "no-store" always;
-    add_header Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), display-capture=(), idle-detection=(), browsing-topics=(), serial=(), bluetooth=()" always;
     add_header Cross-Origin-Opener-Policy "same-origin" always;
     add_header Cross-Origin-Resource-Policy "same-origin" always;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    # preload: submitting the domain to hstspreload.org is an operator
+    # step; the header ships ready for it. See deploy/README.md.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
 
     root /srv/mindpattern/web/dist;
     index index.html;

@@ -525,3 +525,29 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements.dev.lock.txt
           pip-audit -r requirements.lock.txt
+
+  secrets:
+    # Secret-scanning gate (audit F-4, 2026-09-26): gitleaks over the full
+    # git history AND the working tree. The binary is version- and
+    # sha256-pinned like every other external tool in this pipeline, and
+    # every allowlist entry in .gitleaks.toml carries a written defense.
+    # Clean as of 2026-09-26 (gitleaks 8.30.1).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: a secret committed and later removed stays a leak.
+          fetch-depth: 0
+      - name: Install gitleaks (version + sha256 pinned)
+        run: |
+          curl -sSfL -o gitleaks.tgz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz" | sha256sum -c -
+          tar xzf gitleaks.tgz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan full git history
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1
+      - name: Scan working tree (untracked files included)
+        run: gitleaks detect --source . --no-git --config .gitleaks.toml --redact --exit-code 1

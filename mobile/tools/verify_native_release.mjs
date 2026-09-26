@@ -35,6 +35,19 @@
  *      keeps the write-only posture (readTypes:nil) — 2026-09-22 round 3,
  *      NEW-2: react-native-health@1.19.0 has no State of Mind path, so
  *      this category IS the HealthKit mirror.
+ *   9. Android: release signing reads a private keystore.properties and
+ *      NEVER the committed debug keystore (audit F-1, 2026-09-26), with a
+ *      taskGraph guard that fails release demands without it.
+ * 10. Android: R8 minification is enabled for release (audit F-1) with
+ *      obfuscation deliberately off.
+ * 11. Android: network_security_config.xml trusts system CAs only and
+ *      forbids cleartext outside explicit loopback hosts (audit F-2),
+ *      and the manifest references it.
+ * 12. iOS: the native app-switcher shield exists (audit F-3) — a
+ *      synchronous willResignActive cover so the snapshot race the JS
+ *      overlay can lose is closed natively.
+ * 13. The release keystore material itself is NOT tracked by git (only
+ *      the .example template and the debug keystore are).
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -308,6 +321,158 @@ if (!iosExists) {
       "iOS State-of-Mind bridge",
       `${missingBits.length > 0 ? `missing from the bridge: ${missingBits.join(", ")}` : "bridge present"}; ` +
         `${inSources ? "referenced by the Xcode project" : "NOT in the app target's Sources phase — it will not compile in"}.`,
+    );
+  }
+}
+
+// --- 9-10. Android release hardening: signing + R8 (audit F-1) --------------
+const GRADLE_PATH = join("android", "app", "build.gradle");
+if (!androidExists) {
+  fail("Android release signing", "android/ is missing (check 1 must pass first).");
+  fail("Android R8 minification", "android/ is missing (check 1 must pass first).");
+} else {
+  let gradle = "";
+  try {
+    gradle = readFileSync(GRADLE_PATH, "utf8");
+  } catch {
+    /* missing file -> both checks fail below */
+  }
+  const buildTypesBlock = gradle.match(/buildTypes\s*\{[\s\S]*?\n    \}/)?.[0] ?? "";
+  // The RELEASE buildType's own sub-block (debug keeps its debug signing —
+  // that is correct; only release must never reference it).
+  const releaseBlockInBuildTypes = buildTypesBlock.match(/release\s*\{[\s\S]*?\n        \}/)?.[0] ?? "";
+  const guardPresent =
+    gradle.includes("keystore.properties") &&
+    gradle.includes("taskGraph.whenReady") &&
+    gradle.includes("GradleException") &&
+    gradle.includes("signingConfig signingConfigs.release");
+  if (
+    guardPresent &&
+    releaseBlockInBuildTypes.includes("signingConfig signingConfigs.release") &&
+    !releaseBlockInBuildTypes.includes("signingConfigs.debug")
+  ) {
+    pass(
+      "Android release signing",
+      "release signs from android/keystore.properties; the taskGraph guard refuses release demands without it",
+    );
+  } else {
+    fail(
+      "Android release signing",
+      "the release buildType must sign from a private android/keystore.properties (signingConfigs.release + " +
+        "taskGraph.whenReady GradleException guard) and must NEVER reference signingConfigs.debug — the committed " +
+        "debug keystore is public and provides no artifact authenticity (audit F-1, 2026-09-26).",
+    );
+  }
+
+  const minifyOn =
+    /def enableProguardInReleaseBuilds = true/.test(gradle) &&
+    /minifyEnabled enableProguardInReleaseBuilds/.test(gradle);
+  let obfuscationOff = false;
+  try {
+    obfuscationOff = readFileSync(join("android", "app", "proguard-rules.pro"), "utf8").includes("-dontobfuscate");
+  } catch {
+    /* missing file -> obfuscationOff stays false */
+  }
+  if (minifyOn && obfuscationOff) {
+    pass("Android R8 minification", "release shrinks via R8; obfuscation deliberately off");
+  } else {
+    fail(
+      "Android R8 minification",
+      "release must set enableProguardInReleaseBuilds = true (minifyEnabled) and proguard-rules.pro must keep " +
+        "-dontobfuscate — unminified release bytecode ships the full dead-code surface (audit F-1).",
+    );
+  }
+}
+
+// --- 11. Android network security config (audit F-2) -------------------------
+const NSC_PATH = join("android", "app", "src", "main", "res", "xml", "network_security_config.xml");
+if (!androidExists) {
+  fail("Android network security config", "android/ is missing (check 1 must pass first).");
+} else if (!existsSync(NSC_PATH)) {
+  fail(
+    "Android network security config",
+    `${NSC_PATH} is missing — without it a user-installed CA can intercept the bearer token and the one-time ` +
+      "data-key shipment, and the cleartext ban rests only on the manifest placeholder.",
+  );
+} else {
+  const nsc = readFileSync(NSC_PATH, "utf8");
+  let manifestReferences = false;
+  try {
+    manifestReferences = readFileSync(MANIFEST_PATH, "utf8").includes('android:networkSecurityConfig=');
+  } catch {
+    /* manifest already failed check 5 if missing */
+  }
+  // User CAs are allowed ONLY inside <debug-overrides>; strip that block
+  // before asserting the release posture (system anchors, no user anchors).
+  const withoutDebugOverrides = nsc.replace(/<debug-overrides>[\s\S]*?<\/debug-overrides>/, "");
+  const systemOnly =
+    withoutDebugOverrides.includes('<certificates src="system" />') && !withoutDebugOverrides.includes('src="user"');
+  const hasDebugOverrides = /<debug-overrides>[\s\S]*?<\/debug-overrides>/.test(nsc);
+  const cleartextBanned = nsc.includes('<base-config cleartextTrafficPermitted="false">');
+  const cleartextConfigs = nsc.match(/<domain-config cleartextTrafficPermitted="true">[\s\S]*?<\/domain-config>/g) ?? [];
+  const loopbackOnly =
+    cleartextConfigs.length === 1 &&
+    (cleartextConfigs[0].match(/<domain /g) ?? []).length === 3 &&
+    ["localhost", "127.0.0.1", "::1"].every((host) => cleartextConfigs[0].includes(`>${host}</domain>`));
+  if (manifestReferences && systemOnly && hasDebugOverrides && cleartextBanned && loopbackOnly) {
+    pass(
+      "Android network security config",
+      "system CAs only, cleartext banned outside loopback, referenced by the manifest",
+    );
+  } else {
+    fail(
+      "Android network security config",
+      `required: manifest references @xml/network_security_config; base-config cleartextTrafficPermitted="false" ` +
+        'with system-only trust anchors (user CAs allowed ONLY inside <debug-overrides>); the sole cleartext ' +
+        "domain-config covers exactly the loopback hosts (audit F-2, 2026-09-26).",
+    );
+  }
+}
+
+// --- 12. iOS native app-switcher shield (audit F-3) ---------------------------
+const APP_DELEGATE_PATH = join("ios", "MindPattern", "AppDelegate.swift");
+if (!iosExists) {
+  fail("iOS snapshot shield", "ios/ is missing (check 1 must pass first).");
+} else if (!existsSync(APP_DELEGATE_PATH)) {
+  fail("iOS snapshot shield", `${APP_DELEGATE_PATH} is missing.`);
+} else {
+  const appDelegate = readFileSync(APP_DELEGATE_PATH, "utf8");
+  const required = [
+    "willResignActiveNotification",
+    "didBecomeActiveNotification",
+    "addObserver",
+    "removeObserver",
+    "snapshotShield",
+  ];
+  const missingBits = required.filter((needle) => !appDelegate.includes(needle));
+  if (missingBits.length === 0) {
+    pass(
+      "iOS snapshot shield",
+      "native willResignActive cover closes the app-switcher snapshot race the JS overlay can lose",
+    );
+  } else {
+    fail(
+      "iOS snapshot shield",
+      `AppDelegate.swift is missing: ${missingBits.join(", ")} — the JS shield renders asynchronously through the ` +
+        "bridge and can lose the race against the switcher snapshot (audit F-3, 2026-09-26).",
+    );
+  }
+}
+
+// --- 13. No release keystore material in git ----------------------------------
+const tracked = spawnSync("git", ["ls-files"], { encoding: "utf8" });
+if (tracked.status !== 0) {
+  fail("git keystore hygiene", "`git ls-files` could not run (not a git checkout?)");
+} else {
+  const files = tracked.stdout.split("\n");
+  const badKeystores = files.filter((f) => /keystore\.(properties|jks|keystore|p12|pfx)$/i.test(f) && !f.endsWith(".example"));
+  const committedReleaseKey = files.filter((f) => f.endsWith("keystore.properties"));
+  if (badKeystores.length === 0 && committedReleaseKey.length === 0) {
+    pass("git keystore hygiene", "only the .example template and debug.keystore are tracked");
+  } else {
+    fail(
+      "git keystore hygiene",
+      `release keystore material must never be tracked: ${[...new Set([...badKeystores, ...committedReleaseKey])].join(", ")}`,
     );
   }
 }

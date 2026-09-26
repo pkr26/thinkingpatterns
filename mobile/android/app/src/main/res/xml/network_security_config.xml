@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Network security posture (audit F-2, 2026-09-26).
+     Release builds trust ONLY system certificate authorities — a
+     user-installed CA (enterprise proxy, attacker with device access)
+     can no longer stand between the app and its server, which matters
+     because the bearer token and the documented one-time data-key
+     shipment both cross this transport. Cleartext is forbidden
+     everywhere except the explicit loopback hosts the JS client already
+     permits for local development servers. Debug builds additionally
+     trust user CAs via debug-overrides so local proxy debugging keeps
+     working; debug-overrides never apply to release builds. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

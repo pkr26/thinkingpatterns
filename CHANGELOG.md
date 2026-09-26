@@ -4,6 +4,78 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## 2026-09-26 — independent mobile+web security audit: all four findings fixed, web hardened to industrial header policy
+
+A fresh audit of both patient clients (verification: source-level control
+comparison, both test suites executed, `npm audit` clean, repo secret scan)
+found no exploitable vulnerability and four hardening gaps — F-1 Medium
+(Android release signing), F-2 Low (no mobile cert pinning posture), F-3
+Low (iOS snapshot shield race), F-4 Low (no secret-scanning gate). All four
+are fixed here, plus an industrial hardening pass on the web client's
+policy files:
+
+- **F-1 (Medium) — Android release artifacts are never debug-signed
+  again**: the `release` buildType now signs from a private
+  `android/keystore.properties` (gitignored; `keystore.properties.example`
+  documents the shape), and a `gradle.taskGraph.whenReady` guard throws a
+  clear `GradleException` when a release output is demanded without it —
+  debug builds are untouched. R8 minification is enabled for release with
+  obfuscation deliberately off (`-dontobfuscate` + conservative keeps:
+  the Hermes bundle carries the app logic; un-renamed symbols keep
+  reflective bridge lookups safe). Pinned by new preflight checks 9-10.
+- **F-2 (Low) — mobile transport trust posture**: Android now ships
+  `network_security_config.xml` — release trusts SYSTEM certificate
+  authorities only (a user-installed CA can no longer MITM the bearer
+  token or the one-time data-key shipment), cleartext is banned outside
+  the explicit loopback hosts the JS client already permits, and debug
+  builds keep user-CA debugging via `<debug-overrides>`. SPKI pinning is
+  recorded as a written decision (not an oversight) in
+  `docs/SECURITY_RESIDUALS.md`: no static pins can exist for user-hosted
+  servers and RN's JS fetch never exposes the peer certificate, so TOFU
+  needs a native module this repo's CI cannot land safely; the iOS
+  user-installed-CA residual is documented. Pinned by preflight check 11.
+- **F-3 (Low) — iOS app-switcher shield is now native**: a synchronous
+  `willResignActiveNotification` observer in `AppDelegate.swift` drops an
+  opaque cover over the window BEFORE iOS captures the transition
+  snapshot — the JS overlay in `App.tsx` (kept as belt-and-braces, with
+  the themed color) rendered asynchronously through the bridge and could
+  lose the race. Pinned by preflight check 12.
+- **F-4 (Low) — secret-scanning CI gate**: a new `secrets` job in
+  `ci.yml` runs gitleaks 8.30.1 (version- AND sha256-pinned, like every
+  external tool in the pipeline) over the full git history AND the
+  working tree. `.gitleaks.toml` extends the default rules; every
+  allowlist entry (published crypto vectors, test fixtures, generated
+  trees) carries a written defense. Verified clean locally in both modes.
+  Preflight check 13 additionally refuses any tracked release-keystore
+  material.
+- **Web industrial hardening — CSP with zero `'unsafe-inline'`**: the
+  shell stylesheet moved from an inline `<style>` block to the
+  same-origin `/app.css` (React's CSSOM inline styles are outside
+  style-src, so nothing else needed it), letting `style-src` tighten to
+  `'self'` across all four configs (meta, `_headers`, nginx, dev
+  server).
+- **Web industrial hardening — policy upgrades**: `form-action 'none'`
+  (zero native form submissions exist), `frame-src 'none'`,
+  `upgrade-insecure-requests`, `Cross-Origin-Embedder-Policy:
+  require-corp`, an extended deny-list `Permissions-Policy`
+  (accelerometer, gyroscope, magnetometer, display-capture,
+  idle-detection, browsing-topics, serial, bluetooth), HSTS with
+  `preload` (submission to hstspreload.org is the operator step,
+  documented in deploy/README.md), and `X-Robots-Tag: noindex, nofollow`
+  + a robots meta — a mental-health journal must stay out of search
+  indexes and referrer graphs. All four configs carry the identical CSP
+  literal, now with a comment-stripped no-`unsafe-inline` drift pin.
+- **Web industrial hardening — integrity + disclosure**: `npm run build`
+  now stamps sha384 Subresource Integrity on every local subresource of
+  the built shell (`tools/add-sri.mjs`, fail-closed), and the static host
+  ships an RFC 9116 `.well-known/security.txt` (operators replace the
+  placeholder contact — called out in deploy/README.md).
+
+Verification: web 407 green (coverage over the 85/75/85/90 floors),
+`tsc` + production build clean with both SRI stamps, mobile 1648 green +
+typecheck + native-release preflight all-green (13 checks), gitleaks
+clean in git-history and working-tree modes.
+
 ## 2026-09-25 (c) — mobile-parity security audit of the web client: all six findings fixed
 
 `AUDIT_WEB_PARITY_2026-09-25.md` compared the patient web client control-by-

@@ -184,6 +184,15 @@ the preflight tool.
    never collected off-device by MindPattern). A mismatch between the
    declaration and the usage strings above is a rejection risk — update
    both together.
+6. **Native app-switcher shield (2026-09-26, audit F-3).**
+   `AppDelegate.swift` observes `willResignActiveNotification` and drops
+   an opaque cover over the window synchronously — BEFORE iOS captures
+   the app-switcher snapshot — removing it on `didBecomeActive`. The JS
+   overlay in `App.tsx` is kept as belt-and-braces (and carries the
+   themed color): it renders asynchronously through the bridge and could
+   lose the race against the snapshot on its own. There is no iOS
+   equivalent of Android's FLAG_SECURE, so this native cover IS the
+   snapshot defense. Policed by preflight check 12.
 
 ### 3. Android hardening checklist
 
@@ -227,8 +236,37 @@ the preflight tool.
    the session device key do not survive reinstall (password path is
    always the fallback, by design); (c) no key material ever appears in
    `adb backup` output once (1) is set.
+4. **Network security config (2026-09-26, audit F-2).**
+   `android/app/src/main/res/xml/network_security_config.xml`, referenced
+   from the manifest: release trusts **system certificate authorities
+   only** — a user-installed CA (enterprise proxy, attacker with device
+   access) can no longer stand between the app and its server, which
+   matters because both the bearer token and the one-time data-key
+   shipment cross this transport. Cleartext is banned everywhere except
+   the explicit loopback hosts the JS client already permits
+   (`localhost`, `127.0.0.1`, `::1`); debug builds additionally trust
+   user CAs via `<debug-overrides>` so local proxy debugging keeps
+   working. Policed by preflight check 11.
+5. **Release signing + R8 (2026-09-26, audit F-1).** The `release`
+   buildType signs from a private `android/keystore.properties`
+   (gitignored; see `keystore.properties.example`) and a
+   `gradle.taskGraph.whenReady` guard throws a clear `GradleException`
+   when any release output is demanded without it — a release artifact
+   can never silently fall back to the public debug keystore. R8
+   minification is on for release with `-dontobfuscate` plus
+   conservative keeps (the Hermes bundle carries the app logic;
+   un-renamed symbols keep reflective bridge lookups and crash triage
+   safe). Policed by preflight checks 9-10 and 13.
 
 ### 4. TLS/SPKI pinning — design (deliberately not implemented)
+
+> **2026-09-26 (audit F-2):** the interim posture shipped and is pinned —
+> Android's `network_security_config.xml` trusts system CAs only in
+> release and bans cleartext outside loopback (checklist §3.4); the full
+> written decision, including the iOS user-installed-CA residual, lives
+> in `docs/SECURITY_RESIDUALS.md` ("Mobile transport residuals"). The
+> native-pin design below remains the target for when a native CI build
+> exists.
 
 Where the pin belongs, when it lands:
 
@@ -281,6 +319,14 @@ Fail-closed; exit code 1 on any FAIL. Every check prints
 | react-native-keychain autolinking | `npx react-native config` lists the package (runnable only once the projects exist — until then it reports FAIL, by design). |
 | iOS Health usage strings | When `src/healthkit.ts` is imported anywhere (grepped, not assumed), `Info.plist` must carry `NSHealthShareUsageDescription` AND `NSHealthUpdateUsageDescription`. |
 | Android allowBackup | The main manifest sets `android:allowBackup="false"`. |
+| Android FLAG_SECURE / adjustResize | `MainActivity.kt` sets FLAG_SECURE and the activity uses `adjustResize` (checklist §3.2). |
+| iOS HealthKit entitlement | Declared and signed by BOTH target configurations. |
+| iOS State-of-Mind bridge | The three seam-contract methods exist, are iOS-18-gated, write-only, and compiled into the target. |
+| Android release signing (2026-09-26) | The release buildType signs from `android/keystore.properties` with the fail-closed taskGraph guard — never `signingConfigs.debug` (checklist §3.5). |
+| Android R8 minification (2026-09-26) | `enableProguardInReleaseBuilds = true` with `-dontobfuscate` kept (checklist §3.5). |
+| Android network security config (2026-09-26) | System CAs only in release, cleartext banned outside loopback, manifest reference present (checklist §3.4). |
+| iOS snapshot shield (2026-09-26) | Native `willResignActive` cover in `AppDelegate.swift` (checklist §2.6). |
+| git keystore hygiene (2026-09-26) | No release keystore material is tracked by git — only the `.example` template and the debug keystore. |
 
 A check that *cannot run* because the projects are missing is a FAIL —
 unverifiable is not green. There is deliberately no unit-test harness for

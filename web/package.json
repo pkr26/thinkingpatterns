@@ -6,7 +6,7 @@
   "description": "MindPattern patient web client — the mobile app's journaling experience in the browser, same zero-knowledge contract (WEB_PLAN.md).",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node tools/add-sri.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",

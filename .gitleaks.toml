@@ -1,0 +1,54 @@
+# Secret-scanning policy (audit F-4, 2026-09-26).
+#
+# CI (`.github/workflows/ci.yml`, `secrets` job) runs gitleaks — pinned by
+# version AND sha256 like every other external tool in this pipeline — over
+# the full git history and the working tree. Default rules are extended,
+# not replaced.
+#
+# Allowlist policy — every entry needs a written defense, and adding one
+# is a reviewable decision:
+#   - shared/(vectors|interop_fixtures).json — the published cross-platform
+#     crypto test vectors. Every "key" in them is a fixture by design and
+#     is pinned byte-for-byte by the backend/mobile/portal/web suites.
+#   - tests?/ directories — throwaway credentials and crypto fixtures in
+#     test code. Policy: a real production secret must never live in a
+#     test; if one ever does, ROTATE it — an allowlist entry is not secrecy.
+#   - generated/vendored trees — node_modules, coverage, dist, .venv,
+#     .tools, reports, redteam mutation-campaign results: machine-generated
+#     copies of already-scanned source, or vendored toolchains.
+#   - `wrapKeyBlobB64` — a TypeScript parameter name in portal/src/api.ts
+#     (the wrap-key ciphertext blob); the generic entropy rule reads the
+#     identifier itself as the "secret" beside `wrap_key_blob:`.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "published crypto test vectors (cross-platform pins)"
+paths = [
+  '''shared/(vectors|interop_fixtures)\.json''',
+]
+
+[[allowlists]]
+description = "test fixtures and throwaway test credentials"
+paths = [
+  '''(^|[/\\])tests?([/\\]|$)''',
+]
+
+[[allowlists]]
+description = "generated and vendored trees"
+paths = [
+  '''(^|[/\\])node_modules([/\\]|$)''',
+  '''(^|[/\\])coverage([/\\]|$)''',
+  '''(^|[/\\])\.venv([/\\]|$)''',
+  '''(^|[/\\])\.tools([/\\]|$)''',
+  '''(^|[/\\])dist([/\\]|$)''',
+  '''(^|[/\\])reports([/\\]|$)''',
+  '''redteam/mutation_campaign_[^/]+/results/''',
+]
+
+[[allowlists]]
+description = "ciphertext property names adjacent to variable references"
+regexes = [
+  '''wrapKeyBlobB64''',
+]

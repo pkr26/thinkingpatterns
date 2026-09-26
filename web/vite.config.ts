@@ -6,16 +6,21 @@ import react from "@vitejs/plugin-react";
 // credential-bearing page never needs broad HTTPS egress. Keep the CSP
 // aligned with the immutable same-origin API boundary, and with
 // index.html's meta fallback + public/_headers (pinned by
-// tests/securityConfig.test.ts).
+// tests/securityConfig.test.ts). No 'unsafe-inline' even here: dev serves
+// the same external /app.css, and React's CSSOM inline styles are outside
+// style-src's reach. HSTS stays a production-only header (it is
+// meaningless on plain-HTTP loopback dev servers).
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'",
+  "Content-Security-Policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Cache-Control": "no-store",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), display-capture=(), idle-detection=(), browsing-topics=(), serial=(), bluetooth=()",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "X-Robots-Tag": "noindex, nofollow",
 };
 
 export default defineConfig({

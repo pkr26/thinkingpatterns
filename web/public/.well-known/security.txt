@@ -1,0 +1,11 @@
+# RFC 9116 security contact for the MindPattern patient web client.
+# Served from /.well-known/security.txt (and /.well-known/security.txt via
+# the SPA fallback) by the static host / nginx.
+#
+# OPERATORS: replace the example contact and canonical URL with the real
+# ones before serving publicly — a placeholder contact is worse than none
+# because it looks like a channel nobody reads.
+Contact: mailto:security@example.com
+Expires: 2027-09-26T00:00:00.000Z
+Preferred-Languages: en, es
+Canonical: https://app.example.com/.well-known/security.txt

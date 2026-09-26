@@ -55,9 +55,37 @@ react {
 }
 
 /**
- * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ * Run R8 on Release builds to shrink the Java bytecode (audit F-1,
+ * 2026-09-26: release artifacts must not ship unminified). Obfuscation is
+ * deliberately OFF in proguard-rules.pro — the Hermes JS bundle carries
+ * the app logic, and un-renamed symbols keep reflective bridge lookups
+ * and crash triage safe.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
+
+/**
+ * Release signing credentials NEVER live in this file or in git: they are
+ * read from android/keystore.properties (gitignored via mobile/.gitignore)
+ * with the four standard keys. The 2026-09-26 audit (F-1) found release
+ * signing with the committed debug keystore — the taskGraph guard below
+ * fails the build loudly when a release artifact is requested without a
+ * real keystore, so debug builds keep working untouched.
+ */
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    // A present-but-malformed file must fail loudly at configuration time,
+    // before file(null) turns into a cryptic error on some other task.
+    ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].each { key ->
+        if (!keystoreProperties.getProperty(key)) {
+            throw new GradleException(
+                "android/keystore.properties is missing the '${key}' entry. " +
+                "See keystore.properties.example for the required shape."
+            )
+        }
+    }
+}
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -92,6 +120,14 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
     }
     buildTypes {
         debug {
@@ -100,9 +136,34 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+// Fail closed on release artifacts without a real keystore (audit F-1,
+// 2026-09-26): without this guard a missing keystore.properties would
+// silently produce an UNSIGNED apk (assembleRelease) or fall back to the
+// public debug key. Configuration-time throws would break every other
+// task, so the gate fires only when a release output is actually demanded.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.getAllTasks().any { it.name.contains("Release") && it.project == project }) {
+        if (!keystorePropertiesFile.exists()) {
+            throw new GradleException(
+                "Release build requested but android/keystore.properties is missing. " +
+                "Create it from keystore.properties.example pointing at your private " +
+                "release keystore (never commit it). See mobile/README.md."
+            )
+        }
+        if (!file(keystoreProperties.getProperty('storeFile')).exists()) {
+            throw new GradleException(
+                "android/keystore.properties points at a storeFile that does not exist: " +
+                "${keystoreProperties.getProperty('storeFile')}"
+            )
         }
     }
 }

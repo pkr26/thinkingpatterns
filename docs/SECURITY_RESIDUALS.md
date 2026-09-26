@@ -34,6 +34,34 @@ chrome in v1, the in-memory plaintext window, single-tab drafts, the
 pending first Stryker floor) are named and reasoned in
 `docs/WEB_THREAT_MODEL.md` — the honest register this file keeps.
 
+## Mobile transport residuals (2026-09-26, audit F-2 decision)
+
+The mobile client performs no certificate (SPKI) pinning, and that is a
+recorded decision rather than an oversight:
+
+- **No static pins** — the product is self-hostable and the patient may
+  point the app at their own server (`Settings → Advanced`), so no fixed
+  pin-set can exist. The web client does not need pinning: its origin is
+  fixed and HSTS-pinned by the header set.
+- **No TOFU pinning** — React Native's JS `fetch` never exposes the TLS
+  peer certificate, so first-use SPKI pinning requires a native
+  networking module (an invasive, hard-to-test change this repo's
+  CI — static native preflight, no device builds — cannot safely land
+  blind). Revisit if/when a native CI build exists.
+- **What shipped instead (Android)** — `network_security_config.xml`
+  trusts SYSTEM certificate authorities only in release (a user-installed
+  CA — enterprise proxy or attacker-with-device-access — can no longer
+  intercept the bearer token or the one-time data-key shipment) and
+  forbids all cleartext outside the explicit loopback hosts. Debug builds
+  additionally trust user CAs via `<debug-overrides>` for local proxy
+  debugging. Pinned by the native-release preflight.
+- **Remaining residual (iOS)** — standard `NSURLSession` honors
+  user-installed CA profiles; Apple offers no NSC knob to refuse them.
+  Mitigations: the pairing fingerprint tap (sharing), origin pinning
+  warnings, and the fact that installing a root profile requires
+  device access with the user watching. Accepted for v1; revisit with
+  any native networking change.
+
 ## Tracked deferrals (not harness FINDINGs)
 
 Hardening the audit plan asked for that shipped as "next" rather than v1,

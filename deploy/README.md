@@ -198,6 +198,25 @@ own `/api` proxy (the `app.example.com` server block in
 - No backend, container, or environment changes: the web client needs
   nothing beyond the existing API service and this static hosting.
 
+Two operator steps were added with the 2026-09-26 hardening pass:
+
+- **HSTS preload (optional, deliberate):** the patient app's HSTS header
+  now carries `preload`. Submitting the domain at
+  <https://hstspreload.org> is an operator decision — it is effectively
+  irreversible at scale (removal takes months to propagate) and commits
+  every subdomain of the registered domain to HTTPS. The header ships
+  ready; submit only when that commitment is intended.
+- **security.txt contact:** `web/public/.well-known/security.txt` (RFC
+  9116) ships with an example contact. Replace the `Contact:` and
+  `Canonical:` lines with the real ones before serving publicly — a
+  placeholder disclosure channel is worse than none because it looks
+  monitored. Keep `Expires:` within a year and refresh it with releases.
+- The built shell carries Subresource Integrity hashes on every local
+  subresource (stamped by `web/tools/add-sri.mjs` during
+  `npm run build`). If you serve an `index.html` you did not build from
+  this repo's pipeline, re-stamp or drop the attributes deliberately —
+  a stale hash blocks the bundle.
+
 ## Production edge configuration
 
 `nginx/mindpattern.conf.example` is the checked-in edge configuration for a
