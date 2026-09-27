@@ -183,7 +183,9 @@ def build_update_cases() -> list[dict]:
     for week in range(6):
         work_corpus.append(JournalEntry("anxious about work", t0 + timedelta(weeks=week)))
         for d in range(1, 7):
-            work_corpus.append(JournalEntry("felt calm and grateful today", t0 + timedelta(weeks=week, days=d)))
+            work_corpus.append(
+                JournalEntry("felt calm and grateful today", t0 + timedelta(weeks=week, days=d))
+            )
     # Spanish twin of the work corpus (70 days / 10 work weekdays): the
     # ES theme lexicon must drive the same candidate machinery from Spanish
     # text — this case is the golden pin for the on-device port's Spanish

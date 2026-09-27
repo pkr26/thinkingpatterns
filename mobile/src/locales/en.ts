@@ -42,6 +42,9 @@ export const en: Record<string, string> = {
   "common.unlockAgainBody": "Please unlock again.",
   "common.couldNotCompleteTitle": "Could not complete",
   "common.neverWrongMove": "Talking to a professional is never a wrong move.",
+  // 2026-09-27: the local safety plan's action label — shared by the crisis
+  // screen link, the crisis dialogs' third button and the Settings row.
+  "common.makeSafetyPlan": "Make a safety plan",
   "common.streakOne": "Writing streak: {count} day",
   "common.streakMany": "Writing streak: {count} days",
 
@@ -107,6 +110,11 @@ export const en: Record<string, string> = {
   "crisis.findhelpline": "Open findahelpline.com",
   "crisis.findhelpline.detail": "Open findahelpline.com — crisis lines worldwide",
   "crisis.findhelpline.fallback": "You can still visit findahelpline.com in a browser.",
+  // The local safety plan (2026-09-27): a supplement AFTER the resources,
+  // never a gate before them. The link renders only while the vault is
+  // unlocked; the resources above never depend on it.
+  "crisis.makePlanA11y": "Make a safety plan — private, encrypted on this device",
+  "crisis.makePlanNote": "Private to you, encrypted on this device — write what helps you through.",
   "crisis.localeNote": "These are US services. Outside the US, find your local line at findahelpline.com.",
   "crisis.regionNote": "Your region doesn't look like the US — find your local line first:",
   "crisis.usServicesNote": "In the US, these are the national services (988 and 741741 are US-only):",
@@ -127,6 +135,11 @@ export const en: Record<string, string> = {
   "unlock.noAccount": "no saved account on this device — please sign in",
   "unlock.offlineNotEnabled":
     "offline unlock is not enabled on this device yet — sign in once while online to enable it",
+  // v2 key envelope (2026-09-26): the password was accepted (online) or the
+  // cached envelope was readable, but the envelope itself would not open or
+  // is unusable — a calm server/data message, never "wrong password".
+  "unlock.envelopeFailed":
+    "your account's key envelope could not be opened on this server. Nothing was changed — try again, and contact support if it repeats.",
 
   // ----------------------------------------------------------------- login
   "login.subtitle": "Your patterns, from your words. Encrypted on this device.",
@@ -160,6 +173,11 @@ export const en: Record<string, string> = {
     "There is no password reset. If you forget this password, no one — including us — can recover your journal.",
   "login.signIn": "Sign in",
   "login.createAccount": "Create account",
+  // AGE GATE (2026-09-27, clinical): registration requires an explicit 18+
+  // self-declaration. Safety-critical copy — keep it a plain statement of
+  // fact, identical in meaning in every locale.
+  "login.ageConfirm": "I am 18 or older",
+  "login.ageConfirmA11y": "Age confirmation — I am 18 or older",
   "login.switchToRegister": "New here? Create an account",
   "login.switchToSignIn": "Already have an account? Sign in",
   "login.registerFailedTitle": "Couldn't create account",
@@ -172,6 +190,20 @@ export const en: Record<string, string> = {
   "login.registerPartialTitle": "Account created",
   "login.registerPartialBody":
     "Your account was created, but this device couldn't finish signing you in. Switch to sign-in and use your new username and password.",
+  // v2 key envelope (2026-09-26): the password was accepted online, but the
+  // account's key envelope did not open under it on this server — not a
+  // wrong-password message.
+  "login.envelopeFailed":
+    "Your password was accepted, but this account's key envelope could not be unlocked on this server. Nothing was changed — try again, or contact support if it repeats.",
+  // Re-audit 2026-09-27 (M): the online v2 account whose envelope can be
+  // NEITHER fetched nor read from cache used to fall through to v1
+  // semantics — the vault unlocked on the v1-derived key and entries
+  // written that session became permanently unreadable. The session is now
+  // REFUSED: honest, calm, and explicit that nothing was changed.
+  "login.envelopeUnavailable":
+    "We couldn't verify your encryption key with the server. Check your connection and try again — nothing was changed.",
+  "login.envelopeUnrecognized":
+    "We couldn't verify your encryption key — the server sent a response this app doesn't understand. Nothing was changed; updating the app may help.",
 
   // ------------------------------------------------------------- onboarding
   "onboarding.panel1Title": "Write each day",
@@ -186,7 +218,10 @@ export const en: Record<string, string> = {
   "onboarding.stepOf": "{current} of {total}",
   "onboarding.remindQuestion": "Want a gentle reminder each day? You can change it anytime in Settings.",
   "onboarding.readPrivacy": "Read the privacy policy",
-  "onboarding.ageNotice": "MindPattern is for people 13 and older — by continuing you confirm that you are.",
+  // 2026-09-27: the age floor moved to 18 with the registration age gate
+  // (login.ageConfirm) — the onboarding line states the same floor so the
+  // two never disagree.
+  "onboarding.ageNotice": "MindPattern is for people 18 and older — by continuing you confirm that you are.",
   "onboarding.start": "I understand — start writing",
   "onboarding.continueA11y": "Continue to panel {next} of {total}",
 
@@ -299,6 +334,10 @@ export const en: Record<string, string> = {
   // through the catalog so a Spanish device reads a Spanish nudge.
   "notify.reminderBody": "A quiet moment to write, whenever it suits you.",
   "notify.channelName": "Journal reminders",
+  // The MBC check-in nudge (2026-09-27): an invitation, never a debt — no
+  // "overdue", no streak, nothing to feel bad about (the same safe-messaging
+  // contract as the daily reminder body).
+  "notify.measureReminderBody": "A quiet moment for a wellbeing check-in, whenever it suits you.",
 
   // ---------------------------------------------------------------- history
   "history.snapshotReload": "Your journal changed while older entries were loading. Reloading the latest history from the start.",
@@ -651,17 +690,44 @@ export const en: Record<string, string> = {
   "settings.changePasswordTitle": "Change your password",
   "settings.changePasswordBody":
     "This rotates your sign-in credential AND re-encrypts your journal under a new encryption key — the recovery step if your password or key was ever exposed. Every device signs out afterwards; active sharing grants are re-wrapped automatically.",
+  // v2 copy (2026-09-26): accounts on the key envelope change the password
+  // WITHOUT re-encrypting anything — the honest O(1) description.
+  "settings.changePasswordTitleV2": "Change your password",
+  "settings.changePasswordBodyV2":
+    "This changes the password that locks your encryption key. Your journal is not re-encrypted — it stays exactly as it is, and sharing with your therapist keeps working unchanged. Every device signs out afterwards.",
   "settings.newPasswordPlaceholder": "New password (12+ characters)",
   "settings.newPasswordA11y": "New password",
   "settings.changePasswordButton": "Rotate keys and sign in again",
+  "settings.changePasswordButtonV2": "Change password and sign in again",
   "settings.rotateWorking": "Rotating…",
   "settings.rotateSuccessTitle": "Password changed",
   "settings.rotateSuccessBody":
     "Your journal is now encrypted under your new password. Sign in again on this device and on any other device you use.",
+  "settings.rotateSuccessBodyV2":
+    "Your password now unlocks a freshly wrapped copy of your encryption key; the key itself did not change, so your journal and sharing are exactly as they were. Sign in again on this device and on any other device you use.",
   "settings.rotateFailedTitle": "Could not change password",
   "settings.rotateWrongOld": "The current password was not accepted. Nothing was changed.",
   "settings.rotateRewrapFailed":
     "These sharing grants could not be re-wrapped and must be re-paired from the therapist's pairing code: {names}",
+  // --- v1 → v2 key-envelope upgrade (2026-09-26) --------------------------
+  // Honest scope: nothing is re-encrypted, the data key does not change;
+  // the benefit is O(1) password changes from here on. The action ships the
+  // CURRENT data key to the server (inside the password-wrapped envelope),
+  // so it sits behind the typed-password card.
+  "settings.upgradeTitle": "Upgrade key protection",
+  "settings.upgradeBody":
+    "A one-time change to how your password protects your journal: today your password directly derives your encryption key, so changing it re-encrypts everything. After the upgrade a separate random key encrypts your journal and your password locks it — future password changes become instant and nothing about your stored journal changes. This needs your password and takes a moment.",
+  "settings.upgradeButton": "Upgrade now",
+  "settings.reauthUpgradeTitle": "Enter your password to upgrade key protection",
+  "settings.upgradeSuccessTitle": "Key protection upgraded",
+  "settings.upgradeSuccessBody":
+    "Your journal is unchanged and still opens as before. From now on, changing your password no longer re-encrypts it.",
+  "settings.upgradeAlreadyTitle": "Already upgraded",
+  "settings.upgradeAlreadyBody":
+    "This account already uses the newer key protection. Nothing needed to change.",
+  "settings.upgradeFailedTitle": "Could not upgrade key protection",
+  "settings.upgradeKeyMismatchBody":
+    "The encryption key on this device does not match the data stored on the server, so nothing was changed. Lock the app and unlock it again with your current password first, then retry.",
   "settings.reauthLlmTitle": "Enter your password to {action} third-party AI analysis",
   "settings.enableWord": "enable",
   "settings.disableWord": "disable",
@@ -679,6 +745,16 @@ export const en: Record<string, string> = {
   "settings.reminderTimeA11y": "Reminder time",
   "settings.reminderTimeOptionA11y": "Reminder time: {label}",
   "settings.reminderUnavailableNote": "{reason}. The preference is saved and the nudge starts once this build links notifications.",
+  // --- MBC check-in reminders (2026-09-27) -------------------------------
+  "settings.measureReminderLabel": "CHECK-IN REMINDERS",
+  "settings.measureReminderRow": "Check-in reminders",
+  "settings.measureReminderA11y": "Check-in reminders",
+  "settings.measureReminderNote":
+    "A gentle nudge to complete a wellbeing questionnaire when your last one is older than the interval you choose. Local only — nothing is sent anywhere.",
+  "settings.measureIntervalA11y": "Check-in interval",
+  "settings.measureIntervalOptionA11y": "Check-in interval: {label}",
+  "settings.intervalWeeks": "{count} weeks",
+  "settings.safetyPlanA11y": "Open your safety plan",
   "settings.healthMirrorLabel": "HEALTH APP",
   "settings.healthMirrorRow": "Mirror mood check-ins to the Health app",
   "settings.healthMirrorA11y": "Mirror mood check-ins to the Health app",
@@ -782,6 +858,39 @@ export const en: Record<string, string> = {
   "measures.phq2.item1": "Little interest or pleasure in doing things",
   "measures.phq2.item2": "Feeling down, depressed, or hopeless",
 
+  // -------------------------------------------------- safety plan (2026-09-27)
+  // The local, encrypted personal safety plan (Stanley-Brown-inspired
+  // structure; see src/safetyPlan.ts). SAFETY-CRITICAL copy: calm, plain,
+  // first-person where the field is the user's own words; numbers and URLs
+  // never change per locale.
+  "safetyplan.navTitle": "My safety plan",
+  "safetyplan.intro":
+    "A safety plan is yours: what your warning signs look like, what helps, who to reach. It stays on this device, encrypted with your key — it is never sent anywhere. It is a personal tool to lean on, not a substitute for professional help.",
+  "safetyplan.field.warningSigns": "My warning signs",
+  "safetyplan.hint.warningSigns": "Thoughts, feelings, situations or behaviors that tell you a hard time is starting",
+  "safetyplan.field.copingStrategies": "Things I can do to cope",
+  "safetyplan.hint.copingStrategies": "What has calmed or grounded you before — in your own words",
+  "safetyplan.field.peoplePlaces": "People and places that help",
+  "safetyplan.hint.peoplePlaces": "Names, numbers and places you can turn to",
+  "safetyplan.field.askForHelp": "Who I can ask for help",
+  "safetyplan.hint.askForHelp": "People you trust enough to say \u201cI need help\u201d to",
+  "safetyplan.field.professionals": "Professionals and services",
+  "safetyplan.hint.professionals": "Your therapist, doctor or clinic — the crisis lines below are filled in to start",
+  "safetyplan.field.environmentSafer": "Making my environment safer",
+  "safetyplan.hint.environmentSafer": "What you could move, lock or set aside ahead of a hard moment",
+  // The professionals PREFILL for a brand-new plan: the app's built-in
+  // crisis lines, verbatim from the crisis screen (numbers and URLs are
+  // identical in every locale by design).
+  "safetyplan.prefillProfessionals":
+    "988 Suicide & Crisis Lifeline — call or text 988, or chat at 988lifeline.org/chat\nCrisis Text Line — text HOME to 741741\nEmergency (US) — call 911\nOutside the US — findahelpline.com",
+  "safetyplan.save": "Save my safety plan",
+  "safetyplan.saved": "Saved — encrypted, as always.",
+  "safetyplan.saveFailedTitle": "Could not save",
+  "safetyplan.saveFailedBody": "Your plan is still on screen exactly as you typed it — try again.",
+  "safetyplan.lockedTitle": "Locked",
+  "safetyplan.lockedBody":
+    "Your safety plan is encrypted with your key — unlock to read or edit it. The crisis resources stay one tap away below, as always.",
+
   // -------------------------------------------------------- therapist share
   "share.codeNotFoundTitle": "Code not found",
   "share.codeNotFoundBody": "Check the code with your therapist — it expires 15 minutes after they generate it.",
@@ -817,12 +926,22 @@ export const en: Record<string, string> = {
   "share.stoppedOn": "Stopped {date}",
   "share.addLabel": "Add your therapist",
   "share.addBody": "Ask your therapist for a pairing code from their portal, then enter it here. Codes expire after 15 minutes.",
+  // SAS (2026-09-26): sets the expectation beside the pairing-code input —
+  // after lookup, a 6-digit match code and the key fingerprint must be
+  // compared with the therapist out of band before anything is shared.
+  "share.sasIntro":
+    "After you enter the code, this app shows a match code and a key fingerprint. Read both back to your therapist and check they match what their portal shows before you share anything.",
   "share.codePlaceholder": "e.g. 7X2KQM4N",
   "share.codeA11y": "Therapist pairing code",
   "share.lookingUp": "Looking up…",
   "share.findTherapist": "Find my therapist",
   "share.fingerprintNote":
     "Key fingerprint: {fingerprint}\nRead it back to your therapist and check it matches the one their portal shows — a mismatch means the key was substituted in transit.",
+  // SAS (2026-09-26): the server-computed pairing checksum over (code, wrap
+  // key, your account). A substituted key changes it; two humans comparing
+  // it out of band are the detection. Rendered only when well-formed.
+  "share.sasNote":
+    "Match code: {sas}\nRead it back to your therapist and check it matches the one their portal shows for this pairing — a mismatch means the pairing may have been tampered with. Do not continue.",
   // C-7 (2026-09-21): the out-of-band fingerprint check is an ACTION —
   // the grant proceeds only through an explicit "fingerprints match" tap.
   "share.fingerprintsMatch": "Fingerprints match — continue",

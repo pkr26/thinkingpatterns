@@ -272,8 +272,7 @@ async def main() -> int:
         # date when days_back >= entries_per_user. Distinct calendar days
         # are what the 30-day threshold counts.
         days = [
-            today
-            - timedelta(days=(e * args.days_back) // max(args.entries_per_user - 1, 1))
+            today - timedelta(days=(e * args.days_back) // max(args.entries_per_user - 1, 1))
             for e in range(args.entries_per_user)
         ]
         distinct_days = len(set(days))

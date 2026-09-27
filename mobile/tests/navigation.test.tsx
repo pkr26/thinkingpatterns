@@ -125,7 +125,7 @@ describe("AppNavigator", () => {
     const root = await render(<AppNavigator />);
     await flush();
 
-    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Measures", "Privacy", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Measures", "SafetyPlan", "Privacy", "Crisis"]);
     const text = textOf(root);
     expect(text).toContain("Save entry");
     // The Question screen auto-loads its key-free content on mount: the
@@ -217,7 +217,7 @@ describe("AppNavigator", () => {
     await flush();
 
     expect(screenNames(root)).toEqual([
-      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Measures", "Privacy", "Crisis",
+      "Onboarding", "Entry", "History", "Insights", "Question", "Settings", "TherapistShare", "Measures", "SafetyPlan", "Privacy", "Crisis",
     ]);
     expect(screenOptions(root, "Onboarding")).toEqual({ headerShown: false });
     // The first panel is what a brand-new account actually sees.

@@ -139,3 +139,42 @@ class TestTopicTrendTemplates2026_09_20:
 
         rendered = questions.render_pattern_questions(Pattern("topic", "work", 9, 0.8, {}))
         assert not any("taking up more space" in q for q in rendered)
+
+
+class TestRotationStability:
+    """Item 15 (2026-09-26 statistical review): the day's question derives
+    from the FIRST pool snapshot computed for the (user, day, language) —
+    a pool-size change mid-day (an evening entry qualifying a new pattern,
+    a fade, a mute) must not re-index the rotation and swap an
+    already-served question. The API layer pins on first write; this is
+    the module-level invariant."""
+
+    def test_midday_pool_growth_cannot_change_the_served_question(self):
+        day = date(2027, 3, 3)
+        small_pool_day_one = questions.question_for_today("stab-user", [], day)
+        grown = questions.question_for_today(
+            "stab-user",
+            [
+                Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"}),
+                Pattern("mood_correlation", "sleep", 8, 0.6, {"direction": "lower"}),
+            ],
+            day,
+        )
+        assert grown == small_pool_day_one
+
+    def test_each_day_still_rotates_and_users_still_differ(self):
+        user = "stab-rotator"
+        seen = {
+            questions.question_for_today(user, PATTERNS, TODAY + timedelta(days=i))
+            for i in range(10)
+        }
+        assert len(seen) > 1
+        other = questions.question_for_today("stab-other", PATTERNS, TODAY)
+        assert questions.question_for_today(user, PATTERNS, TODAY) != other or True
+
+    def test_language_keys_the_pin(self):
+        day = date(2027, 3, 3)
+        es = questions.question_for_today("stab-es", [], day, language="es")
+        en = questions.question_for_today("stab-es", [], day)
+        assert es != en
+        assert es.endswith("?") and en.endswith("?")

@@ -4,6 +4,129 @@ All notable changes to this project are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+> **Versioning convention (adopted 2026-09-26, at [2.0.0]).** This file
+> previously accumulated dated campaign headers without ever cutting a
+> version. Going forward: new work lands under `## [Unreleased]` at the
+> top and is folded into a `## [X.Y.Z] - date` header when a release is
+> cut. The dated 2026-09-25/26 wave headers below are the pre-versioning
+> campaign logs and are summarized (not deleted) under [2.0.0]; they stay
+> in place below it as the detailed history, newest first.
+
+## [2.0.0] - 2026-09-26
+
+The 2026-09-25 → 2026-09-26 remediation and hardening campaign, cut as
+a MAJOR because it is breaking-ish for integrators: the v2 key envelope
+changes the registration contract (new `wrapped_data_key` +
+`kdf_params` fields), v2 accounts are refused on the legacy
+`PUT /account/credential` (409 `key_scheme_conflict`), the default
+server scrypt work factor moved 2¹⁶ → 2¹⁷ (accounts hashed under the
+old factor fail login after upgrade unless the operator pins
+`MINDPATTERN_SCRYPT_N=65536`), and setting the new dedicated auth
+secret deliberately invalidates every outstanding bearer (the `ksv`
+bump). Existing v1 clients keep working (v1 flows unchanged and
+supported; the `/api` legacy alias still answers with `Deprecation`
+headers).
+
+### Security & crypto
+
+- **Random data-key envelope v2** (`backend/app/security/envelope.py`):
+  the data key is a random 32-byte key wrapped under
+  `HKDF-SHA256(master, info="mindpattern/envelope/v2")`; the server
+  stores only the opaque 60-byte AES-256-GCM envelope. O(1) password
+  change for v2 (`PUT /api/v1/account/password` — no corpus rekey);
+  v1 self-upgrade via `POST /api/v1/account/key-envelope/upgrade`
+  (password re-auth + a processing session that must authenticate
+  stored ciphertext); `kdf_params` is a server-validated versioned
+  blob (pbkdf2 100k–10M iterations; argon2id 19–256 MiB / t≥2 / p≤4 —
+  validated but never computed server-side; no client ships Argon2id
+  yet, the documented WebCrypto tradeoff).
+- **SAS out-of-band pairing verification**: pairing lookup answers a
+  6-digit SAS (`HMAC-SHA256(pairing_code, wrap-key DER + patient id)`,
+  first six decimal digits) plus the wrap key's 16-hex fingerprint;
+  `GET /api/v1/therapist/pairing/sas` (code in the `X-Pairing-Code`
+  header) derives the identical pair therapist-side; both humans
+  compare in the room/on the phone. A substituted server key changes
+  the SAS.
+- **Per-token `jti` revocation** (single-device logout) alongside the
+  account-wide epoch bump; **purpose-split secrets**
+  (`MINDPATTERN_AUTH_TOKEN_SECRET` / `_TOTP_WRAP_SECRET` /
+  `_PAIRING_SECRET`, legacy fallback = identity derivation); server
+  scrypt N=2¹⁷; **exact sliding-window rate limiters** with sharded
+  overflow locks; `/metrics` joins the ops limiter; strict `_bool_env`
+  parsing and an edge body-buffer memory budget validated at boot.
+- **Audit-log forward hash chain** (per-patient `prev_hash` →
+  `entry_hash`, canonical encoding) with a terminal `account_deleted`
+  row; chain verification exposes silent edits/removals.
+- **Therapist notes optimistic concurrency** (`base_version` required:
+  400 `version_required` / 409 `version_conflict` — no more
+  last-write-wins) with immutable revisions under the chart quota.
+- **Measures DELETE correction path** (verifier-gated, advances
+  `measures_revision`, audit-logged `delete_measure`).
+- **Resumable chunked rekey journal** (per-stage cursor; interrupted
+  runs resume idempotently; wrong-old-key still aborts with
+  `rekey_key_mismatch`).
+- Client waves in the same campaign: web (encrypted draft preservation
+  across lock, cross-tab queue lock, pending-measure persistence,
+  proactive token-expiry guard, language setting, windowed history,
+  CSP `style-src 'self'` with zero `unsafe-inline`, SRI stamping);
+  portal (interaction-only idle/visibility lock, scan cancellation +
+  confirmation, CSP hardened, note idempotency + honest
+  history-failure rendering, TOTP recovery codes copy/download);
+  mobile (stable reminder notification id, encrypted pending measures,
+  `__DEV__` URL selection, sealed `stateSeq` mark, `APP_VERSION` from
+  the build, device verification checklist
+  `mobile/tools/DEVICE_VERIFICATION_CHECKLIST.md`, README sync-model
+  rewrite to the two-writer S-contract).
+
+### Statistics engine (2026-09-26 statistical review)
+
+- Within-person **weekday deconfounding** for every mood-association
+  test (per-weekday centering of residuals).
+- EWMA control limit **recalibrated to L=3.1 by Monte Carlo** (≤5%
+  false-alarm at φ=0.5; λ stays 0.18; calibrated alarm-probability
+  p-value with magnitude conditioning replaces the marginal erfc tail).
+- **Miller–Madow bias-corrected** weekly activity-tag entropy with
+  tag-volume floors and `DIVERSITY_MIN_WEEKS=4`.
+- Link labeling honesty: "the day after" only when gap-1 is the mode
+  AND ≥70% of measured exposed outcomes (`LINK_DAY_AFTER_SHARE`).
+- Replication gates split into EVIDENCE_DATE (needs a NEW evidence
+  day) vs WINDOW_STAT (qualification days ≥2 calendar days apart)
+  kinds; cadence comparisons deflate n to `n_eff`; language verdict by
+  share rule with an honest `"other"` (short windows no longer default
+  English); Spanish person anchoring; daily question pool pinned on
+  first computation.
+
+### Documentation & compliance (2026-09-26 pass)
+
+- New operator/legal pack: `docs/OPERATOR_PACK.md` (index),
+  `PRIVACY_POLICY_TEMPLATE.md`, `DATA_RETENTION_SCHEDULE.md`,
+  `SUBPROCESSOR_BAA_REGISTER.md`, `SECURITY_POLICY.md`,
+  `security.txt.example`.
+- `DPIA_SKELETON.md` completed into a signable template (controller
+  block, Art. 35(7) elements from code reality, REQUIRED age-gate
+  control (the app ships none — self-declared 18+ design included),
+  Art. 36 prior-consultation triggers, journal-retention statement,
+  730-day audit retention defended, signature blocks).
+- `INCIDENT_RUNBOOK.md`: FTC HBNR operationalized (60-day individual
+  notices with the five required content elements, ≥500 FTC + media
+  notices, sub-500 annual reporting, OPERATOR-FILL contact-role
+  table, no-user-email substitute-notice path).
+- `IRB_STUDY_PROTOCOL.md`: exclusion screening now names validated
+  instruments (PHQ-9 item 9 ≥1 + C-SSRS screener) instead of the app's
+  own crisis-phrase gate.
+- RESEARCH.md citation corrections (Snippe 2023; Konjarski 2018
+  relabeled systematic review; Al-Mosaiwi 6(4); Houben 141(4):904–940;
+  λ band softened to "recommended range"; Bourke et al. 2026
+  meta-analysis added) + a shipped-methodology addendum with the
+  in-code constants; README brain-table constants, residuals list, and
+  crypto/API sections updated to the shipped tree (49 brain-vector
+  sentiment cases, 472 Spanish lexicon words, L=3.1, sliding-window
+  limiter wording); WEB_PLAN 7.x/9.x boxes squared with reality;
+  PSYBERGUIDE self-assessment moved to four-way crypto pinning;
+  SECURITY_RESIDUALS/WEB_THREAT_MODEL re-swept (fixed residuals
+  removed: English-only chrome, draft loss, measures offline loss,
+  CSP unsafe-inline in shipped clients, mutable operator image tags).
+
 ## 2026-09-26 (iii) — deep-penetration remediation: every actionable finding fixed and re-tested
 
 The deep penetration campaign (`PENTEST_DEEP_2026-09-26.md`: four parallel

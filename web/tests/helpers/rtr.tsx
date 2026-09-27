@@ -106,10 +106,14 @@ export async function pressAria(root: ReactTestRenderer, ariaLabel: string): Pro
   });
 }
 
-/** Flip the (single) role=switch control — the LLM consent toggle. */
-export async function pressSwitch(root: ReactTestRenderer): Promise<void> {
-  const toggle = root.root.findAllByType("button").find((n) => n.props.role === "switch");
-  if (!toggle) throw new Error("no role=switch control rendered");
+/** Flip a role=switch control. With `matching`, picks the switch whose
+ *  aria-label contains it (Settings now renders more than one switch —
+ *  the LLM consent and the check-in cadence). */
+export async function pressSwitch(root: ReactTestRenderer, matching?: string): Promise<void> {
+  const toggle = root.root.findAllByType("button").find((n) =>
+    n.props.role === "switch"
+    && (matching === undefined || String(n.props["aria-label"] ?? "").includes(matching)));
+  if (!toggle) throw new Error(`no role=switch control rendered${matching ? ` matching ${JSON.stringify(matching)}` : ""}`);
   await act(async () => {
     toggle.props.onClick();
   });
@@ -138,5 +142,19 @@ export async function typeArea(root: ReactTestRenderer, labelText: string, value
   if (!field) throw new Error(`no textarea whose label contains ${JSON.stringify(labelText)}`);
   await act(async () => {
     field.props.onChange({ target: { value } });
+  });
+}
+
+/** Set a <label>-wrapped checkbox, matched by the label's text (the
+ *  Checkbox component renders exactly that shape — a real input inside
+ *  its label, so keyboard/SR semantics stay real in the app too). */
+export async function setCheckbox(root: ReactTestRenderer, labelText: string, checked: boolean): Promise<void> {
+  const box = root.root.findAllByType("input").find((n) => {
+    const label = n.parent;
+    return n.props.type === "checkbox" && label !== null && label.type === "label" && textOfNode(label).includes(labelText);
+  });
+  if (!box) throw new Error(`no checkbox whose label contains ${JSON.stringify(labelText)}`);
+  await act(async () => {
+    box.props.onChange({ target: { checked } });
   });
 }

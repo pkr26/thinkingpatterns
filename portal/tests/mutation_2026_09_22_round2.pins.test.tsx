@@ -375,7 +375,11 @@ describe("round 2: App idle lock and session races", () => {
       await typeInto(root, "Password", "pw");
       await press(root, "Sign in");
       await flush();
-      for (const event of ["click", "keydown", "mousemove", "scroll", "touchstart"]) {
+      // 2026-09-26 audit round (M): the re-arm list is INTERACTION events
+      // only — bare mousemove was removed (a jiggler used to keep decrypted
+      // charts alive indefinitely); wheel joined scroll for the same class
+      // of intent. The mousemove exclusion is pinned in app.test.tsx.
+      for (const event of ["click", "keydown", "scroll", "wheel", "touchstart"]) {
         await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60 * 1000); });
         window.dispatchEvent({ type: event } as Event);
       }

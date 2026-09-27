@@ -121,3 +121,28 @@ describe("envelope guards (mutation pins)", () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
   });
 });
+
+/** G (2026-09-26 v2-envelope wave): the portal NEVER derives a patient's
+ *  data key. Patient keys arrive exclusively as consent wraps opened by
+ *  unwrapPatientDataKey (ECDH + HKDF over the grant's keys — pinned
+ *  byte-for-byte by the wrap_vectors suite in tests/crypto.test.ts, which
+ *  is why the v2 scheme changes nothing here: a v2 account's data key is a
+ *  random key the patient re-wraps the SAME way). This pin guards the
+ *  boundary: no password-based patient-key derivation may ever appear in
+ *  the portal's crypto surface — a portal holding a patient-key DERIVATION
+ *  would mean the patient's password-derived schedule leaked into the
+ *  therapist client. */
+describe("patient-key custody boundary (v2 envelope, 2026-09-26)", () => {
+  it("the portal crypto surface exposes no patient-data-key derivation — patient keys only unwrap", async () => {
+    const surface = await import("../src/crypto");
+    const derivations = Object.keys(surface).filter(
+      (name) => /patient/i.test(name) && /derive|password|master|pbkdf/i.test(name),
+    );
+    expect(derivations).toEqual([]);
+    // The only patient-named export is the ECDH unwrap, and the portal's
+    // own password-derived subkeys are the therapist's three labels only.
+    expect(Object.keys(surface).filter((name) => /patient/i.test(name))).toEqual([
+      "unwrapPatientDataKey",
+    ]);
+  });
+});

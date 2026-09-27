@@ -14,7 +14,7 @@ from datetime import date
 
 import pytest
 
-from app.cache import FixedWindowCounter
+from app.cache import SlidingWindowCounter
 from app.config import Settings
 from app.security import crypto
 from app.security.enclave import InMemoryKeyStore, KeyNotFound
@@ -172,27 +172,62 @@ def test_keystore_purges_expired_on_create():
     assert len(store) == 2
 
 
-# --- FixedWindowCounter: time-based windows -----------------------------------
+# --- SlidingWindowCounter: time-based windows -----------------------------------
 
 
 def test_counter_resets_after_window():
-    counter = FixedWindowCounter()
+    # 2026-09-26 audit item 2: windows now SLIDE — a hit ages out exactly
+    # `window` after it landed, so the fixed-window 2x boundary burst is
+    # gone (a fresh full budget never rides on a previous window's tail).
+    counter = SlidingWindowCounter()
     assert counter.hit("k", 60, now=100.0).count == 1
     assert counter.hit("k", 60, now=100.5).count == 2
-    assert counter.hit("k", 60, now=159.9).count == 3  # still inside the first window
-    assert counter.hit("k", 60, now=160.0).count == 1  # window elapsed -> fresh count
+    assert counter.hit("k", 60, now=159.9).count == 3  # 59.9s old: still counted
+    # The FIRST hit (exactly 60s old) aged out; the 100.5 hit (59.5s old)
+    # and the 159.9 hit still count, plus the new one — sliding, not a
+    # wall-clock-aligned window reset.
+    assert counter.hit("k", 60, now=160.0).count == 3
+    # The 100.5 hit ages out next; 159.9, 160.0 and the new hit count.
+    assert counter.hit("k", 60, now=160.6).count == 3
+    # At 220.0 only the 160.6 hit (59.4s old) still counts alongside the
+    # fresh one — the count decays hit by hit, never a window-aligned reset.
+    assert counter.hit("k", 60, now=220.0).count == 2
+    # Past 220.0 + 60 every retained hit is gone: genuinely fresh count.
+    assert counter.hit("k", 60, now=281.0).count == 1
+
+
+def test_sliding_window_admits_no_2x_burst_at_a_boundary():
+    """The honest pin of the NEW semantics (audit item 2): a full budget at
+    the end of one fixed window plus a full budget at the start of the next
+    used to fit inside one sliding span (2x the limit). It no longer does."""
+    counter = SlidingWindowCounter()
+    # Five hits at t≈0 (a full "first window" budget for a limit of 5) ...
+    for _ in range(5):
+        counter.hit("k", 60, now=0.1)
+    # ... and five more the instant the old fixed window would have rolled
+    # over: the original hits are all still inside the sliding 60s span, so
+    # the counter keeps climbing instead of resetting to a fresh budget.
+    for i in range(5):
+        assert counter.hit("k", 60, now=59.9).count == 6 + i
+    # At 60.1 the t=0.1 budget (exactly 60s old) ages out; the 59.9 burst
+    # remains — 5 counted, never a fresh full budget mid-span.
+    assert counter.check("k", 60, now=60.1).count == 5
 
 
 def test_counter_keys_are_independent_across_window_sizes():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     assert counter.hit("a:short", 10, now=0.0).count == 1
     assert counter.hit("a:short", 10, now=9.0).count == 2
-    assert counter.hit("a:short", 10, now=10.0).count == 1  # short window rolled over
+    # Sliding (audit item 2): the hit at 9.0 is only 1s old at 10.0 — it
+    # still counts; only the hit at 0.0 aged out.
+    assert counter.hit("a:short", 10, now=10.0).count == 2
+    # Past 10.0 + 10 every retained hit is beyond the window: fresh count.
+    assert counter.hit("a:short", 10, now=20.1).count == 1
     assert counter.hit("b:long", 60, now=10.0).count == 1  # different key unaffected
 
 
 def test_counter_reports_usable_retry_after():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     result = counter.hit("k", 60, now=100.0)
     assert result.retry_after >= 1
     # While limited, Retry-After must point at when THIS window resets,
@@ -203,7 +238,7 @@ def test_counter_reports_usable_retry_after():
 
 def test_counter_rejects_bad_window():
     with pytest.raises(ValueError):
-        FixedWindowCounter().hit("k", 0)
+        SlidingWindowCounter().hit("k", 0)
 
 
 # --- config: production fail-fast ----------------------------------------------
@@ -497,7 +532,7 @@ async def test_docs_hidden_in_any_non_development_env(monkeypatch, env):
 def test_counter_eviction_is_batched_under_cap_pressure():
     from app.cache import EVICTION_BATCH, MAX_TRACKED_KEYS
 
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     for i in range(MAX_TRACKED_KEYS + 1):
         counter.hit(f"attacker-{i}", 60)
     # One eviction event clears a whole batch below the cap instead of

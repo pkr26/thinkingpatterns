@@ -6,19 +6,34 @@
  * the master key is zeroized the moment the subkeys exist, and EVERY
  * failure path wipes all three.
  *
+ * v2 key scheme (2026-09-26): NEW accounts default to the random data-key
+ * envelope — registration draws a random 32-byte data key, wraps it under
+ * a KEK derived from the password master key, and uploads the 60-byte
+ * blob with kdf_params. Sign-in branches on the login response's
+ * key_scheme: v2 accounts fetch GET /auth/key-envelope and unwrap the
+ * random data key locally (replacing the HKDF data derivation); v1
+ * accounts derive exactly as before — byte-identical, no extra request.
+ *
  * Redesign 2026-09-26: a centered brand panel opens the screen, the mode
- * switch is a segmented control, the fields live in a real <form> (Enter
- * submits — the old web card forgot the form), and registration shows a
- * password-strength meter fed by the existing client-side policy checker.
+ *  switch is a segmented control, the fields live in a real <form> (Enter
+ *  submits — the old web card forgot the form), and registration shows a
+ *  password-strength meter fed by the existing client-side policy checker.
+ *
+ * Age gate (clinical review 2026-09-27, DPIA-required control):
+ * registration requires an honest "I am 18 or older" self-declaration
+ * before the register action enables — UI state only, nothing stored and
+ * nothing extra sent (per-jurisdiction guardian consent is an operator/
+ * policy matter, not an app control).
  */
 import { useState } from "react";
-import { ApiError, auth, setSession, type TokenResponse } from "../api/client";
+import { ApiError, api, auth, setSession, type TokenResponse } from "../api/client";
 import { deriveMasterKey, fromBase64, toBase64, zeroize } from "../crypto/core";
+import { createRegistrationEnvelope, unwrapEnvelope } from "../crypto/envelope";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { randomBytes } from "../platform";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, ErrorBanner, Field, Logo, Note } from "../ui";
+import { Button, Card, Checkbox, ErrorBanner, Field, Logo, Note } from "../ui";
 
 /** Mirrors the backend's USERNAME_PATTERN (schemas.py): honest client-side
  *  validation so the server's validation_error never surprises anyone. */
@@ -101,10 +116,43 @@ function adoptSession(keys: PatientKeys, token: TokenResponse, username: string,
     vault.lock();
     return "invalid-response";
   }
-  setSession(token.token, token.user_id, username);
+  // expires_in rides along (audit 2026-09-26 LOW): the client schedules the
+  // proactive lockDown slightly before the token dies, instead of
+  // discovering expiry as a 401 mid-write.
+  setSession(token.token, token.user_id, username, token.expires_in);
   vault.unlock(keys, token.user_id); // zeroizes masterKey
   onSuccess({ userId: token.user_id, username });
   return "ok";
+}
+
+/** v2 unlock half (2026-09-26): a key_scheme "v2" account's data key is
+ *  NOT the HKDF data label — it is the random key inside the envelope.
+ *  Fetch the envelope, unwrap it under the SAME master the login verifier
+ *  proved, and swap it in for the (now wrong) derived label. Any failure
+ *  leaves NOTHING behind: no session, no keys — an envelope that does not
+ *  open under the just-proven password is a tampered or inconsistent
+ *  server state, never something to paper over with the v1 derivation. */
+async function adoptEnvelopeDataKey(keys: PatientKeys, saltB64: string, username: string): Promise<boolean> {
+  try {
+    const envelope = await api.keyEnvelope();
+    if (envelope.key_scheme !== "v2" || typeof envelope.wrapped_data_key !== "string") {
+      throw new Error("not a v2 envelope");
+    }
+    // The envelope's salt must be the salt the master key was derived from
+    // (a mismatched server answer cannot open the envelope by construction).
+    if (envelope.salt !== saltB64) {
+      throw new Error("envelope salt mismatch");
+    }
+    const salt = fromBase64(saltB64);
+    const unwrapped = await unwrapEnvelope(keys.masterKey, salt, username, envelope.wrapped_data_key, envelope.kdf_params);
+    zeroize(salt, keys.dataKey);
+    keys.dataKey = unwrapped;
+    return true;
+  } catch {
+    zeroize(keys.authKey, keys.dataKey, keys.masterKey);
+    vault.lock();
+    return false;
+  }
 }
 
 export function LoginView(props: { onSuccess: (success: LoginSuccess) => void }): React.JSX.Element {
@@ -112,6 +160,12 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  // The DPIA-required age gate (clinical review 2026-09-27): an honest
+  // self-declaration — the register action stays disabled until the box
+  // is ticked. Nothing is stored beyond the existing registration flow
+  // (no extra data, no extra request): the checkbox is UI state only,
+  // reset with the other fields on a mode switch.
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -119,6 +173,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
     setMode(next);
     setPassword("");
     setConfirm("");
+    setAgeConfirmed(false);
     setError("");
   };
 
@@ -140,6 +195,12 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
       return;
     }
     if (mode === "register") {
+      // The age gate's own guard (defense-in-depth under the disabled
+      // button — a synthetic submit path cannot skip the declaration).
+      if (!ageConfirmed) {
+        setError(t("login.ageGateNeeded"));
+        return;
+      }
       const policy = passwordPolicyError(password);
       if (policy) {
         setError(policy);
@@ -165,6 +226,13 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           zeroize(keys.authKey, keys.dataKey, keys.masterKey);
           throw err;
         }
+        // v2 accounts swap the derived data label for the unwrapped random
+        // key BEFORE adoption; v1 (or a key_scheme-less legacy backend)
+        // keeps deriving locally — exactly the pre-2026-09-26 bytes.
+        if (token.key_scheme === "v2" && !(await adoptEnvelopeDataKey(keys, salt, username))) {
+          setError(t("login.envelopeUnlockWeb"));
+          return;
+        }
         const adoption = adoptSession(keys, token, username, props.onSuccess);
         if (adoption === "therapist-role") {
           setError(t("login.therapistRoleWeb"));
@@ -175,11 +243,24 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           return;
         }
       } else {
-        const saltB64 = toBase64(randomBytes(16));
-        const keys = await derivePatientKeys(await deriveMasterKey(password, fromBase64(saltB64)));
+        const saltBytes = randomBytes(16);
+        const saltB64 = toBase64(saltBytes);
+        const keys = await derivePatientKeys(await deriveMasterKey(password, saltBytes));
         let token: TokenResponse;
         try {
-          token = await auth.register(username, saltB64, toBase64(keys.authKey));
+          // v2 DEFAULT for new accounts (2026-09-26): the data key is a
+          // random 32 bytes wrapped under the password-derived KEK — the
+          // derived data label is drawn only to be discarded (the master
+          // key still feeds the auth verifier and, for v1 servers, the
+          // legacy path). Registration carries kdf_params + the 60-byte
+          // wrapped_data_key together.
+          const envelope = await createRegistrationEnvelope(keys.masterKey, saltBytes, username);
+          zeroize(keys.dataKey);
+          keys.dataKey = envelope.dataKey;
+          token = await auth.register(username, saltB64, toBase64(keys.authKey), {
+            kdfParams: envelope.kdfParams as unknown as Record<string, unknown>,
+            wrappedDataKeyB64: envelope.wrappedDataKeyB64,
+          });
         } catch (err) {
           zeroize(keys.authKey, keys.dataKey, keys.masterKey);
           throw err;
@@ -244,10 +325,21 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
               )}
               <Field label={t("login.webConfirm")} value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
               <Note>{t("login.webRegisterNote")}</Note>
+              {/* DPIA age gate (clinical review 2026-09-27): an honest
+                  self-declaration — 18+, per the DPIA's design (per-
+                  jurisdiction guardian consent is an operator/policy
+                  matter, not an app control). UI state only: nothing is
+                  stored, nothing extra is sent. */}
+              <Checkbox checked={ageConfirmed} onChange={setAgeConfirmed}>{t("login.ageGate")}</Checkbox>
             </>
           )}
           <ErrorBanner message={error} />
-          <Button label={busy ? t("settings.working") : mode === "signin" ? t("login.webSignInTitle") : t("login.webCreateJournal")} onPress={() => void submit()} disabled={busy} block />
+          <Button
+            label={busy ? t("settings.working") : mode === "signin" ? t("login.webSignInTitle") : t("login.webCreateJournal")}
+            onPress={() => void submit()}
+            disabled={busy || (mode === "register" && !ageConfirmed)}
+            block
+          />
           <Button label={mode === "signin" ? t("login.webCreateAccount") : t("login.webHaveAccount")} onPress={() => switchMode(mode === "signin" ? "register" : "signin")} small variant="ghost" block />
         </form>
         <Note tone="muted">{t("login.webNeverLeaves")}</Note>

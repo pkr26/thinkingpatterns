@@ -309,5 +309,73 @@
    ],
    "aad_b64": "WyJlbnRyeSIsIlx1MDY0NVx1MDYzM1x1MDYyYVx1MDYyZVx1MDYyZlx1MDY0NS1cdTA2NjEiLCJcdTA2NDVcdTA2MmZcdTA2MmVcdTA2NDQtMSJd"
   }
+ ],
+ "envelope_vectors": [
+  {
+   "kind": "entry-aad-v2",
+   "password": "envelope-entry-v2-pin",
+   "salt": "oKGio6SlpqeoqaqrrK2urw==",
+   "iterations": 600000,
+   "data_key": "QXxs6JnVUUPfP4tVq3zPqWppovGSfKWmHvUau/vj4D0=",
+   "plaintext": "eyJ2IjoxLCJ0ZXh0IjoidmVyc2lvbi1ib3VuZCBBQUQgcGluIiwic2VudGltZW50IjowLjEsImNyZWF0ZWRfYXQiOiIyMDI2LTA5LTI2In0=",
+   "aad_parts": [
+    "entry",
+    "user-909",
+    "entry-2026-09-26-v2",
+    "3"
+   ],
+   "nonce": "MDEyMzQ1Njc4OTo7",
+   "blob": "MDEyMzQ1Njc4OTo7dxw2y4vI88Rs7TTvIlgeJXHlUXLM20gOMjxYGbSfKGUamtewsrfqqfC0sLbLZFu1qQaOZvoBjLLZyVz4x03Ok5h2Nr07lx2kS0iZX4kZnAmjDZegUzf3VzRwMDgZM0Xy"
+  },
+  {
+   "kind": "entry-aad-v2-tampered",
+   "password": "envelope-entry-v2-pin",
+   "salt": "oKGio6SlpqeoqaqrrK2urw==",
+   "iterations": 600000,
+   "data_key": "QXxs6JnVUUPfP4tVq3zPqWppovGSfKWmHvUau/vj4D0=",
+   "aad_parts": [
+    "entry",
+    "user-909",
+    "entry-2026-09-26-v2",
+    "3"
+   ],
+   "blob": "MDEyMzQ1Njc4OTo7dxw2y4vI88Rs7TTvIlgeJXHlUXLM20gOMjxYGbSfKGUamtewsrfqqfC0sbbLZFu1qQaOZvoBjLLZyVz4x03Ok5h2Nr07lx2kS0iZX4kZnAmjDZegUzf3VzRwMDgZM0Xy",
+   "expect": "tamper"
+  },
+  {
+   "kind": "key-envelope-wrap",
+   "password": "envelope-wrap-pin",
+   "salt": "sLGys7S1tre4ubq7vL2+vw==",
+   "iterations": 600000,
+   "master_key": "lMtwRy9DzK0MFTW7BaAgDXJZ9tEeA5rwnEeZ4u5tG9g=",
+   "kdf_params": {
+    "algorithm": "pbkdf2-sha256",
+    "version": 1,
+    "iterations": 600000
+   },
+   "kek": "W33X3sZrEyE+0PwapAdyLhyKMGxjLVCVdqzcnm9MXWw=",
+   "username": "envelope-wrap-user",
+   "data_key": "yMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5uc=",
+   "aad": "eyJjb250ZXh0IjoiZW52ZWxvcGUiLCJrZGZfcGFyYW1zIjp7ImFsZ29yaXRobSI6InBia2RmMi1zaGEyNTYiLCJ2ZXJzaW9uIjoxLCJpdGVyYXRpb25zIjo2MDAwMDB9LCJ1c2VybmFtZSI6ImVudmVsb3BlLXdyYXAtdXNlciJ9",
+   "nonce": "PD0+P0BBQkNERUZH",
+   "wrapped": "PD0+P0BBQkNERUZHTpSJNOqqq2O0gKPjd8fkHzLCf3SR7571nKT0wCnYlYAnYgETLienz6BXxPGmHV6X"
+  },
+  {
+   "kind": "key-envelope-wrap-tampered",
+   "password": "envelope-wrap-pin",
+   "salt": "sLGys7S1tre4ubq7vL2+vw==",
+   "iterations": 600000,
+   "master_key": "lMtwRy9DzK0MFTW7BaAgDXJZ9tEeA5rwnEeZ4u5tG9g=",
+   "kdf_params": {
+    "algorithm": "pbkdf2-sha256",
+    "version": 1,
+    "iterations": 600000
+   },
+   "kek": "W33X3sZrEyE+0PwapAdyLhyKMGxjLVCVdqzcnm9MXWw=",
+   "username": "envelope-wrap-user",
+   "aad": "eyJjb250ZXh0IjoiZW52ZWxvcGUiLCJrZGZfcGFyYW1zIjp7ImFsZ29yaXRobSI6InBia2RmMi1zaGEyNTYiLCJ2ZXJzaW9uIjoxLCJpdGVyYXRpb25zIjo2MDAwMDB9LCJ1c2VybmFtZSI6ImVudmVsb3BlLXdyYXAtdXNlciJ9",
+   "wrapped": "PD0+P0BBQkNERUZHTpSJNOqqq2O0gKPjd8fkHzLCfnSR7571nKT0wCnYlYAnYgETLienz6BXxPGmHV6X",
+   "expect": "tamper"
+  }
  ]
 }

@@ -8,7 +8,7 @@
  * PUT /account/credential) — password change, interrupted-change
  * recovery, and compromise rotation of the sharing key.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, type AccessLogRow, type Patient } from "../api";
 import {
   decryptCaseloadSummary,
@@ -24,12 +24,26 @@ import {
   unwrapPatientDataKey,
 } from "../crypto";
 import type { Bytes, CaseloadSummary } from "../crypto";
-import { currentOrigin, randomBytes, sessionStore, visitAnchorStore } from "../platform";
-import { Button, Card, ErrorBanner, Field, Note, theme } from "../ui";
+import { copyToClipboard, currentOrigin, downloadTextFile, randomBytes, sessionStore, visitAnchorStore } from "../platform";
+import { Button, Card, ErrorBanner, Field, Note } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
 import { verifyInsightsGeneration, type PortalSession } from "./PatientView";
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+
+/** 2026-09-26 audit round (M, UX copy): the deep triage scan's access
+ *  footprint — one insights fetch + full-blob decrypt per active patient,
+ *  and one server audit row per patient — must be acknowledged once before
+ *  the first run of a browser session. "Don't ask again" is deliberately
+ *  MODULE state: it lives only as long as this tab's JS realm and never
+ *  touches storage, so a fresh page load asks again. */
+let scanConfirmedForSession = false;
+
+/** Test seam: forget the session-scoped confirmation latch (the same
+ *  shape as PatientView's resetInsightsFreshness). */
+export function resetScanConfirmation(): void {
+  scanConfirmedForSession = false;
+}
 
 /** S-4 (pentest 2026-09-26): the interrupted-change recovery salt, keyed by
  *  therapist. sessionStorage — never localStorage: the salt is the only
@@ -83,9 +97,30 @@ export function PatientsView(props: {
   const [sort, setSort] = useState<"shared" | "username" | "triage">("shared");
   const [scan, setScan] = useState<Record<string, CaseloadScanRow> | null>(null);
   const [scanning, setScanning] = useState(false);
+  /** 2026-09-26 audit round (M, UX copy): the armed state of the one-time
+   *  scan confirmation (see scanConfirmedForSession above), plus its
+   *  "don't ask again" checkbox. */
+  const [confirmScan, setConfirmScan] = useState(false);
+  const [scanNoAsk, setScanNoAsk] = useState(false);
+  /** Generation token for the manual scan (2026-09-26 audit round, M):
+   *  navigation/unmount (or a newer scan) invalidates an in-flight loop
+   *  before every further fetch, decrypt, and setState — the scan used to
+   *  keep fetching + decrypting every remaining patient's pattern blob
+   *  after the view was gone. */
+  const scanGeneration = useRef(0);
+  useEffect(() => () => { scanGeneration.current += 1; }, []);
   /** This therapist's own wrap-key fingerprint (shown beside the pairing
-   * code so the patient can verify it after lookup — 2026-09-17 audit). */
+   *  code so the patient can verify it after lookup — 2026-09-17 audit). */
   const [fingerprint, setFingerprint] = useState<string | null>(null);
+  /** SAS out-of-band comparison (2026-09-26): after generating a code, the
+   *  therapist enters the PATIENT'S account id (the patient reads it from
+   *  their app after entering the code) and pulls the SAS the server
+   *  derived for this same (code, wrap key, patient) triple. The two
+   *  humans compare by voice before the patient confirms the grant. */
+  const [sasPatientId, setSasPatientId] = useState("");
+  const [sasBusy, setSasBusy] = useState(false);
+  const [sasError, setSasError] = useState("");
+  const [sasResult, setSasResult] = useState<{ sas: string; wrap_key_fingerprint: string } | null>(null);
   /** Audit B-4 (2026-09-21): the accountability view of this therapist's
    *  own portal actions, fetched on demand from the server's access log. */
   const [auditRows, setAuditRows] = useState<AccessLogRow[] | null>(null);
@@ -128,8 +163,14 @@ export function PatientsView(props: {
   const [totpCode, setTotpCode] = useState("");
   /** S-3 (pentest 2026-09-26): the one-time recovery-code set from enable —
    *  held in state until the panel closes/sign-out, shown exactly once
-   *  (the server keeps only digests; there is no re-display, ever). */
+   *  (the server keeps only digests; there is no re-display, ever).
+   *  2026-09-26 audit round (L): the block now carries copy/download
+   *  affordances through the platform seam, and the codes leave React
+   *  state the moment their block loses focus (or the panel closes) —
+   *  shown-once material never idles on screen. */
   const [totpBackupCodes, setTotpBackupCodes] = useState<string[] | null>(null);
+  /** Honest feedback for the copy affordances ("copied" / why not). */
+  const [totpCopyNote, setTotpCopyNote] = useState("");
 
   /** Same derivation as the sign-in path, with the same P-1 hygiene: the
    *  salt bytes and master never outlive this function; only the returned
@@ -422,6 +463,17 @@ export function PatientsView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [securityOpen, props.session]);
 
+  /** 2026-09-26 audit round (L): the copy affordances for the shown-once
+   *  TOTP material go through the platform seam and report honestly. */
+  const copyTotpText = async (text: string, what: string): Promise<void> => {
+    const copied = await copyToClipboard(text);
+    setTotpCopyNote(
+      copied
+        ? `${what} copied to clipboard.`
+        : `could not copy the ${what} — select the text and copy it manually.`,
+    );
+  };
+
   const loadAudit = useCallback(() => {
     setAuditError("");
     setAuditBusy(true);
@@ -468,6 +520,11 @@ export function PatientsView(props: {
     void (async () => {
       const next: Record<string, CaseloadSummary | null> = {};
       for (const patient of patients) {
+        // 2026-09-26 audit round (M): check the token before EVERY await
+        // iteration — navigation/unmount must stop the decrypt loop, not
+        // just the final setState (each iteration is a live-key decrypt
+        // that keeps running on a stale screen otherwise).
+        if (cancelled) return;
         if (patient.status !== "active" || !patient.summary_blob || !patient.summary_eph_pub) {
           continue;
         }
@@ -505,6 +562,10 @@ export function PatientsView(props: {
     setBusy(true);
     setError("");
     setPairingCode(null);
+    // A new code is a NEW pairing session: its SAS differs by construction
+    // (the code is an HMAC input), so any displayed comparison retires.
+    setSasResult(null);
+    setSasError("");
     try {
       const { code } = await api.newPairingCode();
       setPairingCode(code);
@@ -515,15 +576,51 @@ export function PatientsView(props: {
     }
   };
 
+  /** The therapist half of the SAS comparison: pull the server's
+   *  verification code for this live pairing session + the patient's id.
+   *  The code must belong to THIS therapist and still be live; anything
+   *  else answers the flat 404 (unknown, expired, consumed, someone
+   *  else's — indistinguishable, exactly like lookup/grant). */
+  const showSas = async () => {
+    if (sasBusy || !pairingCode || !sasPatientId.trim()) return;
+    setSasBusy(true);
+    setSasError("");
+    setSasResult(null);
+    try {
+      const result = await api.pairingSas(sasPatientId.trim(), pairingCode);
+      setSasResult({ sas: result.sas, wrap_key_fingerprint: result.wrap_key_fingerprint });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setSasError("pairing code not found or expired — generate a new code and try again");
+      } else {
+        setSasError(err instanceof Error ? err.message : "could not load the verification code");
+      }
+    } finally {
+      setSasBusy(false);
+    }
+  };
+
   const scanCaseload = async () => {
     if (scanning || !props.session) return;
+    // 2026-09-26 audit round (M): this run owns a generation token. The
+    // unmount effect (and every later scan) bumps the ref, so a stale loop
+    // bails before each further fetch/decrypt and before every setState —
+    // navigating away mid-scan no longer keeps fetching + decrypting every
+    // remaining patient's pattern blob (each of which writes a server
+    // audit row) into a dead component.
+    const operation = ++scanGeneration.current;
     setScanning(true);
     setError("");
     const rows: Record<string, CaseloadScanRow> = {};
     try {
       for (const patient of patients.filter((p) => p.status === "active")) {
+        if (operation !== scanGeneration.current) return;
         try {
           const summary = await api.patientInsights(patient.user_id);
+          // Re-check after the await: the fetch may have parked long enough
+          // for the view to die (or a newer scan to start) — do not unwrap
+          // and decrypt this patient's blob into a dead screen.
+          if (operation !== scanGeneration.current) return;
           // Same L-75 anchor store the chart uses (sessionStorage first,
           // lock-scrubbed localStorage fallback): the scan and the chart
           // must agree on which stamp the delta counts from.
@@ -576,10 +673,24 @@ export function PatientsView(props: {
           }; // -1 = could not scan (revoked mid-scan, dead key): honest blank
         }
       }
-      setScan(rows);
+      if (operation === scanGeneration.current) setScan(rows);
     } finally {
-      setScanning(false);
+      if (operation === scanGeneration.current) setScanning(false);
     }
+  };
+
+  /** 2026-09-26 audit round (M, UX copy): the scan button arms the one-time
+   *  confirmation instead of starting the run — the confirmation names the
+   *  access footprint in plain language before the first fetch + audit row
+   *  exists. Once "don't ask again" is set, the button runs directly for
+   *  the rest of this browser session (module state, never storage). */
+  const startOrConfirmScan = (): void => {
+    if (scanning) return;
+    if (!scanConfirmedForSession && !confirmScan) {
+      setConfirmScan(true);
+      return;
+    }
+    void scanCaseload();
   };
 
   const activeAll = patients.filter((p) => p.status === "active");
@@ -606,7 +717,7 @@ export function PatientsView(props: {
   const stopped = patients.filter((p) => p.status !== "active");
 
   return (
-    <main className="portal-main" style={{ minHeight: "100vh" }}>
+    <main className="portal-main">
       <header className="portal-head">
         <h1>Patients — {props.displayName}</h1>
         <Button label="Sign out" small onPress={props.onSignOut} />
@@ -630,6 +741,44 @@ export function PatientsView(props: {
         {fingerprint && (
           <Note>Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit.</Note>
         )}
+        {/* SAS out-of-band comparison (2026-09-26): after the patient
+            enters the code, their app shows a 6-digit verification code
+            and their account id. Enter that id here to pull the SAME
+            code from this side — then compare by voice before they
+            confirm the grant. A substituted key changes the SAS; the two
+            screens cannot be made to agree. */}
+        {pairingCode && (
+          <>
+            <hr className="divider" />
+            <Field
+              label="Patient's account id (shown in their app)"
+              value={sasPatientId}
+              onChange={(value) => setSasPatientId(value.trim())}
+              placeholder="32 characters"
+              autoComplete="off"
+            />
+            <Button
+              label={sasBusy ? "Checking…" : "Show verification code"}
+              small
+              onPress={() => void showSas()}
+              disabled={sasBusy || sasPatientId.length === 0}
+            />
+            {sasError && <Note tone="danger" role="status">{sasError}</Note>}
+            {sasResult && (
+              <>
+                <p data-testid="pairing-sas" className="pairing-code">
+                  {sasResult.sas}
+                </p>
+                <Note tone="warn">
+                  Verification code for this pairing (key id {sasResult.wrap_key_fingerprint}).
+                  The patient&apos;s app shows the same code after they enter yours — read it to
+                  each other and confirm it matches EXACTLY before they confirm sharing. A
+                  mismatch means a key was substituted: generate a new code and do not proceed.
+                </Note>
+              </>
+            )}
+          </>
+        )}
         <Button label={busy ? "Generating…" : "Generate pairing code"} onPress={newCode} disabled={busy} />
       </Card>
 
@@ -637,13 +786,13 @@ export function PatientsView(props: {
       {loadFailed && (
         // Audit fix 17 (2026-09-21): recovery from a failed caseload load
         // used to require a reload or sign-out.
-        <div style={{ marginTop: 8 }}>
+        <div className="mt-8">
           <Button label="Retry loading patients" small onPress={refresh} />
         </div>
       )}
 
       {sensitiveCount > 0 && (
-        <div data-testid="sensitive-banner" style={{ marginBottom: 14 }}>
+        <div data-testid="sensitive-banner" className="mb-14">
           <Note tone="warn">
             {sensitiveCount} of your patients {sensitiveCount === 1 ? "has a sensitive card" : "have sensitive cards"} in
             their current patterns. Opening {sensitiveCount === 1 ? "that chart" : "those charts"} puts the
@@ -652,10 +801,10 @@ export function PatientsView(props: {
         </div>
       )}
 
-      <h3 className="section-label" style={{ marginTop: 22 }}>ACTIVE</h3>
+      <h3 className="section-label section-label--gap">ACTIVE</h3>
       {activeAll.length > 1 && (
         <div className="toolbar">
-          <Button label={scanning ? "Scanning caseload…" : "Scan caseload for triage"} small onPress={() => void scanCaseload()} disabled={scanning} />
+          <Button label={scanning ? "Scanning caseload…" : "Scan caseload for triage"} small onPress={startOrConfirmScan} disabled={scanning} />
           {/* F-6 (2026-09-21): search + sort for the caseload. The classes
               carry the design (portal.css .toolbar*); the select keeps its
               native arrow suppressed and .select-wrap draws the CSP-safe
@@ -687,10 +836,42 @@ export function PatientsView(props: {
           </label>
         </div>
       )}
+      {/* 2026-09-26 audit round (M, UX copy): the armed one-time confirmation.
+              The plain-language footprint precedes the first fetch — every
+              scan is visible to the patient in the server's access log, so
+              the therapist confirms the N-request/N-audit-row footprint
+              before it exists. "Don't ask again" survives only this browser
+              session (module state, never storage). */}
+      {confirmScan && !scanning && (
+        <div className="scan-confirm">
+          <Note tone="warn">
+            This scan downloads and decrypts every active patient&apos;s pattern data — one request and one
+            audit entry per patient (their app can see that this portal read their patterns). The decrypted
+            counts are held only for this screen; nothing is stored.
+          </Note>
+          <label className="confirm-label">
+            <input
+              type="checkbox"
+              checked={scanNoAsk}
+              onChange={(e) => setScanNoAsk(e.target.checked)}
+              aria-label="Do not ask again in this browser session"
+            />
+            Don&apos;t ask again in this browser session
+          </label>
+          <div className="row">
+            <Button label="Start the triage scan" small onPress={() => {
+              if (scanNoAsk) scanConfirmedForSession = true;
+              setConfirmScan(false);
+              void scanCaseload();
+            }} />
+            <Button label="Cancel" small variant="ghost" onPress={() => setConfirmScan(false)} />
+          </div>
+        </div>
+      )}
       {activeAll.length > 1 && (
-        <div style={{ marginBottom: 10 }}>
-          <span style={{ color: theme.muted, fontSize: 12 }}>
-            The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored.
+        <div className="mb-10">
+          <span className="hint">
+            The triage scan fetches each patient&apos;s decrypted pattern counts sequentially — nothing is stored.
           </span>
         </div>
       )}
@@ -705,9 +886,9 @@ export function PatientsView(props: {
         const summary = summaries[patient.user_id];
         return (
         <Card key={patient.user_id}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div className="row-between">
             <div>
-              <strong style={{ color: theme.text, fontSize: 15 }}>{patient.username}</strong>
+              <strong className="patient-name">{patient.username}</strong>
               <Note>
                 sharing since {dayOf(patient.granted_at)}
                 {/* M-21 (2026-09-20): a manual scan row is FRESHER than the
@@ -732,12 +913,12 @@ export function PatientsView(props: {
 
       {stopped.length > 0 && (
         <>
-          <h3 className="section-label" style={{ marginTop: 22 }}>STOPPED SHARING</h3>
+          <h3 className="section-label section-label--gap">STOPPED SHARING</h3>
           {stopped.map((patient) => (
             <Card key={patient.user_id} deep>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div className="row-between">
                 <div>
-                  <strong style={{ color: theme.text, fontSize: 14 }}>{patient.username}</strong>
+                  <strong className="patient-name patient-name--sm">{patient.username}</strong>
                   <Note>
                     access ended {patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — their
                     entries and patterns are no longer reachable. Your notes about this patient stay.
@@ -759,14 +940,14 @@ export function PatientsView(props: {
           who-accessed-my-data endpoint on the mobile side. */}
       <Card title="My access history" deep>
         {auditRows === null ? (
-          <div>
+          <div className="row row--wrap">
             <Button
               label={auditBusy ? "Loading…" : "Load access history"}
               small
               onPress={loadAudit}
               disabled={auditBusy}
             />
-            <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
+            <span className="hint">
               Every read and write this portal performed (newest 100) — nothing is loaded until you ask.
             </span>
           </div>
@@ -795,9 +976,9 @@ export function PatientsView(props: {
           fetched, or sent until asked for. */}
       <Card title="Account security" deep>
         {!securityOpen ? (
-          <div>
+          <div className="row row--wrap">
             <Button label="Show account security" small variant="ghost" onPress={() => setSecurityOpen(true)} />
-            <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
+            <span className="hint">
               Change your password, recover your sharing key after an interrupted change, or rotate a
               compromised sharing key — nothing runs until you ask.
             </span>
@@ -805,7 +986,7 @@ export function PatientsView(props: {
         ) : (
           <>
             <div className="stack">
-              <h3 className="section-label" style={{ marginTop: 0 }}>Change password</h3>
+              <h3 className="section-label section-label--flush">Change password</h3>
               <Note>
                 Your sharing key is re-wrapped under the new password first, then the login credential is
                 rotated — on success every session, including this one, is signed out. There is still no
@@ -823,7 +1004,7 @@ export function PatientsView(props: {
             </div>
             <div className="stack">
               <hr className="divider" />
-              <h3 className="section-label" style={{ marginTop: 0 }}>Recover sharing key</h3>
+              <h3 className="section-label section-label--flush">Recover sharing key</h3>
               <Note>
                 Repairs an interrupted password change: if the change failed after the sharing key was
                 re-wrapped, this seals the same key back under the password you actually sign in with, so
@@ -853,7 +1034,7 @@ export function PatientsView(props: {
             </div>
             <div className="stack">
               <hr className="divider" />
-              <h3 className="section-label" style={{ marginTop: 0 }}>Rotate sharing key (suspected compromise)</h3>
+              <h3 className="section-label section-label--flush">Rotate sharing key (suspected compromise)</h3>
               <Note>
                 Publishes a brand-new sharing keypair sealed under your current password. Existing grants
                 stay readable only after each patient re-wraps their data key via the pairing fingerprint
@@ -861,7 +1042,7 @@ export function PatientsView(props: {
                 the point. Your notes are unaffected: they are sealed under your password, not this key.
               </Note>
               <Field label="Current password (to authorize rotation)" value={compCurrent} onChange={setCompCurrent} type="password" autoComplete="current-password" />
-              <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: theme.muted, fontSize: 12 }}>
+              <label className="confirm-label">
                 <input
                   type="checkbox"
                   checked={compConfirmed}
@@ -880,7 +1061,7 @@ export function PatientsView(props: {
             </div>
             <div className="stack">
               <hr className="divider" />
-              <h3 className="section-label" style={{ marginTop: 0 }}>Two-factor authentication (authenticator app)</h3>
+              <h3 className="section-label section-label--flush">Two-factor authentication (authenticator app)</h3>
               {totpStatus === null && (
                 <Note role="status">Checking this account&apos;s two-factor status…</Note>
               )}
@@ -907,20 +1088,28 @@ export function PatientsView(props: {
                     Enter this secret in your authenticator app NOW — it is shown exactly once and
                     never again. Two-factor only takes effect after you confirm a code below.
                   </Note>
-                  <p
-                    aria-label="Authenticator secret (manual entry)"
-                    className="mono"
-                    style={{ color: theme.text, fontSize: 14, wordBreak: "break-all", margin: 0, letterSpacing: 1 }}
-                  >
-                    {totpPending.secretBase32}
-                  </p>
-                  <p
-                    aria-label="otpauth URI for apps that accept it"
-                    className="mono"
-                    style={{ color: theme.muted, fontSize: 11, wordBreak: "break-all", margin: 0 }}
-                  >
-                    {totpPending.otpauthUri}
-                  </p>
+                  <div className="totp-secret">
+                    <p
+                      aria-label="Authenticator secret (manual entry)"
+                      className="mono mono-secret"
+                    >
+                      {totpPending.secretBase32}
+                    </p>
+                    <p
+                      aria-label="otpauth URI for apps that accept it"
+                      className="mono mono-uri"
+                    >
+                      {totpPending.otpauthUri}
+                    </p>
+                    <div className="row row--wrap">
+                      <Button
+                        label="Copy secret"
+                        small
+                        onPress={() => void copyTotpText(`${totpPending.secretBase32}`, "secret")}
+                      />
+                      {totpCopyNote && <span className="hint" role="status">{totpCopyNote}</span>}
+                    </div>
+                  </div>
                   <Field label="Current password (to authorize setup)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
                   <Field
                     label="6-digit code from the app"
@@ -944,22 +1133,56 @@ export function PatientsView(props: {
                     recovery code).
                   </Note>
                   {totpBackupCodes && (
-                    <>
+                    /* 2026-09-26 audit round (L): the shown-once codes are
+                        focusable so they can be BLUR-CLEARED — the moment
+                        focus leaves this block (copied or not), the codes
+                        leave React state; panel close clears them too. The
+                        "shown EXACTLY ONCE" copy stays accurate because the
+                        server keeps only digests: there is no re-display. */
+                    <div
+                      className="totp-codes"
+                      tabIndex={0}
+                      aria-label="One-time recovery codes (cleared when this block loses focus)"
+                      onBlur={(event) => {
+                        const next = event.relatedTarget as Node | null;
+                        if (next && event.currentTarget.contains(next)) return;
+                        setTotpBackupCodes(null);
+                        setTotpCopyNote("");
+                      }}
+                    >
                       <Note tone="warn">
                         Recovery codes — shown EXACTLY ONCE, never again. Each works one time in place
-                        of a 6-digit code at sign-in. Copy them somewhere safe NOW: losing every code
+                        of a 6-digit code at sign-in. Copy or download them NOW: losing every code
                         AND the authenticator leaves an operator clear as the only path.
                       </Note>
-                      <div
-                        aria-label="One-time recovery codes"
-                        className="mono"
-                        style={{ color: theme.text, fontSize: 13, letterSpacing: 1, margin: "4px 0", columns: 2 }}
-                      >
+                      <div aria-label="One-time recovery codes" className="mono recovery-codes">
                         {totpBackupCodes.map((code) => (
-                          <p key={code} style={{ margin: "2px 0" }}>{code}</p>
+                          <p key={code}>{code}</p>
                         ))}
                       </div>
-                    </>
+                      <div className="row row--wrap">
+                        <Button
+                          label="Copy recovery codes"
+                          small
+                          onPress={() => void copyTotpText(totpBackupCodes.join("\n"), "recovery codes")}
+                        />
+                        <Button
+                          label="Download recovery codes (.txt)"
+                          small
+                          variant="ghost"
+                          onPress={() =>
+                            downloadTextFile(
+                              "mindpattern-recovery-codes.txt",
+                              "MindPattern therapist portal — one-time recovery codes\n\n"
+                                + `${totpBackupCodes.join("\n")}\n\n`
+                                + "Each code works one time in place of a 6-digit sign-in code.\n"
+                                + "They are shown only once; keep this file somewhere safe.",
+                            )
+                          }
+                        />
+                        {totpCopyNote && <span className="hint" role="status">{totpCopyNote}</span>}
+                      </div>
+                    </div>
                   )}
                   {!totpBackupCodes && (
                     <Note tone="danger">
@@ -992,9 +1215,13 @@ export function PatientsView(props: {
               variant="ghost"
               onPress={() => {
                 setSecurityOpen(false);
-                // The pending secret is shown-once material: closing the
-                // panel discards it (a fresh setup mints a fresh secret).
+                // The pending secret AND the one-time recovery codes are
+                // shown-once material: closing the panel discards them (a
+                // fresh setup mints a fresh secret; the codes have no
+                // re-display, ever).
                 setTotpPending(null);
+                setTotpBackupCodes(null);
+                setTotpCopyNote("");
                 setTotpPw("");
                 setTotpCode("");
               }}

@@ -5,8 +5,12 @@ import react from "@vitejs/plugin-react";
 // The portal talks only to its own origin (`/api` is proxied locally in dev),
 // so a credential-bearing page never needs broad HTTPS egress. Keep the CSP
 // aligned with LoginView's immutable same-origin API boundary.
+// 2026-09-26 CSP hardening: style-src no longer allows inline styles — the
+// views' former inline style objects are portal.css classes now and the
+// print rules live in public/print.css (a real <link media="print">
+// stylesheet), so no <style> tag or style= attribute ships anywhere.
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'",
+  "Content-Security-Policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",

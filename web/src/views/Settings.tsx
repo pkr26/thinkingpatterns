@@ -3,9 +3,11 @@
  * consent (re-authenticated), the access log ("who accessed my data"),
  * the web-first ciphertext export download, queue recovery,
  * verifier-gated account deletion with the retention honesty note, and
- * the full password-rotation flow — rekey the corpus (two single-use
- * processing sessions), re-wrap every active therapist grant, THEN
- * rotate the credential (which kills every session everywhere).
+ * the password-change flows — ROUTED BY KEY SCHEME (2026-09-26): v1
+ * accounts keep the full rekey rotation (two single-use processing
+ * sessions, therapist-grant re-wraps, credential rotation), v2 accounts
+ * get the O(1) envelope re-wrap (PUT /account/password), and v1 accounts
+ * can self-upgrade to v2 ("Upgrade key protection").
  *
  * Redesign 2026-09-26: sectioned cards (Appearance / Privacy & data /
  * Access log / Account / an isolated red Danger zone), the LLM consent
@@ -13,21 +15,26 @@
  * and the access log renders as a timeline.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type ListedConsent } from "../api/client";
+import { api, auth, ApiError, sessionUsername, type ListedConsent } from "../api/client";
 import { decrypt, deriveMasterKey, toBase64, fromBase64, zeroize, type Bytes } from "../crypto/core";
 import { buildAad } from "../crypto/aad";
+import { KDF_PARAMS_DEFAULT, rewrapDataKey } from "../crypto/envelope";
 import { decryptEntry } from "../crypto/patient";
 import { wrapDataKeyForTherapist } from "../crypto/sharing";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { rebindEntryVersions, forgetAllEntryVersions } from "../entryVersions";
+import { clearActiveDraft, rewrapActiveDraft } from "../entryDraft";
+import { CADENCE_INTERVALS, clearMeasureCadence, readMeasureCadence, writeMeasureCadence, type MeasureCadencePref } from "../measureCadence";
+import { clearSafetyPlan, rewrapSafetyPlan } from "../safetyPlan";
 import { passwordPolicyError } from "./LoginView";
 import { requeueRejected, rejectedEntries, queueLength, clearQueue } from "../offlineQueue";
 import { downloadTextFile, localStore, randomBytes } from "../platform";
 import { clearMoodLog, rewrapMoodLog } from "../moodLog";
 import { clearFeedback, rewrapFeedback } from "../questionFeedback";
+import { clearPendingMeasure, rewrapPendingMeasure } from "../pendingMeasure";
 import { clearMutedPids, readMutedPids, writeMutedPids } from "../patternMutes";
 import { forgetAnalysisGeneration } from "../stateSeqGuard";
-import { t } from "../strings";
+import { applyLanguagePref, getLanguagePref, t, type LanguagePref } from "../strings";
 import { vault } from "../vault";
 import { applyThemePref, readThemePref, writeThemePref, type ThemePref } from "../theme";
 import { Button, Card, ErrorBanner, Field, Note, PillNote, SegmentedControl, Toggle } from "../ui";
@@ -83,11 +90,18 @@ async function newKeyReadsJournal(userId: string, newDataKey: Bytes): Promise<bo
  *  rekeyed the corpus, so the ladder actually fires. The salt is public
  *  material (the server stores it in the clear after rotation); it is
  *  inert without the password and is wiped by deletion's mindpattern.*
- *  prefix sweep. */
+ *  prefix sweep. (v1 flow only — the v2 O(1) change never rekeys, so it
+ *  never needs a resume ladder.) */
 const pendingSaltKey = (userId: string): string => `mindpattern.rotatePendingSalt.${userId}`;
 
-export function SettingsView(props: { onLockdown: (notice: string) => void }): React.JSX.Element {
+export function SettingsView(props: { onLockdown: (notice: string) => void; onOpenSafetyPlan?: () => void }): React.JSX.Element {
   const [themePref, setThemePref] = useState<ThemePref>(() => readThemePref());
+  // Language (audit 2026-09-26 LOW): 'auto' | 'en' | 'es', applied live.
+  const [languagePref, setLanguagePref] = useState<LanguagePref>(() => getLanguagePref());
+  // The opt-in check-in cadence (clinical review 2026-09-27): null = not
+  // yet read from the per-account slot; the interval control renders only
+  // while the reminder is on.
+  const [cadence, setCadence] = useState<MeasureCadencePref | null>(null);
   const [llm, setLlm] = useState<{ available: boolean; enabled: boolean } | null>(null);
   // 2026-09-26 audit LOW b: a FAILED meta/consent read is an explicit
   // unknown state with a retry — the LLM section used to vanish silently.
@@ -99,6 +113,17 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [deleteText, setDeleteText] = useState("");
+  /** The account's key scheme (2026-09-26): routes the password-change
+   *  card between the v1 rekey flow and the v2 O(1) re-wrap, and gates
+   *  the "Upgrade key protection" action. null = not yet known; "unknown"
+   *  (fetch failed) honestly blocks BOTH cards instead of guessing — the
+   *  v1 flow against a v2 account 409s key_scheme_conflict, and silently
+   *  showing v2 copy to a v1 account would promise re-encryption that
+   *  does not happen. A 404 means the backend predates the endpoint and
+   *  therefore has no v2 accounts at all: v1. */
+  const [keyScheme, setKeyScheme] = useState<"v1" | "v2" | null>(null);
+  const [schemeUnknown, setSchemeUnknown] = useState(false);
+  const [upgradePassword, setUpgradePassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -108,12 +133,24 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
     const run = generation.current + 1;
     generation.current = run;
     if (!vault.isUnlocked()) return;
+    setSchemeUnknown(false);
     setLlmLoad("loading");
-    const [meta, consentState] = await Promise.all([
+    const [meta, consentState, envelope] = await Promise.all([
       api.meta().catch(() => null),
       api.getLlmConsent().catch(() => null),
+      api.keyEnvelope().then(
+        (body) => body,
+        (err: unknown) => (err instanceof ApiError && err.status === 404 ? { key_scheme: "v1" } : null),
+      ),
     ]);
     if (generation.current !== run) return;
+    if (envelope) {
+      setKeyScheme(envelope.key_scheme === "v2" ? "v2" : "v1");
+      setSchemeUnknown(false);
+    } else {
+      setKeyScheme(null);
+      setSchemeUnknown(true);
+    }
     if (meta && consentState) {
       setLlm({ available: meta.llm_available, enabled: consentState.enabled });
       setLlmLoad("known");
@@ -125,6 +162,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
     if (owner) {
       setQueued(await queueLength(owner).catch(() => 0));
       setRejected((await rejectedEntries(owner).catch(() => [])).length);
+      setCadence(await readMeasureCadence(owner));
     }
     await loadAccess();
   }, []);
@@ -149,6 +187,25 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
     setThemePref(next);
     writeThemePref(next);
     applyThemePref(next);
+  };
+
+  const chooseLanguage = (pref: string): void => {
+    const next: LanguagePref = pref === "en" || pref === "es" ? pref : "auto";
+    setLanguagePref(next);
+    // Live AND persisted: the catalog swaps in place (subscribers re-render
+    // — this view included) and the next load resolves the same choice.
+    applyLanguagePref(next);
+  };
+
+  /** The check-in cadence: local non-content state in the per-account
+   *  slot (measureCadence.ts) — the toggle and the interval persist
+   *  immediately, with no server round trip. Toggling ON keeps the
+   *  already-chosen interval (4 weeks until the patient picks one). */
+  const chooseCadence = (pref: MeasureCadencePref): void => {
+    const owner = vault.ownerUserId();
+    if (!owner) return;
+    setCadence(pref);
+    void writeMeasureCadence(owner, pref);
   };
 
   const toggleLlm = async (enabled: boolean): Promise<void> => {
@@ -324,6 +381,19 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
       // sealed under a key nothing will derive again.
       await rewrapMoodLog(old.dataKey, newKey.dataKey, owner).catch(() => clearMoodLog(owner).catch(() => undefined));
       await rewrapFeedback(old.dataKey, newKey.dataKey, owner).catch(() => clearFeedback(owner).catch(() => undefined));
+      // The lock-sealed journal draft rides the same family (audit
+      // 2026-09-26): re-sealed under the new key, or cleared if unreadable.
+      await rewrapActiveDraft(old.dataKey, newKey.dataKey, owner).catch(() => clearActiveDraft(owner).catch(() => undefined));
+      // The local safety plan (clinical review 2026-09-27) rides it too —
+      // durable patient-written content, so a rotation re-seals it rather
+      // than losing it; an unreadable plan degrades to blank, never an
+      // error that blocks the rotation.
+      await rewrapSafetyPlan(old.dataKey, newKey.dataKey, owner).catch(() => clearSafetyPlan(owner).catch(() => undefined));
+      // Re-audit 2026-09-27: the pending-measure slot rides the same
+      // family — an in-flight questionnaire survives the rotation (or is
+      // cleared if unreadable; it is disposable metadata, never worth a
+      // rotation-blocking error).
+      await rewrapPendingMeasure(old.dataKey, newKey.dataKey, owner).catch(() => clearPendingMeasure(owner).catch(() => undefined));
       await readMutedPids(old.dataKey, owner)
         .then((pids) => writeMutedPids(newKey.dataKey, owner, pids))
         .catch(() => clearMutedPids(owner).catch(() => undefined));
@@ -348,6 +418,112 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
     }
   };
 
+  /** The O(1) v2 password change (2026-09-26): the vault's data key is the
+   *  RANDOM envelope key — it never rotates, so there is no rekey, no
+   *  consent re-wrap, and no local re-wrapping (mood log, drafts, mutes
+   *  all stay sealed under the same key). The client derives the NEW
+   *  salt + verifier, re-wraps the SAME data key under the new password,
+   *  and uploads one payload; the server swaps credential + envelope in
+   *  one transaction and bumps the token epoch — every session dies with
+   *  the 204, so success funnels to the honest lockdown, like v1. */
+  const rotatePasswordV2 = async (): Promise<void> => {
+    const owner = vault.ownerUserId();
+    const username = sessionUsername();
+    if (!owner || !username || !vault.isUnlocked()) {
+      setError(t("common.sessionLocked"));
+      return;
+    }
+    // The same full policy as the v1 path (M-1): the envelope re-wrap is
+    // the new offline-guessing floor on the credential-changing path.
+    const policy = passwordPolicyError(newPassword);
+    if (policy) {
+      setError(policy);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError(t("settings.pwMismatch"));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const old = vault.get();
+    let newKeys: PatientKeys | null = null;
+    let newSalt: Bytes | null = null;
+    try {
+      newSalt = randomBytes(16);
+      newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt));
+      const wrappedDataKeyB64 = await rewrapDataKey(old.dataKey, newKeys.masterKey, newSalt, username);
+      await api.changePassword({
+        verifierB64: toBase64(old.authKey),
+        newSaltB64: toBase64(newSalt),
+        newVerifierB64: toBase64(newKeys.authKey),
+        wrappedDataKeyB64,
+      });
+      // No local rewrap of anything: the data key did not change. The
+      // epoch bump killed this token too — lockdown, honestly.
+      props.onLockdown(t("settings.rotateV2SuccessNotice"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("settings.rotateFailed"));
+    } finally {
+      if (newKeys) zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
+      if (newSalt) zeroize(newSalt);
+      setBusy(false);
+    }
+  };
+
+  /** The v1→v2 self-upgrade (2026-09-26): wrap the CURRENT data key (the
+   *  one this vault already holds) under a KEK derived from the password
+   *  the user just typed, and upload it with two proofs — the verifier
+   *  derived from the SAME typed password (a mistyped password fails the
+   *  verifier server-side BEFORE any envelope is stored; storing an
+   *  envelope under the wrong password would brick every future unlock)
+   *  and a processing session opened with the current data key (the
+   *  possession proof; 403 envelope_key_mismatch means the session key
+   *  did not authenticate stored ciphertext — sign in fresh and retry).
+   *  Nothing the account can see changes: same key, same journal, same
+   *  grants; only future password changes become O(1). */
+  const upgradeKeyProtection = async (): Promise<void> => {
+    const owner = vault.ownerUserId();
+    const username = sessionUsername();
+    if (!owner || !username || !vault.isUnlocked() || !upgradePassword) {
+      setError(t("common.sessionLocked"));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setStatus(null);
+    let typedKeys: PatientKeys | null = null;
+    let saltBytes: Bytes | null = null;
+    try {
+      const { salt } = await auth.saltFor(username);
+      saltBytes = fromBase64(salt);
+      typedKeys = await derivePatientKeys(await deriveMasterKey(upgradePassword, saltBytes));
+      const verifierB64 = toBase64(typedKeys.authKey);
+      const dataKey = vault.get().dataKey;
+      const session = await api.openProcessingSession(toBase64(dataKey));
+      const wrappedDataKeyB64 = await rewrapDataKey(dataKey, typedKeys.masterKey, saltBytes, username);
+      await api.upgradeKeyEnvelope(
+        wrappedDataKeyB64,
+        KDF_PARAMS_DEFAULT as unknown as Record<string, unknown>,
+        session.session_token,
+        verifierB64,
+      );
+      setKeyScheme("v2");
+      setStatus(t("settings.upgradeDoneNote"));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "envelope_key_mismatch") {
+        setError(t("settings.upgradeKeyMismatchNote"));
+      } else {
+        setError(err instanceof Error ? err.message : t("settings.upgradeFailedNote"));
+      }
+    } finally {
+      if (typedKeys) zeroize(typedKeys.masterKey, typedKeys.authKey, typedKeys.dataKey);
+      if (saltBytes) zeroize(saltBytes);
+      setUpgradePassword("");
+      setBusy(false);
+    }
+  };
+
   const deleteAccount = async (): Promise<void> => {
     if (!vault.isUnlocked()) return;
     if (deleteText.trim().toUpperCase() !== "DELETE") {
@@ -364,12 +540,16 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
         // this browser's IndexedDB either — the offline queue (items,
         // rejected, quarantine), the entry-version high-water marks, the
         // analysis-generation mark, the encrypted mood log, the question
-        // feedback queue, and the encrypted pattern-mute set all go with
-        // the account.
+        // feedback queue, the encrypted pending-measure record, and the
+        // encrypted pattern-mute set all go with the account.
         await Promise.allSettled([
           clearFeedback(owner),
           clearMoodLog(owner),
           clearQueue(owner),
+          clearActiveDraft(owner),
+          clearSafetyPlan(owner),
+          clearMeasureCadence(owner),
+          clearPendingMeasure(owner),
           forgetAllEntryVersions(owner),
           forgetAnalysisGeneration(owner),
           clearMutedPids(owner),
@@ -404,7 +584,52 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
           onSelect={chooseTheme}
           a11yLabel={t("settings.appearanceTitle")}
         />
+        <hr className="divider" />
+        <Note tone="muted">{t("settings.languageNote")}</Note>
+        <SegmentedControl
+          options={[
+            { id: "auto", label: t("settings.languageAuto") },
+            { id: "en", label: t("settings.languageEn") },
+            { id: "es", label: t("settings.languageEs") },
+          ]}
+          activeId={languagePref}
+          onSelect={chooseLanguage}
+          a11yLabel={t("settings.languageA11y")}
+        />
       </Card>
+
+      <Card title={t("settings.cadenceTitle")}>
+        {cadence === null ? (
+          <Note role="status">{t("common.loading")}</Note>
+        ) : (
+          <>
+            <Toggle
+              checked={cadence.enabled}
+              onChange={(enabled) => chooseCadence({ ...cadence, enabled })}
+              disabled={busy}
+              label={t("settings.remindMeasures")}
+            />
+            {cadence.enabled && (
+              <>
+                <Note tone="muted">{t("settings.remindMeasuresNote")}</Note>
+                <SegmentedControl
+                  options={CADENCE_INTERVALS.map((weeks) => ({ id: String(weeks), label: t(`measures.cadence.${weeks}`) }))}
+                  activeId={String(cadence.intervalWeeks)}
+                  onSelect={(id) => chooseCadence({ ...cadence, intervalWeeks: Number(id) as MeasureCadencePref["intervalWeeks"] })}
+                  a11yLabel={t("settings.cadenceIntervalA11y")}
+                />
+              </>
+            )}
+          </>
+        )}
+      </Card>
+
+      {props.onOpenSafetyPlan && (
+        <Card title={t("plan.title")}>
+          <Note tone="muted">{t("settings.safetyPlanNote")}</Note>
+          <Button label={t("settings.openSafetyPlan")} onPress={props.onOpenSafetyPlan} small variant="ghost" icon="heart" />
+        </Card>
+      )}
 
       <Card title={t("settings.privacyDataTitle")}>
         {llmLoad === "known" && llm && (
@@ -459,12 +684,43 @@ export function SettingsView(props: { onLockdown: (notice: string) => void }): R
         {accessCursor && <Button label={t("settings.showMore")} onPress={() => void loadAccess(accessCursor)} small variant="ghost" />}
       </Card>
 
+      {/* Password change, routed by the account's key scheme (2026-09-26):
+          v2 accounts get the O(1) re-wrap (no re-encryption, honest copy);
+          v1 accounts keep the full rekey flow below. An UNKNOWN scheme
+          blocks the card — running the v1 flow against a v2 account would
+          409 key_scheme_conflict at the very last step. */}
       <Card title={t("settings.rotateTitle")}>
-        <Note tone="muted">{t("settings.rotateNote")}</Note>
-        <Field label={t("settings.newPasswordField")} value={newPassword} onChange={setNewPassword} type="password" autoComplete="new-password" />
-        <Field label={t("settings.confirmPasswordField")} value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />
-        <Button label={busy ? t("settings.working") : t("settings.changePasswordButton")} onPress={() => void rotatePassword()} disabled={busy} />
+        {keyScheme === null ? (
+          <>
+            <Note tone={schemeUnknown ? "warn" : "muted"}>{t("settings.schemeUnknownNote")}</Note>
+            {schemeUnknown && (
+              <Button label={t("settings.llmRetry")} onPress={() => void load()} small variant="ghost" disabled={busy} />
+            )}
+          </>
+        ) : (
+          <>
+            <Note tone="muted">{t(keyScheme === "v2" ? "settings.rotateV2Note" : "settings.rotateNote")}</Note>
+            <Field label={t("settings.newPasswordField")} value={newPassword} onChange={setNewPassword} type="password" autoComplete="new-password" />
+            <Field label={t("settings.confirmPasswordField")} value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />
+            <Button
+              label={busy ? t("settings.working") : t("settings.changePasswordButton")}
+              onPress={() => void (keyScheme === "v2" ? rotatePasswordV2() : rotatePassword())}
+              disabled={busy}
+            />
+          </>
+        )}
       </Card>
+
+      {/* v1 accounts only (2026-09-26): the self-service upgrade to the v2
+          key envelope. Collapsed to a single confirm-with-password action —
+          nothing is derived, fetched, or sent until the user asks. */}
+      {keyScheme === "v1" && (
+        <Card title={t("settings.upgradeTitle")}>
+          <Note tone="muted">{t("settings.upgradeNote")}</Note>
+          <Field label={t("settings.upgradePasswordField")} value={upgradePassword} onChange={setUpgradePassword} type="password" autoComplete="current-password" />
+          <Button label={busy ? t("settings.working") : t("settings.upgradeButton")} onPress={() => void upgradeKeyProtection()} disabled={busy || upgradePassword.length === 0} />
+        </Card>
+      )}
 
       <Card title={t("settings.deleteTitle")} tone="danger">
         <Note tone="danger">{t("settings.deleteNote")}</Note>

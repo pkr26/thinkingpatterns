@@ -10,9 +10,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { clearSession, api, hasSession, setUnauthorizedHandler, type Patient } from "./api";
 import { unlockWrapPrivateKey } from "./crypto";
 import { LoginView, type PortalKeys } from "./views/LoginView";
-import { PatientsView } from "./views/PatientsView";
+import { PatientsView, resetScanConfirmation } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
-import { InfoBanner, theme } from "./ui";
+import { InfoBanner } from "./ui";
 import { localStore, sessionStore, visitAnchorStore } from "./platform";
 
 type View =
@@ -57,7 +57,7 @@ export function App(): React.JSX.Element {
     setSessionState(next);
   }, []);
 
-  const lockDown = useCallback((message: string) => {
+  const lockDown = useCallback((message: string, opts?: { clearAnchors?: boolean }) => {
     lifecycle.current += 1;
     loginAttempt.current += 1;
     const retiring = sessionRef.current;
@@ -65,10 +65,20 @@ export function App(): React.JSX.Element {
     // are session-backed they DELIBERATELY survive this lock boundary — a
     // 10-minute idle lock or a token expiry mid-clinic-day must not erase
     // the "new since reviewed" delta; the browser session's end clears
-    // them. Only the localStorage fallback keeps the old scrub-on-lock
-    // contract, because localStorage would otherwise outlive the session.
-    if (retiring && !visitAnchorStore.sessionBacked()) {
-      localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+    // them. The 2026-09-26 audit round (L) added ONE carve-out: an
+    // EXPLICIT sign-out clears the session-backed stamps too — leaving the
+    // workstation for the day should not leave per-patient date stamps
+    // behind for whoever uses the tab next. Idle-lock retention stays the
+    // accepted L-75 trade-off. Only the localStorage fallback keeps the
+    // unconditional scrub-on-lock contract, because localStorage would
+    // otherwise outlive the session.
+    if (retiring) {
+      if (opts?.clearAnchors === true) {
+        sessionStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+        localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+      } else if (!visitAnchorStore.sessionBacked()) {
+        localStore.removePrefix(`mindpattern.lastVisit.${retiring.userId}.`);
+      }
     }
     // 2026-09-26 audit M-P1: revoke the bearer SERVER-SIDE before the local
     // teardown. POST /auth/logout bumps the account's token epoch, so a
@@ -95,6 +105,12 @@ export function App(): React.JSX.Element {
     setDisplayName("");
     setUnlockError("");
     setNotice(message);
+    // Re-audit 2026-09-27 (L): the triage-scan "don't ask again" latch is
+    // module state and survives everything above — without this reset, a
+    // DIFFERENT therapist signing into the same tab inherits the previous
+    // therapist's acknowledgment. Every lock boundary (explicit sign-out,
+    // idle lock, 401 expiry) ends the session, so the latch dies here too.
+    resetScanConfirmation();
     setView({ kind: "login" });
   }, [replacePortalSession]);
 
@@ -121,6 +137,14 @@ export function App(): React.JSX.Element {
   }, []);
 
   // Idle auto-lock: reset on any real interaction.
+  // 2026-09-26 audit round (M): only INTERACTION events re-arm the timer —
+  // the old list included bare `mousemove`, so a mouse jiggler (or a
+  // shared laptop's wandering cursor) kept decrypted charts and live keys
+  // on screen indefinitely. A visibilitychange listener covers the
+  // forgotten-foreground-tab case: background tabs throttle timers, so the
+  // overdue setTimeout may not fire until the user returns; a tab hidden
+  // longer than the idle threshold now locks the moment it becomes visible
+  // again, through the same lockDown path.
   useEffect(() => {
     if (!session) return;
     let timer = setTimeout(() => lockDown("Locked after inactivity — sign in again to continue."), IDLE_LOCK_MS);
@@ -128,11 +152,29 @@ export function App(): React.JSX.Element {
       clearTimeout(timer);
       timer = setTimeout(() => lockDown("Locked after inactivity — sign in again to continue."), IDLE_LOCK_MS);
     };
-    const events: (keyof WindowEventMap)[] = ["click", "keydown", "mousemove", "scroll", "touchstart"];
+    const events: (keyof WindowEventMap)[] = ["click", "keydown", "scroll", "wheel", "touchstart"];
     events.forEach((ev) => window.addEventListener(ev, bump, { passive: true }));
+    let hiddenAt: number | null = null;
+    const onVisibility = (): void => {
+      if (typeof document === "undefined") return;
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= IDLE_LOCK_MS) {
+        lockDown("Locked after inactivity — sign in again to continue.");
+      }
+      hiddenAt = null;
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
     return () => {
       clearTimeout(timer);
       events.forEach((ev) => window.removeEventListener(ev, bump));
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
     };
   }, [session]);
 
@@ -207,7 +249,7 @@ export function App(): React.JSX.Element {
       <>
         {notice && <InfoBanner message={notice} flush />}
         {unlockError && (
-          <div className="banner banner--error" role="alert" style={{ borderRadius: 0 }}>
+          <div className="banner banner--error banner--flush" role="alert">
             {unlockError}
           </div>
         )}
@@ -217,7 +259,7 @@ export function App(): React.JSX.Element {
   }
 
   if (!session) {
-    return <p style={{ color: theme.text }}>Unlocking…</p>;
+    return <p className="unlocking">Unlocking…</p>;
   }
 
   if (view.kind === "patient") {
@@ -226,7 +268,9 @@ export function App(): React.JSX.Element {
         patient={view.patient}
         session={session}
         onBack={() => setView({ kind: "patients" })}
-        onSignOut={() => lockDown("Signed out. Your in-memory keys were cleared.")}
+        // 2026-09-26 audit round (L): an explicit sign-out also clears the
+        // session-backed visit anchors (see lockDown's carve-out).
+        onSignOut={() => lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true })}
       />
     );
   }
@@ -237,7 +281,8 @@ export function App(): React.JSX.Element {
       session={session}
       onOpen={(patient) => setView({ kind: "patient", patient })}
       onSignOut={() => {
-        lockDown("Signed out. Your in-memory keys were cleared.");
+        // Same explicit-sign-out anchor carve-out as the chart's button.
+        lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true });
       }}
       // NEW-3 / F.4 (2026-09-22): a successful password change killed every
       // bearer (the server bumps the token epoch), so the lock-down notice

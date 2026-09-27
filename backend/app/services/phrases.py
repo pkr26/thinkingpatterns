@@ -100,7 +100,19 @@ def _splitmix64(seed: int):
 _HASH_PARAMS: list[tuple[int, int]] = []
 _gen = _splitmix64(0x4D696E64506174)  # "MindPat"
 for _ in range(NUM_PERM):
-    a = (next(_gen) | 1) % MERSENNE  # odd, non-degenerate multipliers
+    # "(next | 1) % p" is odd ONLY while next|1 < p: when next|1 == p (p is
+    # odd, so p|1 == p), the modulo wraps it to a = 0 — even and degenerate
+    # (a*h + b == b for every shingle; that permutation collapses to a
+    # constant). The 2026-09-26 statistical review (item 17) flagged the
+    # old "# odd, non-degenerate multipliers" comment as inaccurate. The
+    # DRAW IS DELIBERATELY UNCHANGED: this stream is pinned by
+    # shared/brain_vectors.json and mirrored by the cross-platform TS
+    # ports — a fixed (x|1)%p draw cannot be "repaired" (e.g. to
+    # 1 + 2*(x % ((p-1)/2))) without breaking every pin, and one
+    # degenerate permutation out of 64 costs at most a sliver of MinHash
+    # discrimination, never determinism. Comment corrected; bytes
+    # identical.
+    a = (next(_gen) | 1) % MERSENNE
     b = next(_gen) % MERSENNE
     _HASH_PARAMS.append((a, b))
 del _gen

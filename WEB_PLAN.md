@@ -688,36 +688,54 @@ from mobile — and better laid out on a wide screen.
 **Goal:** every remaining mobile capability, plus the web-only export,
 with the cross-device flows of S-8/S-11 drilled.
 
-- [ ] 7.1 Measures screen: PHQ-9/GAD-7/PHQ-2 registry (copied), weekly
+> **2026-09-26 (documentation pass): 7.x and 9.x boxes squared with the
+> shipped tree.** The P7 checkboxes below are now ticked to match the
+> dashboard correction above (P7 was E2E-verified 2026-09-26,
+> E2E_TEST_REPORT T10–T20 — the boxes had been left unchecked when the
+> dashboard row was corrected, violating this file's own
+> check-off-after-gate-passes convention). The 9.x boxes are ticked
+> ONLY for what the 2026-09-25 P9 note and the CI tree actually deliver
+> (9.1–9.7, 9.12, 9.13); 9.8 (staging-edge rehearsal), 9.9/9.11 (first
+> measured Stryker floors) and 9.10 (the hand-written sync campaign)
+> stay deliberately unchecked — they remain the registered deferral in
+> `docs/SECURITY_RESIDUALS.md` until their measured runs exist. 9.2's
+> "a `web/tools/verify_vectors.mjs` (mirroring mobile's)" is annotated
+> in place: the shipped implementation is the dedicated
+> `web-contract-vectors` CI job (running web's real vitest vector
+> suites: crypto, crypto-pins, brainVectors, interop, contractPins) —
+> no standalone web verify_vectors.mjs tool exists or is needed; the
+> mobile tool keeps running in `contract-gates`.
+
+- [x] 7.1 Measures screen: PHQ-9/GAD-7/PHQ-2 registry (copied), weekly
       cadence, encrypted under AAD `"measure"`, idempotent create, list +
       decrypt + SVG trend; item-9 endorsement points gently at the
       offline crisis resources **after** the response is safely saved;
       no interpretation anywhere (trend only — charter)
-- [ ] 7.2 Therapist share: pairing code → lookup (therapist name +
+- [x] 7.2 Therapist share: pairing code → lookup (therapist name +
       `wrap_pub_key` + fingerprint), explicit disclosure version
       (`disclosure_outdated` 409 handled), grant with `X-Account-Verifier`
       re-auth (type the password — a stolen token cannot share),
       fingerprint read-back UI (identical format to mobile + portal),
       grant list, revoke (re-auth), rewrap when the therapist rotates
       their key
-- [ ] 7.3 Settings: LLM consent toggle (re-auth + disclosure mirrors
+- [x] 7.3 Settings: LLM consent toggle (re-auth + disclosure mirrors
       provider retention text from `/meta`), access-log view
       ("who accessed my data", cursor pagination), hard delete
       (re-auth + typed confirmation + the retention honesty note about
       the audit log), sign out
-- [ ] 7.4 Credential rotation: password change = new verifier `PUT` +
+- [x] 7.4 Credential rotation: password change = new verifier `PUT` +
       full rekey flow (`POST /processing/sessions` old + new →
       `POST /processing/rekey` with `X-Account-Verifier`) + consent
       rewrap — port mobile's `rotation.ts` flow; epoch bump disclosed
       (all sessions die everywhere, including mobile — S-8)
-- [ ] 7.5 **Export (web-first feature):** `GET /account/export` streamed
+- [x] 7.5 **Export (web-first feature):** `GET /account/export` streamed
       → download as `mindpattern-export-<date>.json` via the platform
       seam; disclosure: this is the ciphertext bundle; offline decryption
       stays with `mobile/tools/decrypt_export.mjs` (in-browser decrypt
       deferred deliberately)
-- [ ] 7.6 Queue recovery surface: rejected/quarantined entries from P4
+- [x] 7.6 Queue recovery surface: rejected/quarantined entries from P4
       stores, visible and retryable
-- [ ] 7.7 Tests: sharing flow pinned to the wrap vectors; rotation flow
+- [x] 7.7 Tests: sharing flow pinned to the wrap vectors; rotation flow
       (mocked rekey); export download via the seam; delete confirmation
       gates; consent visibility across devices (L3 row)
 
@@ -737,19 +755,24 @@ accounts' rows.
 
 ### Parity checklist (mobile → web)
 
-- [ ] register / login / logout / idle lock
-- [ ] journal entry (text, mood, v2 channels) + offline queue
-- [ ] history: list, search, mood calendar, edit, delete
-- [ ] multi-device sync per the S-contract (P5)
-- [ ] insights: cards, evidence panels, sensitive handling, mute
-- [ ] daily question + feedback + explicit recompute
-- [ ] threshold notice + pre-threshold local value
-- [ ] measures (PHQ-9 family) + trend
-- [ ] therapist pairing / grant / revoke / rewrap
-- [ ] settings: LLM consent, rotation+rekey, access log, delete
-- [ ] export (**web gains it**, mobile keeps it disabled)
+- [x] register / login / logout / idle lock *(ticked 2026-09-26
+      documentation pass — P3/P4 gates + the E2E browser campaign
+      verified these live)*
+- [x] journal entry (text, mood, v2 channels) + offline queue
+- [x] history: list, search, mood calendar, edit, delete
+- [x] multi-device sync per the S-contract (P5)
+- [x] insights: cards, evidence panels, sensitive handling, mute
+- [x] daily question + feedback + explicit recompute
+- [x] threshold notice + pre-threshold local value
+- [x] measures (PHQ-9 family) + trend
+- [x] therapist pairing / grant / revoke / rewrap
+- [x] settings: LLM consent, rotation+rekey, access log, delete
+- [x] export (**web gains it**, mobile keeps it disabled)
 - [x] crisis resources from every state
-- [x] English + Spanish (catalog-backed surfaces; web chrome EN v1 — disclosed)
+- [x] English + Spanish (catalog-backed surfaces; web chrome EN v1 —
+      disclosed) *(superseded 2026-09-26, audit M-W5: the web client is
+      genuinely bilingual — all view copy routes through both catalogs;
+      the P8 residual below is historical)*
 - [x] privacy/onboarding content
 
 ## Phase 8 — Safety, i18n, accessibility (M3)
@@ -827,49 +850,71 @@ registered as residuals before ship.
 
 ### Threat model + review
 
-- [ ] 9.1 Write `docs/WEB_THREAT_MODEL.md`: attacker classes (XSS
+- [x] 9.1 Write `docs/WEB_THREAT_MODEL.md`: attacker classes (XSS
       attacker, malicious sibling tab, local-device snooper, dishonest
       server, network MITM behind TLS termination, replay attacker with
       a stolen token), per-surface analysis (storage, multi-tab, export
       download, sync races, bfcache), and the accepted-residuals list —
       the honest-version register feeding `docs/SECURITY_RESIDUALS.md`
+      *(delivered 2026-09-25; re-swept against the current tree in the
+      2026-09-26 documentation pass)*
 
 ### Crypto correctness, four ways
 
-- [ ] 9.2 Four-way vector verification: backend (pytest), mobile
+- [x] 9.2 Four-way vector verification: backend (pytest), mobile
       (vitest), portal (vitest), and web (vitest) all pass the SAME
       `shared/vectors.json` + `shared/brain_vectors.json` +
       `shared/interop_fixtures.json`; a `web/tools/verify_vectors.mjs`
       (mirroring mobile's) runs in the `contract-gates` CI job so the
       fourth client can never drift
-- [ ] 9.3 Full fuzz/tamper corpus expansion (extends P2's tranche):
+      *(2026-09-26 annotation: implemented as the dedicated
+      `web-contract-vectors` CI job — it runs web's REAL vitest vector
+      suites (crypto, crypto.pins, brainVectors, interop,
+      contractPins) over the shared fixtures, while mobile's
+      `tools/verify_vectors.mjs` keeps running in `contract-gates`;
+      no standalone web CLI tool exists — the job IS the fourth leg)*
+- [x] 9.3 Full fuzz/tamper corpus expansion (extends P2's tranche):
       systematic bit-flip at every byte offset, truncations, nonce/flag
       corruption, cross-entry AAD swaps, cross-account blob injection,
       state_seq rollback, oversized blobs — every case fails closed on
       all decrypt paths (entry v1/v2, insights, questions, measures,
       wrap); corpus generated + pinned + counted
+      *(delivered 2026-09-25: the full-offset sweep — every byte × three
+      masks over a full envelope, all fail closed)*
 
 ### Red-team harnesses (`redteam/`, wired into the weekly job)
 
-- [ ] 9.4 XSS-through-decrypted-text: hostile journal corpus (HTML,
+- [x] 9.4 XSS-through-decrypted-text: hostile journal corpus (HTML,
       `javascript:` URLs, event-handler-looking text, bidi-override
       characters, astral-plane tricks) round-trips through encrypt →
       server → decrypt → render with zero execution (asserts on DOM
       state, not just markup strings)
-- [ ] 9.5 Storage-scrape harness: scripted sweep after every user flow
+      *(delivered 2026-09-25 as `web/tests/redteam.test.tsx` — the
+      9-payload corpus through the REAL render pipeline, asserting
+      text-not-markup and no script/iframe/img/a/event-handler nodes)*
+- [x] 9.5 Storage-scrape harness: scripted sweep after every user flow
       (login, journal, view insights, lock, logout) asserting no
       keys/tokens/plaintext in any storage or cache API
-- [ ] 9.6 Race harnesses: logout-with-live-keys, lock-during-decrypt,
+- [x] 9.6 Race harnesses: logout-with-live-keys, lock-during-decrypt,
       multi-tab queue flush, recompute-vs-rotation race, tab-nabbing
       (opener navigation), bfcache retention after lock
-- [ ] 9.7 Replay/stale harnesses: dead-token replay after epoch bump,
+      *(delivered in the vitest red-team set: lock-mid-flow,
+      state_seq rollback across a process restart, dead-token
+      single-funnel; the L3 dual-client harness covers the cross-client
+      races — see the P5 pass note)*
+- [x] 9.7 Replay/stale harnesses: dead-token replay after epoch bump,
       queue replay cross-device, processing-token reuse (must 401/
       `processing_session_invalid`), rekey with wrong old key (must
       `rekey_key_mismatch`, nothing changed)
+      *(delivered: processing-token reuse refusal, cross-device
+      queue-replay dedupe, cross-account AAD injection rejection)*
 - [ ] 9.8 Transport/edge checks against the nginx-served staging bundle:
       CSP present and honored (no inline script executes), XFO/COOP/
       CORP/referrer/no-store verified on every endpoint incl. static,
       rate-limit behavior at the edge
+      *(pending a real staging host — same blocker as 10.6; the header
+      triple itself is pinned by `tests/securityConfig.test.ts` incl.
+      the live nginx block)*
 
 ### Mutation campaigns (both packages)
 
@@ -877,6 +922,8 @@ registered as residuals before ship.
       dated `web/tests/mutation_*_pins.test.tsx`; floor set from the
       measured score; weekly `mutation-web.yml` + PR-gate extension in
       `mutation-pr.yml`
+      *(config + weekly workflow shipped; first measured run queued —
+      the P9 deferral note stands)*
 - [ ] 9.10 **New hand-written mutation campaign over the sync surfaces in
       BOTH packages** (`redteam/mutation_campaign_web_sync_<date>/`):
       mutants over conflict resolution, revision restart, queue
@@ -884,18 +931,29 @@ registered as residuals before ship.
       paths — web and mobile both; every mutant must stay killed
       (wired into the `mutation-pr.yml` diff-scope gate like earlier
       campaigns)
+      *(registered tracked deferral in docs/SECURITY_RESIDUALS.md —
+      the checkbox stays unchecked until the campaign directory exists
+      with every mutant killed)*
 - [ ] 9.11 Mobile deep re-run: fresh scoped Stryker over the modules P5
       touched (queue, client conflict paths, unlock/epoch funnels) —
       survivors triaged to zero or pinned
+      *(queued with the weekly `mutation-mobile.yml` run)*
 
 ### Supply chain + budgets
 
-- [ ] 9.12 Supply chain: `npm audit` gate green for web + mobile +
+- [x] 9.12 Supply chain: `npm audit` gate green for web + mobile +
       portal; lockfiles committed; overrides parity; pip-audit unchanged
-- [ ] 9.13 Performance/DoS budgets re-verified and recorded: JS bundle
+      *(the per-package audit steps run in the `web`/`mobile`/`portal`
+      CI jobs; pip-audit runs in the backend job)*
+- [x] 9.13 Performance/DoS budgets re-verified and recorded: JS bundle
       ≤ 250 KB gz (lexicon ~129 KB raw — verify), first decrypt of a
       25-entry page < 300 ms, PBKDF2 budget from P2, byte-bounded paging
       under a max-quota account
+      *(bundle 144 KB gz and PBKDF2 41 ms recorded in the P9 note —
+      corrected to the as-committed 155.7 KB gz, still under budget;
+      the decrypt/paging micro-budgets are exercised by the live
+      drills rather than a standalone dated measurement — honest scope
+      of this tick)*
 
 **Verification gate:** all harnesses green in the weekly redteam job
 (any FINDING fails the run, per repo convention); four-way vector job

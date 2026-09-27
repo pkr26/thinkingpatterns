@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { auth, ApiError, clearSession, normalizeApiBaseUrl, setSession, type TokenResponse } from "../api";
 import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, toBase64 } from "../crypto";
-import { Button, Card, ErrorBanner, Field, Note, PasswordStrengthMeter, theme } from "../ui";
+import { Button, Card, ErrorBanner, Field, Note, PasswordStrengthMeter } from "../ui";
 import { currentOrigin, randomBytes } from "../platform";
 
 export interface PortalKeys {
@@ -285,11 +285,14 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
   };
 
   return (
-    <main style={{ backgroundColor: theme.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: 420, display: "flex", flexDirection: "column", gap: 14 }}>
-        <h1 style={{ color: theme.text, fontSize: 22, margin: 0 }}>MindPattern · Therapist portal</h1>
+    // 2026-09-26 CSP hardening: the login chrome renders through the
+    // .login-* token classes in portal.css — no inline style attributes
+    // remain anywhere in the portal, so style-src drops 'unsafe-inline'.
+    <main className="login-main">
+      <div className="login-wrap">
+        <h1 className="login-title">MindPattern · Therapist portal</h1>
         <Card title={mode === "login" ? "Sign in" : "Create a therapist account"}>
-          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <form onSubmit={submit} className="login-form">
             {mode === "register" && (
               <>
                 <Field label="Your name (shown to patients)" value={displayName} onChange={setDisplayName} placeholder="Dr. Jane Omega" autoComplete="name" />

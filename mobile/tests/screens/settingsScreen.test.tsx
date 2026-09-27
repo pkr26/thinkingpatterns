@@ -85,6 +85,9 @@ vi.mock("../../src/nativeFeatures", () => ({
   reminderCapability: () => reminderCapability(),
   scheduleDailyReminder: (...args: unknown[]) => scheduleDailyReminder(...(args as [number, number])),
   cancelDailyReminder: (...args: unknown[]) => cancelDailyReminder(...(args as [])),
+  // 2026-09-27 clinical wave: the opt-in check-in reminder rides the same
+  // nativeFeatures seam (own stable id); deletion cancels both schedules.
+  cancelMeasureReminder: async () => true,
 }));
 
 // The HealthKit State of Mind seam (2026-09-19): controllable per test,
@@ -121,7 +124,7 @@ const {
   touchableByLabel,
   inputByPlaceholder,
 } = await import("../helpers/rtr");
-const { resetApi } = await import("../helpers/apiMock");
+const { resetApi, SALT_B64 } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
 
 const authKey = Buffer.alloc(32, 2);
@@ -1441,5 +1444,98 @@ describe("change-password rotation self-completes (audit fix 7, 2026-09-21)", ()
     const reauthInput = inputByPlaceholder(root, "password");
     expect((reauthInput.props as { value: string }).value).toBe("");
     expect(touchableByLabel(root, "Confirm with password").props.disabled).toBe(true);
+  });
+});
+
+// --- v1 → v2 key-envelope upgrade + scheme-aware copy (2026-09-26) -----------
+describe("key-envelope upgrade card", () => {
+  it("appears ONLY when the server says the account is v1", async () => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("Upgrade key protection");
+    expect(textOf(root)).toContain("today your password directly derives your encryption key");
+
+    const v2 = await render(<SettingsScreen navigation={nav} />);
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: SALT_B64, kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 }, wrapped_data_key: Buffer.alloc(60, 7).toString("base64") } as never);
+    const root2 = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root2)).not.toContain("Upgrade key protection");
+    void v2;
+  });
+
+  it("runs the upgrade after the typed password: session key proof + honest success copy", async () => {
+    // The upgrade requires the vault to be bound to THIS account (the
+    // key-shipping ownership rule); the suite's default unlock has no id.
+    vault.lock();
+    vault.unlock({ ...keys }, "user-1");
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Upgrade now");
+    await flush();
+    expect(textOf(root)).toContain("Enter your password to upgrade key protection");
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Confirm with password");
+    await flush();
+
+    // Both proofs shipped: the processing session carried the vault's data
+    // key, and the wrap is a real 60-byte envelope over THAT key.
+    expect(api.openProcessingSession).toHaveBeenCalledWith(keys.dataKey.toString("base64"));
+    expect(api.upgradeKeyEnvelope).toHaveBeenCalledTimes(1);
+    const [params, wrappedB64, token] = vi.mocked(api.upgradeKeyEnvelope).mock.calls[0] as unknown as [
+      Record<string, unknown>,
+      string,
+      string,
+    ];
+    expect(params).toEqual({ algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 });
+    expect(Buffer.from(wrappedB64, "base64")).toHaveLength(60);
+    expect(token).toBe("st"); // the mocked processing session token
+    expect(lastAlert()[0]).toBe("Key protection upgraded");
+    // The card is gone — the account is v2 on this screen now.
+    expect(textOf(root)).not.toContain("Upgrade key protection");
+    // The vault survived untouched (same data key, still unlocked).
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(keys.dataKey);
+  });
+
+  it("a 403 envelope_key_mismatch gets the dedicated honest copy, never a raw error", async () => {
+    const { ApiError } = await import("../../src/api/client");
+    vault.lock();
+    vault.unlock({ ...keys }, "user-1");
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
+    vi.mocked(api.upgradeKeyEnvelope).mockRejectedValue(
+      new ApiError(403, "the processing session's key did not authenticate stored ciphertext", "envelope_key_mismatch"),
+    );
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(root, "Upgrade now");
+    await flush();
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Confirm with password");
+    await flush();
+    expect(lastAlert()[0]).toBe("Could not upgrade key protection");
+    expect(lastAlert()[1]).toContain("does not match the data stored on the server");
+    expect(lastAlert()[1]).not.toContain("processing session");
+  });
+});
+
+describe("scheme-aware change-password copy", () => {
+  it("v1 accounts keep the rekey disclosure; v2 accounts get the honest O(1) copy", async () => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
+    const v1Root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(v1Root, "Change password");
+    await flush();
+    expect(textOf(v1Root)).toContain("re-encrypts your journal under a new encryption key");
+    expect(textOf(v1Root)).toContain("Rotate keys and sign in again");
+
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: SALT_B64, kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 }, wrapped_data_key: Buffer.alloc(60, 7).toString("base64") } as never);
+    const v2Root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    await pressLabel(v2Root, "Change password");
+    await flush();
+    expect(textOf(v2Root)).toContain("Your journal is not re-encrypted");
+    expect(textOf(v2Root)).toContain("Change password and sign in again");
   });
 });

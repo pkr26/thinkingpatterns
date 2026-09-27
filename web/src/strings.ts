@@ -17,25 +17,29 @@
  *    returns the key itself (visible in review, never a crash).
  *  - "{name}"-style placeholders interpolate from the optional vars bag;
  *    an unknown placeholder stays literal so gaps surface in review.
- *  - Locale selection is device-driven ("es-*" → es, else en). There is
- *    deliberately NO in-app language override this wave — a manual
- *    Language setting is a residual, not an omission.
+ *  - Locale selection: "auto" resolves from the device locale ("es-*" →
+ *    es, else en); an explicit "en"/"es" override wins (the Language
+ *    setting, audit 2026-09-26 LOW). The preference persists locally and
+ *    applies on the next load AND live (subscribeLanguage).
  *  - Dates and numbers format through `dateLocaleTag()` so Intl calls
  *    ("es-ES" / "en-US") follow the same selection.
  */
 
+import { localStore } from "./platform";
 import { en } from "./locales/en";
 import { es } from "./locales/es";
 
 export type Locale = "en" | "es";
+
+/** The Language setting: follow the device, or pin a catalog. */
+export type LanguagePref = "auto" | "en" | "es";
 
 /** Locale tag for Intl date/number formatting (dateLocaleTag-dependent). */
 export function dateLocaleTag(): string {
   return currentLocale === "es" ? "es-ES" : "en-US";
 }
 
-/** Resolved ONCE from the device locale — the app has no language switch,
- *  so re-reading it per call would only invite inconsistency. */
+/** Resolved from the device locale whenever the preference is "auto". */
 function detectLocale(): Locale {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -45,7 +49,57 @@ function detectLocale(): Locale {
   }
 }
 
-let currentLocale: Locale = detectLocale();
+/** The persisted preference — the theme-pref idiom (mindpattern.* so the
+ *  sign-out privacy sweep clears it; acceptable for a display setting).
+ *  Reads/writes run through the platform's localStorage seam, which is
+ *  inert outside a DOM instead of throwing. */
+export const LANGUAGE_STORAGE_KEY = "mindpattern.language.pref";
+
+function storedLanguagePref(): LanguagePref {
+  const value = localStore.get(LANGUAGE_STORAGE_KEY);
+  return value === "en" || value === "es" ? value : "auto";
+}
+
+function writeLanguagePref(pref: LanguagePref): void {
+  localStore.set(LANGUAGE_STORAGE_KEY, pref);
+}
+
+function resolveLocale(pref: LanguagePref): Locale {
+  return pref === "auto" ? detectLocale() : pref;
+}
+
+let languagePref: LanguagePref = storedLanguagePref();
+let currentLocale: Locale = resolveLocale(languagePref);
+
+type LanguageListener = () => void;
+const languageListeners = new Set<LanguageListener>();
+
+function notifyLanguageChanged(): void {
+  for (const listener of languageListeners) listener();
+}
+
+/** Apply a language preference NOW (live) and persist it: the catalog
+ *  swaps immediately and every subscriber (App) re-renders. */
+export function applyLanguagePref(pref: LanguagePref): void {
+  languagePref = pref;
+  writeLanguagePref(pref);
+  currentLocale = resolveLocale(pref);
+  notifyLanguageChanged();
+}
+
+/** The preference currently in force (never the raw storage bytes). */
+export function getLanguagePref(): LanguagePref {
+  return languagePref;
+}
+
+/** Live-apply subscription: fires whenever applyLanguagePref changes the
+ *  active catalog. Returns an unsubscribe function. */
+export function subscribeLanguage(listener: LanguageListener): () => void {
+  languageListeners.add(listener);
+  return () => {
+    languageListeners.delete(listener);
+  };
+}
 
 export function setLocale(locale: Locale): void {
   currentLocale = locale;

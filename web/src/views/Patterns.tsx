@@ -178,6 +178,10 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
       return;
     }
     // ok: pull the decrypted summary directly for the richer fields.
+    // Immediate re-check after the awaits above (audit 2026-09-26 LOW): a
+    // lock that landed mid-reconcile is a quiet no-op, never
+    // vault.get()'s throw as an unhandled rejection.
+    if (!vault.isUnlocked()) return;
     const keys = vault.get();
     const summary = await api.insights().catch(() => null);
     if (!summary || generation.current !== run) {

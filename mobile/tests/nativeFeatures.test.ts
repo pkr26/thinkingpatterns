@@ -12,10 +12,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const requestPermission = vi.fn(async () => ({ authorizationStatus: 1 }));
 const createTriggerNotification = vi.fn(async () => "notif-1");
 const cancelAllNotifications = vi.fn(async () => undefined);
+const cancelNotification = vi.fn(async () => undefined);
 const createChannel = vi.fn(async () => "mindpattern-reminders");
 
 vi.mock("@notifee/react-native", () => ({
-  default: { requestPermission, createTriggerNotification, cancelAllNotifications, createChannel },
+  default: { requestPermission, createTriggerNotification, cancelAllNotifications, cancelNotification, createChannel },
   TriggerType: { TIMESTAMP: 0 },
   RepeatFrequency: { HOURLY: 0, DAILY: 1, WEEKLY: 2 },
 }));
@@ -30,6 +31,8 @@ beforeEach(() => {
   createTriggerNotification.mockResolvedValue("notif-1");
   cancelAllNotifications.mockReset();
   cancelAllNotifications.mockResolvedValue(undefined);
+  cancelNotification.mockReset();
+  cancelNotification.mockResolvedValue(undefined);
   createChannel.mockReset();
   createChannel.mockResolvedValue("mindpattern-reminders");
 });
@@ -41,11 +44,15 @@ describe("scheduleDailyReminder", () => {
     expect(requestPermission).toHaveBeenCalledTimes(1);
     expect(createTriggerNotification).toHaveBeenCalledTimes(1);
     const [notification, trigger] = createTriggerNotification.mock.calls[0] as [
-      { title: string; body: string; android: { channelId: string } },
+      { id: string; title: string; body: string; android: { channelId: string } },
       { type: number; timestamp: number; repeatFrequency: number },
     ];
-    // Calm copy, no streak-shaming, and the app's own channel.
+    // Calm copy, no streak-shaming, the app's own channel — and the STABLE
+    // notification id (2026-09-26 audit MEDIUM): notifee mints a random id
+    // when none is passed, and each reschedule stacked a fresh daily
+    // trigger; a stable id replaces the previous schedule instead.
     expect(notification).toEqual({
+      id: "mindpattern-daily-reminder",
       title: "MindPattern",
       body: "A quiet moment to write, whenever it suits you.",
       android: { channelId: "mindpattern-reminders" },
@@ -90,15 +97,88 @@ describe("scheduleDailyReminder", () => {
   });
 });
 
+describe("reschedule idempotency (2026-09-26 audit MEDIUM)", () => {
+  it("N session-start syncs converge to ONE schedule: every create rides the SAME stable id, each preceded by a cancel of that id", async () => {
+    // reminderSync.ts reconciles on EVERY session start; before the fix,
+    // each schedule call minted a random notifee id and stacked a new
+    // daily trigger (N restarts = N notifications a day). The contract
+    // now: the stable id replaces the previous schedule AND the previous
+    // id is cancelled explicitly before the create (belt-and-braces for
+    // platform builds that lag on same-id replacement).
+    const syncs = 5; // five app restarts for an enabled user
+    for (let i = 0; i < syncs; i++) {
+      expect(await scheduleDailyReminder(20, 0)).toBe(true);
+    }
+    expect(createTriggerNotification).toHaveBeenCalledTimes(syncs);
+    expect(cancelNotification).toHaveBeenCalledTimes(syncs);
+    expect(cancelNotification).toHaveBeenNthCalledWith(1, "mindpattern-daily-reminder");
+    const ids = (createTriggerNotification.mock.calls as unknown as [
+      { id: string },
+      unknown,
+    ][]).map((call) => call[0].id);
+    expect(new Set(ids)).toEqual(new Set(["mindpattern-daily-reminder"]));
+    // ORDER: each cancel lands before its create, so no window exists
+    // where two schedules for the reminder are live at once.
+    for (let i = 0; i < syncs; i++) {
+      expect(cancelNotification.mock.invocationCallOrder[i]).toBeLessThan(
+        createTriggerNotification.mock.invocationCallOrder[i],
+      );
+    }
+    // The cancel is scoped to the reminder id — never the app's whole
+    // notification set (that is cancelDailyReminder's job, deliberately
+    // a user action).
+    expect(cancelAllNotifications).not.toHaveBeenCalled();
+  });
+
+  it("a failed pre-create cancel never blocks the schedule (the stable id is the primary guarantee)", async () => {
+    cancelNotification.mockRejectedValue(new Error("nothing scheduled"));
+    expect(await scheduleDailyReminder(20, 0)).toBe(true);
+    expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("an ancient notifee build without cancelNotification still schedules under the stable id", async () => {
+    const notifee = (await import("@notifee/react-native")) as unknown as {
+      default: Record<string, unknown>;
+    };
+    const original = notifee.default.cancelNotification;
+    delete notifee.default.cancelNotification;
+    try {
+      expect(await scheduleDailyReminder(20, 0)).toBe(true);
+      const [notification] = createTriggerNotification.mock.calls[0] as [
+        { id: string },
+        unknown,
+      ];
+      expect(notification.id).toBe("mindpattern-daily-reminder");
+    } finally {
+      notifee.default.cancelNotification = original;
+    }
+  });
+});
+
 describe("cancelDailyReminder", () => {
-  it("cancels the app's (only) notifications and reports true", async () => {
+  it("cancels by the STABLE reminder id (scoped, never the app's whole set)", async () => {
     expect(await cancelDailyReminder()).toBe(true);
-    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    expect(cancelNotification).toHaveBeenCalledWith("mindpattern-daily-reminder");
+    expect(cancelAllNotifications).not.toHaveBeenCalled();
     expect(requestPermission).not.toHaveBeenCalled(); // cancel needs no permission
   });
 
+  it("an ancient notifee build without cancelNotification falls back to cancelAllNotifications", async () => {
+    const notifee = (await import("@notifee/react-native")) as unknown as {
+      default: Record<string, unknown>;
+    };
+    const original = notifee.default.cancelNotification;
+    delete notifee.default.cancelNotification;
+    try {
+      expect(await cancelDailyReminder()).toBe(true);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    } finally {
+      notifee.default.cancelNotification = original;
+    }
+  });
+
   it("a native failure is a false, never a throw", async () => {
-    cancelAllNotifications.mockRejectedValue(new Error("native exploded"));
+    cancelNotification.mockRejectedValue(new Error("native exploded"));
     expect(await cancelDailyReminder()).toBe(false);
   });
 });

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 from datetime import date, timedelta
 
@@ -244,14 +245,13 @@ class TestRekeyMidTransactionAtomicity:
                     "measures": {mid: bytes(blob) for mid, blob in measures},
                 }
 
-        before = await snapshot()
-
         def explode(*args, **kwargs):
             # Reached only AFTER the entry-phase UPDATEs have executed
             # inside the open transaction (the entries phase uses
             # _rekey_entry_batch; this is the insights/measures phase).
             raise RuntimeError("simulated crash mid-rekey, after entry writes")
 
+        original_blob_batch = insights_api._rekey_blob_batch
         monkeypatch.setattr(insights_api, "_rekey_blob_batch", explode)
         old_verifier = emu.auth_key_b64
         old_key = emu.data_key
@@ -274,17 +274,75 @@ class TestRekeyMidTransactionAtomicity:
         assert response.status_code == 500
         assert response.json()["code"] == "internal_error"
 
+        # 2026-09-26 audit item 12 evolved this pin (rekey transaction
+        # restructure, audit item 11): each batch commits in its own SHORT
+        # transaction with the progress journal, so a crash after the entry
+        # phase leaves those batches rekeyed — the all-or-nothing contract
+        # is replaced by crash-safe RESUMABILITY. What must still hold:
+        #   * every blob decrypts under exactly ONE of the two keys (no
+        #     torn/corrupt rows — each batch is all-or-nothing);
+        #   * the journal recorded the completed stage for the retry;
+        #   * a retry with the same keys finishes the rotation idempotently.
         after = await snapshot()
-        assert after == before, "a mid-rekey crash must leave ALL blobs on the old key"
+        from app.models import RekeyJournal
 
-        # And the account is still fully usable under the OLD credential and
-        # key: the failed rotation committed nothing (all-old, never mixed).
+        async with app.state.sessionmaker() as session:
+            journal = (
+                await session.execute(
+                    select(RekeyJournal).where(RekeyJournal.user_id == emu.user_id)
+                )
+            ).scalar_one_or_none()
+        assert journal is not None, "an interrupted rotation must leave a resumable journal"
+        assert journal.stage == "entries"
+        assert journal.entries_done == 2
+        for cid, blob in after["entries"].items():
+            # Both entries were in the crashed run's FIRST stage: new key,
+            # upgraded to the v2 (version-bound) AAD like every rekey.
+            plain = crypto.decrypt(emu.data_key, blob, crypto.entry_aad_v2(emu.user_id, cid, 1))
+            assert json.loads(plain)["text"] in ("one", "two")
+        for mid, blob in after["measures"].items():
+            # The crash fired in the insights phase: measures untouched (old key).
+            plain = crypto.decrypt(old_key, blob, crypto.build_aad("measure", emu.user_id, mid))
+            assert json.loads(plain)["v"] == 1
+
+        # The retry (fresh single-use sessions, same two keys) resumes from
+        # the journal: entries authenticate under the NEW key and are
+        # skipped idempotently; measures rotate; the journal is retired.
+        monkeypatch.setattr(insights_api, "_rekey_blob_batch", original_blob_batch)
+        old_token2 = await emu.open_processing_session_for(client, old_key)
+        new_token2 = await emu.open_processing_session_for(client, emu.data_key)
+        response = await client.post(
+            "/api/processing/rekey",
+            headers={
+                **emu.headers,
+                "X-Processing-Token": old_token2,
+                "X-New-Processing-Token": new_token2,
+                "X-Account-Verifier": old_verifier,
+            },
+        )
+        assert response.status_code == 200, response.text
+        counts = response.json()
+        assert counts == {"entries": 2, "insights": 0, "measures": 1}
+        async with app.state.sessionmaker() as session:
+            journal2 = (
+                await session.execute(
+                    select(RekeyJournal).where(RekeyJournal.user_id == emu.user_id)
+                )
+            ).scalar_one_or_none()
+        assert journal2 is None, "completion retires the journal with the revision bumps"
+        final = await snapshot()
+        for cid, blob in final["entries"].items():
+            crypto.decrypt(emu.data_key, blob, crypto.entry_aad_v2(emu.user_id, cid, 1))
+        for mid, blob in final["measures"].items():
+            crypto.decrypt(emu.data_key, blob, crypto.build_aad("measure", emu.user_id, mid))
+
+        # And the account is fully usable under the OLD credential while the
+        # DATA now decrypts under the new key — the exact state a client that
+        # finished its rotation retry expects.
         emu.derive_new_generation(old_password, old_salt)
         await emu.login(client)
         fetched = await client.get("/api/entries/e-1", headers=emu.headers)
         assert fetched.status_code == 200, fetched.text
-        payload = emu.decrypt_entry(fetched.json()["blob"], "e-1", 1)
-        assert payload["text"] == "one"
 
 
 # --- 2a: at-rest server blindness -----------------------------------------------

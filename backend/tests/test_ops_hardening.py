@@ -126,7 +126,7 @@ async def test_recompute_records_duration_and_429s_are_visible(client, settings)
     text = response.text
     assert "mindpattern_recompute_seconds_count 1" in text, text
     # Rate-limited responses flow through the counter: hammer salt lookups.
-    from app.cache import FixedWindowCounter  # noqa: F401  (documentation)
+    from app.cache import SlidingWindowCounter  # noqa: F401  (documentation)
 
     for _ in range(25):
         await client.post("/api/auth/salt", json={"username": "metricsuser"})
@@ -286,6 +286,28 @@ async def test_cross_host_guard_refuses_when_lock_taken():
 # ---------------------------------------------------------------------------
 
 
+def test_edge_rate_table_covers_all_three_ops_routes(app):
+    """Re-audit (2026-09-27): _rate_limit_rules(app) is evaluated EAGERLY at
+    HardeningMiddleware registration, so every route whose bucket the edge
+    malformed-body counter must mirror has to exist BEFORE that call. The
+    three ops routes used to be registered after it and were silently
+    missing from the edge table. Pin the built table's contents, not the
+    registration order: each ops path must appear with its ops-health
+    bucket check attached."""
+    hardening = next(m for m in app.user_middleware if m.cls.__name__ == "HardeningMiddleware")
+    rules = hardening.kwargs["rate_limit_rules"]
+    covered: set[str] = set()
+    for _methods, pattern, checks in rules:
+        if not any(check.bucket == "ops-health" for check in checks):
+            continue
+        for path in ("/healthz", "/metrics", "/readyz"):
+            if pattern.match(path):
+                covered.add(path)
+    assert covered == {"/healthz", "/metrics", "/readyz"}, (
+        f"edge rate-limit table misses ops routes: {covered}"
+    )
+
+
 async def test_metrics_token_comes_from_the_live_settings():
     # The closure's settings carry NO token; a runtime replacement does.
     # Against the stale closure the empty "Bearer " expectation used to
@@ -351,15 +373,27 @@ async def test_sweep_task_is_created_and_cancelled_with_the_lifespan(settings):
 
 async def test_prune_once_deletes_only_rows_past_retention(client, app):
     now = utcnow()
-
-    def _row(action: str, at) -> AccessLog:
-        return AccessLog(
-            actor_id=new_id(), actor_role="therapist", user_id=new_id(), action=action, at=at
-        )
+    from app.api._audit import append_access_log
 
     async with app.state.sessionmaker() as session:
-        session.add(_row("read_insights", now - timedelta(days=731)))
-        session.add(_row("read_notes", now))
+        # 2026-09-26 audit item 16: seeded through the chained append (each
+        # row is its own one-patient chain here).
+        await append_access_log(
+            session,
+            actor_id=new_id(),
+            actor_role="therapist",
+            user_id=new_id(),
+            action="read_insights",
+            at=now - timedelta(days=731),
+        )
+        await append_access_log(
+            session,
+            actor_id=new_id(),
+            actor_role="therapist",
+            user_id=new_id(),
+            action="read_notes",
+            at=now,
+        )
         await session.commit()
 
     await main_mod._prune_access_log_once(app)

@@ -1263,6 +1263,9 @@ describe("mutation pins 2026-09-22: PatientsView caseload", () => {
     const root = await render(<PatientsView displayName="Dr." session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />);
     await flush(4);
     await press(root, "Scan caseload for triage");
+    // 2026-09-26 audit round (M, UX copy): the scan asks once per session
+    // before fetching — confirm it to start the actual run.
+    await press(root, "Start the triage scan");
     await vi.waitFor(() => expect(textOf(root)).toContain("(scanned just now)"), { timeout: 4000 });
     const select = root.root.findAllByType("select")[0]!;
     await select.props.onChange({ target: { value: "triage" } });

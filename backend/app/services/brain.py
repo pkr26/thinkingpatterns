@@ -19,8 +19,8 @@ RESEARCH.md for the full bibliography. The changes that matter:
     (x-0.74 scalar) and "but" re-weighting replaces the binary word
     lists. Still pure and deterministic.
   * **Lagged day-after links** (Konjarski et al. 2018, *Sleep Medicine
-    Reviews* meta-analysis of daily-diary sleep→affect studies; Bolger et
-    al. 1989 spillover): "the day after 'sleep' comes up, your entries
+    Reviews* systematic review of daily-diary sleep→affect studies; Bolger
+    et al. 1989 spillover): "the day after 'sleep' comes up, your entries
     read lower" — the literal pattern *linking* the product is named for.
     Welch's t + Cohen's d on residuals, gated like every statistical
     claim.
@@ -184,6 +184,21 @@ WINDOW_STAT_KINDS = frozenset(
 )
 REPLICATION_MIN_SPREAD_DAYS = 2
 
+# The complete kind taxonomy the engine itself can emit (item 12, 2026-09-26
+# statistical review). A stored record whose kind is NOT in this set is a
+# foreign/hand-crafted payload: it must never flow into lifecycle promotion
+# or surfacing — _stored_from_dict demotes it to "archived" on load (inert:
+# invisible, never re-qualified by any detector since detectors only emit
+# known kinds, and eventually dropped by the aging sweep). The phrase kinds
+# are spelled literally because PHRASE_KINDS is defined further down (near
+# its consumer); tests pin the two stay in sync.
+KNOWN_PATTERN_KINDS: frozenset[str] = (
+    STATISTICAL_KINDS
+    | EVIDENCE_DATE_KINDS
+    | WINDOW_STAT_KINDS
+    | {"topic", "rumination", "recurring_phrase"}
+)
+
 
 def _is_statistical(kind: str, detail: dict[str, Any]) -> bool:
     """The replication gate's kind test: STATISTICAL_KINDS membership, plus
@@ -215,6 +230,10 @@ MOOD_MIN_EFFECT = 0.5  # Cohen's d
 MOOD_SD_FLOOR = 0.05  # lexicon mood always carries at least this measurement noise
 LINK_MIN_PER_SIDE = 8  # lagged day-after links: transitions per side
 LINK_MAX_GAP_DAYS = 2  # "next day" survives a one-day skip in journaling
+# Day-after phrasing floor (item 4, 2026-09-26 review): gap-1 exposures
+# must be at least this share of the measured exposed outcomes (and the
+# strict mode) before the card may say "the day after".
+LINK_DAY_AFTER_SHARE = 0.70
 PHRASE_MIN_OCCURRENCES = 3
 PHRASE_MIN_SPAN_DAYS = 7
 PHRASE_MIN_DISTINCT_DAYS = 3
@@ -241,11 +260,184 @@ RUMINATION_MIN_NEGATORS = 2  # ... or non-positive + negation-heavy phrasing
 MOOD_SHIFT_MIN_DAYS = 21
 MOOD_SHIFT_BASELINE_MIN = 10
 MOOD_SHIFT_LAMBDA = 0.18  # inside the validated 0.05–0.25 band
-MOOD_SHIFT_LIMIT = 2.7  # control-limit multiplier (standard ARL choice)
+# Control-limit multiplier. 2.7 (the "standard ARL choice") was recalibrated
+# 2026-09-26 (statistical review, item 2): a one-off Monte Carlo of the EXACT
+# rule below (40k-100k runs per cell; AR(1) daily mood with unit marginal
+# variance; chart sigma estimated from the baseline quarter exactly as the
+# code does; AR(1) limit inflation (1+phi)/(1-phi) applied with the TRUE phi)
+# measured the per-recompute false-alarm probability at phi=0.5 as 5.2-7.3%
+# for windows of 21-40 days — over the 5% line. L=3.1 brings the worst cell
+# (phi=0.5, n≈40) to 4.7% <= 5% while keeping detection power for real
+# shifts high (a sustained 2-sigma shift over the last 10 days still fires
+# with probability 0.92 at n=60; 1-sigma, phi=0: 0.31).
+MOOD_SHIFT_LIMIT = 3.1
 MOOD_SHIFT_TAIL = 5  # most recent EWMA points inspected
 MOOD_SHIFT_RUN = 3  # beyond-limit points required in the tail
 MOOD_SHIFT_MIN_SHIFT = 0.15
 MOOD_SHIFT_SIGMA_FLOOR = 0.05
+
+# The calibrated run-rule alarm probability the mood_shift detector reports
+# into the Benjamini-Hochberg family (item 2): P(the exact alarm rule fires
+# on one recompute | null), measured by the same one-off simulation that
+# set MOOD_SHIFT_LIMIT (100,000 replications per cell, L=3.1, seed 20260926).
+# Rows: phi_hat 0.0/0.2/0.4/0.6/0.8. Columns: total charted days
+# n = 21/40/90/180 (n_tail = n - baseline quarter; every eligible chart has
+# n >= 21 so the scanned tail is always >= 5 points and the last-5 window is
+# fully populated — the table needs no small-tail branch). Monotone in phi
+# by construction; the n=180 row was isotonic-maxed at fit time (the raw
+# phi=0 cell 0.00222 exceeded the phi=0.2 cell 0.00183 — Monte Carlo noise,
+# reconciled to the running max so the interpolator can never decrease as
+# autocorrelation rises).
+_MOOD_SHIFT_ALARM_TABLE: tuple[tuple[float, ...], ...] = (
+    (0.02272, 0.03439, 0.00689, 0.00222),
+    (0.02451, 0.03635, 0.00766, 0.00222),
+    (0.02909, 0.04083, 0.00896, 0.00224),
+    (0.03285, 0.05212, 0.01199, 0.00295),
+    (0.03460, 0.07566, 0.01889, 0.00366),
+)
+_MOOD_SHIFT_ALARM_PHIS = (0.0, 0.2, 0.4, 0.6, 0.8)
+_MOOD_SHIFT_ALARM_NS = (21, 40, 90, 180)
+# Ceiling for phi_hat > 0.8 (linear extrapolation from the 0.6-0.8 slope,
+# capped): near the phi clamp the inflation cap [1,16] bites and measured
+# rates jump (phi=0.95, n=40: 0.21), so the extrapolation is capped at a
+# deliberately conservative 0.25 — overstating p only suppresses a claim.
+_MOOD_SHIFT_ALARM_MAX = 0.25
+# Magnitude conditioning, same one-off simulation: among null alarms that
+# FIRED, the fraction whose triggering EWMA point lay at least z beyond the
+# limit (columns = the same n grid; each cell is the max over the phi grid,
+# so the factor is conservative in phi).
+#   p_alarm = table(phi_hat, n) * S(n, z_obs)
+# is then P0(alarm AND |z_last| >= z_obs) — a valid selection-adjusted
+# p-value for the OBSERVED alarm: the joint event implies the alarm (the
+# table bounds it) and implies the excursion (the marginal-conditional
+# product bounds it), so the product of the calibrated marginal with the
+# calibrated conditional is the calibrated joint. Without this factor
+# every alarm would report the unconditional ~0.2-7.6% rate and an honest
+# 9-sigma sustained decline could never top a Benjamini-Hochberg family —
+# "reasonable detection power" (the review's own requirement for L) means
+# the p must fall with the excursion's magnitude. A barely-clearing alarm
+# (z_obs ~= L) still reports ~= the unconditional rate: conservative
+# exactly where the review wanted conservatism. For z > 6 the factor
+# continues along the normal tail ratio erfc(z/sqrt2)/erfc(6/sqrt2) —
+# the correct asymptotic shape, and a shrink-only continuation.
+_MOOD_SHIFT_ALARM_ZS = (3.1, 3.3, 3.5, 4.0, 4.5, 5.0, 6.0)
+_MOOD_SHIFT_ALARM_S: tuple[tuple[float, ...], ...] = (
+    (1.000, 0.917, 0.813, 0.554, 0.358, 0.219, 0.084),
+    (1.000, 0.897, 0.786, 0.543, 0.353, 0.229, 0.105),
+    (1.000, 0.820, 0.667, 0.324, 0.157, 0.074, 0.016),
+    (1.000, 0.797, 0.612, 0.224, 0.094, 0.029, 0.008),
+)
+_MOOD_SHIFT_P_FLOOR = 1e-12
+
+# Re-audit (2026-09-27), EWMA item: the p-table lookup must be CONSERVATIVE
+# in the autocorrelation estimate, not point-identified. The limits are
+# widened with the SHRUNK phi_hat = max(0, r - 2/sqrt(n-1)) — deliberately
+# biased LOW so iid noise never widens them — but indexing the alarm table
+# by that same low estimate made the reported p anti-conservative under a
+# genuinely autocorrelated null: the realized P(p <= 0.05) through the real
+# detector measured 13.4% at phi=0.5/n=40 and 28.1% at phi=0.8/n=21 (the
+# alarm probability the table returns was calibrated with limits widened by
+# the TRUE phi, while production's limits are widened by a noisy
+# downward-biased estimate and therefore fire far more often). Fix: index
+# the lookup by the estimator's UPPER branch,
+#
+#     phi_eff = min(_MOOD_SHIFT_PHI_EFF_MAX, phi_hat + K/sqrt(n-1))
+#
+# i.e. the same 1/sqrt(n-1) standard error the shrinkage subtracts, added
+# back (and then some) on the conservative side: under estimator
+# uncertainty the p must be valid for the worst phi the data plausibly
+# supports, because the limits already took the optimistic branch. K is a
+# MC-tuned conservatism dial (see the regression test for the spec + seed);
+# phi_eff saturates at _MOOD_SHIFT_PHI_EFF_MAX, where the table lookup's own
+# extrapolation cap (_MOOD_SHIFT_ALARM_MAX) takes over. When the shrunk
+# estimate is 0 (the ~98% of iid charts where r never cleared 2 SE),
+# phi_eff stays 0: a null chart reports exactly the pre-fix p, so phi=0
+# behavior is bit-identical and no iid power is spent on the correction.
+#
+# K=2.0 is the measured frontier (seeded sweep, 2026-09-27): K=1.0 keeps
+# mirror-chart power (0.84 for a 3σ sustained shift at phi=0.5/n=90) but
+# leaves the phi=0.8 short-n nulls at 15-23% false alarms; K=2.0 holds
+# every cell at 3-7% at a deployed power of ~0.68. Validity was bought
+# with power — deliberately: a false "your mood has shifted" card is the
+# harm vector here, and the downstream replication gate (window kinds
+# need qualification days >=2 calendar days apart) further suppresses the
+# residual. Recovering 0.8+ deployed power needs a different lever (a
+# longer chart or a length-scaled L), not a smaller K.
+_MOOD_SHIFT_PHI_EFF_K = 2.0
+_MOOD_SHIFT_PHI_EFF_MAX = 0.99
+
+
+def _ewma_alarm_probability(phi_hat: float, n_points: int, z_obs: float) -> float:
+    """P(run-rule alarm fires on one recompute | null), calibrated.
+
+    Bilinear interpolation (piecewise-linear in phi_hat and in the chart
+    length, clamped at both edges) over _MOOD_SHIFT_ALARM_TABLE, times the
+    magnitude-conditioning factor S(n, z_obs) — the deterministic,
+    monotone fit the 2026-09-26 calibration left behind (see the two
+    constant blocks above for exactly what was simulated and how the
+    joint p is assembled). Above the phi grid the last segment's slope
+    extrapolates, capped at _MOOD_SHIFT_ALARM_MAX. This REPLACES the
+    marginal erfc tail of the last EWMA point, which ignored both that
+    the alarm is a SCAN (last point beyond AND >= 3 of the last 5
+    beyond, same sign) over an autocorrelated chart and that the
+    excursion's magnitude carries evidence the scan-adjusted p must
+    reflect. The reported p is conditional on phi_hat (the same estimate
+    the limits were widened with); the residual risk that phi_hat
+    UNDERSTATES a short window's true autocorrelation (and the real rate
+    therefore exceeds the table) is an honest limitation, dampened by
+    the 2-SE shrinkage in _detect_mood_shift.
+    """
+    phis, ns = _MOOD_SHIFT_ALARM_PHIS, _MOOD_SHIFT_ALARM_NS
+    table = _MOOD_SHIFT_ALARM_TABLE
+    # --- phi side: collapse the 5 rows into one interpolated row of 4.
+    if phi_hat <= phis[0]:
+        row: list[float] = list(table[0])
+    else:
+        hi = next((i for i in range(1, len(phis)) if phi_hat <= phis[i]), len(phis))
+        if hi < len(phis):
+            lo = hi - 1
+            w = _interp_fraction(phis[lo], phis[hi], phi_hat)
+            row = [table[lo][col] + w * (table[hi][col] - table[lo][col]) for col in range(len(ns))]
+        else:
+            # Beyond the last knot: extrapolate each column along its own
+            # 0.6->0.8 slope (rates keep rising with phi), then cap.
+            over = (phi_hat - phis[-1]) / (phis[-1] - phis[-2])
+            row = [
+                min(
+                    _MOOD_SHIFT_ALARM_MAX,
+                    table[-1][col] + over * (table[-1][col] - table[-2][col]),
+                )
+                for col in range(len(ns))
+            ]
+    # --- n side: interpolate along the collapsed row (clamped to the grid).
+    n = max(ns[0], min(ns[-1], n_points))
+    j = max(i for i in range(len(ns) - 1) if n >= ns[i])
+    wn = _interp_fraction(ns[j], ns[j + 1], n)
+    marginal = row[j] + wn * (row[j + 1] - row[j])
+    # --- magnitude conditioning: interpolate S over z on the same n grid
+    # (s_table is indexed [n_row][z_column]; j/wn carry the n position).
+    zs, s_table = _MOOD_SHIFT_ALARM_ZS, _MOOD_SHIFT_ALARM_S
+    if z_obs <= zs[0]:
+        factor = 1.0
+    elif z_obs >= zs[-1]:
+        s6 = s_table[j][-1] + wn * (s_table[j + 1][-1] - s_table[j][-1])
+        ratio = math.erfc(z_obs / math.sqrt(2.0)) / math.erfc(zs[-1] / math.sqrt(2.0))
+        factor = s6 * min(1.0, ratio)
+    else:
+        zk = max(k for k in range(len(zs) - 1) if z_obs >= zs[k])
+        wz = _interp_fraction(zs[zk], zs[zk + 1], z_obs)
+        s_lo = s_table[j][zk] + wn * (s_table[j + 1][zk] - s_table[j][zk])
+        s_hi = s_table[j][zk + 1] + wn * (s_table[j + 1][zk + 1] - s_table[j][zk + 1])
+        factor = s_lo + wz * (s_hi - s_lo)
+    return max(_MOOD_SHIFT_P_FLOOR, min(_MOOD_SHIFT_ALARM_MAX, marginal * factor))
+
+
+def _interp_fraction(lo: float, hi: float, value: float) -> float:
+    """The fraction of the way from lo to hi that value sits (0..1)."""
+    if hi <= lo:
+        return 0.0
+    return (value - lo) / (hi - lo)
+
 
 # Once a stored mood shift's evidence is this many days old, the EWMA
 # baseline re-anchors PAST it (see _mood_reanchor_day): a stable,
@@ -1049,6 +1241,8 @@ CURATED_SENTIMENT: dict[str, float] = {
 # The ENGLISH-only lexicon: the language-DETECTION set is built from it
 # (not the merged lookup), so Spanish prose cannot inflate English hits.
 SENTIMENT_LEXICON_EN: dict[str, float] = {**VADER_BASE, **CURATED_SENTIMENT}
+
+
 def _fold_canonicalize_lexicon(mapping: dict[str, float]) -> dict[str, float]:
     """2026-09-26 audit follow-up N-11: fold-invariance for the MERGED maps.
 
@@ -1067,16 +1261,11 @@ def _fold_canonicalize_lexicon(mapping: dict[str, float]) -> dict[str, float]:
         k
         for k in mapping
         if unicodedata.normalize("NFD", k) != k
-        and "".join(
-            c for c in unicodedata.normalize("NFD", k)
-            if unicodedata.category(c) != "Mn"
-        )
+        and "".join(c for c in unicodedata.normalize("NFD", k) if unicodedata.category(c) != "Mn")
         in mapping
     ]:
         folded = "".join(
-            c
-            for c in unicodedata.normalize("NFD", key)
-            if unicodedata.category(c) != "Mn"
+            c for c in unicodedata.normalize("NFD", key) if unicodedata.category(c) != "Mn"
         )
         if mapping[folded] != mapping[key]:
             mapping[key] = mapping[folded]
@@ -1188,6 +1377,7 @@ def _negators_for(language: str | None) -> frozenset[str]:
         return NEGATORS_EN
     return NEGATORS
 
+
 # Absolutist language (Al-Mosaiwi & Johnstone 2018): elevated in
 # anxiety/depression and suicidal-ideation text; reported to the user as a
 # self-reflection observation only — never as a risk score.
@@ -1229,7 +1419,7 @@ ABSOLUTIST_WORDS = ABSOLUTIST_WORDS_EN | ABSOLUTIST_WORDS_ES
 # measurement — share of entries — so no significance test applies).
 # --- structured channels (entry payload v2, 2026-09-17) ------------------------
 # Sleep quality is the best-validated lagged daily-diary channel (Konjarski
-# 2018 meta-analysis: sleep QUALITY → next-day affect). The user's 1-5
+# 2018 systematic review: sleep QUALITY → next-day affect). The user's 1-5
 # rating becomes a within-person binary: nights rated strictly below the
 # user's OWN median are "poor sleep" days (a 3 means something different
 # for someone who averages 4 than for someone averaging 2 — never pooled).
@@ -1794,6 +1984,50 @@ _KNOWN_TOKENS_ES: frozenset[str] = (
     | frozenset(SENSE_WORDS_ES)
 )
 
+# --- emoji tokens (item 10, 2026-09-26 statistical review) -----------------------
+# Emoji were counted with text.count(key) over the raw entry text, which
+# (a) missed every BARE base spelling — "❤" without the U+FE0F variation
+# selector scored nothing while "❤️" scored 3.0 (the Unicode consortium
+# treats both as the same grapheme; users and keyboards mix them freely),
+# and (b) would double-count shared-base keys if two map entries ever
+# shared a base (each key's count() scans the same characters again).
+# Counting now runs on a VS16-CANONICALIZED view: one regex pass matching
+# each distinct base with an OPTIONAL trailing U+FE0F (longest bases
+# first, so no base can eat another's prefix), each occurrence emitted
+# once as the map's canonical key — bare and fully-qualified spellings
+# score identically, shared bases count once, and pinned outputs for
+# fully-qualified emoji are byte-identical (the canonical key is the map
+# key the old count produced).
+_VS16 = "\ufe0f"
+_EMOJI_BASE_TO_KEY: dict[str, str] = {}
+for _emoji_key in EMOJI_VALENCES:  # dict order: deterministic on every run
+    _emoji_base = _emoji_key.removesuffix(_VS16)
+    # A fully-qualified (VS16-bearing) key is the canonical spelling of a
+    # shared base; a bare key never displaces it (insertion-order stable
+    # either way — the map has one spelling per base today, this just
+    # fixes the rule if that ever changes).
+    if _emoji_base not in _EMOJI_BASE_TO_KEY or _emoji_key.endswith(_VS16):
+        _EMOJI_BASE_TO_KEY[_emoji_base] = _emoji_key
+del _emoji_key, _emoji_base
+_EMOJI_SCAN_RE = re.compile(
+    "|".join(
+        re.escape(base) + _VS16 + "?"
+        for base in sorted(_EMOJI_BASE_TO_KEY, key=lambda b: (-len(b), b))
+    )
+)
+
+
+def _emoji_tokens(text: str) -> list[str]:
+    """The entry's emoji as canonical EMOJI_VALENCES keys, one per occurrence.
+
+    VS16-canonicalized and deduped by base (see the block comment above):
+    "❤" and "❤️" both yield "❤️", exactly once per occurrence.
+    """
+    return [
+        _EMOJI_BASE_TO_KEY[m.group(0).removesuffix(_VS16)] for m in _EMOJI_SCAN_RE.finditer(text)
+    ]
+
+
 # --- NLP primitives -------------------------------------------------------------
 
 # Per-character fold cache for _fold_sentiment_text: journals repeat the
@@ -2061,11 +2295,7 @@ def _dominant_tod(tod_seen: list[str]) -> tuple[str, int]:
 
 
 def extract_themes(tokens: list[str], language: str = "en") -> set[str]:
-    return {
-        theme
-        for theme in (theme_for(t, language) for t in tokens)
-        if theme is not None
-    }
+    return {theme for theme in (theme_for(t, language) for t in tokens) if theme is not None}
 
 
 def sentences_of(text: str) -> list[str]:
@@ -2113,6 +2343,35 @@ def _personal_baselines(day_sentiments: list[tuple[date, float]]) -> dict[date, 
             ]
             out[day] = (sum(window) / len(window)) if window else global_mean
     return out
+
+
+def _strip_weekday_effects(day_residuals: dict[date, float]) -> dict[date, float]:
+    """Per-weekday centering of the residual series (within-person).
+
+    Weekly-cycle deconfounding (2026-09-26 statistical review, item 1 —
+    RESEARCH.md §5 row 1 promised "also detrend weekly cycles"; Golder &
+    Macy 2011 mandate removing day-of-week cycles before computing
+    OTHER associations). A ±7-day rolling baseline absorbs slow TRENDS
+    but not the weekly CYCLE: a theme that co-occurs with a weekday mood
+    dip (work-Mondays) could surface through the shared rhythm alone —
+    the theme rides the Monday dip, the dip depresses the theme-day
+    residual mean, and the Welch test reads a "mood tie" that is just
+    the calendar. Subtracting each weekday's own mean residual is the
+    OLS solution of regressing the residuals on weekday dummies (the
+    within-person version — group means never enter, only this user's
+    own Mondays vs their own Tuesdays), so a theme that appears ONLY on
+    Mondays measures against the user's own average Monday: zero mean
+    by construction, no association unless the THEME-Mondays differ
+    from the non-theme Mondays. Iteration is over SORTED days and a
+    weekday-ordered table — deterministic under every PYTHONHASHSEED.
+    """
+    by_weekday: dict[int, list[float]] = {}
+    for day in sorted(day_residuals):
+        by_weekday.setdefault(day.weekday(), []).append(day_residuals[day])
+    weekday_means = {wd: sum(vals) / len(vals) for wd, vals in sorted(by_weekday.items())}
+    return {
+        day: value - weekday_means[day.weekday()] for day, value in sorted(day_residuals.items())
+    }
 
 
 def _pearson(xs: list[float], ys: list[float]) -> float | None:
@@ -2218,6 +2477,14 @@ def _stored_from_dict(raw: Any, pid: str) -> StoredPattern | None:
     label = raw.get("label")
     if not isinstance(kind, str) or not isinstance(label, str):
         return None
+    # Kind-taxonomy validation (item 12, 2026-09-26): an unknown kind is a
+    # foreign payload (a hand-crafted store, a schema from another engine).
+    # The record is kept — audit/evidence continuity — but forced INERT:
+    # state "archived" never surfaces, never promotes (no detector emits a
+    # foreign kind, so nothing ever re-qualifies it), and the aging sweep
+    # drops it in due course. A surfacing-eligible state on an unknown kind
+    # used to flow straight into the surfaced payload.
+    kind_is_known = kind in KNOWN_PATTERN_KINDS
     iso_or_none = lambda v: _parse_iso(v)  # noqa: E731
     qualification_days = (
         sorted({d for d in raw.get("qualification_days", []) if _parse_iso(d)})
@@ -2236,6 +2503,8 @@ def _stored_from_dict(raw: Any, pid: str) -> StoredPattern | None:
     state = raw.get("state")
     if not isinstance(state, str) or state not in SURFACED_STATES + ("candidate", "archived"):
         state = "candidate"
+    if not kind_is_known and state != "archived":
+        state = "archived"
     try:
         occurrences = int(raw.get("occurrences", 0) or 0)
         if occurrences < 0:
@@ -2482,6 +2751,88 @@ def _person_candidates(window: list[JournalEntry]) -> set[str]:
     return set(ranked[:PERSON_MAX_CANDIDATES])
 
 
+# Spanish person anchoring (item 14, 2026-09-26 statistical review): the
+# EN anchor reads "recurring mid-sentence CAPITALIZED token", which is
+# unworkable for Spanish (no capitalization signal) and was correctly
+# suppressed for every non-English language — the German-caps
+# false-positive class. The ES heuristic uses ONLY unambiguous
+# possessive-relation bigrams ("mi madre", "mi jefe"): a closed set of
+# kinship/work superiors behind the possessive "mi", matched on FOLDED
+# text with word boundaries. No capitalization anywhere (Spanish
+# sentence-start caps cannot fire it), no open-vocabulary noun guessing
+# (German "Meine Arbeit" folds to "meine arbeit" — the first word is not
+# "mi", so the class is suppressed by design). Feminine/masculine forms
+# are enumerated explicitly; plurals ("mis padres") are deliberately NOT
+# matched (the singular set is the documented, reviewable surface).
+_ES_RELATION_NOUNS: tuple[str, ...] = (
+    "madre",
+    "padre",
+    "hermano",
+    "hermana",
+    "hijo",
+    "hija",
+    "abuelo",
+    "abuela",
+    "tio",
+    "tia",
+    "primo",
+    "prima",
+    "jefe",
+    "jefa",
+    "esposa",
+    "esposo",
+    "marido",
+    "suegra",
+    "suegro",
+)
+_ES_PERSON_CANDIDATES: frozenset[str] = frozenset(f"mi {noun}" for noun in _ES_RELATION_NOUNS)
+_ES_RELATION_RE = re.compile(
+    r"\b(?:" + "|".join(rf"mi {noun}" for noun in _ES_RELATION_NOUNS) + r")\b"
+)
+
+
+def _mentions_es_relation(text: str, phrase: str) -> bool:
+    """Word-boundary mention of an ES relation phrase on FOLDED text."""
+    return re.search(rf"\b{re.escape(phrase)}\b", _fold_sentiment_text(text.lower())) is not None
+
+
+def _person_mention(text: str, name: str, language: str) -> bool:
+    """Mention check for the active language's person-anchor set."""
+    if language == "es":
+        return _mentions_es_relation(text, name)
+    return _mentions_name(text, name)
+
+
+def _person_candidates_es(window: list[JournalEntry]) -> set[str]:
+    """Recurring Spanish possessive-relation candidates, deterministically.
+
+    Same floors as the EN anchor (PERSON_MIN_TOTAL_MENTIONS /
+    PERSON_MIN_DISTINCT_DAYS / PERSON_MAX_CANDIDATES): a relation becomes
+    a person anchor only when the user writes "mi madre"-style bigrams
+    across enough distinct days. Word-boundary regex over the FOLDED text
+    ("mi tia" does not match "mi tiazas"); iteration over the fixed,
+    sorted candidate set keeps every ordering deterministic.
+    """
+    counts: dict[str, int] = {}
+    days: dict[str, set[date]] = {}
+    for entry in window:
+        folded = _fold_sentiment_text(entry.text.lower())
+        found = set(_ES_RELATION_RE.findall(folded))
+        for phrase in found:
+            counts[phrase] = counts.get(phrase, 0) + 1
+            days.setdefault(phrase, set()).add(entry.entry_date)
+    qualified = {
+        phrase
+        for phrase, n in counts.items()
+        if n >= PERSON_MIN_TOTAL_MENTIONS
+        and len(days.get(phrase, set())) >= PERSON_MIN_DISTINCT_DAYS
+    }
+    if len(qualified) <= PERSON_MAX_CANDIDATES:
+        return qualified
+    ranked = sorted(qualified, key=lambda phrase: (-counts[phrase], -len(days[phrase]), phrase))
+    return set(ranked[:PERSON_MAX_CANDIDATES])
+
+
 def _detect_themes(
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
     weekday_days: dict[int, int],
@@ -2606,9 +2957,7 @@ def _detect_themes(
         # fabricated 0.0 residual must stay out of the mood groups. A
         # blanked entry WITH a mood tag is the user's own report and stays.
         mood_with_theme = [(e, s) for e, s in with_theme if e.text or e.sentiment is not None]
-        mood_without_theme = [
-            (e, s) for e, s in without_theme if e.text or e.sentiment is not None
-        ]
+        mood_without_theme = [(e, s) for e, s in without_theme if e.text or e.sentiment is not None]
         moods_with = _day_means(mood_with_theme)
         moods_without = _day_means(mood_without_theme)
         if len(moods_without) >= MOOD_MIN_PER_SIDE:
@@ -2647,7 +2996,7 @@ def _detect_links(
 
     The best-validated lagged association in the daily-diary literature
     is sleep → next-day affect (Konjarski et al. 2018, *Sleep Medicine
-    Reviews* meta-analysis); stress spillover (Bolger et al. 1989) has the
+    Reviews* systematic review); stress spillover (Bolger et al. 1989) has the
     same shape. We test every theme's next-day residual mood against the
     user's own baseline — the literal "pattern linking" the product
     promises. Only lag-1/lag-2 are tested: they are the interpretable,
@@ -2660,10 +3009,12 @@ def _detect_links(
         (a skip-day pair still measures "the day after the theme came
         up" for the WRITER — they just didn't write that day), so
         transitions with gap <= LINK_MAX_GAP_DAYS are admitted. The
-        label then reports the MODAL exposed gap (detail.lag_days, with
-        per-gap counts): "the day after" is said only when the data
-        actually says it. Restricting to gap == 1 was tried and
-        rejected: for anyone who skips a weekday the exposed group
+        label then reports the exposed gap mix (detail.lag_days with
+        per-gap counts): "the day after" is said only when gap-1 is the
+        STRICT mode AND >= LINK_DAY_AFTER_SHARE of the measured exposed
+        outcomes (item 4, 2026-09-26) — a nearly even gap mixture gets
+        the honest lag-generic copy. Restricting to gap == 1 was tried
+        and rejected: for anyone who skips a weekday the exposed group
         collapses below the sample floor and true links vanish.
       * EFFECTIVE SAMPLE SIZE: consecutive-day residuals are
         autocorrelated (that carryover is the inertia detector's whole
@@ -2705,6 +3056,16 @@ def _detect_links(
         # Evidence follows what was MEASURED (see the F-3 filter above):
         # unmeasured outcome days back no part of the claim.
         outcome_days = [cur for _, cur in exposed_pairs if cur in day_residuals]
+        # Day-after phrasing gate (2026-09-26 statistical review, item 4):
+        # "the day after" may be said ONLY when gap-1 exposures are a
+        # DOMINANT majority of the measured exposed outcomes — strictly
+        # the mode AND >= LINK_DAY_AFTER_SHARE of them. The old tie-break
+        # (gap1 >= gap2) let a 5-vs-4 gap-2 mixture print "the day after";
+        # a nearly even gap mix must fall through to the lag-generic
+        # "in the days after" copy instead. detail.lag_days and the
+        # gap1/gap2 counts ride along unchanged; the renderers key off
+        # lag_days exactly as before (lag != 1 renders the generic copy).
+        day_after = gap1 > gap2 and gap1 >= LINK_DAY_AFTER_SHARE * len(exposed)
         signals.append(
             _Signal(
                 pid=f"link:{theme}",
@@ -2713,9 +3074,9 @@ def _detect_links(
                 occurrences=len(exposed),
                 pvalue=pvalue,
                 detail={
-                    # The MODAL exposed gap (ties break to 1, the stricter
-                    # reading): the card copy keys off this.
-                    "lag_days": 1 if gap1 >= gap2 else 2,
+                    # 1 = "the day after"; anything else renders the honest
+                    # lag-generic copy (see patterns.Pattern.describe).
+                    "lag_days": 1 if day_after else 2,
                     "gap1_days": gap1,
                     "gap2_days": gap2,
                     "mood_delta": round(delta, 3),
@@ -2745,14 +3106,35 @@ def _inertia_signal(
     channels (2026-09-19): the payload-v2 energy pick is a client-reported
     channel like the mood tag, so it rides the identical machinery — same
     evidence bars, same BH family, same lifecycle. Returns None when either
-    window lacks the minimum consecutive-day pairs."""
+    window lacks the minimum consecutive-day pairs.
+
+    Boundary ownership (2026-09-26 statistical review, item 8): the two
+    windows' pair sets must not share an OBSERVATION — the pair anchored
+    ON the cutoff day (cutoff-1 -> cutoff) and the first recent pair
+    (cutoff -> cutoff+1) both contain the cutoff day's value, which fed
+    both sample correlations and broke the Fisher-z independence
+    premise at exactly the seam the test compares. The boundary day's
+    own pair is now dropped from the EARLIER window (the recent window
+    keeps the observation through its cutoff -> cutoff+1 pair), so the
+    two correlation samples are built on disjoint observations FOR THE
+    GAP-1 PAIRS this argument is about. A GAP-2 pair can still share one
+    observation across the seam: the earlier window's last pair anchored
+    at cutoff-1 spans cutoff-3 -> cutoff-1 and the recent window's first
+    pair anchored at cutoff+1 may span cutoff-1 -> cutoff+1, both
+    containing the cutoff-1 value — one shared point out of >=
+    2 * INERTIA_MIN_PAIRS >= 20 per comparison, an overlap an order of
+    magnitude below the Fisher-z test's own sampling error. The strict
+    seam exclusion (the cutoff-anchored pair belongs to NEITHER window)
+    still removes the boundary day itself, which is the case that broke
+    the independence premise by construction.
+    """
     recent_cutoff = today - timedelta(days=INERTIA_RECENT_DAYS)
     consecutive: list[tuple[date, float, float]] = []
     for (d1, s1), (d2, s2) in zip(series, series[1:]):
         if 1 <= (d2 - d1).days <= 2:
             consecutive.append((d2, s1, s2))
     recent = [(s1, s2) for d, s1, s2 in consecutive if d > recent_cutoff]
-    earlier = [(s1, s2) for d, s1, s2 in consecutive if d <= recent_cutoff]
+    earlier = [(s1, s2) for d, s1, s2 in consecutive if d < recent_cutoff]
     if len(recent) < INERTIA_MIN_PAIRS or len(earlier) < INERTIA_MIN_PAIRS:
         return None
     r_recent = _pearson([a for a, _ in recent], [b for _, b in recent])
@@ -2952,26 +3334,62 @@ def _detect_sense_making(day_densities: list[tuple[date, float]], today: date) -
 # own tagging, never a symptom claim. Needs real variety to exist: a
 # person who ever used fewer than two distinct tags has no variety to
 # lose or gain, and no claim is made for them.
+#
+# Estimator + sample floors (2026-09-26 statistical review, item 3):
+#   * Miller-Madow bias correction: MLE plug-in entropy is DOWNWARD biased
+#     by ~(m-1)/(2N) nats (the observed distribution is lumpier than the
+#     truth); simulation measured -0.56 bits on weeks of this engine's
+#     shape — larger than the 0.35-bit effect gate, so the raw estimator
+#     could manufacture or swallow a whole claim. Miller (1955)/Madow
+#     gives the closed-form first-order correction (m-1)/(2N ln 2) bits
+#     (m = distinct tags that week, N = tag occurrences); the minimum-
+#     bias choice among the simple corrections, and deterministic.
+#   * Tag-volume floor: weeks with < DIVERSITY_MIN_TAG_DAYS tagged days
+#     or < DIVERSITY_MIN_DISTINCT_TAGS distinct tags are EXCLUDED from
+#     the sample (not scored as zero): a one-tag week's "entropy" is a
+#     sample-size artifact of how little the user journaled, and
+#     low-volume weeks otherwise systematically drag the mean down.
+#   * DIVERSITY_MIN_WEEKS raised 3 -> 4: the comparison is a Welch t over
+#     per-week entropy observations; at 3 weeks per side Welch-Satterthwaite
+#     df land at ~3-4, where the t critical value is inflated ~40% over
+#     normal and the 0.35-bit gate rides almost pure noise. 4 per side
+#     (df ~6-7) is the smallest sample where the gate means what it says.
 DIVERSITY_RECENT_WEEKS = 4
-DIVERSITY_MIN_WEEKS = 3  # weekly entropy observations per window
+DIVERSITY_MIN_WEEKS = 4  # weekly entropy observations per window
 DIVERSITY_DELTA = 0.35  # bits of entropy change vs the earlier window
 DIVERSITY_VARIANCE_FLOOR = 0.25
+DIVERSITY_MIN_TAG_DAYS = 2  # a week needs >= this many distinct tagged days
+DIVERSITY_MIN_DISTINCT_TAGS = 2  # ... and >= this many distinct tags, to count
 
 
 def _weekly_tag_entropies(tag_days: dict[str, set[date]]) -> list[tuple[date, float]]:
-    """(week-start-monday, Shannon entropy in bits) for every week with at
-    least one tag, chronological."""
+    """(week-start-monday, Miller-Madow-corrected entropy in bits) for every
+    week that clears the volume floor, chronological.
+
+    A week qualifies only with >= DIVERSITY_MIN_TAG_DAYS distinct tagged
+    days AND >= DIVERSITY_MIN_DISTINCT_TAGS distinct tags (see the
+    constants above). Entropy is the Miller-Madow bias-corrected
+    estimator: H_mle + (m - 1) / (2 N ln 2) bits. Iteration is over
+    sorted weeks and sorted tag sets — deterministic everywhere.
+    """
     weeks: dict[date, dict[str, int]] = {}
-    for tag, days in tag_days.items():
+    week_tag_days: dict[date, set[date]] = {}
+    for tag, days in sorted(tag_days.items()):
         for d in days:
             week = d - timedelta(days=d.weekday())
             weeks.setdefault(week, {})
             weeks[week][tag] = weeks[week].get(tag, 0) + 1
+            week_tag_days.setdefault(week, set()).add(d)
     out: list[tuple[date, float]] = []
     for week in sorted(weeks):
         counts = weeks[week]
+        distinct_tags = len(counts)
+        tagged_days = len(week_tag_days[week])
+        if distinct_tags < DIVERSITY_MIN_DISTINCT_TAGS or tagged_days < DIVERSITY_MIN_TAG_DAYS:
+            continue
         total = sum(counts.values())
         entropy = -sum((c / total) * math.log2(c / total) for c in counts.values() if c > 0)
+        entropy += (distinct_tags - 1) / (2.0 * total * math.log(2.0))  # Miller-Madow
         out.append((week, entropy))
     return out
 
@@ -3054,7 +3472,7 @@ def _detect_mood_dynamics(
         # (the same Bartlett deflation Welch applies). Degenerate inputs
         # fail closed to p=1: "no evidence", never a crash.
         resid_phi = _daily_lag1_autocorr(day_residuals)
-        pvalue = statsig.brown_forsythe_two_sided_p(
+        pvalue = statsig.brown_forsythe_upper_p(
             recent_vals,
             earlier_vals,
             n_eff_x=statsig.effective_sample_size(len(recent_vals), resid_phi),
@@ -3328,6 +3746,15 @@ def _detect_cadence(entry_days: set[date], today: date) -> list[_Signal]:
     applied to the gaps between writing days. Brown-Forsythe on the gap
     deviations (gaps are counts; the median-centered test is robust to
     their skew), failing closed on degenerate windows.
+
+    n_eff deflation (2026-09-26 statistical review, item 6 — mirrors the
+    instability detector's brain.py:3057 machinery): ADJACENT inter-writing
+    gaps share a calendar day by construction (gap_i ends where gap_{i+1}
+    begins), so the two sides' gap series are structurally dependent — a
+    one-day skip moves BOTH neighbouring gaps in opposite directions.
+    The pooled lag-1 autocorrelation of the whole window's gap sequence
+    deflates each side's effective n before the F df are computed, the
+    same Bartlett honesty Welch applies to the mood tests.
     """
     days_sorted = sorted(entry_days)
     recent_cutoff = today - timedelta(days=INERTIA_RECENT_DAYS)
@@ -3345,7 +3772,13 @@ def _detect_cadence(entry_days: set[date], today: date) -> list[_Signal]:
         return []
     sd_recent = statsig.sample_sd(recent_gaps)
     sd_earlier = statsig.sample_sd(earlier_gaps)
-    pvalue = statsig.brown_forsythe_two_sided_p(recent_gaps, earlier_gaps)
+    gap_phi = _lag1_autocorr(gaps(days_sorted))
+    pvalue = statsig.brown_forsythe_upper_p(
+        recent_gaps,
+        earlier_gaps,
+        n_eff_x=statsig.effective_sample_size(len(recent_gaps), gap_phi),
+        n_eff_y=statsig.effective_sample_size(len(earlier_gaps), gap_phi),
+    )
     return [
         _Signal(
             pid="cadence:rhythm",
@@ -3400,9 +3833,12 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     over the first quarter of the window, min 10 days), then tracks an
     exponentially weighted moving average (lambda 0.18, inside the
     0.05-0.25 band validated by Smit, Schat & Ceulemans 2023); a run of
-    points beyond +/-2.7 sigma_ewma in the recent tail reports a
+    points beyond +/-3.1 sigma_ewma in the recent tail reports a
     trajectory shift (Snippe et al. 2024 used this exact family of
-    charts on EMA mood series).
+    charts on EMA mood series). The limit multiplier and the reported
+    p-value are CALIBRATED (2026-09-26 statistical review, item 2): see
+    MOOD_SHIFT_LIMIT and _ewma_alarm_probability for the one-off
+    simulation both come from.
     """
     n = len(day_sentiments)
     if n < MOOD_SHIFT_MIN_DAYS:
@@ -3416,24 +3852,52 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     # precisely the autocorrelated series this engine's own inertia
     # detector exists to find: for AR(1) with lag-1 correlation phi the
     # long-run variance inflates by ~ (1+phi)/(1-phi) (phi = 0.5 → ~2.4x),
-    # and unadjusted ±2.7 "sigma" limits are effectively ±1.75 — measured
-    # false-alarm rates of ~19% on stationary autocorrelated mood. Only a
-    # STRONG baseline phi estimate triggers inflation: with the ~15-point
-    # baselines this chart gets, the standard error of r is ~0.27, so
-    # weak estimates are indistinguishable from iid and inflating on them
-    # would smother real shifts.
-    phi = _lag1_autocorr(values)
-    # Clamp before the division: a constant-within-float-noise baseline
+    # and unadjusted ±3.1 "sigma" limits would be effectively ±2.0.
+    # phi estimation (item 2b, recalibrated 2026-09-26): the OLD trigger
+    # read phi from the ~15-point baseline alone (SE ≈ 0.27 — the 0.35
+    # trigger sat at ~1.3 SE, a coin flip) and only inflated above it.
+    # The estimate now uses the FULL chart series (baseline + window,
+    # typically 60-180 points, SE = 1/sqrt(n-1) ≈ 0.07-0.13) shrunk
+    # James-Stein-style toward 0: the raw r must clear TWO of its own
+    # standard errors before it buys any inflation (phi_hat = max(0,
+    # r - 2/sqrt(n-1))), so iid noise (~half of all r draws are positive)
+    # never widens the limits while genuinely autocorrelated mood (r
+    # 0.5-0.85) clears the bar comfortably. Residual limitation, stated
+    # honestly: on very short charts (n ≈ 21-30, SE ≈ 0.2) the 2-SE
+    # shrink can understate strong autocorrelation, and the realized
+    # false-alarm rate then exceeds the calibrated table below — the
+    # BH family, the >= MOOD_SHIFT_RUN run rule and the replication
+    # gate all still stand between that residual and a surfaced card.
+    phi_raw = _lag1_autocorr([s for _, s in day_sentiments])
+    # Clamp before the division: a constant-within-float-noise series
     # computes r == 1.0 exactly and (1+phi)/(1-phi) divides by zero — the
     # 2026-09-16 red-team corpus (35 near-identical daily entries) bricked
     # every future recompute for such accounts. phi = 0.99 already
     # saturates the inflation cap below, so the clamp changes no honest
     # statistical outcome.
-    if phi is not None:
-        phi = min(phi, 0.99)
-    if phi is not None and phi >= 0.35:
-        inflation = (1.0 + phi) / (1.0 - phi)
-        sigma_ewma *= math.sqrt(min(max(inflation, 1.0), 16.0))
+    phi_hat = 0.0
+    if phi_raw is not None:
+        phi_hat = max(0.0, min(phi_raw, 0.99) - 2.0 / math.sqrt(max(1, n - 1)))
+    # Two-sided estimator handling (re-audit, 2026-09-27 — see the
+    # _MOOD_SHIFT_PHI_EFF_K constant block for the full argument and the MC
+    # evidence): phi_hat is deliberately biased LOW (the 2-SE shrink exists
+    # so iid noise never widens the limits), but a low estimate under true
+    # AR(1) leaves the limits too narrow and makes BOTH the realized alarm
+    # rate AND the reported p invalid — measured 13-31% of recomputes
+    # reporting p <= 0.05 under pure phi=0.5/0.8 nulls. The chart therefore
+    # runs on the estimator's UPPER branch: phi_eff = min(0.99, phi_hat +
+    # k/sqrt(n-1)) drives the AR(1) limit inflation AND the alarm-table
+    # lookup together, restoring the table's calibration condition (limits
+    # widened with the SAME phi the table row assumes). phi_hat == 0 keeps
+    # phi_eff == 0: an iid chart is bit-identical to the pre-fix behavior.
+    phi_eff = phi_hat
+    if phi_hat > 0.0:
+        phi_eff = min(
+            _MOOD_SHIFT_PHI_EFF_MAX,
+            phi_hat + _MOOD_SHIFT_PHI_EFF_K / math.sqrt(max(1, n - 1)),
+        )
+    inflation = (1.0 + phi_eff) / (1.0 - phi_eff)
+    sigma_ewma *= math.sqrt(min(max(inflation, 1.0), 16.0))
     upper = mu + MOOD_SHIFT_LIMIT * sigma_ewma
     lower = mu - MOOD_SHIFT_LIMIT * sigma_ewma
 
@@ -3457,11 +3921,18 @@ def _detect_mood_shift(day_sentiments: list[tuple[date, float]]) -> list[_Signal
     direction = "lower" if last_sign < 0 else "higher"
     # The excursion IS a statistical claim (a control chart is a repeated
     # test): attach its p-value so it enters the BH family with everything
-    # else instead of bypassing multiple-testing correction. The minimum
-    # meaningful shift is an effect gate and filters the SURVIVORS — the
-    # test ran, so the family counts it.
-    z_last = (last_ewma - mu) / sigma_ewma if sigma_ewma > 0 else 0.0
-    pvalue = statsig.normal_two_sided_sf(z_last)
+    # else instead of bypassing multiple-testing correction. The p is the
+    # CALIBRATED per-recompute alarm probability of the exact run rule
+    # (item 2a), magnitude-conditioned on the observed excursion — the
+    # marginal normal tail of the last point ignored the scan that
+    # selected it. The minimum meaningful shift is an effect gate and
+    # filters the SURVIVORS — the test ran, so the family counts it.
+    z_obs = abs(last_ewma - mu) / sigma_ewma if sigma_ewma > 0 else float(MOOD_SHIFT_LIMIT)
+    # The p lookup indexes the SAME phi_eff the limits were widened with —
+    # the table's calibration condition (limits widened with the row's phi)
+    # is what makes the returned rate valid for this chart (see the
+    # two-sided estimator comment above).
+    pvalue = _ewma_alarm_probability(phi_eff, n, z_obs)
     return [
         _Signal(
             pid=f"mood_shift:{direction}",
@@ -3776,9 +4247,7 @@ def _iso(day: date) -> str:
     return day.isoformat()
 
 
-def _replication_satisfied(
-    record: StoredPattern, signal: _Signal, prior_evidence: set[str]
-) -> bool:
+def _replication_satisfied(record: StoredPattern, signal: _Signal) -> bool:
     """True when a statistical claim has an INDEPENDENT second observation.
 
     Two distinct qualification days are necessary but not sufficient:
@@ -3789,31 +4258,50 @@ def _replication_satisfied(
     a single excursion). What counts as independent depends on the claim
     (see EVIDENCE_DATE_KINDS / WINDOW_STAT_KINDS above):
 
-      * evidence-date kinds: this run's signal must contribute at least
-        one evidence day the record did not already hold — the claim
-        re-derived on data that did not produce the first qualification.
+      * evidence-date kinds: the evidence accumulated since the FIRST
+        qualification must contain >= 2 distinct new evidence days
+        (2026-09-26 statistical review, item 5 — one new day can be a
+        single clustered mention, exactly the same fluke shape the gate
+        exists to stop; two days is the smallest honest "the data grew,
+        and it still says so"). "New" means the evidence day POSTDATES
+        first_qualified: days after the first qualification cannot have
+        produced it, and being the newest observations they survive every
+        EVIDENCE_DATES_CAP (the 2026-09-21 D-1 eviction exploit compared
+        against capped-away OLD days; post-first_qualified days are by
+        construction the newest, so the cap cannot fake them). A recompute
+        of an UNCHANGED corpus contributes nothing — its evidence all
+        predates first_qualified — and a same-day rerun contributes
+        nothing either.
       * window-stat kinds: the first and latest qualification days must
         be >= REPLICATION_MIN_SPREAD_DAYS calendar days apart, so the
         window itself has moved between the two observations.
 
-    Sensitivity cost, honestly stated: a real claim now surfaces a day or
-    two later than the bare 2-day gate allowed (it still surfaces on the
-    first recompute after genuinely new corroborating data exists).
+    Sensitivity cost, honestly stated: a real daily-writing claim now
+    surfaces on the SECOND day after first qualification (two fresh
+    evidence days) instead of the first — one extra day of patience for
+    an inference about someone's mental health.
     """
     if len(record.qualification_days) < 2:
         return False
     if record.kind in EVIDENCE_DATE_KINDS:
-        # 2026-09-21 audit D-1: set membership against the stored list was
-        # defeated by the EVIDENCE_DATES_CAP. The cap keeps the NEWEST
-        # EVIDENCE_DATES_CAP days, so for a well-evidenced pattern (>60
-        # evidence days) an evicted older day counted as "new" — a
-        # same-corpus, zero-new-data recompute satisfied "independent
-        # replication" (verified: mood_correlation:work, 73 evidence days,
-        # surfaced on a second identical run). Genuinely new evidence must
-        # postdate everything any earlier run held, and the newest stored
-        # day survives every cap — compare against it, not membership.
-        newest_prior = max(prior_evidence) if prior_evidence else ""
-        return any(_iso(day) > newest_prior for day in signal.evidence_days)
+        # New = evidence days STRICTLY AFTER first_qualified. Deliberately
+        # cumulative (counted against the FIRST qualification, not the
+        # latest merge): a daily writer's intermediate recomputes each
+        # absorb their own day into the stored evidence, so comparing
+        # against the newest stored day would reset the count every run
+        # and the gate could never open. Cap safety (2026-09-21 audit
+        # D-1): days after first_qualified are by construction the NEWEST
+        # observations, so the EVIDENCE_DATES_CAP (which keeps the newest
+        # 60) can never evict them — an unchanged-corpus recompute
+        # contributes nothing (its evidence all predates first_qualified)
+        # and cannot fake replication. A hostile store that stuffs future
+        # evidence days only pushes the comparison further out and fails
+        # closed.
+        first_qualified = record.first_qualified
+        if not first_qualified:
+            return False
+        new_days = sum(1 for day in signal.evidence_days if _iso(day) > first_qualified)
+        return new_days >= 2
     spread = (
         date.fromisoformat(record.qualification_days[-1])
         - date.fromisoformat(record.qualification_days[0])
@@ -3915,10 +4403,10 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
         record.first_qualified = record.first_qualified or today_iso
         days = sorted(set(record.qualification_days) | {today_iso})
         record.qualification_days = days[-QUALIFICATION_DAYS_CAP:]
-        # The replication gate compares this run's signal against the
-        # evidence recorded BEFORE this merge — a "new evidence day" is new
-        # relative to everything earlier runs already counted.
-        prior_evidence = set(record.evidence_dates)
+        # Evidence accumulates the union of every run's days, capped to the
+        # newest EVIDENCE_DATES_CAP. The replication gate's "new" comparison
+        # anchors on first_qualified (stored on the record), not on this
+        # set — the gate needs only the record and this run's signal.
         evidence = sorted(set(record.evidence_dates) | {_iso(d) for d in signal.evidence_days})
         record.evidence_dates = evidence[-EVIDENCE_DATES_CAP:]
 
@@ -3936,7 +4424,7 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
             ).days
             promoted = False
             if _is_statistical(record.kind, record.detail):
-                if _replication_satisfied(record, signal, prior_evidence):
+                if _replication_satisfied(record, signal):
                     promoted = True
             elif (
                 record.occurrences >= STRONG_EVIDENCE
@@ -3968,7 +4456,7 @@ def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None
             # lucky re-qualification after months of silence is the same
             # single-run fluke the promotion gate exists to stop.
             if not _is_statistical(record.kind, record.detail) or _replication_satisfied(
-                record, signal, prior_evidence
+                record, signal
             ):
                 record.state = "emerging"
                 record.first_qualified = today_iso
@@ -4117,9 +4605,11 @@ def update(
         # Emoji ride along as their own tokens: they score mood through
         # EMOJI_VALENCES but never become themes or phrase shingles (the
         # theme/phrase lookups simply never match them). Counted per
-        # OCCURRENCE: an entry of five sobs carries five sob tokens, not
-        # one (a repeated word is counted five times too).
-        tokens.extend(e for e in EMOJI_VALENCES for _ in range(entry.text.count(e)))
+        # OCCURRENCE on a VS16-canonicalized copy (item 10, see
+        # _emoji_tokens): an entry of five sobs carries five sob tokens,
+        # and a bare "❤" scores exactly like "❤️" — same grapheme, same
+        # valence, counted once.
+        tokens.extend(_emoji_tokens(entry.text))
         entry_tokens.append(tokens)
 
     # Language gate (2026-09-17): see the LANGUAGE_* constants. When the
@@ -4138,14 +4628,27 @@ def update(
     # sentiment, rumination classification step aside; client mood tags
     # still count). Phrase repetition needs WORD_RE tokenization, so it
     # steps aside for non-Latin scripts too (M-10, 2026-09-20: the README
-    # promise was corrected to match). Too little text keeps the
-    # historical English default.
+    # promise was corrected to match).
+    #
+    # Zero-token and short windows (2026-09-26 statistical review, item 9):
+    # a corpus with ZERO [a-z']+ tokens (CJK/Cyrillic/Greek, emoji-only)
+    # used to fall through to the English default and score lexicon mood
+    # from nothing; it now reports "other" whenever any raw text exists —
+    # "we do not know this language" is the honest verdict, and the
+    # clients already render a dedicated note card for it. Short windows
+    # (< LANGUAGE_MIN_TOKENS scored tokens) apply the SAME share rule
+    # instead of defaulting to English: with few tokens the share is a
+    # noisy estimate, so low-EN-share short windows default AWAY from EN
+    # scoring (length-aware tie rule) rather than guessing English. Only
+    # the fully EMPTY corpus (no tokens, no text at all) keeps the
+    # historical English default — nothing is being suppressed there.
     language = "en"
-    if len(scored) >= LANGUAGE_MIN_TOKENS:
+    any_text = any(entry.text for entry in window)
+    if scored or any_text:
         en_hits = sum(1 for t in scored if t in _KNOWN_TOKENS)
         es_hits = sum(1 for t in scored if t in _KNOWN_TOKENS_ES)
-        en_share = en_hits / len(scored)
-        es_share = es_hits / len(scored)
+        en_share = en_hits / len(scored) if scored else 0.0
+        es_share = es_hits / len(scored) if scored else 0.0
         if es_share >= LANGUAGE_HIT_FLOOR and es_share > en_share:
             language = "es"
         elif en_share >= LANGUAGE_HIT_FLOOR:
@@ -4175,20 +4678,28 @@ def update(
             themes.add(SLEEP_CHANNEL_THEME)
         per_entry.append((entry, tokens, themes, sentiment))
 
-    # Person anchoring: computed once per run over the raw window — but
-    # only for English (2026-09-21 audit D-4). The heuristic reads "a
-    # recurring MID-SENTENCE capitalized token" as a name; German-style
-    # orthography capitalizes every noun, so under language "other" (or
-    # Spanish sentence starts) common nouns masquerade as people and a
-    # mood-tagging user gets source="person" cards for ordinary words.
-    # English is the only orthography where the signal means what it says.
-    person_names = _person_candidates(window) if language == "en" else set()
+    # Person anchoring: computed once per run over the raw window. The EN
+    # heuristic reads "a recurring MID-SENTENCE capitalized token" as a
+    # name — German-style orthography capitalizes every noun, so under
+    # language "other" (or Spanish sentence starts) common nouns
+    # masquerade as people and a mood-tagging user gets source="person"
+    # cards for ordinary words (2026-09-21 audit D-4; English is the only
+    # orthography where that signal means what it says). Spanish gets its
+    # OWN anchor (item 14, 2026-09-26): unambiguous possessive-relation
+    # bigrams ("mi madre", "mi jefe") with no capitalization dependence —
+    # see _person_candidates_es. Every other language anchors nothing.
+    if language == "en":
+        person_names: set[str] = _person_candidates(window)
+    elif language == "es":
+        person_names = _person_candidates_es(window)
+    else:
+        person_names = set()
     if person_names:
         per_entry = [
             (
                 entry,
                 tokens,
-                themes | {n for n in person_names if _mentions_name(entry.text, n)},
+                themes | {n for n in person_names if _person_mention(entry.text, n, language)},
                 sentiment,
             )
             for entry, tokens, themes, sentiment in per_entry
@@ -4286,8 +4797,28 @@ def update(
     # statement about levels, not deviations.
     baselines = _personal_baselines(day_sentiments)
     day_residuals = {day: mood - baselines.get(day, mood) for day, mood in day_sentiments}
+    # Weekly-cycle deconfounding (2026-09-26 statistical review, item 1):
+    # the residual series still carries the weekly cycle (the rolling
+    # baseline spans ±7 days, so a stable weekday dip survives it), and a
+    # theme co-varying with that rhythm would surface through the calendar
+    # alone. Per-weekday centering (see _strip_weekday_effects) feeds the
+    # ASSOCIATION tests — mood_correlation, link, the energy↔mood coupling
+    # and the nuisance lag-1 deflation they share. Two consumers keep the
+    # pre-centering series deliberately: the instability detector (a
+    # weekly dip IS a swing the user feels — spread claims describe
+    # excursions, not contrasts) and the EWMA chart (a LEVEL claim
+    # against the baseline quarter, not a between-days contrast).
+    assoc_residuals = _strip_weekday_effects(day_residuals)
+    weekday_adjustment = {day: day_residuals[day] - assoc_residuals[day] for day in day_residuals}
     residual_per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = [
-        (entry, tokens, themes, sentiment - baselines.get(entry.entry_date, sentiment))
+        (
+            entry,
+            tokens,
+            themes,
+            sentiment
+            - baselines.get(entry.entry_date, sentiment)
+            - weekday_adjustment.get(entry.entry_date, 0.0),
+        )
         for entry, tokens, themes, sentiment in mood_entries
     ]
     day_themes: dict[date, set[str]] = {}
@@ -4297,9 +4828,10 @@ def update(
     signals: list[_Signal] = []
     if per_entry:
         # One nuisance estimate per run: lag-1 autocorrelation of the daily
-        # residual series, deflating per-group n in the link/mood Welch
+        # WEEKDAY-DECONFOUNDED residual series (item 1: the same series the
+        # mood/link Welch tests run on), deflating per-group n in those
         # tests (consecutive-day residuals are not independent evidence).
-        resid_lag1 = _daily_lag1_autocorr(day_residuals)
+        resid_lag1 = _daily_lag1_autocorr(assoc_residuals)
         # The recurring-phrase clusters feed BOTH the phrase detector and
         # the topic presence gate (a presence a repeated sentence already
         # explains is the same measurement twice) — computed once per run.
@@ -4317,7 +4849,7 @@ def update(
             else [(day, mood) for day, mood in day_sentiments if day > anchor]
         )
         signals.extend(_detect_mood_shift(shift_series))
-        signals.extend(_detect_links(day_themes, day_residuals, today, resid_lag1))
+        signals.extend(_detect_links(day_themes, assoc_residuals, today, resid_lag1))
         # Writing calendar from ALL window entry dates (2026-09-20 audit
         # H-10): avoidance and cadence observe WHEN the user journaled —
         # pure writing-metadata, not something the lexicon scored. Under
@@ -4367,12 +4899,15 @@ def update(
             signals.append(na_inertia)
         # Energy ↔ mood coupling: cross-channel concordance on within-person
         # residuals, recent vs the user's own earlier norm. Needs both
-        # channels present on enough shared days.
+        # channels present on enough shared days. Both channels are
+        # weekday-deconfounded (item 1): two channels that share the user's
+        # weekly rhythm would correlate through the calendar, not through
+        # each other.
         energy_baselines = _personal_baselines(day_energies)
-        energy_residuals = {
-            day: value - energy_baselines.get(day, value) for day, value in day_energies
-        }
-        coupling = _coupling_signal(energy_residuals, day_residuals, today)
+        energy_residuals = _strip_weekday_effects(
+            {day: value - energy_baselines.get(day, value) for day, value in day_energies}
+        )
+        coupling = _coupling_signal(energy_residuals, assoc_residuals, today)
         if coupling is not None:
             signals.append(coupling)
         # Sense-making trajectory and activity variety (2026-09-19): the
@@ -4589,9 +5124,7 @@ def update(
     # truncation or empty submit carrying zero mood evidence, and averaging
     # its fabricated neutral 0.0 pulled "average reading" (portal) toward
     # the middle. Tagged entries keep counting: the user's own report.
-    sentiments = [
-        s for entry, _, _, s in per_entry if entry.text or entry.sentiment is not None
-    ]
+    sentiments = [s for entry, _, _, s in per_entry if entry.text or entry.sentiment is not None]
     stats = {
         "total_entries": len(per_entry),
         # Honesty signal (2026-09-19): the detected analysis language;

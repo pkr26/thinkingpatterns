@@ -4,7 +4,7 @@
  * (the client emulator) — if these ever disagree, shared/vectors.json fails.
  */
 import { buildAad, decrypt, encrypt } from "./envelope";
-import { deriveAuthKey, deriveDataKey, deriveMasterKey, deriveMasterKeyAsync, zeroize } from "./kdf";
+import { deriveAuthKey, deriveDataKey, deriveMasterKey, deriveMasterKeyAsync, KDF_ITERATIONS, zeroize } from "./kdf";
 
 export interface Keys {
   masterKey: Buffer;
@@ -44,9 +44,12 @@ export function deriveKeys(password: string, salt: Buffer): Keys {
 }
 
 /** deriveKeys without the JS-thread freeze (see deriveMasterKeyAsync) —
- *  the login/unlock screens' preferred path. */
-export async function deriveKeysAsync(password: string, salt: Buffer): Promise<Keys> {
-  const masterKey = await deriveMasterKeyAsync(password, salt);
+ *  the login/unlock screens' preferred path. `iterations` defaults to the
+ *  600k contract; the v2 password rotation passes the account envelope's
+ *  OWN kdf_params count so the re-wrap KEK can never disagree with the AAD
+ *  the wrap declares (re-audit 2026-09-27). */
+export async function deriveKeysAsync(password: string, salt: Buffer, iterations = KDF_ITERATIONS): Promise<Keys> {
+  const masterKey = await deriveMasterKeyAsync(password, salt, iterations);
   return { masterKey, authKey: deriveAuthKey(masterKey), dataKey: deriveDataKey(masterKey) };
 }
 

@@ -143,7 +143,7 @@ describe("App", () => {
     expect(textOf(root)).toContain("Create a therapist account instead");
   });
 
-  it("sign-out aborts the portal session, wipes raw keys, and keeps the session-backed delta anchor (L-75)", async () => {
+  it("sign-out aborts the portal session, wipes raw keys, and clears the session-backed delta anchor (L-75 + 2026-09-26 round)", async () => {
     const crypto = vi.mocked(await import("../src/crypto"));
     const wrapKek = new Uint8Array(32).fill(7);
     const noteKey = new Uint8Array(32).fill(9);
@@ -156,6 +156,7 @@ describe("App", () => {
       },
     ]);
     window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+    window.sessionStorage.setItem("mindpattern.lastVisit.other-therapist.user-9", "2026-09-01T00:00:00.000Z");
     const root = await login();
     await press(root, "Open patterns");
     await flush();
@@ -169,13 +170,30 @@ describe("App", () => {
 
     expect(hasSession()).toBe(false);
     expect([...noteKey]).toEqual(new Array(32).fill(0));
-    // L-75 decision (2026-09-20): visit-date stamps are date-only anchors
-    // in per-tab sessionStorage, so a sign-out / idle lock / expiry no
-    // longer scrubs them — the clinician keeps the "new since reviewed"
-    // delta within the browser session, and the session's end clears it.
-    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBe("2026-09-01T00:00:00.000Z");
+    // 2026-09-26 audit round (L): an EXPLICIT sign-out clears this
+    // therapist's session-backed anchors too — leaving the workstation for
+    // the day must not leave per-patient date stamps on the shared machine.
+    // Another therapist's stamps are untouched (the prefix is user-scoped).
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
+    expect(window.sessionStorage.getItem("mindpattern.lastVisit.other-therapist.user-9")).toBe("2026-09-01T00:00:00.000Z");
     expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
     expect(textOf(root)).toContain("Your in-memory keys were cleared");
+  });
+
+  it("an IDLE lock keeps the session-backed delta anchor (the accepted L-75 retention)", async () => {
+    // The carve-out above is sign-out ONLY: a 10-minute idle lock mid
+    // clinic-day must not erase the "new since reviewed" delta — that is
+    // the deliberate L-75 trade-off, documented at App's lockDown.
+    window.sessionStorage.setItem("mindpattern.lastVisit.therapist-1.user-1", "2026-09-01T00:00:00.000Z");
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60 * 1000); });
+      expect(textOf(root)).toContain("Locked after inactivity");
+      expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBe("2026-09-01T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("2026-09-26 audit M-P1: sign-out revokes the bearer server-side before the local teardown", async () => {
@@ -213,6 +231,82 @@ describe("App", () => {
       expect(hasSession()).toBe(false);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  // --- 2026-09-26 audit round (M): interaction-only re-arm + visibility ------
+
+  it("bare mousemove does NOT re-arm the idle timer — a mouse jiggler cannot keep keys alive", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60 * 1000); });
+      // Jiggle away for the entire remaining window: passive mouse motion
+      // is not interaction and must not reset anything.
+      for (let i = 0; i < 30; i += 1) {
+        await act(async () => { window.dispatchEvent({ type: "mousemove" } as Event); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(5 * 1000); });
+      }
+      expect(textOf(root)).toContain("Locked after inactivity");
+      expect(hasSession()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a real interaction (click) re-arms the idle timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60 * 1000); });
+      await act(async () => { window.dispatchEvent({ type: "click" } as Event); });
+      // 9 minutes past the ORIGINAL deadline: still unlocked.
+      await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60 * 1000); });
+      expect(textOf(root)).toContain("Patients — Dr. Portal");
+      // The re-armed timer fires at click + 10 min.
+      await act(async () => { await vi.advanceTimersByTimeAsync(60 * 1000 + 1); });
+      expect(textOf(root)).toContain("Locked after inactivity");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a tab hidden past the idle threshold locks on return even when no timer fired", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      // Hide the tab, then move the WALL CLOCK past the threshold without
+      // running any timer callbacks — the browser's background-tab timer
+      // throttling case the visibilitychange handler exists for.
+      (document as { hidden: boolean }).hidden = true;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      await act(async () => { vi.setSystemTime(Date.now() + 11 * 60 * 1000); });
+      expect(textOf(root)).toContain("Patients — Dr. Portal"); // not locked while hidden
+      (document as { hidden: boolean }).hidden = false;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      expect(textOf(root)).toContain("Locked after inactivity");
+      expect(hasSession()).toBe(false);
+      expect(vi.mocked(api.logout)).toHaveBeenCalledTimes(1); // same lockDown path
+    } finally {
+      vi.useRealTimers();
+      (document as { hidden: boolean }).hidden = false;
+    }
+  });
+
+  it("a short hide does NOT lock on return", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      (document as { hidden: boolean }).hidden = true;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      await act(async () => { vi.setSystemTime(Date.now() + 4 * 60 * 1000); });
+      (document as { hidden: boolean }).hidden = false;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      expect(textOf(root)).toContain("Patients — Dr. Portal");
+      expect(hasSession()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      (document as { hidden: boolean }).hidden = false;
     }
   });
 
@@ -255,6 +349,52 @@ describe("App", () => {
     expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeTruthy();
     expect(window.sessionStorage.getItem("mindpattern.lastVisit.other-therapist.user-1")).toBeTruthy();
     expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
+  });
+
+  it("re-audit 2026-09-27: sign-out resets the triage-scan 'don't ask again' latch — the next sign-in asks again", async () => {
+    // The latch is MODULE state; without the lockDown reset it would leak
+    // across sessions in the same tab, and a DIFFERENT therapist signing in
+    // would silently inherit the previous therapist's acknowledgment of the
+    // scan's access footprint.
+    // The scan toolbar renders for 2+ active patients.
+    vi.mocked(api.patients).mockResolvedValue([
+      {
+        user_id: "user-1", username: "patienta", status: "active",
+        granted_at: "2026-09-01T00:00:00Z", revoked_at: null,
+        ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
+      },
+      {
+        user_id: "user-2", username: "patientb", status: "active",
+        granted_at: "2026-09-02T00:00:00Z", revoked_at: null,
+        ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
+      },
+    ]);
+    const root = await login();
+    await flush();
+    // First scan: the footprint confirmation is asked; tick "don't ask
+    // again" and run it — the latch is now set.
+    await press(root, "Scan caseload for triage");
+    await flush();
+    expect(textOf(root)).toContain("one request and one audit entry per patient");
+    const box = root.root.findAllByType("input").find((n) => n.props["aria-label"] === "Do not ask again in this browser session");
+    expect(box).toBeTruthy();
+    await act(async () => { box!.props.onChange({ target: { checked: true } }); });
+    await press(root, "Start the triage scan");
+    await flush(8);
+
+    // Sign out, then sign back in (in production: a different therapist at
+    // the shared clinic machine). The footprint question must be asked
+    // again — the latch died with the session at the lockDown boundary.
+    await press(root, "Sign out");
+    await flush();
+    await typeInto(root, "Username", "drportal");
+    await typeInto(root, "Password", "pw");
+    await press(root, "Sign in");
+    await flush();
+    expect(textOf(root)).toContain("Patients — Dr. Portal");
+    await press(root, "Scan caseload for triage");
+    await flush();
+    expect(textOf(root)).toContain("one request and one audit entry per patient");
   });
 
   it("2026-09-19: a FAILED key unlock wipes the password-derived wrap KEK too", async () => {

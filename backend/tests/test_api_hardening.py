@@ -689,31 +689,38 @@ async def test_get_insights_uses_a_distinct_date_scan(client, app):
 # --- P1-15: atomic logout + keystore purge ------------------------------------------
 
 
-async def test_logout_epoch_bump_is_a_single_atomic_update(client, app):
+async def test_logout_revokes_only_the_presented_token(client, app):
+    """2026-09-26 remediation: logout records the bearer's jti in the
+    revocation store (ttl = the token's own expiry) instead of bumping the
+    account-wide epoch — one device signs out without killing every other
+    session. The epoch bump remains the GLOBAL primitive (credential
+    rotation, deletion) and still fires for legacy jti-less tokens."""
     emu = ClientEmulator("atomiclogout", "pw-atomic-logout")
     await emu.register(client)
+    first_token = emu.token
 
-    statements: list[str] = []
-
-    @event.listens_for(app.state.engine.sync_engine, "before_cursor_execute")
-    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
-        statements.append(statement)
+    # A second, independent session for the same account (fresh login).
+    await emu.login(client)
+    second_token = emu.token
+    assert second_token != first_token
 
     assert (await client.post("/api/auth/logout", headers=emu.headers)).status_code == 204
 
-    epoch_updates = [s for s in statements if "UPDATE" in s.upper() and "token_epoch" in s]
-    assert epoch_updates, statements
-    # SET token_epoch = token_epoch + 1 — atomic in the DB, not read-modify-write.
-    assert any(
-        "token_epoch +" in s or "token_epoch +(" in s or "(token_epoch +" in s
-        for s in epoch_updates
-    ), epoch_updates
-
+    # The logged-out token is dead (jti revoked)...
+    stale = await client.get("/api/entries", headers=emu.headers)
+    assert stale.status_code == 401
+    assert stale.json()["detail"] == "invalid token"  # flat reason, no oracle
+    # ...while the OTHER live token for the same account still works, and
+    # the epoch did NOT move (no global bump on single-device logout).
+    ok = await client.get("/api/entries", headers={"Authorization": f"Bearer {first_token}"})
+    assert ok.status_code == 200
     from app.models import User
 
     async with app.state.sessionmaker() as session:
         user = await session.get(User, emu.user_id)
-    assert user.token_epoch == 2
+    assert user.token_epoch == 1
+    # Exactly the one presented jti is resident in the revocation store.
+    assert len(app.state.token_revocations) == 1
 
 
 async def test_logout_purges_processing_sessions(client, app):

@@ -507,9 +507,11 @@ export function Dialog(props: { title: string; onClose: () => void; children: Re
     // inert-on-#app-content variant muted the dialog's own focusables —
     // caught live in E2E and pinned in tests/interaction.test.tsx).
     const appContent = document.getElementById("app-content");
-    const inerted = appContent
-      ? Array.from(appContent.children).filter((el) => !el.contains(panel.current) && !panel.current.contains(el))
-      : [];
+    const panelEl = panel.current;
+    const inerted =
+      appContent && panelEl
+        ? Array.from(appContent.children).filter((el) => !el.contains(panelEl) && !panelEl.contains(el))
+        : [];
     inerted.forEach((el) => el.setAttribute("inert", ""));
     const focusables = (): HTMLElement[] => {
       if (!panel.current) return [];

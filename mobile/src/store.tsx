@@ -18,9 +18,10 @@ import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { clearCrisisDialogStamp } from "./crisisDialog";
-import { syncReminderSchedule } from "./reminderSync";
+import { syncReminderSchedule, syncMeasureReminderSchedule } from "./reminderSync";
+import { clearLastMeasureDate, clearMeasureReminderPrefs } from "./measureReminders";
 import { disableBiometricUnlock } from "./biometricUnlock";
-import { cancelDailyReminder } from "./nativeFeatures";
+import { cancelDailyReminder, cancelMeasureReminder } from "./nativeFeatures";
 import { loadHapticsSetting } from "./haptics";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
@@ -172,6 +173,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .getUserId()
       .then((userId) => {
         if (userId) void syncReminderSchedule(userId);
+        // The MBC check-in nudge rides the same session-start
+        // reconciliation (2026-09-27): opt-in + cadence decide, and a
+        // nudge that has become stale (a measure was completed since it
+        // was scheduled) dies here.
+        if (userId) void syncMeasureReminderSchedule(userId);
       })
       .catch(() => {});
     api
@@ -254,7 +260,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // 401s, and that self-inflicted 401 must REQUEUE the current user's
     // items — not move them to the rejected store (see abortInFlightFlush).
     abortInFlightFlush();
-    // Best-effort server revocation (retires every token for the account);
+    // Best-effort per-device sign-out (2026-09-26: the server revokes THIS
+    // bearer's jti — other devices' sessions stay valid; the account-wide
+    // epoch bump now happens only on credential rotation / deletion);
     // local cleanup proceeds regardless of connectivity.
     try {
       await api.logout();
@@ -280,6 +288,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       await clearRecomputeStamp(userId).catch(() => {});
       await clearUnlockProof(userId).catch(() => {});
       await clearCrisisDialogStamp(userId).catch(() => {});
+      // Re-audit 2026-09-27 (L): the measure-cadence stamp and the measure
+      // reminder prefs are per-account traces like the crisis-dialog stamp
+      // above — on a shared device they must not outlive the session they
+      // belonged to (who signs in next should not inherit the previous
+      // user's cadence clock or nudge settings).
+      await clearLastMeasureDate(userId).catch(() => {});
+      await clearMeasureReminderPrefs(userId).catch(() => {});
       // M-19 (2026-09-20 audit): the biometric data-key wrap must not
       // outlive the session it belonged to — sign-out hygiene is exactly
       // what biometricUnlock.ts documents for this call. Currently inert
@@ -292,7 +307,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // M-19: the daily reminder is device-global, so it is cancelled with or
     // without a resolvable account id — the shared-device user must not be
     // nudged by a signed-out session (account deletion already did this).
+    // The measure check-in nudge (2026-09-27) rides the same hygiene.
     await cancelDailyReminder().catch(() => {});
+    await cancelMeasureReminder().catch(() => {});
+    // The cached key envelope (v2 offline-unlock material) is account
+    // material like the salt — wiped with the session.
+    if (username) await api.clearCachedKeyEnvelope(username).catch(() => {});
     if (username) await api.clearCachedSalt(username).catch(() => {});
     await api.clearSession();
     setAuthStatus("loggedOut");

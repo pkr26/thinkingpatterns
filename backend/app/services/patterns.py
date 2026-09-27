@@ -494,9 +494,7 @@ def analyze(entries: list[JournalEntry]) -> Analysis:
     # from brain.py — a blank-text entry with no explicit mood tag carries
     # zero mood evidence and must not average in a fabricated neutral 0.0;
     # a tagged one is the user's own report and stays.
-    sentiments = [
-        s for entry, s, _ in per_entry if entry.text or entry.sentiment is not None
-    ]
+    sentiments = [s for entry, s, _ in per_entry if entry.text or entry.sentiment is not None]
     dates_seen = sorted({e.entry_date for e, _, _ in per_entry})
     return Analysis(
         total_entries=len(per_entry),

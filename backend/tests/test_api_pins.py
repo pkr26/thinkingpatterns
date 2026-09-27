@@ -794,6 +794,10 @@ class _FkCommitSession:
             return SimpleNamespace(
                 scalars=lambda: SimpleNamespace(first=lambda: SimpleNamespace(user_id="l12-gone"))
             )
+        if "access_log" in text:
+            # 2026-09-26 audit item 16: the chained audit append reads the
+            # patient's chain head before inserting — an empty chain here.
+            return SimpleNamespace(first=lambda: None)
         if self.executions == 2:  # duplicate pre-check
             return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: None))
         if "count" in text:  # note quota (live + revision aggregate)
@@ -804,6 +808,11 @@ class _FkCommitSession:
         return 0
 
     async def refresh(self, *_a, **_k):
+        pass
+
+    async def flush(self):
+        # 2026-09-26 audit item 16: the chained audit append flushes its row
+        # inside the caller's transaction.
         pass
 
     def add(self, row):

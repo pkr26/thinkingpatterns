@@ -1,30 +1,51 @@
 /**
- * syncReminderSchedule (src/reminderSync.ts): the preference is the
- * direction of truth — enabled schedules at the stored local time,
- * anything else cancels — and every failure path answers false without
- * throwing. nativeFeatures is mocked here; its own seam is covered in
+ * syncReminderSchedule + syncMeasureReminderSchedule (src/reminderSync.ts):
+ * the preference is the direction of truth — for the daily reminder,
+ * enabled schedules at the stored local time, anything else cancels; for
+ * the check-in nudge, the preference is JOINED BY THE CADENCE (only a due
+ * interval schedules). Every failure path answers false without throwing.
+ * nativeFeatures is mocked here; its own seam is covered in
  * tests/nativeFeatures.test.ts.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 
 const scheduleDailyReminder = vi.fn(async () => true);
 const cancelDailyReminder = vi.fn(async () => true);
+const scheduleMeasureReminder = vi.fn(async () => true);
+const cancelMeasureReminder = vi.fn(async () => true);
 
 vi.mock("../src/nativeFeatures", () => ({
   scheduleDailyReminder: (...args: unknown[]) => scheduleDailyReminder(...(args as [number, number])),
   cancelDailyReminder: (...args: unknown[]) => cancelDailyReminder(...(args as [])),
+  scheduleMeasureReminder: (...args: unknown[]) => scheduleMeasureReminder(...(args as [Date])),
+  cancelMeasureReminder: (...args: unknown[]) => cancelMeasureReminder(...(args as [])),
 }));
 
-const { syncReminderSchedule } = await import("../src/reminderSync");
+const { syncReminderSchedule, syncMeasureReminderSchedule } = await import("../src/reminderSync");
 const { setReminderEnabled, setReminderTime } = await import("../src/reminders");
+const {
+  setMeasureReminderEnabled,
+  setMeasureReminderInterval,
+  recordMeasureCompleted,
+  clearMeasureReminderPrefs,
+  clearLastMeasureDate,
+} = await import("../src/measureReminders");
 
-beforeEach(() => {
+beforeEach(async () => {
   storage.__reset();
   scheduleDailyReminder.mockReset();
   scheduleDailyReminder.mockResolvedValue(true);
   cancelDailyReminder.mockReset();
   cancelDailyReminder.mockResolvedValue(true);
+  scheduleMeasureReminder.mockReset();
+  scheduleMeasureReminder.mockResolvedValue(true);
+  cancelMeasureReminder.mockReset();
+  cancelMeasureReminder.mockResolvedValue(true);
+  // The cadence stamp is secureStore-backed (device-key ciphertext in
+  // AsyncStorage): clear it so one test's completion never leaks into the
+  // next test's cadence.
+  await clearLastMeasureDate("user-1");
 });
 
 describe("syncReminderSchedule", () => {
@@ -73,5 +94,78 @@ describe("syncReminderSchedule", () => {
     // rather than guessing a time or leaving a stale schedule untouched.
     expect(cancelDailyReminder).toHaveBeenCalledTimes(1);
     expect(scheduleDailyReminder).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncMeasureReminderSchedule (2026-09-27: opt-in AND cadence)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("a disabled preference cancels — never a nudge the user never asked for", async () => {
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
+    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
+  });
+
+  it("opt-in with NO completed measure schedules nothing (no baseline, no cadence)", async () => {
+    await setMeasureReminderEnabled("user-1", true);
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
+    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
+  });
+
+  it("opt-in + last measure OLDER than the interval schedules ONE one-shot nudge at the next calm 20:00", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 27, 11, 0, 0)); // 2026-09-27, before 20:00
+    await setMeasureReminderEnabled("user-1", true); // default interval: 4 weeks
+    await recordMeasureCompleted("user-1", "2026-08-20"); // 38 days old
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(scheduleMeasureReminder).toHaveBeenCalledTimes(1);
+    const fireAt = scheduleMeasureReminder.mock.calls[0][0] as Date;
+    expect(fireAt).toEqual(new Date(2026, 8, 27, 20, 0, 0, 0));
+    expect(cancelMeasureReminder).not.toHaveBeenCalled();
+  });
+
+  it("a FRESH completion retires any scheduled nudge (cancel, not reschedule)", async () => {
+    await setMeasureReminderEnabled("user-1", true);
+    await recordMeasureCompleted("user-1", "2026-09-26");
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
+    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
+  });
+
+  it("the interval choice moves the due boundary (2 weeks due, 4 not yet)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 27, 10, 0, 0));
+    await recordMeasureCompleted("user-1", "2026-09-13"); // 14 days old
+    await setMeasureReminderEnabled("user-1", true);
+    await setMeasureReminderInterval("user-1", 2);
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(scheduleMeasureReminder).toHaveBeenCalledTimes(1);
+
+    scheduleMeasureReminder.mockClear();
+    cancelMeasureReminder.mockClear();
+    await clearMeasureReminderPrefs("user-1");
+    await setMeasureReminderEnabled("user-1", true); // back to the 4-week default
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
+    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("a corrupt preference fails toward the disabled default — cancel, never a guess", async () => {
+    await storage.setItem("@mindpattern/measure_reminders_user-1", "{\"enabled\":true,\"intervalWeeks\":99}");
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
+    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
+    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
+  });
+
+  it("a scheduling that cannot land answers false without throwing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 27, 10, 0, 0));
+    await setMeasureReminderEnabled("user-1", true);
+    await recordMeasureCompleted("user-1", "2026-08-01");
+    scheduleMeasureReminder.mockResolvedValue(false);
+    await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(false);
   });
 });

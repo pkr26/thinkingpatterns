@@ -36,21 +36,29 @@ observation shows you its evidence.**
 The engine is **deterministic** (`update(state, entries, today)` is a pure
 function — no clock, no RNG, no network) and **idiographic**: every claim is
 computed within-person, against the user's own baseline, never against
-population averages. Full citations in `RESEARCH.md`.
+population averages. Full citations in `RESEARCH.md` (bibliography
+included — e.g. the sleep→next-day link is grounded in Bourke et al.
+2026, *Sleep Medicine Reviews*, a meta-analysis of 118 within-person
+studies). *(Citation-gate status, honestly: the error-code list below is
+CI-enforced against `backend/app/**`, but README↔RESEARCH.md citation
+resolution is NOT yet machine-checked — a test that every named
+citation here resolves to a bibliography entry is a planned
+contract-gate extension, registered in
+`docs/SECURITY_RESIDUALS.md`'s tracked items, not a shipped one.)*
 
 | Pattern kind | What it says | Method | Grounding |
 |---|---|---|---|
 | `temporal` | "'work' concentrates on Sundays" | weekday concentration vs your own writing schedule; exact binomial; **every** candidate weekday tested (not just the argmax), Benjamini–Hochberg FDR across all claims | day-of-week effects: Golder & Macy 2011 (*Science*); Mappiness |
-| `mood_correlation` | "entries read lower on days 'work' appears" | **within-person residuals** (your mood minus your own rolling baseline — the intensive-longitudinal standard) + Welch's t on autocorrelation-deflated effective sample sizes + Cohen's d gate | Bolger & Laurenceau 2013; Fisher (idiographic models) |
-| `link` | "the day after 'sleep' comes up, entries read lower" | lag-1 day-after association on residuals, same gates; the label reports the **modal exposed gap** (`lag_days` + gap1/gap2 counts) and says "the day after" only when gap 1 is the mode | sleep→next-day mood: Bourke et al. 2026 meta-analysis (118 studies); stress spillover: Bolger et al. 1989 |
+| `mood_correlation` | "entries read lower on days 'work' appears" | **within-person residuals** (your mood minus your own rolling baseline — the intensive-longitudinal standard), **deconfounded for the weekly cycle** (per-weekday centering: a work-Monday mood dip cannot masquerade as a theme association) + Welch's t on autocorrelation-deflated effective sample sizes + Cohen's d gate | Bolger & Laurenceau 2013; Fisher (idiographic models); day-of-week confounder: Golder & Macy 2011 |
+| `link` | "the day after 'sleep' comes up, entries read lower" | lag-1 day-after association on the same weekday-deconfounded residuals, same gates; the label reports the **modal exposed gap** (`lag_days` + gap1/gap2 counts) and says "the day after" only when gap-1 is both the mode and ≥70% of measured exposed outcomes (`LINK_DAY_AFTER_SHARE`) | sleep→next-day mood: Bourke et al. 2026 meta-analysis (118 studies); stress spillover: Bolger et al. 1989 |
 | `inertia` | "mood carries over day to day more than usual" | lag-1 autocorrelation, recent vs your earlier norm (Fisher-z difference test) | Kuppens et al. 2010; Houben et al. 2015 meta-analysis |
 | `energy_inertia` | "your energy carries over day to day more than usual" | the same inertia machinery over the optional energy picks (payload v2 channel) | affect-dynamics methods as `inertia`; mood–energy dissociation is circumplex-standard |
 | `pa_inertia` / `na_inertia` | "your positive / negative feelings carry over more than usual" | the same machinery over the graded lexicon's POSITIVE and NEGATIVE streams summed by sign (`sentiment_components`), text-scored entries only | differential dynamics of PA vs NA: Emmons & Diener 1985; Abitante et al. 2024 |
 | `energy_mood_coupling` | "your energy and your mood move together more than usual" | Pearson correlation of energy and mood within-person residuals, recent vs your own earlier norm (Fisher-z); surfaced only as a rise | mood–energy concordance as a within-person affect-dynamics signal |
 | `sense_making` | "your writing has leaned more on sense-making words" | causal+insight word density per day (LIWC-style dictionary), recent vs your earlier norm (Welch's t + density gates) | rising causal/insight word use tracks benefit in expressive writing: Pennebaker & Francis 1996; Campbell & Pennebaker 2003; Hevey 2014 |
-| `activity_diversity` | "the variety in your tagged activities has narrowed/widened" | weekly Shannon entropy over activity tags, recent weeks vs your earlier weeks (Welch's t + change gate); both directions surface | variety of pleasant activities tracks symptoms: Ong et al. 2023 |
+| `activity_diversity` | "the variety in your tagged activities has narrowed/widened" | weekly Shannon entropy over activity tags with **Miller–Madow bias correction** (raw plug-in entropy under-estimates by more than the effect gate), low-volume weeks excluded (≥2 tagged days and ≥2 distinct tags to count), recent vs earlier weeks (≥4 weekly observations per side; Welch's t + change gate); both directions surface | variety of pleasant activities tracks symptoms: Ong et al. 2023; Miller 1955/Madow (bias correction) |
 | `instability` | "bigger daily swings than usual" | spread of within-person residuals, recent vs earlier | affective instability literature |
-| `mood_shift` | "entries read lower than your baseline lately" | EWMA control chart (λ=0.18, ±2.7σ, personal baseline) | Snippe et al. 2023; Smit, Schat & Ceulemans 2023 (methods) |
+| `mood_shift` | "entries read lower than your baseline lately" | EWMA control chart (λ=0.18, ±3.1σ — the limit recalibrated 2026-09-26 by Monte Carlo simulation of the exact rule to keep the per-recompute false-alarm probability ≤5% at φ=0.5; run-of-3 beyond-limit points in the last 5, personal baseline, AR(1)-inflated limits) | Snippe et al. 2023; Smit, Schat & Ceulemans 2023 (methods) |
 | `rumination` | "the worry 'X' keeps returning" | near-duplicate **negative** phrase clusters + negation-heavy phrasing + absolutist-word density | Ehring & Watkins 2008 (RNT); Al-Mosaiwi & Johnstone 2018 (absolutist words) |
 | `topic` | "'guitar' has been taking up more space in your writing" | emergent topic discovery: recurring content n-grams beyond the fixed lexicon (function/theme/sentiment words excluded); RISING topics tested against your own earlier entries (exact binomial, BH) or persistent presence (≥30% of entries — a direct measurement requiring ≥4 distinct following-token contexts, suppressed when ≥80% covered by the run's own recurring-phrase clusters; carries `detail.presence=true`) | bursty recurring topics are a standard diary-analysis signal |
 | `recurring_phrase` | "the phrase 'X' keeps returning" | MinHash (64-perm) + LSH (16×4 bands) near-duplicate clustering | — |
@@ -90,7 +98,7 @@ runs in the mobile app too: the graded sentiment engine (the full merged
 lexicon — 7,726 words + emoji valences — with negation, intensifier and
 "but" rules and morphological candidates) is ported to TypeScript
 (`mobile/src/brain/`) and pinned to the Python engine by cross-platform
-vectors (`shared/brain_vectors.json`: 48 sentiment cases including the
+vectors (`shared/brain_vectors.json`: 49 sentiment cases including the
 negation/morphology regression inputs, plus the statistics core — erfc,
 Pearson, Fisher-z difference p; the file is regenerated by
 `backend/scripts/gen_brain_vectors.py`, so recount there when it changes). The device-local mood estimate, History
@@ -104,7 +112,7 @@ establishes is that whatever runs locally is the same deterministic
 math, never an approximation.
 
 **Spanish is the second analysis language (2026-09-19).** The engine's
-first non-English lexicon ships: ~480 graded Spanish sentiment words on
+first non-English lexicon ships: 472 graded Spanish sentiment words on
 the same -4..+4 scale (plus Spanish negators, intensifiers, "pero"
 contrast words, absolutist and sense-making sets, and a function-word
 detection set). The old English-only language GATE became language
@@ -244,13 +252,22 @@ anything:
 5. **Notes** are the therapist's own record: encrypted under the
    therapist's password-derived key in the browser, attachable to a
    patient or a pattern, surviving a revoke and dying with either
-   account. Patients cannot read them.
+   account. Patients cannot read them. Edits are optimistically
+   concurrent (2026-09-26): a PATCH must carry the `base_version` it was
+   based on (`version_required` if omitted — fail-closed rather than
+   last-write-wins) and a lost race answers 409 `version_conflict`
+   instead of silently overwriting; superseded content is kept as
+   immutable revisions under the chart quota.
 6. **Revoke** (password-gated) clears the wrapped key — future access
    ends immediately. What was already read cannot be unread; the grant
    disclosure says so plainly. Re-granting reactivates the same consent
    row (note continuity for the therapist). Every grant/revoke and every
-   patient-data read/write is audit-logged; the access log outlives
-   account deletion.
+   patient-data read/write is audit-logged; the log outlives account
+   deletion, and (2026-09-26) each patient's audit trail is a **forward
+   hash chain** (`prev_hash` → `entry_hash` over a canonical encoding of
+   the row's fields) with an account-deletion terminal row — silent row
+   edits or removals break the chain and are detectable by the chain
+   verifier (`verify_access_log_chain`).
 7. **Compliance flag**: sharing journal data with clinicians moves an
    operator into health-data territory (HIPAA BAA in the US or
    equivalent). The architecture (explicit consent records with
@@ -280,12 +297,12 @@ anything:
 
 ## The security model (honest version)
 
-1. **Keys are derived on your device.** `master = PBKDF2-HMAC-SHA256(password, salt, 600k)`; HKDF splits it into an `auth_key` (sent at login; the server stores `scrypt(auth_key)` with N=2¹⁶) and a `data_key` that encrypts everything.
+1. **Keys are derived on your device.** `master = PBKDF2-HMAC-SHA256(password, salt, 600k)`; HKDF splits it into an `auth_key` (sent at login; the server stores `scrypt(auth_key)` with N=2¹⁷ — raised from 2¹⁶ on 2026-09-26; see `MINDPATTERN_SCRYPT_N`) and a `data_key` that encrypts everything. **v1 accounts** (every account before 2026-09-26, still fully supported) derive the data key directly from that master key, so changing the password re-keys the whole corpus (`POST /processing/rekey`, then `PUT /account/credential`). **v2 accounts** hold a RANDOM 32-byte data key wrapped client-side under `kek = HKDF-SHA256(master, salt, info="mindpattern/envelope/v2")` — the server stores only the opaque 60-byte AES-256-GCM envelope (`users.wrapped_data_key`, AAD = canonical JSON binding context + the account name + the account's declared `kdf_params`), never a KEK input, so a password change is O(1): unwrap locally, re-wrap under the new salt, `PUT /account/password`; the corpus, processing sessions, and every therapist consent wrap keep working under the SAME random key. New v2 registration sends `{salt, verifier, kdf_params, wrapped_data_key}`; v1 clients self-upgrade after unlocking via `POST /account/key-envelope/upgrade` (password re-auth + a processing session that authenticates stored ciphertext — possession of the real data key). Accounts declare their client KDF in a versioned `kdf_params` blob (`{"algorithm":"pbkdf2-sha256","iterations":600000,"version":1}`, or argon2id with memory/parallelism/iterations): the server validates structure and cost bounds (pbkdf2 100k–10M iterations; argon2id 19–256 MiB, t≥2, p≤4) and stores it — it never computes the KDF. Argon2id does NOT ship in any client today (the shipped params stay pbkdf2-600k per the documented WebCrypto tradeoff); the blob is what lets a client adopt it later with no server change. After login, `GET /auth/key-envelope` returns salt + `kdf_params` + `wrapped_data_key` so the client can unwrap locally (params are echoed only to authenticated callers — returning them with the pre-login salt lookup would turn a non-default cost profile into an account-existence oracle).
 2. **The server is blind to content — with one deliberate exception.** Entries/insights/questions are AES-256-GCM blobs (`nonce‖ct‖tag`), AAD-bound to `(user, entry, context)`, so blobs can't be relocated undetected and a DB leak yields no plaintext. The exception: to compute insights, the client sends the `data_key` in a **single-use** processing session (over TLS, memory-only, destroyed the moment the recompute consumes it, purged on account deletion). During that request the server can read your entries — that is the design trade-off of v1 (server-side analysis). On-device analysis is the path to removing it.
 3. **Processing is bounded.** Nothing is decrypted before the 30-day threshold. After it: decrypt → analyze → re-encrypt, keys and plaintext buffers owned by the enclave are zeroized (`bytearray`-scrubbed). The enclave keeps **one** zeroized working copy of the data key per recompute run — minting a fresh immutable `bytes(key)` per item would leave N unzeroized copies for the GC. Honest scope: the analyzer itself creates Python/JS string copies of your text that only GC reclaims; a process memory image can still contain them. TEE-style guarantees are deployment work.
 4. **Progressive revelation is enforced server-side.** Patterns are only computed, stored, and served after 30 distinct active days. Entry dates can't predate the account (backdating can't fast-forward the gate) and may be at most server-today + 1 day (device-local timezone grace). Before the threshold the client sees only its own device-local mood trend.
 5. **Enumeration resistance — scoped truthfully.** Salt lookup (POST /api/auth/salt) never reveals account existence per request (deterministic decoys, identical for unknown and deactivated accounts). Registration must, like any name-based system, answer whether a name is taken; it is rate-limited per-IP **and** per-username to make mass probing impractical. The residual oracle is longitudinal: a name's salt changes decoy → real when it registers and real → decoy on deactivation, so a watcher who re-probes the same name over time learns the membership transition. That transition leak is inherent to name-based systems — the salt has to change hands at some point — and is stated, not claimed away.
-6. **Destructive actions re-authenticate.** `DELETE /api/account` and enabling LLM analysis require the password-derived verifier — a stolen bearer token cannot erase a journal. `POST /api/auth/logout` bumps a token epoch that revokes every token for the account.
+6. **Destructive actions re-authenticate.** `DELETE /api/account` and enabling LLM analysis require the password-derived verifier — a stolen bearer token cannot erase a journal. `POST /api/auth/logout` (2026-09-26) records the presented token's 128-bit `jti` in a revocation store until its own expiry — one device signs out without killing the account's other sessions; the account-wide epoch bump remains the global kill switch and still fires on credential rotation, password change, and account deletion (and for legacy jti-less tokens at logout).
 7. **Metadata the server does hold** (be aware of it): usernames, per-entry calendar dates and received timestamps, entry ciphertext sizes, insight dates, and — when a therapist anchors a note to a pattern — the note's `pattern_pid` (a coarse analysis-derived topic id like `temporal:work`; the note's text and timestamps stay inside the ciphertext blob). A DB leak reveals *when* and *how much* you wrote — never *what*.
 8. **Optional LLM analysis is opt-in per user.** If the operator configures `MINDPATTERN_LLM_URL`, journal text is only sent to that third-party endpoint for accounts that explicitly consented (re-authenticated toggle in Settings, with the disclosure that named-provider retention applies), only post-threshold, with model output sanitized (labels length-capped, "recurring phrases" verified against your actual text, numerics clamped). Enabling records `llm_consent_at` + `llm_consent_disclosure` ("v1") on the account — cleared on disable, and included in the export bundle, so the GDPR record of what was consented to (and when) travels with the user's own data. Off by default for every account.
 9. **Therapist sharing keeps the server blind.** The patient's client
@@ -293,9 +310,17 @@ anything:
    stores the wrap, never a usable key); the portal unwraps it locally.
    Honest residual: the server *relays* the therapist's public key during
    pairing, so an actively dishonest server could substitute its own key
-   and read the grant — the pairing fingerprint check (both humans read
-   the same 8-byte SHA-256 of the key) is the out-of-band mitigation;
-   without it, pairing trusts the server for identity discovery.
+   and read the grant. The out-of-band mitigation is now SERVER-computed
+   (2026-09-26): pairing lookup answers a 6-digit SAS ("123 456") — the
+   first six decimal digits of `HMAC-SHA256(pairing_code, wrap-key DER +
+   patient user id)` — plus the wrap key's SHA-256 fingerprint (first 16
+   hex), and `GET /therapist/pairing/sas` (therapist-authenticated, the
+   code in the `X-Pairing-Code` header) derives the identical pair for the
+   same live pairing session; both humans compare the two values in the
+   room / on the phone before the patient confirms. A substituted key
+   changes the SAS; the code (single-use, 15 min) is the HMAC key, so
+   every rotation re-rolls it. Without the comparison, pairing still
+   trusts the server for identity discovery.
    See "Sharing with a therapist" above for the full lifecycle, including
    the honest revocation limit: revocation ends ACCESS, it cannot unread
    what a browser already decrypted.
@@ -324,7 +349,12 @@ devices' next request funnels to re-auth with the honest reason.
 
 New in this wave: `POST/GET /api/v1/measures` (the patient's opaque
 encrypted questionnaire records — same date/quota/idempotency discipline
-as entries, AAD context `"measure"`) and the consent-gated
+as entries, AAD context `"measure"`), `DELETE /api/v1/measures/{id}`
+(the 2026-09-26 correction path: hard-delete of one mis-recorded
+measure, gated on the password verifier exactly like every other
+destructive action, advancing `measures_revision` and writing a
+`delete_measure` audit row in the same transaction), and the
+consent-gated
 `GET /api/v1/therapist/patients/{id}/measures` (audit-logged like every
 patient-data read). Both measure reads carry the full entries pagination
 contract (2026-09-21 audit A-3): `page_bytes` opt-in byte-bounded pages
@@ -337,7 +367,9 @@ rekey advance the marker in the same transaction.
 
 All routes mount under **`/api/v1`** (canonical); the same routers are also served under **`/api`** as a deprecated legacy alias for existing clients — every response it serves carries the **`Deprecation: true`** header (2026-09-21 audit A-8), alongside `/api/meta`'s `api_version` as the discovery path to the canonical base. `GET /api/v1/meta` returns `{unlock_days, llm_available, api_version, version}` — `api_version` is how a client discovers the canonical base. The audit trail is readable, not write-only (2026-09-21 audit B-4): `GET /api/v1/account/access-log` gives each patient the who-accessed-my-data view (GDPR Art. 15 parity) and `GET /api/v1/therapist/access-log` + the portal's "My access history" panel give therapists their own action history — both cursor-paginated via `X-Next-Cursor`. Alongside `GET /healthz` (liveness only, no DB touch), **`GET /readyz`** runs `SELECT 1` against the database and answers 503 when it fails — that is the probe to gate deploys on. `DELETE /api/v1/account` takes the verifier in the **`X-Account-Verifier`** header (a JSON body is still accepted as a deprecated fallback — DELETE bodies are unreliable across clients and proxies).
 
-Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes (complete — every value `backend/app/**` raises plus the status-default envelope map in `backend/app/deps.py`): `unauthorized`, `invalid_credentials`, `forbidden` (403 — role/ownership walls, e.g. a regular user on a therapist route), `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `method_not_allowed` (405), `request_timeout` (408), `conflict`, `collection_changed` (409 — the paginated collection changed while paging; restart from the first page), `version_conflict` (409 — a version-bound entry replacement lost the race to another device; refetch and retry), `account_deleted` (410 — the account was deleted mid-request), `gone` (410 status-default), `disclosure_outdated` (409 — the sharing disclosure version moved past what the client recorded), `llm_unavailable` (409 — consent requested but the operator has not configured `MINDPATTERN_LLM_URL`), `feedback_blob_invalid` (the recompute feedback attachment failed its crypto/shape check), `rekey_key_mismatch` (400 — the rekey's old key did not authenticate every blob; nothing was changed), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `processing_session_required`, `processing_session_invalid`, `internal_error`, `service_unavailable`, `error` (the last-resort fallback for an HTTP status outside the map in `backend/app/deps.py` — defense in depth no current route emits), `totp_required` (401 — the therapist account has TOTP enabled; re-send the login with a `totp_code`), and `totp_code_invalid` (401/403 — the presented TOTP code was wrong, outside the drift window, or already consumed). The completeness of this list is CI-enforced: the `contract-gates` job scans every `code="..."` kwarg **and** every `"code": "..."` dict-literal envelope under `backend/app/**` plus the status-default map, and fails if README does not list the value.
+2026-09-26 key-envelope wave (all additive, v1 flows unchanged): `GET /api/v1/auth/key-envelope` (the v2 unlock material: salt + `kdf_params` + `wrapped_data_key`; v1 accounts answer `key_scheme:"v1"` with nulls), `PUT /api/v1/account/password` (the O(1) v2 password change — credential + envelope swap in one transaction, NO corpus rekey; a v1 account using it migrates to v2), `POST /api/v1/account/key-envelope/upgrade` (v1→v2 self-service migration: password re-auth + a processing session whose key must authenticate stored ciphertext), and `GET /api/v1/therapist/pairing/sas` (the therapist-side SAS for the out-of-band pairing comparison; the code rides the `X-Pairing-Code` header, never the URL). `shared/vectors.json` gains an append-only `envelope_vectors` section (four-part v2 entry AAD, the key-envelope KEK/wrap construction, and a tampered negative for each).
+
+Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes (complete — every value `backend/app/**` raises plus the status-default envelope map in `backend/app/deps.py`): `unauthorized`, `invalid_credentials`, `forbidden` (403 — role/ownership walls, e.g. a regular user on a therapist route), `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `method_not_allowed` (405), `request_timeout` (408), `conflict`, `collection_changed` (409 — the paginated collection changed while paging; restart from the first page), `version_conflict` (409 — a version-bound entry replacement lost the race to another device; refetch and retry), `account_deleted` (410 — the account was deleted mid-request), `gone` (410 status-default), `disclosure_outdated` (409 — the sharing disclosure version moved past what the client recorded), `llm_unavailable` (409 — consent requested but the operator has not configured `MINDPATTERN_LLM_URL`), `feedback_blob_invalid` (the recompute feedback attachment failed its crypto/shape check), `rekey_key_mismatch` (400 — the rekey's old key did not authenticate every blob; nothing was changed), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `processing_session_required`, `processing_session_invalid`, `internal_error`, `service_unavailable`, `error` (the last-resort fallback for an HTTP status outside the map in `backend/app/deps.py` — defense in depth no current route emits), `totp_required` (401 — the therapist account has TOTP enabled; re-send the login with a `totp_code`), and `totp_code_invalid` (401/403 — the presented TOTP code was wrong, outside the drift window (previous-and-current timestep only since 2026-09-26), or already consumed). 2026-09-26 key-envelope wave: `key_scheme_conflict` (409 — a v2-envelope account tried `PUT /account/credential`, whose salt swap without an envelope re-wrap would destroy the data key's locker; use `PUT /account/password`), `envelope_key_mismatch` (403 — the `POST /account/key-envelope/upgrade` processing session's key did not authenticate stored ciphertext; re-open the session with the account's current data key). Notes concurrency: `version_required` (400 — a clinical-note PATCH omitted `base_version`; fail-closed rather than last-write-wins). The completeness of this list is CI-enforced: the `contract-gates` job scans every `code="..."` kwarg **and** every `"code": "..."` dict-literal envelope under `backend/app/**` plus the status-default map, and fails if README does not list the value.
 
 ## Running
 
@@ -506,15 +538,19 @@ limiting/concurrency (46 killed + 14 new pins + 2 documented residuals).
 |---|---|---|
 | `MINDPATTERN_ENV` | `production` | Fails closed: only the literal `development` may use the dev secret, SQLite, or /docs; every other value (including unset) takes the production gates |
 | `MINDPATTERN_DB_URL` | local SQLite | SQLAlchemy async URL (use `postgresql+asyncpg://…` in prod) |
-| `MINDPATTERN_TOKEN_SECRET` | dev default | HMAC secret for session tokens — must be set outside development (≥ 32 chars, or the app refuses to boot) |
+| `MINDPATTERN_TOKEN_SECRET` | dev default | Legacy HMAC secret — must be set outside development (≥ 32 chars, or the app refuses to boot). Still accepted alone: each purpose below then resolves to it (the documented identity derivation), so existing deployments keep every bearer signature, wrapped TOTP secret, and pairing digest across the upgrade |
+| `MINDPATTERN_AUTH_TOKEN_SECRET` | *(empty → token secret)* | Dedicated bearer-token signing secret (2026-09-26 purpose split). Setting it bumps the token key-scheme version (`ksv`): every outstanding bearer dies — deliberately, even when the bytes equal the legacy secret, so rotation to a split secret invalidates cleanly. ≥ 32 chars when set |
+| `MINDPATTERN_TOTP_WRAP_SECRET` | *(empty → token secret)* | Dedicated secret for TOTP-at-rest wrapping and recovery-code digests (internally HKDF-domain-separated). Rotation is one-way: wrapped therapist secrets must be re-armed. ≥ 32 chars when set |
+| `MINDPATTERN_PAIRING_SECRET` | *(empty → token secret)* | Dedicated secret for pairing-code HMAC digests. Rotation is one-way: live pairing codes die with it. ≥ 32 chars when set |
+| `MINDPATTERN_SCRYPT_N` | `131072` (2¹⁷) | Server-side scrypt work factor for login verifiers (power of two, 2¹⁵–2²⁰). Raised from 2¹⁶ on 2026-09-26 (login stays well inside the auth latency budget; offline guesses pay 2× the RAM on top of the client-side PBKDF2-600k stretch). Accounts hashed under an older factor fail login after an upgrade until re-registered, or pin this to `65536` for existing fleets |
 | `MINDPATTERN_DECOY_SECRET` | *(empty → token secret)* | Dedicated secret for unknown-username decoy salts (2026-09-21 audit C-6) — set it to decouple decoy-salt stability from token-secret rotation (a longitudinal observer could otherwise distinguish "unknown user" responses across a rotation); ≥ 32 chars when set |
-| `MINDPATTERN_TOKEN_TTL` | `86400` | Session-token lifetime in seconds (≤ 30 days; logout revokes immediately via token-epoch bump, so this is only the idle-expiry ceiling) |
+| `MINDPATTERN_TOKEN_TTL` | `86400` | Session-token lifetime in seconds (≤ 30 days; logout revokes the presented token immediately via its `jti`, and credential rotation/password change revoke every token via the epoch bump, so this is only the idle-expiry ceiling) |
 | `MINDPATTERN_UNLOCK_DAYS` | `30` | Pattern-revelation threshold |
 | `MINDPATTERN_PROCESSING_TTL` | `300` | Processing-session key lifetime (seconds); sessions are single-use |
 | `MINDPATTERN_ANALYSIS_BLOB_BUDGET` | `8388608` | Cumulative ciphertext-byte budget bounding which entries one analysis may LOAD — the newest rows are kept whole and older rows are dropped past it, so peak recompute memory follows the analysis budget, never the account's storage quota. It never raises 413 (storage quotas are the `MINDPATTERN_MAX_*` settings) |
 | `MINDPATTERN_LLM_URL` | unset | HTTPS OpenAI-compatible endpoint for the optional LLM analyzer (exact loopback HTTP only in development); per-user consent still required; unset = deterministic mini-brain. **Mandatory companions when set outside development** (the boot refuses without all three): `MINDPATTERN_LLM_PROVIDER_NAME` (≤ 120 chars), `MINDPATTERN_LLM_DATA_RETENTION` (≤ 500 chars, the provider-declared retention that consent copy must mirror), `MINDPATTERN_LLM_POLICY_VERSION` (≤ 64 chars; the consent fingerprint covers it, so changing vendors/terms invalidates stale consents). `MINDPATTERN_LLM_API_KEY`/`MINDPATTERN_LLM_MODEL` complete the wiring |
 | `MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN` | *(empty)* | Therapist sharing is **fail-closed OFF in production**: `therapist_sharing_enabled` defaults to true only in development, and enabling it in production requires this controlled enrollment token (≥ 32 chars) with which therapists register. Same posture for the LLM: unset `MINDPATTERN_LLM_URL` means the analyzer is off for every account and `llm-consent` answers 409 `llm_unavailable` |
-| `MINDPATTERN_AUTH_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Fixed-window rate limits for auth and salt lookups; registration conflicts also use a per-username bucket (login intentionally does not, so an attacker cannot spend a victim's lockout budget) |
+| `MINDPATTERN_AUTH_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Exact sliding-window rate limits for auth and salt lookups (2026-09-26: every limiter is an exact sliding window keyed on the monotonic clock, with sharded overflow locks bounding the key-set's memory — no fixed-window burst-of-2 edge at the boundary); registration conflicts also use a per-username bucket (login intentionally does not, so an attacker cannot spend a victim's lockout budget) |
 | `MINDPATTERN_ENTRIES_RATE_LIMIT` / `_WINDOW` | `120` / `60` | Entry creation rate limit |
 | `MINDPATTERN_PROCESSING_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Processing sessions + recompute rate limit |
 | `MINDPATTERN_READ_RATE_LIMIT` / `_WINDOW` | `300` / `60` | Authenticated read/delete endpoints |
@@ -537,6 +573,13 @@ processing-session TTL ≤ 300 s, request-body deadline ≤ 120 s, rate windows 
 100 000/window).
 
 ## Deletion & retention scope (read this before operating)
+
+> **Operator/legal pack**: `docs/OPERATOR_PACK.md` indexes the
+> signable compliance documents built on the retention facts below — a
+> privacy-policy template, the data-retention schedule (every number in
+> one table), a subprocessor/BAA register, a security policy +
+> `security.txt` example, plus the DPIA template and incident runbook.
+> Read that first when preparing a deployment.
 
 `DELETE /api/account` (password proof required) removes the user and the
 **full cascade** from the live database: entries, insights and questions,
@@ -594,14 +637,18 @@ turn it back into readable files offline.
 - Password rotation shipped (2026-09-20): a leaked password or captured
   data key is a recoverable event, not account recreation. The client
   re-authenticates with the old password, then POST /api/v1/processing/rekey
-  re-encrypts every stored blob old data key → new inside one
-  all-or-nothing transaction (a wrong old key aborts with
-  `rekey_key_mismatch` and nothing commits), each active therapist grant
+  re-encrypts every stored blob old data key → new as a **resumable
+  chunk-journaled run** (2026-09-26: a per-stage `rekey_journal` row
+  records stage + cursor; a run interrupted mid-corpus resumes
+  idempotently — rows already under the new key authenticate and are
+  skipped — and a wrong old key still aborts with `rekey_key_mismatch`
+  with nothing changed), each active therapist grant
   is re-wrapped to the new key, and PUT /api/v1/account/credential
   retires the old credential (the epoch bump kills every bearer). The
   vault then re-locks and the biometric wrap resets — the next unlock
   happens under the new password. A leaked token still dies at logout
-  (epoch bump) or expiry.
+  (jti revocation for the one token; epoch bump for the account) or
+  expiry.
 - **Therapists have the same recovery path** (2026-09-21, audit C-2):
   `PUT /api/v1/account/credential` accepts therapist tokens, and
   `PUT /api/v1/therapist/wrap-key` (verifier-gated) replaces the sharing
@@ -688,11 +735,38 @@ Facts an operator should know from that history:
   trusts client-controlled dates inside encrypted blobs.
 - `probe_brain.py` (9/9 planted-pattern corpus) gates CI and exits
   non-zero on any failure.
-- Documented residuals (accepted with written rationale): data-key escrow
-  during consented recomputes (recoverable via key rotation), CSP
-  `style-src 'unsafe-inline'` (no injection path), plaintext draft
-  surviving vault lock, operator tooling mutable tags (pin before
-  production).
+- Documented residuals (accepted with written rationale; the full
+  register is `docs/SECURITY_RESIDUALS.md`, and the operator-facing
+  statement lives in `docs/OPERATOR_PACK.md`): data-key escrow during
+  consented recomputes (recoverable via key rotation; the v2 envelope
+  makes the credential side O(1), the corpus rekey stays chunk-journaled
+  and resumable); the client KDF is PBKDF2-600k, not Argon2id — the
+  documented WebCrypto tradeoff, with the versioned `kdf_params` blob
+  ready for a later client switch; the processing enclave is an
+  in-process seam (no TEE attestation — deployment work); no TLS
+  certificate pinning on mobile (a written decision in
+  SECURITY_RESIDUALS: self-hosted deployments cannot have static pins;
+  Android ships system-CA-only trust, the iOS user-installed-CA residual
+  stands); single-process deployment (in-process counters/keystore/
+  locks); the access audit log outlives account deletion for the
+  configured 730-day window (defended in the DPIA); consented LLM
+  egress, when an operator enables it, is plaintext at the provider by
+  design; and the deploy/nginx **portal** vhost example still carries a
+  stale `style-src 'unsafe-inline'` header copy (the portal's own
+  shipped meta CSP has none, and browsers enforce both policies — the
+  intersection — so this is alignment debt in the example config, not a
+  live injection path; the web vhost and both client bundles ship
+  `'self'`-only, test-pinned). Previously listed and now FIXED: CSP
+  `unsafe-inline` in the shipped clients, operator-tooling mutable
+  image tags (every compose image is digest-pinned and CI-gated by
+  `deploy/monitoring/verify.sh --production`), rekey as a single
+  all-or-nothing transaction (now a resumable per-stage journal), note
+  last-write-wins edits (now `base_version` compare-and-swap with 409
+  `version_conflict`), unversioned measures corrections (DELETE
+  correction path, verifier-gated, audit-logged), and the web client's
+  plaintext draft-at-lock (now preserved as ciphertext;
+  mobile's draft stash remains memory-only plaintext surviving a lock —
+  account-bound and wiped at sign-out, a scoped residual that stands).
 
 
 ## License

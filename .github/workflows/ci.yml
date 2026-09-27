@@ -52,7 +52,7 @@ jobs:
         # Same tag family as docker-compose.yml's db service (digest-pinned
         # there). This is a throwaway service container, so the password is
         # a non-secret CI string, not an operator credential.
-        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mindpattern_test
@@ -255,23 +255,78 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Write a throwaway .env
+      - name: Write a throwaway .env and secret files
         # Random per run; nothing here survives `compose down -v` below.
+        # The secrets mount as FILES (2026-09-26 infra audit): the compose
+        # file reads them from deploy/secrets/, which is gitignored — CI
+        # materializes throwaway copies the same way it writes .env.
+        # Re-audit 2026-09-27: POSTGRES_PASSWORD is generated ONCE into a
+        # shell variable and written to BOTH sinks (.env for the api's
+        # MINDPATTERN_DB_URL interpolation, deploy/secrets/postgres_password
+        # for the db's native POSTGRES_PASSWORD_FILE). Two independent
+        # `openssl rand` calls here meant the api could never authenticate
+        # to the db it depends on.
         run: |
+          set -euo pipefail
+          pg_password=$(openssl rand -hex 16)
+          test -n "$pg_password" || { echo "::error::openssl produced an empty password" >&2; exit 1; }
           {
-            echo "MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)"
-            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
-            echo "BACKUP_KEY=$(openssl rand -base64 32)"
+            echo "POSTGRES_PASSWORD=$pg_password"
             # The checked-in production compose file consumes published
             # image references only.  CI intentionally opts into the
             # explicit local source-build overlay.
             echo "MINDPATTERN_API_IMAGE=mindpattern-api:ci"
             echo "MINDPATTERN_BACKUP_IMAGE=mindpattern-backup:ci"
           } > .env
+          mkdir -p deploy/secrets
+          printf '%s\n' "$pg_password" > deploy/secrets/postgres_password
+          openssl rand -hex 32 > deploy/secrets/token_secret
+          : > deploy/secrets/auth_token_secret
+          openssl rand -base64 32 > deploy/secrets/backup_key
+          chmod 600 .env deploy/secrets/postgres_password \
+            deploy/secrets/token_secret deploy/secrets/auth_token_secret \
+            deploy/secrets/backup_key
+      - name: Assert the db password is ONE value across .env and the secret file
+        # Fail-fast re-audit assertion (2026-09-27): the api authenticates
+        # with the password interpolated from .env into MINDPATTERN_DB_URL,
+        # while the db service reads deploy/secrets/postgres_password via
+        # POSTGRES_PASSWORD_FILE. If those diverge, every later step in this
+        # job fails confusingly at `up --wait`. Check the files directly AND
+        # the rendered compose contract (what the containers will actually
+        # receive) before anything is built.
+        run: |
+          set -euo pipefail
+          for f in .env deploy/secrets/postgres_password; do
+            test -f "$f" || { echo "::error::required file $f was not written by the previous step" >&2; exit 1; }
+          done
+          env_password=$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)
+          file_password=$(cat deploy/secrets/postgres_password)
+          if [ -z "$env_password" ]; then
+            echo "::error::.env carries no POSTGRES_PASSWORD" >&2
+            exit 1
+          fi
+          if [ "$env_password" != "$file_password" ]; then
+            echo "::error::POSTGRES_PASSWORD mismatch: .env and deploy/secrets/postgres_password hold DIFFERENT values — the api's MINDPATTERN_DB_URL could never authenticate to the db" >&2
+            exit 1
+          fi
+          rendered_url=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml config \
+            | sed -n 's/^[[:space:]]*MINDPATTERN_DB_URL:[[:space:]]*//p' | head -n 1)
+          case "$rendered_url" in
+            *"$file_password"*)
+              echo "compose render: api MINDPATTERN_DB_URL contains the deploy/secrets/postgres_password value"
+              ;;
+            *)
+              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): ${rendered_url:-<empty>}" >&2
+              exit 1
+              ;;
+          esac
       - name: Validate compose and build both local source images
+        # --progress=plain (2026-09-26): a bare "build" failure reports
+        # only the failing stage; the plain renderer shows the compile/apt
+        # output needed to diagnose digest/base drift from the run log.
         run: |
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
-          docker compose -f docker-compose.yml -f docker-compose.dev.yml build
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml build --progress=plain
       - name: Trivy vulnerability scan of both built images (2026-09-21 audit G-6)
         # OS-package coverage pip-audit/npm cannot see (the backend image
         # compiles asyncpg against live apt). Fixable HIGH/CRITICAL
@@ -333,8 +388,11 @@ jobs:
           done
           test "$found" = 1
           restore_name="mindpattern-restore-${GITHUB_RUN_ID:-local}-${RANDOM}"
+          # Digest matches docker-compose.yml's db service (re-pinned
+          # 2026-09-26; the previous cf78e766… pin was superseded — see the
+          # deploy/README.md digest-pin inventory).
           docker run --rm -d --name "$restore_name" -e POSTGRES_PASSWORD=restore \
-            postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 >/dev/null
+            postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea >/dev/null
           cleanup_restore() { docker rm -f "$restore_name" >/dev/null 2>&1 || true; }
           trap cleanup_restore EXIT
           for attempt in $(seq 1 20); do
@@ -347,7 +405,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile backups exec -T backup sh -ceu '
             set -- /backups/mindpattern-*.dump.enc
             mindpattern-backup-mac verify "$1"
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -in "$1"
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:/run/secrets/backup_key -in "$1"
           ' | docker exec -i "$restore_name" pg_restore --no-owner -U postgres -d postgres
           docker exec "$restore_name" psql -U postgres -d postgres -tAc \
             "SELECT count(*) FROM users WHERE username = 'backup-restore-probe'" | grep -qx '1'
@@ -449,6 +507,15 @@ jobs:
         # AND digest together (deploy/monitoring/README.md, "Digest
         # pinning").
         run: bash deploy/monitoring/verify.sh --production
+      - name: Compose image digest-drift gate
+        # 2026-09-26 infra audit: dependabot has no compose ecosystem, so a
+        # pinned base can age behind its moving tag (the 2026-09-07
+        # postgres pin sat ~6 weeks stale behind Trivy failures). The gate
+        # resolves each repo:tag@sha256 pin against the live registry and
+        # fails when the tag moved AND the pin is >90 days old per the
+        # deploy/README.md inventory — a re-pin becomes scheduled, not
+        # accidental.
+        run: bash deploy/monitoring/check-image-drift.sh
       - name: Shellcheck every shell script (error severity)
         run: shellcheck --severity=error $(find . -name '*.sh' -not -path '*/node_modules/*')
 

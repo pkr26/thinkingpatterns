@@ -154,7 +154,7 @@ describe("MeasuresView branches", () => {
     }
     await press(root, "Save measure");
     await settle(40, 3);
-    expect(textOf(root)).toContain("Already recorded today");
+    expect(textOf(root)).toContain("Already recorded");
   });
 });
 
@@ -182,7 +182,9 @@ describe("SettingsView branches", () => {
     coreStubs();
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
-    await pressSwitch(root);
+    // 2026-09-27: Settings renders TWO switches now (the check-in cadence
+    // joined the LLM consent) — press the LLM one by its aria-label.
+    await pressSwitch(root, "LLM");
     await settle(40, 3);
     expect(textOf(root)).toContain("does not offer LLM analysis");
   });

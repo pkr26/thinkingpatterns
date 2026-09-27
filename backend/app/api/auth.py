@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 import anyio.to_thread
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,40 +47,70 @@ from ..cache import (
 from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_user
 from ..locks import lifecycle_locks
-from ..models import TotpBackupCode, User, utcnow
-from ..schemas import LoginRequest, RegisterRequest, SaltLookupRequest, SaltResponse, TokenResponse
-from ..security.kdf import hkdf_sha256
+from ..models import ROLE_THERAPIST, TotpBackupCode, User, utcnow
+from ..schemas import (
+    KeyEnvelopeResponse,
+    LoginRequest,
+    RegisterRequest,
+    SaltLookupRequest,
+    SaltResponse,
+    TokenResponse,
+)
+from ..security import tokens
+from ..security.kdf import (
+    KdfParamsError,
+    canonical_kdf_params_json,
+    hkdf_sha256,
+    parse_kdf_params_json,
+    validate_kdf_params,
+)
 from ..security.sharing import backup_code_digest
 from ..security.tokens import issue_token
 from ..security.totp import unwrap_secret, verify_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# N=2^16 (64 MiB) — above OWASP's absolute floor and defensible here: the
-# input is a 256-bit key already stretched by client-side PBKDF2-600k, so
-# offline cracking pays both costs per guess.
-SCRYPT_N = 2**16
+# Server-side verifier hashing. N=2^17 (128 MiB, ~70ms) is the config
+# default (MINDPATTERN_SCRYPT_N; Settings.scrypt_n) — raised from 2^16 in
+# the 2026-09-26 remediation. Rationale: the input is a 256-bit key
+# already stretched by client-side PBKDF2-600k (an offline cracker pays
+# BOTH costs per guess), the ~70ms sits comfortably inside the auth
+# admission limiter's latency budget (4 concurrent slots ≈ no visible
+# queue at human login rates), and doubling the memory re-priced GPU
+# attacks that had begun to treat 64 MiB as cheap. MIGRATION: scrypt
+# output depends on N and the schema records no per-account factor, so
+# accounts hashed under the old 2^16 default fail login after an upgrade
+# until re-registered, or the operator pins MINDPATTERN_SCRYPT_N=65536
+# (see config.py).
+SCRYPT_N = 2**17
 SCRYPT_R = 8
 SCRYPT_P = 1
-SCRYPT_MAXMEM = 256 * 1024 * 1024
+# 2^17 × r=8 × 128 bytes/Block = 128 MiB per hash; maxmem must exceed the
+# peak or hashlib refuses the parameters. 512 MiB leaves room for a future
+# default bump without a second knob.
+SCRYPT_MAXMEM = 512 * 1024 * 1024
 AUTH_KEY_SIZE = 32
 SALT_BYTES = 16  # exactly — the decoy is 16 bytes too, so lengths cannot differ
 
 _b64_decode_error = (binascii.Error, ValueError)
 
-
-def hash_verifier(auth_key: bytes, salt: bytes) -> bytes:
-    return hashlib.scrypt(
-        auth_key, salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, maxmem=SCRYPT_MAXMEM
-    )
+# v2 key scheme: the wrapped data-key envelope is exactly nonce(12) +
+# ct(32) + tag(16) = 60 decoded bytes (security.envelope pins the shape).
+WRAPPED_DATA_KEY_SIZE = 60
 
 
-async def hash_verifier_off_loop(auth_key: bytes, salt: bytes, limiter=None) -> bytes:
-    """scrypt is ~35ms of CPU and 64 MiB of RAM: never run it on the event
+def hash_verifier(auth_key: bytes, salt: bytes, n: int = SCRYPT_N) -> bytes:
+    return hashlib.scrypt(auth_key, salt=salt, n=n, r=SCRYPT_R, p=SCRYPT_P, maxmem=SCRYPT_MAXMEM)
+
+
+async def hash_verifier_off_loop(
+    auth_key: bytes, salt: bytes, limiter=None, n: int = SCRYPT_N
+) -> bytes:
+    """scrypt is ~70ms of CPU and 128 MiB of RAM: never run it on the event
     loop thread, and cap concurrency through the app's dedicated auth
     limiter so a login flood cannot queue unbounded scrypt allocations on
     the shared anyio pool."""
-    return await anyio.to_thread.run_sync(hash_verifier, auth_key, salt, limiter=limiter)
+    return await anyio.to_thread.run_sync(hash_verifier, auth_key, salt, n, limiter=limiter)
 
 
 def _auth_limiter(request: Request):
@@ -144,14 +174,32 @@ def decoy_salt(username: str, secret: str) -> str:
 
 
 def _issue(request: Request, user: User) -> TokenResponse:
+    """Mint a bearer for an authenticated account.
+
+    Signed under the AUTH-token secret (Settings.auth_token_secret — the
+    purpose-split resolution: explicit MINDPATTERN_AUTH_TOKEN_SECRET, else
+    the legacy MINDPATTERN_TOKEN_SECRET), stamped with the secret's
+    key-scheme version (ksv) so a future rotation to a split secret
+    invalidates cleanly, carrying a fresh 128-bit jti for single-token
+    logout, and pinned to the account's role so the wire token names its
+    purpose. The DB role remains the authorization authority downstream.
+    """
     settings = request.app.state.settings
     return TokenResponse(
         token=issue_token(
-            user.id, settings.token_secret, settings.token_ttl_seconds, epoch=user.token_epoch
+            user.id,
+            settings.auth_token_secret,
+            settings.token_ttl_seconds,
+            epoch=user.token_epoch,
+            purpose=tokens.PURPOSE_THERAPIST
+            if user.role == ROLE_THERAPIST
+            else tokens.PURPOSE_PATIENT,
+            ksv=settings.auth_secret_version,
         ),
         user_id=user.id,
         expires_in=settings.token_ttl_seconds,
         role=user.role,
+        key_scheme=user.key_scheme if user.key_scheme else "v1",
     )
 
 
@@ -196,13 +244,50 @@ async def register(
             detail=f"verifier must be {AUTH_KEY_SIZE} bytes",
             code="validation_error",
         )
+    # v2 key scheme (2026-09-26): kdf_params and wrapped_data_key arrive
+    # together or not at all. The params blob is validated + canonicalized
+    # (structure AND cost bounds — security.kdf); the wrapped key is stored
+    # OPAQUELY: the server never sees the KEK input, so the 60-byte blob is
+    # as unreadable to it as any entry ciphertext. A v1 registration (both
+    # fields absent) keeps the exact historical behavior.
+    kdf_params_json: str | None = None
+    wrapped_key_bytes: bytes | None = None
+    if body.kdf_params is not None or body.wrapped_data_key is not None:
+        if body.kdf_params is None or body.wrapped_data_key is None:
+            raise ApiError(
+                status_code=422,
+                detail="v2 registration requires kdf_params and wrapped_data_key together",
+                code="validation_error",
+            )
+        try:
+            canonical = validate_kdf_params(body.kdf_params)
+        except KdfParamsError as exc:
+            raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
+        kdf_params_json = canonical_kdf_params_json(canonical)
+        try:
+            wrapped_key_bytes = base64.b64decode(body.wrapped_data_key, validate=True)
+        except _b64_decode_error:
+            raise ApiError(
+                status_code=422,
+                detail="wrapped_data_key must be base64",
+                code="validation_error",
+            ) from None
+        if len(wrapped_key_bytes) != WRAPPED_DATA_KEY_SIZE:
+            raise ApiError(
+                status_code=422,
+                detail=f"wrapped_data_key must be exactly {WRAPPED_DATA_KEY_SIZE} bytes",
+                code="validation_error",
+            )
 
     # Hash FIRST, before the existence check, so the taken/free paths are
     # computationally identical (no timing oracle on top of the status code).
     scrypt_server_salt = os.urandom(16)
     async with auth_work_slot(request):
         verifier_hash = await hash_verifier_off_loop(
-            verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
+            verifier_bytes,
+            scrypt_server_salt,
+            limiter=_auth_limiter(request),
+            n=settings.scrypt_n,
         )
 
     existing = await session.execute(select(User).where(User.username == body.username))
@@ -215,6 +300,9 @@ async def register(
         salt=body.salt,
         verifier=verifier_hash,
         scrypt_salt=scrypt_server_salt,
+        key_scheme="v2" if wrapped_key_bytes is not None else "v1",
+        wrapped_data_key=wrapped_key_bytes,
+        kdf_params=kdf_params_json,
     )
     session.add(user)
     try:
@@ -231,6 +319,55 @@ async def register(
         record_keyed_failure(request, username_key, settings.auth_rate_window)
         raise ApiError(status_code=409, detail="username already taken", code="conflict") from exc
     return response
+
+
+@router.get(
+    "/key-envelope",
+    response_model=KeyEnvelopeResponse,
+    dependencies=[
+        Depends(make_rate_limiter("auth-envelope", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def get_key_envelope(
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """The v2 unlock material: salt + kdf_params + wrapped data key.
+
+    After login, a v2 client fetches this and unwraps its random data key
+    LOCALLY (KEK = HKDF of the password-derived key per kdf_params — see
+    security/envelope.py; the server holds no input that can perform the
+    unwrap, so serving the blob to the authenticated account leaks
+    nothing an attacker with the bearer + the database does not already
+    have). v1 accounts answer key_scheme="v1" with null envelope fields —
+    the legacy password-derived flow, and a hint that the client MAY
+    offer the self-service upgrade (POST /account/key-envelope/upgrade).
+
+    Fresh-device residual, stated honestly: kdf_params are echoed only to
+    AUTHENTICATED callers (returning them with the pre-login salt lookup
+    would turn a non-default cost profile into an account-existence
+    oracle). The shipped client derives with the constant default params
+    (pbkdf2-sha256-600k), so fresh-device login is unambiguous; a future
+    client that adopts non-default params must remember them on-device —
+    a 401 on a known-good password then means "params mismatch", not
+    "wrong password".
+    """
+    params = parse_kdf_params_json(user.kdf_params)
+    if user.key_scheme == "v2" and (params is None or user.wrapped_data_key is None):
+        # Unreachable through the API (every v2 write path validates the
+        # pair atomically); a hand-mangled row fails CLOSED with the flat
+        # 404 instead of coaching an attacker about the account's state.
+        raise ApiError(status_code=404, detail="account not found", code="not_found")
+    return KeyEnvelopeResponse(
+        key_scheme=user.key_scheme or "v1",
+        salt=user.salt,
+        kdf_params=params,
+        wrapped_data_key=(
+            base64.b64encode(bytes(user.wrapped_data_key)).decode("ascii")
+            if user.key_scheme == "v2" and user.wrapped_data_key is not None
+            else None
+        ),
+    )
 
 
 @router.post(
@@ -285,13 +422,19 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
         if user is None or not user.is_active:
             # Burn equivalent CPU so response timing does not reveal existence.
             await hash_verifier_off_loop(
-                b"\x00" * AUTH_KEY_SIZE, b"\x00" * 16, limiter=_auth_limiter(request)
+                b"\x00" * AUTH_KEY_SIZE,
+                b"\x00" * 16,
+                limiter=_auth_limiter(request),
+                n=request.app.state.settings.scrypt_n,
             )
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
             )
         candidate = await hash_verifier_off_loop(
-            verifier_bytes, user.scrypt_salt, limiter=_auth_limiter(request)
+            verifier_bytes,
+            user.scrypt_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
         )
         if not hmac.compare_digest(candidate, bytes(user.verifier)):
             raise ApiError(
@@ -326,22 +469,31 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
                 settings.totp_failure_limit,
                 settings.auth_rate_window,
             )
-            secret = unwrap_secret(user.totp_secret, settings.token_secret)
+            # Purpose-split secret (2026-09-26): TOTP secrets at rest unwrap
+            # under MINDPATTERN_TOTP_WRAP_SECRET (else the legacy token
+            # secret — identity derivation, so existing blobs stay valid).
+            secret = unwrap_secret(user.totp_secret, settings.totp_wrap_secret)
             matched = (
                 verify_code(secret, code) if secret is not None else None
             )  # unwrap failure = fail closed: no second factor, no token
-            replayed = (
-                user.totp_last_counter is not None and matched is not None
-                and matched <= user.totp_last_counter
-            )
-            if matched is None or replayed:
+            # 2026-09-26 audit item 10: the snapshot replay pre-check
+            # (``matched <= user.totp_last_counter`` against the auth-time
+            # ORM row) is GONE. A concurrent login that advanced the counter
+            # to the SAME timestep made a FRESH code look "replayed" here
+            # and 401'd it, even though the atomic fence below would have
+            # rejected only the true loser. Every authenticator-code success
+            # now flows through the conditional UPDATE — it is the sole
+            # replay authority. Timing equivalence is preserved: both
+            # failure paths still pay one keyed verification plus one
+            # committed database write before the same 401 envelope.
+            if matched is None:
                 # Recovery codes (2026-09-26 pentest S-3): a 10-char
                 # single-use code redeems in place of the authenticator
                 # code. Atomic redemption (conditional UPDATE authority),
                 # so concurrent presentations of one code resolve to
                 # exactly one success.
                 redeemed = False
-                digest_candidate = backup_code_digest(code, settings.token_secret)
+                digest_candidate = backup_code_digest(code, settings.totp_wrap_secret)
                 live_codes = (
                     (
                         await session.execute(
@@ -368,9 +520,7 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
                         redeemed = db_rowcount(burn) == 1
                         break
                 if not redeemed:
-                    record_keyed_failure(
-                        request, totp_fail_key, settings.auth_rate_window
-                    )
+                    record_keyed_failure(request, totp_fail_key, settings.auth_rate_window)
                     raise ApiError(
                         status_code=401,
                         detail="invalid totp code",
@@ -381,8 +531,9 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
                 # conditional UPDATE is the authority — two logins racing
                 # the same code serialize on the row and exactly one wins
                 # (the loser's WHERE clause no longer matches after the
-                # winner's commit). The pre-check above stays as a cheap
-                # fast-path rejection only.
+                # winner's commit). Audit item 10 removed the snapshot
+                # fast-path: the fence alone decides, so a concurrent
+                # same-timestep login can never 401 a genuinely fresh code.
                 fence = await session.execute(
                     update(User)
                     .where(
@@ -397,9 +548,7 @@ async def login(body: LoginRequest, request: Request, session: AsyncSession = De
                 )
                 await session.commit()
                 if db_rowcount(fence) != 1:
-                    record_keyed_failure(
-                        request, totp_fail_key, settings.auth_rate_window
-                    )
+                    record_keyed_failure(request, totp_fail_key, settings.auth_rate_window)
                     raise ApiError(
                         status_code=401,
                         detail="invalid totp code",
@@ -417,26 +566,53 @@ async def logout(
     request: Request,
     user: User = Depends(require_user),
     session: AsyncSession = Depends(get_session),
+    authorization: str | None = Header(default=None),
 ):
-    """Revoke every bearer token for this account (all devices) at once.
+    """Sign out THIS device's session (2026-09-26 remediation wave).
 
-    Sign-out on one device cannot selectively kill its own token without
-    per-token state; the epoch bump retires them all — the user re-logs-in
-    elsewhere, which is the safe direction to err for journal data.
+    Every bearer now carries a 128-bit jti; logout records it in the
+    in-process revocation store with a ttl equal to the token's own
+    expiry, and deps.require_user refuses any bearer whose jti is
+    resident. Other devices' tokens for the same account stay valid —
+    the previous behavior (an unconditional epoch bump killing every
+    session at once) remains available as the GLOBAL revocation
+    primitive and is still exercised by credential rotation and account
+    deletion, where invalidating everything is exactly the point.
 
-    The bump is a single UPDATE (epoch = epoch + 1), not a read-modify-write
-    of the user row: two overlapping logouts must still bump twice, never
-    lost-update to the same value. Any in-memory processing sessions for the
-    account die with it — after sign-out nothing may still hold the data key
-    (the account-deletion path does the same purge).
+    Legacy tokens minted before the jti claim existed cannot be revoked
+    individually; for them (and only them) this path falls back to the
+    epoch bump, preserving the historical all-devices semantics instead
+    of silently accepting an unrevocable logout.
+
+    The lifecycle fence and processing-key purge are unchanged: after
+    sign-out returns, nothing may still hold THIS account's data key from
+    a session this logout raced (the account-deletion path does the same
+    purge).
     """
-    # Session creation takes the same fence from its fresh epoch check
-    # through key_store.create(). That makes this commit-plus-purge one
+    bearer = authorization[len("Bearer ") :].strip() if authorization else ""
+    try:
+        payload = tokens.verify_token(bearer, request.app.state.settings.auth_token_secret)
+    except tokens.TokenError:
+        # require_user just accepted this token; a failure here means the
+        # header was mangled between the two reads. Fail CLOSED — refuse
+        # the logout rather than revoking nothing and answering 204.
+        raise ApiError(status_code=401, detail="invalid token", code="unauthorized") from None
+    if payload.get("ksv", 1) != request.app.state.settings.auth_secret_version:
+        raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    # Session creation takes the same fence from its fresh epoch/revocation
+    # check through key_store.create(). That makes this commit-plus-purge one
     # lifecycle event: a pre-logout bearer cannot create a new key after the
     # purge has returned.
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
-        await session.execute(
-            update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)
-        )
-        await session.commit()
+        jti = payload.get("jti")
+        if isinstance(jti, str) and jti:
+            request.app.state.token_revocations.revoke(jti, float(payload["exp"]))
+        else:
+            # Legacy jti-less bearer: the only honest revocation left is the
+            # account-wide epoch bump (single atomic UPDATE, never a
+            # read-modify-write — overlapping logouts both bump).
+            await session.execute(
+                update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)
+            )
+            await session.commit()
         request.app.state.key_store.destroy_all_for_owner(user.id)

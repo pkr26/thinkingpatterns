@@ -20,7 +20,13 @@ function escapeAsciiChar(code: number): string {
   return "\\u" + code.toString(16).padStart(4, "0");
 }
 
-function toEnsureAscii(text: string): string {
+/** Post-process a JSON serialization to Python's ensure_ascii=True range
+ *  (escape every UTF-16 code unit >= 0x7F). Exported because the v2 key
+ *  envelope's OBJECT-shaped AAD (crypto/keyEnvelope.ts) needs the exact
+ *  same escaping for its username field — one canonicalizer, not two that
+ *  could drift. Safe on a whole JSON document: after JSON.stringify,
+ *  nothing outside string literals can be >= 0x7F. */
+export function jsonEnsureAscii(text: string): string {
   let out = "";
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
@@ -36,6 +42,6 @@ export function buildAad(...parts: string[]): Buffer {
   // structural characters itself, so escaping the WHOLE serialization is
   // safe: nothing outside string literals can be >= 0x7F.
   // Stryker disable StringLiteral
-return Buffer.from(toEnsureAscii(arrayJson), "utf8");
+return Buffer.from(jsonEnsureAscii(arrayJson), "utf8");
   // Stryker restore StringLiteral
 }

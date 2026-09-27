@@ -197,7 +197,19 @@ class _BrainSpy:
 
 
 class TestFeedbackPreflight:
-    async def test_tampered_feedback_rejected_without_analysis(self, client, settings, monkeypatch):
+    """2026-09-26 audit item 12 evolved these pins: the feedback blob is
+    decrypted EXACTLY ONCE and only inside the SecureProcessingContext (the
+    old flow decrypted it twice outside the enclave — an AAD scan plus a
+    pre-flight parse). The price is honest and small: classifying a bad
+    feedback blob now costs ONE corpus analysis run (the tamper surfaces
+    inside the run, the retry-without-feedback ladder isolates it), where
+    the old pre-flight caught it before any corpus work. The security
+    property — a bad feedback blob can NEVER reach the brain, and the
+    response is the same specific 400 — is unchanged."""
+
+    async def test_tampered_feedback_rejected_with_one_analysis_run(
+        self, client, settings, monkeypatch
+    ):
         emu = await _insight_phase_user(client, settings, "fb-tampered")
         spy = _BrainSpy(monkeypatch)
         garbage = base64.b64encode(crypto.generate_key() + crypto.generate_key()).decode("ascii")
@@ -209,18 +221,24 @@ class TestFeedbackPreflight:
         )
         assert response.status_code == 400
         assert response.json()["code"] == "feedback_blob_invalid"
-        # The whole point of the pre-flight: NO corpus decrypt, NO analysis
-        # (previously two full brain.update runs were discarded).
-        assert spy.calls == 0
+        # The first attempt dies in the CONTEXT'S DECRYPT (before analysis);
+        # the isolating retry (entries+state, no feedback) is the one run
+        # that classifies the culprit. Exactly one analysis, never two, and
+        # the tampered feedback never reached brain.update's arguments.
+        assert spy.calls == 1
 
-    async def test_authenticated_but_malformed_feedback_rejected_without_analysis(
+    async def test_authenticated_but_malformed_feedback_rejected_before_analysis(
         self, client, settings, monkeypatch
     ):
         emu = await _insight_phase_user(client, settings, "fb-malformed")
         spy = _BrainSpy(monkeypatch)
-        # Valid GCM under the real data key and AAD — but not JSON.
+        # Valid GCM under the real data key and AAD — but not JSON. The
+        # shape check runs INSIDE analyze_fn (item 12), so the malformed
+        # plain is refused before the brain ever sees it.
         blob = crypto.encrypt(
-            emu.data_key, b"definitely not json", crypto.build_aad("feedback", emu.user_id, _utc_today().isoformat())
+            emu.data_key,
+            b"definitely not json",
+            crypto.build_aad("feedback", emu.user_id, _utc_today().isoformat()),
         )
         token = await emu.open_processing_session(client)
         response = await client.post(
@@ -236,7 +254,11 @@ class TestFeedbackPreflight:
         emu = await _insight_phase_user(client, settings, "fb-valid")
         spy = _BrainSpy(monkeypatch)
         payload = b'{"feedback": [{"pid": "some-pid", "resonated": true}]}'
-        blob = crypto.encrypt(emu.data_key, payload, crypto.build_aad("feedback", emu.user_id, _utc_today().isoformat()))
+        blob = crypto.encrypt(
+            emu.data_key,
+            payload,
+            crypto.build_aad("feedback", emu.user_id, _utc_today().isoformat()),
+        )
         token = await emu.open_processing_session(client)
         response = await client.post(
             "/api/insights/recompute",

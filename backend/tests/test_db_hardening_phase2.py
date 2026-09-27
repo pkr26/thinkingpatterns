@@ -221,12 +221,16 @@ async def test_daily_sweep_prunes_dead_pairing_codes(client, app):
     async with app.state.sessionmaker() as session:
         remaining = set((await session.execute(select(PairingCode.code_hash))).scalars())
         live_hash = (
-            await session.execute(
-                select(PairingCode.code_hash).where(
-                    PairingCode.therapist_id == therapist.user_id
+            (
+                await session.execute(
+                    select(PairingCode.code_hash).where(
+                        PairingCode.therapist_id == therapist.user_id
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert dead_hash not in remaining
     # The sweep must not eat live codes: the freshly minted one survives.
     assert len(live_hash) == 1 and live_hash[0] != dead_hash

@@ -11,6 +11,23 @@ Numerical routines follow the standard recipes (log-space binomial
 sums; the Lentz continued fraction for the regularized incomplete beta
 function, as in Numerical Recipes / A&S 26.5.8) with fixed iteration
 caps so they cannot spin or diverge silently.
+
+THE BENJAMINI-HOCHBERG FAMILY (documented 2026-09-26 statistical
+review): the brain feeds one BH family per
+recompute, and the family is a MIXTURE of one-sided and two-sided
+tests — Welch t (two-sided), Fisher-z correlation differences
+(one-sided by construction, "risen more than usual"), Brown-Forsythe
+spread tests (upper-tailed), exact binomial/Poisson-binomial weekday
+tails (upper-tailed), and the EWMA chart's run-rule alarm probability
+(selection-adjusted). BH controls FDR under independence or the
+PRDS condition; a mixture of sidedness does not break that (each
+p-value is still super-uniform under its own null), but the family's
+members are NOT mutually independent: the mood/link tests share ONE
+residual series and one nuisance lag-1 estimate, so their p-values are
+positively dependent in a way PRDS plausibly covers but we have not
+proven. Future work, explicitly noted here: a Benjamini-Yekutieli
+(q/(1+ln m)) sensitivity run as a guardrail for the dependence
+assumption — no code change yet.
 """
 
 from __future__ import annotations
@@ -235,16 +252,18 @@ def effective_sample_size(n: int, lag1: float | None) -> float:
     return min(float(n), max(3.0, n * (1.0 - r) / (1.0 + r)))
 
 
-def brown_forsythe_two_sided_p(
+def brown_forsythe_upper_p(
     xs: list[float], ys: list[float], n_eff_x: float | None = None, n_eff_y: float | None = None
 ) -> float:
     """Brown-Forsythe (median-centered Levene) p for H0: equal spread.
 
-    UPPER-TAILED only (2026-09-20 audit fix M-7 — the historical name keeps
-    the "_two_sided" suffix so existing brain.py callers stay source-stable,
-    but the doubling is gone; see the return site). An instability claim is
-    directional by construction ("swung MORE than usual"), so the standard
-    one-sided test is both the textbook form and the honest one.
+    Renamed from ``brown_forsythe_two_sided_p`` (2026-09-26 statistical
+    review, item 6): the doubling was already removed on 2026-09-20
+    (audit fix M-7) but the "_two_sided" suffix kept describing a test
+    the code no longer ran. UPPER-TAILED only: an instability claim is
+    directional by construction ("swung MORE than usual"), so the
+    standard one-sided test is both the textbook form and the honest
+    one. See the return site for the dropped lower tail.
 
     The instability detector replaced its variance-ratio F-test with this
     (2026-09-17): the F-test assumes iid normal observations and is
@@ -323,11 +342,20 @@ def welch_test(
     after any ``variance_floor``) return (0.0, 1.0) — "no evidence" —
     rather than dividing by zero. For a product that makes claims to
     vulnerable people, failing silent-and-negative is the only safe
-    direction. Callers measuring noisy proxies (lexicon mood) pass a
-    floor so single-sided constant groups still measure as separation —
-    but TWO constant groups fabricate a t-test on variance the data never
-    had (p ~ 1e-22 from pure floor), so that case is forced to "no
-    evidence" regardless of the floor.
+    direction.
+
+    ``variance_floor`` has exactly ONE role here (2026-09-26 statistical
+    review, item 7): damping the STANDARD ERROR of a t-statistic whose
+    sides have real spread. It is NOT a license to fabricate spread a
+    side never had — a group whose ACTUAL variance is ~0 (a constant
+    mood series, five identical tags) contributes no second moment to
+    test with, so when EITHER side's actual variance is below the
+    float-noise epsilon the test fails closed to (0.0, 1.0) regardless
+    of the floor. (Previously only BOTH-constant groups failed closed;
+    one constant group let the floor alone drive |t| to arbitrary size
+    — p ~ 1e-22 from pure floor.) The floor keeps its other, CONSERVATIVE
+    role in ``cohens_d``, where it bounds a pooled DENOMINATOR from
+    below (a smaller |d|, never a bigger claim) — see that function.
 
     ``lag1``: when the observations come from an autocorrelated series
     (day-overlapping mood residuals), the raw n overstates the evidence;
@@ -341,7 +369,8 @@ def welch_test(
     m1, m2 = _mean(a), _mean(b)
     v1_actual, v2_actual = _variance(a), _variance(b)
     # Float-safe "constant group" test (a mean of 12 x -0.6 is off by ~1e-16).
-    if v1_actual < 1e-12 and v2_actual < 1e-12:
+    # EITHER side constant (item 7): no honest t exists — fail closed.
+    if v1_actual < 1e-12 or v2_actual < 1e-12:
         return 0.0, 1.0
     v1 = max(v1_actual, variance_floor**2)
     v2 = max(v2_actual, variance_floor**2)
@@ -365,6 +394,13 @@ def cohens_d(a: list[float], b: list[float], variance_floor: float = 0.0) -> flo
     identical-but-different groups are perfect separation, not zero
     effect. A zero floor with zero spread still returns 0.0 (no
     measurable difference, no claim).
+
+    This is the floor's CONSERVATIVE role (item 7, 2026-09-26 review):
+    it bounds a pooled DENOMINATOR from below, so it can only make |d|
+    SMALLER than the raw computation — the opposite of welch_test, where
+    a floor under a constant group used to manufacture significance.
+    The two roles are deliberately separated: same constant, opposite
+    failure modes, and only this one is safe.
     """
     n1, n2 = len(a), len(b)
     if n1 + n2 < 3:

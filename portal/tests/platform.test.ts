@@ -1,7 +1,7 @@
 /** The platform seam: origin + localStorage/sessionStorage access degrade
  *  safely when the DOM is absent or storage is hostile. */
-import { describe, expect, it } from "vitest";
-import { currentOrigin, localStore, sessionStore, visitAnchorStore } from "../src/platform";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { copyToClipboard, currentOrigin, downloadTextFile, localStore, sessionStore, visitAnchorStore } from "../src/platform";
 
 const realWindow = (globalThis as { window?: unknown }).window;
 
@@ -100,5 +100,48 @@ describe("visitAnchorStore (L-75 decision, 2026-09-20)", () => {
     } finally {
       (globalThis as { window?: unknown }).window = realWindow;
     }
+  });
+});
+
+describe("shown-once TOTP affordance seams (2026-09-26 audit round L)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("copyToClipboard writes through navigator.clipboard and reports success", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    await expect(copyToClipboard("A2B3C4D5E6")).resolves.toBe(true);
+    expect(writeText).toHaveBeenCalledWith("A2B3C4D5E6");
+  });
+
+  it("copyToClipboard degrades to false with no clipboard or a denied one", async () => {
+    // No clipboard API at all (the node runtime's bare navigator shape)…
+    vi.stubGlobal("navigator", {});
+    await expect(copyToClipboard("code")).resolves.toBe(false);
+    // …and a clipboard that withholds permission.
+    const denied = vi.fn(async () => { throw new Error("not allowed"); });
+    vi.stubGlobal("navigator", { clipboard: { writeText: denied } });
+    await expect(copyToClipboard("code")).resolves.toBe(false);
+  });
+
+  it("downloadTextFile is inert without a document and never throws on a hostile DOM", () => {
+    // The node runtime has no document (the setup shim defines one only for
+    // the App suite; this file predates it, so assert through a stub).
+    const anchor = { href: "", download: "", click: vi.fn() };
+    const created: string[] = [];
+    vi.stubGlobal("document", {
+      createElement: (tag: string) => {
+        created.push(tag);
+        return anchor;
+      },
+    });
+    const revokeURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:x", revokeObjectURL: revokeURL });
+    expect(() => downloadTextFile("codes.txt", "body")).not.toThrow();
+    expect(created).toEqual(["a"]);
+    expect(anchor.download).toBe("codes.txt");
+    expect(anchor.click).toHaveBeenCalledTimes(1);
+    expect(revokeURL).toHaveBeenCalledWith("blob:x");
   });
 });

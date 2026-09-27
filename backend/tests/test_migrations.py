@@ -255,6 +255,54 @@ def test_collection_snapshot_revision_migration_backfills_and_roundtrips(tmp_pat
     command.upgrade(cfg, "head")
 
 
+def test_key_envelope_v2_revision_roundtrips(tmp_path, monkeypatch):
+    """f2a8c6d4e9b1 adds users.key_scheme/wrapped_data_key/kdf_params:
+    existing accounts backfill to 'v1' with NULL envelope fields, the
+    columns leave cleanly on downgrade, and re-upgrade restores them
+    (batch-mode rebuild parity, 2026-09-26 key-envelope wave)."""
+    db_file = tmp_path / "key-envelope.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+
+    command.upgrade(cfg, "d7f1c5a9b3e0")  # the revision immediately before
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            INSERT INTO users
+                (id, username, salt, verifier, scrypt_salt, created_at,
+                 is_active, token_epoch, llm_consent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("ke-user", "key-envelope-user", "s", b"v", b"k", "2026-09-26T00:00:00+00:00", 1, 1, 0),
+        )
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db_file}")
+
+    def users_columns() -> dict:
+        return {c["name"]: c for c in inspect(engine).get_columns("users")}
+
+    columns = users_columns()
+    assert {"key_scheme", "wrapped_data_key", "kdf_params"} <= columns.keys()
+    assert not columns["key_scheme"]["nullable"]
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql(
+            "SELECT key_scheme, wrapped_data_key, kdf_params FROM users WHERE id = ?",
+            ("ke-user",),
+        ).all()
+    assert row == [("v1", None, None)]  # backfilled default, NULL envelope
+    engine.dispose()
+
+    command.downgrade(cfg, "d7f1c5a9b3e0")
+    engine = create_engine(f"sqlite:///{db_file}")
+    assert not ({"key_scheme", "wrapped_data_key", "kdf_params"} & set(users_columns()))
+    engine.dispose()
+    command.upgrade(cfg, "head")
+
+
 def test_app_boots_and_writes_on_migrated_database(tmp_path, monkeypatch):
     db_file = tmp_path / "migrated.db"
     db_url = f"sqlite+aiosqlite:///{db_file}"
@@ -393,6 +441,82 @@ def test_undated_insight_unique_index_deduplicates_legacy_rows(tmp_path, monkeyp
     engine.dispose()
 
 
+def test_access_log_chain_migration_backfills_seqs_before_unique_index(tmp_path, monkeypatch):
+    """c6e0b4f8a2d9 must assign per-row chain_seq BEFORE creating the UNIQUE
+    index: every pre-existing row ships with the server_default seq 1, so an
+    index built first aborts `alembic upgrade head` on any populated database
+    with a UNIQUE constraint failure (re-audit, 2026-09-27). Mirrors the
+    dated-insight dedupe pattern: seed at the PRE-chain revision, upgrade,
+    then assert the deterministic 1..n numbering, the unique index, and that
+    the chain the migration wrote satisfies app/api/_audit.py's own verifier.
+    """
+
+    db_file = tmp_path / "access-log-chain.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    command.upgrade(cfg, "b5d9a3e7f1c8")  # the revision immediately before
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            """
+            INSERT INTO users
+                (id, username, salt, verifier, scrypt_salt, created_at,
+                 is_active, token_epoch, llm_consent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("user-1", "chain-user", "s", b"v", b"k", "2026-01-01T00:00:00+00:00", 1, 1, 0),
+        )
+        # Three pre-chain rows for ONE user, inserted in an order that does
+        # NOT match their `at`: the backfill must renumber by (at, id) — the
+        # order the verification walk reads — not by insertion/row id.
+        for row_id, action, at in (
+            ("late", "entry_created", "2026-03-01T00:00:00+00:00"),
+            ("early", "login", "2026-01-01T00:00:00+00:00"),
+            ("mid", "note_read", "2026-02-01T00:00:00+00:00"),
+        ):
+            conn.exec_driver_sql(
+                """
+                INSERT INTO access_log (id, actor_id, actor_role, user_id, action, at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (row_id, "user-1", "patient", "user-1", action, at),
+            )
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT chain_seq, id FROM access_log WHERE user_id = ? ORDER BY chain_seq",
+            ("user-1",),
+        ).all()
+        assert rows == [(1, "early"), (2, "mid"), (3, "late")]
+        assert any(
+            index["name"] == "uq_access_log_user_chain_seq" and index["unique"]
+            for index in inspect(engine).get_indexes("access_log")
+        )
+    engine.dispose()
+
+    # The migration's own genesis seals must satisfy the app's chain walker
+    # (the same verification every read path can run post-deploy).
+    from app.api._audit import verify_access_log_chain
+
+    async def _verify() -> None:
+        eng = build_engine(db_url)
+        try:
+            async with build_sessionmaker(eng)() as session:
+                verdict = await verify_access_log_chain(session, "user-1")
+                assert verdict.ok, verdict
+                assert verdict.rows_checked == 3
+        finally:
+            await eng.dispose()
+
+    asyncio.run(_verify())
+
+
 def test_postgres_alembic_upgrade_head_and_current(monkeypatch):
     """The real migration path against real PostgreSQL: plain DDL, the
     advisory lock, batch mode OFF — everything the SQLite tests above
@@ -435,6 +559,138 @@ def test_postgres_alembic_upgrade_head_and_current(monkeypatch):
         return [row[0] for row in rows]
 
     assert asyncio.run(_stamp()) == heads
+
+
+def test_postgres_downgrade_base_upgrade_head_roundtrip(monkeypatch):
+    """The FULL downgrade path against real PostgreSQL (2026-09-26
+    test-infrastructure audit, item 5): downgrade ALL the way to base
+    (every revision's downgrade DDL, none of which the SQLite coverage
+    exercises beyond one or two revisions), then upgrade back to head,
+    then alembic-current must sit at head. Mirrors the SQLite round-trips
+    above but on the engine production actually deploys.
+
+    Safety: a downgrade-to-base DROPS DATA, so this test never touches
+    the shared MINDPATTERN_TEST_DB_URL database. It derives a dedicated
+    disposable database name from that URL (a ``_downgrade_rt`` suffix)
+    and creates/drops it itself; the shared database is only used as the
+    connection target for CREATE/DROP DATABASE, never migrated.
+
+    Driven through the REAL ``command.upgrade``/``command.downgrade`` —
+    the deploy entrypoint's own path, env.py included — since the
+    2026-09-26 fix that COMMITs env.py's advisory-lock preamble: alembic
+    now owns and commits each migration transaction, so the walk
+    persists. (Before that fix the preamble AUTOBEGUN a transaction
+    alembic classified as externally owned and rolled back at connection
+    close, silently persisting nothing — the reason this test originally
+    drove the Operations API directly and maintained alembic_version by
+    hand. That workaround is gone; this test exercises exactly what
+    production runs, and the command invocations sit at sync-test level
+    because env.py executes ``asyncio.run`` itself.)
+    """
+    db_url = os.environ.get("MINDPATTERN_TEST_DB_URL", "").strip()
+    if not db_url.startswith("postgresql"):
+        pytest.skip("MINDPATTERN_TEST_DB_URL is not a PostgreSQL URL")
+
+    import asyncpg
+    from alembic.script import ScriptDirectory
+    from sqlalchemy.engine import make_url
+
+    base = make_url(db_url)
+    disposable_name = (base.database or "mindpattern_test") + "_downgrade_rt"
+    disposable_url = base.set(database=disposable_name).render_as_string(hide_password=False)
+    # asyncpg takes plain postgres:// DSNs (no +asyncpg driver token).
+    admin_dsn = (
+        base.set(database="postgres")
+        .render_as_string(hide_password=False)
+        .replace("postgresql+asyncpg://", "postgresql://")
+    )
+
+    async def _admin(sql: str) -> None:
+        conn = await asyncpg.connect(admin_dsn)
+        try:
+            await conn.execute(sql)
+        finally:
+            await conn.close()
+
+    async def _version_rows() -> list[str]:
+        # A FRESH engine per phase, disposed inside the same event loop:
+        # pooled connections are loop-bound, and the phases run in separate
+        # asyncio.run() loops (see below — the alembic command path cannot
+        # be called from inside a live loop because env.py spins its own).
+        eng = build_engine(disposable_url)
+        try:
+            async with eng.connect() as conn:
+                rows = (await conn.exec_driver_sql("SELECT version_num FROM alembic_version")).all()
+            return [row[0] for row in rows]
+        finally:
+            await eng.dispose()
+
+    async def _table_names() -> list[str]:
+        eng = build_engine(disposable_url)
+        try:
+            async with eng.connect() as conn:
+                rows = await conn.exec_driver_sql(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                )
+            return sorted(row[0] for row in rows)
+        finally:
+            await eng.dispose()
+
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"this round-trip assumes a single head, got {heads}"
+
+    async def _prep_disposable() -> None:
+        # Standalone-run hygiene: the conftest autouse cleanup DELETEs rows
+        # from every app table on the SHARED database after this test, so
+        # make sure that schema exists (a lone run of this module against a
+        # fresh shared DB would otherwise error in teardown; full-suite
+        # runs get this from earlier tests' create_all). Idempotent. Then
+        # the disposable database itself: a crashed earlier run can leave
+        # it behind, and WITH (FORCE) also evicts lingering connections
+        # (PG >= 13).
+        shared_engine = build_engine(db_url)
+        try:
+            from app.db import init_models
+
+            await init_models(shared_engine)
+        finally:
+            await shared_engine.dispose()
+        await _admin(f'DROP DATABASE IF EXISTS "{disposable_name}" WITH (FORCE)')
+        await _admin(f'CREATE DATABASE "{disposable_name}"')
+
+    asyncio.run(_prep_disposable())
+    # The command path reads its URL from the environment (env.py's
+    # contract); point it at the disposable database for the walk. The
+    # command.* calls themselves MUST sit at sync-test level: env.py
+    # executes asyncio.run(run_migrations_online()) at module scope, which
+    # is illegal inside a live loop — hence the phases below alternate
+    # sync alembic invocations with fresh-loop assertion helpers.
+    monkeypatch.setenv("MINDPATTERN_DB_URL", disposable_url)
+    try:
+        # Phase 1: base → head through the real command path, exactly as
+        # the deploy entrypoint runs it.
+        command.upgrade(cfg, "head")
+        assert asyncio.run(_version_rows()) == heads
+        assert {"users", "entries"} <= set(asyncio.run(_table_names()))
+
+        # Phase 2: head → base. Base means BASE: every app table is gone.
+        # The empty alembic_version table itself survives — that is the real
+        # command path's behavior (alembic drops its rows, not the table; the
+        # Operations-API workaround the old version of this test used did
+        # drop the table by hand, which production `downgrade base` does not).
+        command.downgrade(cfg, "base")
+        assert asyncio.run(_table_names()) == ["alembic_version"]
+        assert asyncio.run(_version_rows()) == []
+
+        # Phase 3: straight back up — a downgrade path that leaves the
+        # database un-upgradeable would be worse than no downgrade.
+        command.upgrade(cfg, "head")
+        assert asyncio.run(_version_rows()) == heads
+        assert {"users", "entries"} <= set(asyncio.run(_table_names()))
+    finally:
+        asyncio.run(_admin(f'DROP DATABASE IF EXISTS "{disposable_name}" WITH (FORCE)'))
 
 
 def test_dated_insight_unique_constraint_deduplicates_before_enforcing(tmp_path, monkeypatch):

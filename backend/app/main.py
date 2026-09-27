@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import __version__, config, singleprocess
 from .api import api_router, api_v1_router
-from .cache import FixedWindowCounter, RateLimitCheck, make_rate_limiter
+from .cache import RateLimitCheck, SlidingWindowCounter, TokenRevocationStore, make_rate_limiter
 from .db import SCHEMA_HEAD, build_engine, build_sessionmaker, init_models
 from .deps import DEFAULT_ERROR_CODES
 from .metrics import MetricsMiddleware, MetricsRegistry
@@ -312,15 +312,19 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     )
     app.state.sessionmaker = build_sessionmaker(app.state.engine)
     app.state.key_store = InMemoryKeyStore()
-    app.state.rate_counter = FixedWindowCounter()
+    app.state.rate_counter = SlidingWindowCounter()
+    # Single-token logout (2026-09-26): jti -> expiry map checked in
+    # deps.require_user. In-process on the same standing as the rate
+    # counter and the keystore (one host per database, enforced at boot).
+    app.state.token_revocations = TokenRevocationStore()
     app.state.metrics = MetricsRegistry()
     # Analysis (brain recomputes) is attacker-sized CPU work; a dedicated
     # limiter keeps it from occupying every worker thread that auth scrypt
     # and ordinary requests also need.
     app.state.analyze_limiter = anyio.CapacityLimiter(4)
-    # Auth scrypt (N=2^16, ~64 MiB per hash) likewise gets its own small
-    # limiter: a login flood must not be able to queue unbounded 64-MiB
-    # allocations on the shared anyio thread pool.
+    # Auth scrypt (default N=2^17, ~128 MiB per hash) likewise gets its own
+    # small limiter: a login flood must not be able to queue unbounded
+    # 128-MiB allocations on the shared anyio thread pool.
     app.state.auth_limiter = anyio.CapacityLimiter(4)
     # Non-blocking admission paired with auth_limiter: acquire this BEFORE
     # the login SELECT, so a flood gets a small 503 queue boundary rather
@@ -423,29 +427,6 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     app.include_router(api_v1_router)
     app.include_router(api_router)
 
-    # Outermost: body-size cap + security headers on EVERY response (413s,
-    # 500s included) + last-ditch exception handling. Registered AFTER the
-    # routers are included only because its malformed-body rate rules are
-    # built from the final route table; add_middleware still stacks it as
-    # the outermost user middleware (each call prepends).
-    app.add_middleware(
-        HardeningMiddleware,
-        max_body_bytes=settings.max_body_bytes,
-        body_read_timeout_seconds=settings.body_read_timeout_seconds,
-        trust_proxy_headers=settings.trust_proxy_headers,
-        trusted_proxy_ips=settings.trusted_proxy_ips,
-        rate_limit_rules=_rate_limit_rules(app),
-        rate_counter=app.state.rate_counter,
-        rate_limit_settings=settings,
-        cors_origins=tuple(settings.cors_origins),
-        cors_expose_headers=tuple(cors_expose_headers),
-        # M-26: responses this outer layer synthesizes from exceptions the
-        # app raised (last-ditch 500, deep-nesting 400) and its pre-dispatch
-        # flood 429s never pass the inner MetricsMiddleware — tap them into
-        # the same registry so status families stay complete.
-        status_observer=app.state.metrics.observe_request,
-    )
-
     @app.get(
         "/healthz",
         tags=["ops"],
@@ -461,7 +442,20 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         # process as alive (that's what /readyz is for).
         return {"status": "ok", "version": APP_VERSION}
 
-    @app.get("/metrics", tags=["ops"])
+    @app.get(
+        "/metrics",
+        tags=["ops"],
+        # 2026-09-26 audit item 1: /metrics was the only route besides
+        # CORS preflights with no limiter at all. It renders the registry
+        # (cheap), but an unauthenticated flood could still draw unlimited
+        # 200s — and unlimited hardening-layer body-buffer work — outside
+        # every API bucket. It joins /healthz + /readyz in the one shared,
+        # generous ops bucket: load-balancer and Prometheus scrapers stay
+        # comfortable while the flood is bounded.
+        dependencies=[
+            Depends(make_rate_limiter("ops-health", "ops_rate_limit", "ops_rate_window"))
+        ],
+    )
     async def metrics_endpoint(request: Request):
         # Fail closed: without an explicitly configured token the endpoint
         # exists only in development; every other environment 404s. The
@@ -517,6 +511,43 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 content=_error_envelope(503, "database unavailable"),
             )
         return {"status": "ready", "version": APP_VERSION}
+
+    # Outermost: body-size cap + security headers on EVERY response (413s,
+    # 500s included) + last-ditch exception handling. Registered AFTER every
+    # route exists — both router mounts AND the three ops routes above —
+    # because its malformed-body rate rules are built from the final route
+    # table by _rate_limit_rules(app) RIGHT HERE: the argument is evaluated
+    # eagerly at registration, so a route added after this call would be
+    # invisible to the edge counter (the re-audit caught exactly that for
+    # /healthz, /metrics, /readyz). add_middleware still stacks this as the
+    # outermost user middleware (each call prepends), and nothing is added
+    # after it, so registering last changes nothing about the stack order.
+    app.add_middleware(
+        HardeningMiddleware,
+        max_body_bytes=settings.max_body_bytes,
+        body_read_timeout_seconds=settings.body_read_timeout_seconds,
+        trust_proxy_headers=settings.trust_proxy_headers,
+        trusted_proxy_ips=settings.trusted_proxy_ips,
+        rate_limit_rules=_rate_limit_rules(app),
+        rate_counter=app.state.rate_counter,
+        rate_limit_settings=settings,
+        # 2026-09-26 audit item 6: route this layer's LIMITS through a live
+        # accessor of app.state.settings. The constructor's copies went stale
+        # the moment tests (or a future operator surface) swapped
+        # app.state.settings at runtime, while every route dependency read
+        # the live object — the edge pre-dispatch gate and the dependencies
+        # could then disagree about both the body cap and the bucket limits.
+        # The provider keeps direct constructions (which pass a Settings
+        # object only) on the historical static behavior.
+        settings_provider=lambda: app.state.settings,
+        cors_origins=tuple(settings.cors_origins),
+        cors_expose_headers=tuple(cors_expose_headers),
+        # M-26: responses this outer layer synthesizes from exceptions the
+        # app raised (last-ditch 500, deep-nesting 400) and its pre-dispatch
+        # flood 429s never pass the inner MetricsMiddleware — tap them into
+        # the same registry so status families stay complete.
+        status_observer=app.state.metrics.observe_request,
+    )
 
     return app
 

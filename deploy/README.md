@@ -7,6 +7,45 @@ references. A tagged GitHub release publishes the exact
 `mindpattern-release-vX.Y.Z.env` fragment containing those references, plus
 the verified therapist-portal archive and a SHA-256 file for each asset.
 
+> **Compliance documents**: before first public service, complete the
+> operator/compliance pack — `docs/OPERATOR_PACK.md` indexes the privacy
+> policy template, data-retention schedule, subprocessor/BAA register,
+> security policy, `security.txt` example, the signable DPIA template, and
+> the incident runbook. deploy/README.md covers the mechanics; the pack
+> covers the obligations.
+
+## Digest-pin inventory & re-pin dates
+
+Every image in the production contract is digest-pinned; each pin has a
+deliberate re-pin discipline (Dependabot has no compose-ecosystem digest
+updates for service images):
+
+| Image | Pinned where | Pinned on | Re-pin procedure |
+|---|---|---|---|
+| API + backup worker | release env asset (`mindpattern-release-vX.Y.Z.env`), consumed as `@sha256` by `docker-compose.yml` | each release (workflow publishes provenance + SBOM, and since 2026-09-26 cosign-signs both digests keyless — verify with `cosign verify <ref>` against the repo's OIDC identity) | deploy the next tagged release; never rebuild on the host |
+| `postgres:16-alpine@sha256:721873c34ceb…` | `docker-compose.yml` (db service) + `backup/Dockerfile` | 2026-09-26 (re-resolved via the Docker Hub registry API; previous pin 2026-09-07 had fallen ~6 weeks behind the moving tag) | `docker buildx imagetools inspect postgres:16-alpine` → replace tag AND digest together, deliberately — in BOTH files |
+| `postgres:16-alpine@sha256:721873c34ceb…` (workflow-side) | `.github/workflows/ci.yml` (restore container) + `.github/workflows/release.yml` (postgres service container, production-integration restore container) | 2026-09-26 (moved off the superseded 2026-09-07 `cf78e766…` pin when the drift gate learned to scan workflows) | same inspect-and-replace discipline |
+| `python:3.14-slim@sha256:51dafde81dbdb…` | `backend/Dockerfile` (both stages) | 2026-09-26 (re-resolved via the registry API; previous pin 2026-09-07) | same inspect-and-replace discipline |
+| `prom/prometheus:v3.4.1@sha256:9abc6cf6aea7…` | `deploy/monitoring/docker-compose.yml` + `.github/workflows/ci.yml` (promtool copy step) | 2026-09-22 audit G-7/NEW-4 | same inspect-and-replace discipline; `deploy/monitoring/verify.sh --production` (CI's monitoring-verify job) fails any mutable reference |
+| `grafana/grafana:12.0.0@sha256:263cbefd5d9b…` | `deploy/monitoring/docker-compose.yml` | 2026-09-22 audit G-7/NEW-4 | same inspect-and-replace discipline |
+| `prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa0…` | `deploy/monitoring/docker-compose.yml` | 2026-09-22 audit G-7/NEW-4 | same inspect-and-replace discipline |
+| `prom/node-exporter:v1.9.1@sha256:d00a542e409e…` | `deploy/monitoring/docker-compose.yml` | 2026-09-26 (resolved from the Docker Hub registry API) | same inspect-and-replace discipline |
+| `prom/alertmanager:v0.28.0@sha256:d5155cfac40a…` | `deploy/monitoring/docker-compose.yml` | 2026-09-26 | same inspect-and-replace discipline |
+| `rclone/rclone:1.69.1@sha256:600f51856285…` | `deploy/backup-offsite/docker-compose.yml` | 2026-09-22 audit G-7/NEW-4 (including the tag repair: `v1.69.1` does not exist on Docker Hub — rclone tags are unprefixed) | same inspect-and-replace discipline |
+| `aquasec/trivy:0.61.0@sha256:6967db29ce52…` | `.github/workflows/ci.yml` + `.github/workflows/release.yml` (image scanner) | 2026-09-22 (final verification) | version- and sha256-pinned scanner; re-pin deliberately |
+| gitleaks 8.30.1, cosign-installer (`@c56c2d3e…` v3.8.0) | CI workflows | 2026-09-22/26 | version- and sha256-pinned external tools; bump on review |
+
+**Drift gate (2026-09-26; workflows added 2026-09-27):**
+`deploy/monitoring/check-image-drift.sh` (a CI step in the
+monitoring-verify job, and runnable standalone) resolves every
+`repo:tag@sha256` pin above — in the production compose, both operator
+overlays, AND every `.github/workflows/*.yml` image reference — against the
+live registry and FAILS when a tag has moved and the pin is older than 90
+days per this table — a re-pin is now a scheduled obligation, not an
+accident discovered by a failing Trivy scan. Update the "Pinned on" column
+whenever you re-pin (the gate reads it, matching on the first 12 digest hex
+characters, so each row above must keep its `@sha256:<12hex>…` form).
+
 `docker-compose.dev.yml` is the only source-build overlay. It is for local
 development and CI integration testing; never add it to a production command.
 Likewise, never use `--build` when deploying a tagged release: that would
@@ -94,9 +133,57 @@ BACKUP_KEY=<a unique base64 backup-encryption key>
 MINDPATTERN_TRUST_PROXY_HEADERS=0
 ```
 
+**Purpose-split secrets (2026-09-26) — recommended for every new
+deployment.** The backend accepts dedicated secrets per purpose; each
+falls back to `MINDPATTERN_TOKEN_SECRET` (identity derivation) when
+unset, so existing deployments keep working, but a fresh deployment
+should set all four from day one (rotation of one purpose then never
+disturbs the others):
+
+```dotenv
+MINDPATTERN_AUTH_TOKEN_SECRET=<openssl rand -hex 32>   # bearer signing
+MINDPATTERN_TOTP_WRAP_SECRET=<openssl rand -hex 32>    # therapist TOTP at rest
+MINDPATTERN_PAIRING_SECRET=<openssl rand -hex 32>      # pairing-code HMAC digests
+MINDPATTERN_DECOY_SECRET=<openssl rand -hex 32>        # unknown-user decoy salts
+```
+
+Caveats before ever CHANGING these on a live deployment: setting
+`MINDPATTERN_AUTH_TOKEN_SECRET` (even to the same bytes as the legacy
+secret) bumps the token key-scheme version and invalidates every
+outstanding bearer; `MINDPATTERN_TOTP_WRAP_SECRET` rotation is one-way
+(wrapped therapist secrets must be re-armed); `MINDPATTERN_PAIRING_SECRET`
+rotation kills live pairing codes. The full rotation procedure is
+`docs/INCIDENT_RUNBOOK.md` "Rotating `MINDPATTERN_TOKEN_SECRET`" —
+read it before touching any of them.
+
 Generate values once with `openssl rand -hex 32`, `openssl rand -hex 16`, and
 `openssl rand -base64 32`; store them in the approved secret manager and that
 owner-only file. Do not place secrets in the release env asset or checkout.
+
+**File-mounted secrets (2026-09-26 infra audit) — compose reads these
+INSTEAD of env where the consumer supports it.** Container environment
+variables are visible to `docker inspect` on the host, so the signing and
+backup secrets additionally mount as compose `secrets:` files under
+`deploy/secrets/` (examples committed; real files gitignored; the app
+resolves `<VAR>_FILE`, the db reads `POSTGRES_PASSWORD_FILE` natively, the
+backup worker builds its pgpass line and passes `-pass file:` to openssl):
+
+```bash
+mkdir -p "$APP_DIR/deploy/secrets" && cd "$APP_DIR/deploy/secrets"
+openssl rand -hex 32  > token_secret        # = MINDPATTERN_TOKEN_SECRET
+: > auth_token_secret                       # optional; empty = derive
+openssl rand -hex 16  > postgres_password   # same value as .env's POSTGRES_PASSWORD
+openssl rand -base64 32 > backup_key        # = BACKUP_KEY
+chmod 600 token_secret auth_token_secret postgres_password backup_key
+# Only if you use the off-site replication overlay:
+cp rclone_config.example rclone_config && $EDITOR rclone_config  # fill the S3 remote
+chmod 600 rclone_config
+```
+
+`POSTGRES_PASSWORD` stays in the secrets.env as well — the api service
+interpolates it raw into `MINDPATTERN_DB_URL` (compose cannot read secret
+files for interpolation), so that one value remains env-based by design;
+everything else above moves out of the environment.
 
 Use a shell function so an exported host variable cannot override the release
 image references. The release env file is passed *after* the secrets file, so
@@ -181,6 +268,49 @@ docker compose --env-file .env \
 
 bash backend/scripts/rehearse_restore.sh --env-file .env --dev
 ```
+
+## Branch protection (operator step — the repo cannot enable it for you)
+
+Every guarantee above (digest pinning, CI gates, secret scanning, the
+contract tests that pin the README's claims) is enforced by CI — and CI
+only protects `main` if branch protection requires it. A repository
+admin (not this checkout) must run, once per repository:
+
+```bash
+REPO=pkr26/thinkingpatterns    # change for a fork
+
+# 1. Discover the exact check names your commits report (the workflow
+#    is "CI"; each job surfaces as its own check, e.g. "backend",
+#    "contract-gates", "web-contract-vectors"):
+SHA=$(gh api "repos/$REPO/commits/main" --jq '.sha')
+gh api "repos/$REPO/commits/$SHA/check-runs" --jq '.check_runs[].name'
+
+# 2. Require them on main, plus one approving review, no direct pushes
+#    past the checks (repeat the checks[] line for EVERY name step 1
+#    listed that you want required — requiring all of them is the
+#    honest default; the names below are illustrative):
+gh api --method PUT "repos/$REPO/branches/main/protection" \
+  -H "Accept: application/vnd.github+json" \
+  -f 'required_status_checks[strict]=false' \
+  -f 'required_status_checks[checks][][context]=backend' \
+  -f 'required_status_checks[checks][][context]=backend-postgres' \
+  -f 'required_status_checks[checks][][context]=contract-gates' \
+  -f 'required_pull_request_reviews[required_approving_review_count]=1' \
+  -f 'required_pull_request_reviews[dismiss_stale_reviews]=true' \
+  -f 'enforce_admins=false' \
+  -F 'restrictions=null'
+
+# 3. Verify:
+gh api "repos/$REPO/branches/main/protection" \
+  --jq '.required_status_checks, .required_pull_request_reviews'
+```
+
+Notes: `checks[][context]` is the current schema (the older plain
+`contexts[]` string array also works); `strict=false` keeps the checks
+required while allowing merges of up-to-date branches without
+head-branch freshness enforcement — set it to `true` if you want
+"branch is up to date" forced too. Until this is done, anyone with
+push access can bypass every gate this document describes.
 
 ## The patient web client (2026-09-25, WEB_PLAN P10)
 

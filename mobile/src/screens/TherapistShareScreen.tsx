@@ -66,6 +66,22 @@ const dayOf = (iso: string): string => {
   return parsed.toLocaleDateString(dateLocaleTag(), { year: "numeric", month: "long", day: "numeric" });
 };
 
+/** SAS (2026-09-26): the pairing checksum is SERVER-CONTROLLED text on a
+ *  security screen — accept only the exact shape the contract defines
+ *  ("ddd ddd"), never free-form rendering. Absent/invalid → null → the
+ *  line is simply not shown (an older server predates the field). */
+export function validSas(value: unknown): string | null {
+  return typeof value === "string" && /^\d{3} \d{3}$/.test(value) ? value : null;
+}
+
+/** The server-computed wrap-key fingerprint (16 hex). Same validation
+ *  discipline; used to CROSS-CHECK the locally computed fingerprint of the
+ *  wrap key the same response carried — agreement is another substitution
+ *  tripwire, disagreement must be visible. */
+export function validServerFingerprint(value: unknown): string | null {
+  return typeof value === "string" && /^[0-9a-f]{16}$/.test(value) ? value : null;
+}
+
 export function TherapistShareScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const [consents, setConsents] = useState<ListedConsent[]>([]);
@@ -151,11 +167,15 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
     // C-7 (2026-09-21): the check is now an ACTION, not a display — the
     // password step unlocks only through an explicit "fingerprints match"
     // attestation tap; a mismatch opens guidance and never the grant.
+    // SAS (2026-09-26): the match code rides the confirmation beside the
+    // fingerprint — the two humans compare BOTH out of band.
+    const sas = validSas(lookup.sas);
+    const sasLine = sas !== null ? `\n\n${tr("share.sasNote", { sas })}` : "";
     Alert.alert(
       tr("share.grantTitle", { name: lookup.display_name }),
       `${tr("share.grantBody")}\n\n${tr("share.fingerprintNote", {
         fingerprint: therapistKeyFingerprint(lookup.wrap_pub_key),
-      })}`,
+      })}${sasLine}`,
       [
         { text: tr("common.cancel"), style: "cancel" },
         {
@@ -335,6 +355,10 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         <>
           <Text style={themed.label}>{tr("share.addLabel")}</Text>
           <Text style={themed.footnote}>{tr("share.addBody")}</Text>
+          {/* SAS (2026-09-26): the expectation rides BESIDE the pairing-code
+              input — the user knows before typing that a match code and a
+              fingerprint must be compared out of band afterwards. */}
+          <Text style={themed.footnote}>{tr("share.sasIntro")}</Text>
           <TextInput
             style={themed.input}
             value={code}
@@ -355,6 +379,28 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       {sharingAvailable === true && lookup && !pending && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
           <Text style={[styles.cardTitle, { color: t.colors.text }]}>{lookup.display_name}</Text>
+          {/* SAS (2026-09-26): the server-computed match code beside the
+              locally computed fingerprint, with the compare-out-of-band
+              copy. Hidden when the server sent nothing valid (older
+              servers) — never guessed, never free-form. */}
+          {validSas(lookup.sas) !== null && (
+            <Text style={themed.footnote} accessibilityLabel={tr("share.sasNote", { sas: validSas(lookup.sas)! })}>
+              {tr("share.sasNote", { sas: validSas(lookup.sas)! })}
+            </Text>
+          )}
+          {/* Cross-check: the server's fingerprint of the wrap key must equal
+              THIS app's fingerprint of the same response's key bytes —
+              disagreement means the response is internally inconsistent and
+              is surfaced as the mismatch guidance, never silently ignored. */}
+          {(() => {
+            const server = validServerFingerprint(lookup.wrap_key_fingerprint);
+            const local = therapistKeyFingerprint(lookup.wrap_pub_key);
+            return server !== null && server !== local ? (
+              <Text style={{ color: t.colors.error, fontSize: 12, lineHeight: 18 }} accessibilityRole="alert">
+                {tr("share.mismatchTitle")}: {tr("share.mismatchBody")}
+              </Text>
+            ) : null;
+          })()}
           <Text style={themed.footnote}>
             {tr("share.fingerprintNote", { fingerprint: therapistKeyFingerprint(lookup.wrap_pub_key) })}
           </Text>

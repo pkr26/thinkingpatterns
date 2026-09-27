@@ -122,6 +122,55 @@ ENCRYPT_CASES = [
 ]
 
 
+# --- v2 key-scheme vectors (2026-09-26 crypto-architecture wave) ---------------
+#
+# Three NEW cross-platform pins, all append-only under their own top-level
+# section "envelope_vectors" (existing sections keep their exact entries):
+#   1. The FOUR-PART v2 entry AAD (context, user, id, content_version) —
+#      the pre-2026-09-20 blobs above are all three-part; nothing pinned
+#      what a current client emits for the version-bound binding.
+#   2. A TAMPERED-blob NEGATIVE vector: same inputs, one flipped
+#      ciphertext byte, "expect": "tamper" — platforms must fail
+#      authentication, never return plaintext or a 500.
+#   3. The random data-key ENVELOPE construction (security/envelope.py):
+#      KEK = HKDF-SHA256(master_key, salt, "mindpattern/envelope/v2"),
+#      wrapped = AES-256-GCM(kek, random 32-byte data_key) with AAD
+#      canonical JSON {context, kdf_params, user_id}, plus its own tampered
+#      negative. kdf_params stay pbkdf2-sha256 here: the server never
+#      computes Argon2id (no dependency, by design) and vectors must be
+#      generatable by every platform's shipped crypto stack.
+ENVELOPE_ENTRY_CASE = {
+    "password": "envelope-entry-v2-pin",
+    "salt": bytes(range(160, 176)),
+    "plaintext": b'{"v":1,"text":"version-bound AAD pin","sentiment":0.1,"created_at":"2026-09-26"}',
+    # The FOUR-PART v2 binding: the fourth part is the row's monotonic
+    # content_version (2026-09-20 audit fix M-2).
+    "aad_parts": ["entry", "user-909", "entry-2026-09-26-v2", "3"],
+    "nonce": bytes(range(48, 60)),
+}
+
+ENVELOPE_WRAP_CASE = {
+    "password": "envelope-wrap-pin",
+    "salt": bytes(range(176, 192)),
+    # Canonical pbkdf2 blob exactly as kdf.validate_kdf_params emits it.
+    "kdf_params": {"algorithm": "pbkdf2-sha256", "iterations": kdf.KDF_ITERATIONS, "version": 1},
+    # The AAD binds the account USERNAME (unique, immutable, client-known
+    # before registration) — not the server-generated user id, which cannot
+    # exist at first-wrap time (see security/envelope.py's deviation note).
+    "username": "envelope-wrap-user",
+    "data_key": bytes(range(200, 232)),  # the RANDOM 32-byte data key (pinned for the vector)
+    "nonce": bytes(range(60, 72)),
+}
+
+
+def _tamper(blob: bytes) -> bytes:
+    """Flip one ciphertext byte in the middle of the envelope — guaranteed
+    inside ct||tag (past the 12-byte nonce), guaranteed to break GCM."""
+    mutated = bytearray(blob)
+    mutated[len(blob) // 2] ^= 0x01
+    return bytes(mutated)
+
+
 def derive_keys(password: str, salt: bytes) -> tuple[bytes, bytes, bytes]:
     """PBKDF2 master key, cross-checked between two implementations."""
     via_hashlib = kdf.derive_master_key(password, salt, kdf.KDF_ITERATIONS)
@@ -181,6 +230,92 @@ def main() -> None:
             }
         )
 
+    envelope_vectors = []
+    # (1) four-part v2 entry AAD pin + (2) its tampered negative.
+    entry_case = ENVELOPE_ENTRY_CASE
+    _, _, entry_data_key = derive_keys(entry_case["password"], entry_case["salt"])
+    entry_aad = crypto.build_aad(*entry_case["aad_parts"])
+    # Wire format nonce||ct||tag — the same shape every other encrypt
+    # vector section pins.
+    entry_blob = entry_case["nonce"] + AESGCM(entry_data_key).encrypt(
+        entry_case["nonce"], entry_case["plaintext"], entry_aad
+    )
+    envelope_vectors.append(
+        {
+            "kind": "entry-aad-v2",
+            "password": entry_case["password"],
+            "salt": base64.b64encode(entry_case["salt"]).decode(),
+            "iterations": kdf.KDF_ITERATIONS,
+            "data_key": base64.b64encode(entry_data_key).decode(),
+            "plaintext": base64.b64encode(entry_case["plaintext"]).decode(),
+            "aad_parts": entry_case["aad_parts"],
+            "nonce": base64.b64encode(entry_case["nonce"]).decode(),
+            "blob": base64.b64encode(entry_blob).decode(),
+        }
+    )
+    envelope_vectors.append(
+        {
+            "kind": "entry-aad-v2-tampered",
+            "password": entry_case["password"],
+            "salt": base64.b64encode(entry_case["salt"]).decode(),
+            "iterations": kdf.KDF_ITERATIONS,
+            "data_key": base64.b64encode(entry_data_key).decode(),
+            "aad_parts": entry_case["aad_parts"],
+            "blob": base64.b64encode(_tamper(entry_blob)).decode(),
+            # NEGATIVE vector: consumers must raise their tamper error.
+            "expect": "tamper",
+        }
+    )
+    # (3) the random data-key envelope (security/envelope.py) + its tampered
+    # negative. Built through the REAL module (not AESGCM directly) so the
+    # pin is the reference implementation's own output — the same standing
+    # the sharing wrap vectors have.
+    from app.security import envelope as key_envelope
+
+    wrap_case = ENVELOPE_WRAP_CASE
+    wrap_master, _, _ = derive_keys(wrap_case["password"], wrap_case["salt"])
+    canonical_params = kdf.validate_kdf_params(wrap_case["kdf_params"])
+    kek = key_envelope.envelope_kek(wrap_master, wrap_case["salt"])
+    wrap_aad = key_envelope.envelope_aad(wrap_case["username"], canonical_params)
+    wrapped = key_envelope.wrap_data_key(
+        wrap_case["data_key"],
+        kek=kek,
+        username=wrap_case["username"],
+        kdf_params=canonical_params,
+        nonce=wrap_case["nonce"],
+    )
+    envelope_vectors.append(
+        {
+            "kind": "key-envelope-wrap",
+            "password": wrap_case["password"],
+            "salt": base64.b64encode(wrap_case["salt"]).decode(),
+            "iterations": kdf.KDF_ITERATIONS,
+            "master_key": base64.b64encode(wrap_master).decode(),
+            "kdf_params": canonical_params,
+            "kek": base64.b64encode(kek).decode(),
+            "username": wrap_case["username"],
+            "data_key": base64.b64encode(wrap_case["data_key"]).decode(),
+            "aad": base64.b64encode(wrap_aad).decode(),
+            "nonce": base64.b64encode(wrap_case["nonce"]).decode(),
+            "wrapped": base64.b64encode(wrapped).decode(),
+        }
+    )
+    envelope_vectors.append(
+        {
+            "kind": "key-envelope-wrap-tampered",
+            "password": wrap_case["password"],
+            "salt": base64.b64encode(wrap_case["salt"]).decode(),
+            "iterations": kdf.KDF_ITERATIONS,
+            "master_key": base64.b64encode(wrap_master).decode(),
+            "kdf_params": canonical_params,
+            "kek": base64.b64encode(kek).decode(),
+            "username": wrap_case["username"],
+            "aad": base64.b64encode(wrap_aad).decode(),
+            "wrapped": base64.b64encode(_tamper(wrapped)).decode(),
+            "expect": "tamper",
+        }
+    )
+
     out = REPO_ROOT / "shared" / "vectors.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     # MERGE, never overwrite: shared/vectors.json also carries hand-maintained
@@ -190,7 +325,7 @@ def main() -> None:
     # fails closed when those sections are missing. Only the sections this
     # script actually generates are replaced; every other key is preserved
     # as-is (value AND position) from the existing file.
-    GENERATED_SECTIONS = ("vectors", "encrypt_vectors")
+    GENERATED_SECTIONS = ("vectors", "encrypt_vectors", "envelope_vectors")
     existing_text = out.read_text() if out.exists() else ""
     try:
         existing = json.loads(existing_text) if existing_text else {}
@@ -215,12 +350,23 @@ def main() -> None:
             break
     preserved = {k: v for k, v in existing.items() if k not in GENERATED_SECTIONS}
     payload = dict(existing)
-    payload.update({"vectors": vectors, "encrypt_vectors": encrypt_vectors})
+    payload.update(
+        {
+            "vectors": vectors,
+            "encrypt_vectors": encrypt_vectors,
+            "envelope_vectors": envelope_vectors,
+        }
+    )
     out.write_text(json.dumps(payload, indent=indent) + "\n")
-    preserved_names = ", ".join(f"{k} ({len(v) if isinstance(v, (list, dict)) else 1})"
-                                for k, v in preserved.items()) or "none"
+    preserved_names = (
+        ", ".join(
+            f"{k} ({len(v) if isinstance(v, (list, dict)) else 1})" for k, v in preserved.items()
+        )
+        or "none"
+    )
     print(
-        f"wrote {len(vectors)} vectors + {len(encrypt_vectors)} encrypt vectors -> {out}\n"
+        f"wrote {len(vectors)} vectors + {len(encrypt_vectors)} encrypt vectors + "
+        f"{len(envelope_vectors)} envelope vectors -> {out}\n"
         f"preserved hand-maintained sections: {preserved_names}"
     )
 

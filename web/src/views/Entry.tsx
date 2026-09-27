@@ -13,7 +13,11 @@
  * EntryScreen parity); the machine-derived sentimentScore stays
  * device-local (the on-device read line and the mood-log fallback).
  *
- * Drafts are memory-only: no plaintext at rest, ever (disclosed in the UI).
+ * Drafts live in this tab's memory while the session is live; a lock
+ * (hidden tab / idle / expiry) SEALS the in-progress draft under the data
+ * key before the keys die and the editor unmounts (entryDraft.ts, audit
+ * 2026-09-26) — no plaintext at rest, ever, and no lost half-written
+ * entry either (disclosed in the UI).
  *
  * Redesign 2026-09-26: the check-in is a visible one-tap visual card
  * (faces for mood and energy, dots for sleep, chips for activities) —
@@ -21,11 +25,12 @@
  * aria-pressed sage, never the danger color. A time-aware greeting and
  * streak chip open the screen.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { encryptEntry, timeOfDayBucket } from "../crypto/patient";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
+import { clearActiveDraft, loadActiveDraft, registerDraftSource, type EntryDraft } from "../entryDraft";
 import { localDateISO } from "../dates";
 import { newClientEntryId } from "../entryId";
 import { recordMood, localStreak } from "../moodLog";
@@ -59,6 +64,16 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
   const [queuedCount, setQueuedCount] = useState(0);
 
   const userId = vault.ownerUserId();
+  const [draftRestored, setDraftRestored] = useState(false);
+
+  // The live draft, as a ref: App's lockDown reads it through
+  // registerDraftSource the instant a lock fires, BEFORE the vault
+  // zeroizes — a hidden-tab/idle lock must seal the half-written entry,
+  // not destroy it (entryDraft.ts, audit 2026-09-26).
+  const draftRef = useRef<EntryDraft>({ text, mood: moodPick, energy: energyPick, sleep: sleepPick, tags });
+  draftRef.current = { text, mood: moodPick, energy: energyPick, sleep: sleepPick, tags };
+  useEffect(() => registerDraftSource(() => draftRef.current), []);
+
   // The on-device read is a display-only estimate — it never rides in the
   // payload (H-5); only an explicit pick does.
   const sentiment = useMemo(
@@ -76,6 +91,34 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
     void queueLength(userId).then(setQueuedCount).catch(() => undefined);
   }, [userId]);
 
+  // Restore a draft sealed at lock time (audit 2026-09-26): the editor's
+  // whole multi-field state comes back exactly as it was left. The SLOT
+  // deliberately stays until save/discard — switching views and back must
+  // not lose the draft, and the next lock re-seals whatever is on screen.
+  useEffect(() => {
+    const owner = vault.ownerUserId();
+    if (!owner || !vault.isUnlocked()) return;
+    let cancelled = false;
+    loadActiveDraft(vault.get().dataKey, owner)
+      .then((draft) => {
+        if (cancelled || !draft) return;
+        // Never clobber typing that raced the restore: the slot keeps the
+        // draft either way.
+        const live = draftRef.current;
+        if (live.text !== "" || live.mood !== null || live.energy !== null || live.sleep !== null || live.tags.length > 0) return;
+        setText(draft.text);
+        setMoodPick(draft.mood);
+        setEnergyPick(draft.energy);
+        setSleepPick(draft.sleep);
+        setTags(draft.tags);
+        setDraftRestored(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const toggleTag = (tag: string): void => {
     setTags((current) => (current.includes(tag) ? current.filter((x) => x !== tag) : [...current, tag]));
   };
@@ -85,9 +128,12 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       setError(t("entry.empty"));
       return;
     }
-    const keys = vault.get();
     const owner = vault.ownerUserId();
-    if (!owner) {
+    if (!owner || !vault.isUnlocked()) {
+      // The owner/isUnlocked re-check BEFORE the key fetch (audit 2026-09-26
+      // LOW): a lock that landed between the last render and this press
+      // used to hit vault.get()'s throw as an unhandled rejection — now it
+      // is the honest locked message, quietly.
       setError(t("common.sessionLocked"));
       return;
     }
@@ -111,6 +157,11 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
     setBusy(true);
     setError("");
     try {
+      // Immediate re-check inside the try (audit 2026-09-26 LOW, the
+      // Patterns guard pattern): a lock during the crisis-tier awaits must
+      // not turn vault.get() into an unhandled rejection.
+      if (!vault.isUnlocked()) return;
+      const keys = vault.get();
       const entryDate = date; // WEB_PLAN D-7: creation is today-only
       const clientEntryId = newClientEntryId(entryDate);
       const createdAt = new Date().toISOString();
@@ -162,12 +213,33 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       setSleepPick(null);
       setTags([]);
       setCrisisPrompt(false);
+      setDraftRestored(false);
+      // The entry is safe (server or ciphertext queue) — the sealed draft's
+      // custody ends here (entryDraft.ts, audit 2026-09-26).
+      await clearActiveDraft(owner).catch(() => undefined);
       props.onSaved(result, date);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("entry.couldNotSave"));
     } finally {
       setBusy(false);
     }
+  };
+
+  const editorEmpty =
+    text.trim() === "" && moodPick === null && energyPick === null && sleepPick === null && tags.length === 0;
+
+  /** Explicit discard (audit 2026-09-26): wipe the editor AND the sealed
+   *  draft — the user said this entry is not happening. */
+  const discard = (): void => {
+    setText("");
+    setMoodPick(null);
+    setEnergyPick(null);
+    setSleepPick(null);
+    setTags([]);
+    setCrisisPrompt(false);
+    setDraftRestored(false);
+    const owner = vault.ownerUserId();
+    if (owner) void clearActiveDraft(owner).catch(() => undefined);
   };
 
   const now = new Date();
@@ -250,9 +322,15 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
           </PillNote>
         )}
 
+        {draftRestored && !editorEmpty && (
+          <PillNote role="status" icon="info">{t("entry.draftRestoredNote")}</PillNote>
+        )}
         <ErrorBanner message={error} />
         <div className="stack" style={{ gap: "var(--space-2)" }}>
           <Button label={busy ? t("entry.saving") : t("entry.save")} icon="check" onPress={() => void save()} disabled={busy} block />
+          <span className="row" style={{ justifyContent: "center" }}>
+            <Button label={t("entry.discard")} icon="x" onPress={discard} small variant="ghost" disabled={busy || editorEmpty} />
+          </span>
           <span className="row" style={{ gap: 6, justifyContent: "center" }}>
             <Icon name={isOnline() ? "shield" : "alert"} size={14} />
             <span className="note note--muted">{isOnline() ? t("entry.draftMemoryNote") : t("entry.offlineQueueNote")}</span>

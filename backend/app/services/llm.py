@@ -221,6 +221,15 @@ def _clean_label(raw: object) -> str | None:
         return None
     if _URL_OR_PHONE.search(label) or _SPELLED_CONTACT.search(label):
         return None
+    # Defense-in-depth (2026-09-26 statistical review, item 11): the
+    # bare-domain guard previously protected only narratives — labels
+    # relied on the exact-match constraint (_label_grounded + the corpus
+    # verbatim rule) to keep domains out. A pattern label rides onto
+    # cards and into the daily question exactly like a narrative, so the
+    # same "helpnow.example.com" shapes are refused here too, behind the
+    # constraints that remain.
+    if _DOMAIN_LIKE.search(label):
+        return None
     # Digit-word runs ("five five five zero one three four") are phone
     # numbers spelled out — three or more consecutive number-words is never
     # legitimate pattern vocabulary.

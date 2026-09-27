@@ -74,6 +74,15 @@ takes voice input through the OS keyboard's dictation (see mobile/README.md).
     mood correlations.
   - **Mood trajectory**: EWMA control chart over daily mood (λ=0.3, ±2.7σ
     limits, run-of-3 in the last 5 points) → `mood_shift` patterns.
+    *(Historical drift, recorded 2026-09-26: this plan's λ=0.3/±2.7σ was
+    never what shipped. The engine first shipped λ=0.18 (inside the
+    0.05–0.25 recommended range per the Smit/Schat/Ceulemans 2023
+    tutorial — see RESEARCH.md §2.2) with ±2.7σ, and the 2026-09-26
+    statistical review then recalibrated the limit to ±3.1σ by Monte
+    Carlo simulation of the exact rule (≤5% per-recompute false-alarm
+    probability at φ=0.5; run-of-3 in the last 5 unchanged). Shipped
+    constants: `MOOD_SHIFT_LAMBDA = 0.18`, `MOOD_SHIFT_LIMIT = 3.1` in
+    `backend/app/services/brain.py` — believe those, not this plan.)*
   - **Phrases** (`app/services/phrases.py`): MinHash (64 perm) + LSH
     (16×4 bands) near-duplicate clustering over unigram+bigram shingles.
 - Analyzers: **brain** (default, above; `analyzer="brain"`), plus optional

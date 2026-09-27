@@ -48,7 +48,28 @@ afterEach(() => {
 describe("stored base URL policy", () => {
   it("defaults to the local dev server", async () => {
     expect(await getBaseUrl()).toBe(DEFAULT_BASE_URL);
+    // The suite's environment mirrors a DEV build (tests/helpers/
+    // i18nSetup.ts sets __DEV__ = true), so the default here is the dev
+    // branch of the build-selected constant.
     expect(DEFAULT_BASE_URL).toBe("http://localhost:8000");
+  });
+
+  // 2026-09-26 audit LOW: the default is __DEV__-selected — a release
+  // build must never silently default to the device-local dev server.
+  it("selects the default by build: release builds get the loud HTTPS placeholder", async () => {
+    vi.stubGlobal("__DEV__", false);
+    vi.resetModules();
+    const release = await import("../src/api/client");
+    // The single release-config point: a PLACEHOLDER origin, never a real
+    // deployment — operators must replace it at release-config time, and
+    // a build left on it fails loudly (no such host) rather than quietly
+    // shipping a dev default.
+    expect(release.PRODUCTION_BASE_URL).toBe("https://api.mindpattern.example");
+    expect(release.DEFAULT_BASE_URL).toBe(release.PRODUCTION_BASE_URL);
+    expect(release.DEFAULT_BASE_URL).not.toContain("localhost");
+    // …and the placeholder is still a valid product-grammar URL, so the
+    // release default survives parseServerUrl without special-casing.
+    expect(release.parseServerUrl(release.DEFAULT_BASE_URL)).not.toBeNull();
   });
 
   it("persists valid https URLs and clears the insecure flag", async () => {

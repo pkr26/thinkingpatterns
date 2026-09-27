@@ -680,38 +680,6 @@
     ],
     "state": [
      {
-      "pid": "mood_correlation:work",
-      "kind": "mood_correlation",
-      "label": "work",
-      "first_seen": "2026-08-02",
-      "last_seen": "2026-10-04",
-      "first_qualified": "2026-10-11",
-      "last_qualified": "2026-10-11",
-      "occurrences": 10,
-      "state": "candidate",
-      "qualification_days": [
-       "2026-10-11"
-      ],
-      "evidence_dates": [
-       "2026-08-02",
-       "2026-08-09",
-       "2026-08-16",
-       "2026-08-23",
-       "2026-08-30",
-       "2026-09-06",
-       "2026-09-13",
-       "2026-09-20",
-       "2026-09-27",
-       "2026-10-04"
-      ],
-      "detail": {
-       "cohens_d": 39.936,
-       "direction": "lower",
-       "mood_delta": 1.997,
-       "p_value": 0.0
-      }
-     },
-     {
       "pid": "phrase:7aacea0d97b2",
       "kind": "recurring_phrase",
       "label": "me senti tranquilo y agradecido",

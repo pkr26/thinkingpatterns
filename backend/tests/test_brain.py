@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from datetime import date, timedelta
 
 import pytest
@@ -38,6 +39,13 @@ def sundays(start: date, count: int) -> list[date]:
 
 def consecutive(start: date, count: int) -> list[date]:
     return [start + timedelta(days=i) for i in range(count)]
+
+
+def _jitter(i: int) -> float:
+    """Deterministic +-0.05 wobble for test corpora (item 7: exactly
+    constant groups carry no variance and now fail the Welch test
+    closed — real corpora are never exactly constant)."""
+    return 0.05 if i % 2 == 0 else -0.05
 
 
 def dates_only(state: dict) -> dict:
@@ -104,15 +112,19 @@ class TestBaseRateCorrection:
         days = consecutive(T0 - timedelta(days=69), 70)
         entries = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]
         # Statistical kinds replicate before surfacing: candidate on first
-        # qualification, emerging once it re-qualifies with INDEPENDENT
-        # evidence — a fresh work entry. (A next-day recompute of the
-        # UNCHANGED corpus is the same observation scored twice and no
-        # longer promotes; see _replication_satisfied.)
+        # qualification, emerging once the evidence accumulated since the
+        # first qualification covers >= 2 NEW evidence days (item 5,
+        # 2026-09-26: a single clustered mention is the same fluke shape
+        # the gate exists to stop). A next-day recompute of the UNCHANGED
+        # corpus is the same observation scored twice and never promotes.
         first = brain.update(brain.load_state(None), entries, T0)
         assert all(p.kind != "temporal" for p in first.surfaced)
-        grown = entries + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1))]
+        grown = entries + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=2)),
+        ]
         result = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
         )
         temporals = [p for p in result.surfaced if p.kind == "temporal"]
         assert any(t.label == "work" and t.detail["day"] == "Sunday" for t in temporals)
@@ -147,17 +159,24 @@ class TestMoodCorrelation:
     def test_effect_and_significance_gates(self):
         days = consecutive(T0 - timedelta(days=69), 70)
         entries = []
-        for d in days:
-            if d.weekday() == 6:
+        # Work days spread across EVERY weekday (every third day): the mood
+        # tie must be a same-day within-person association, not a weekly
+        # cycle riding one weekday (item 1's deconfounding would absorb a
+        # Sunday-only pattern — correctly).
+        for i, d in enumerate(days):
+            if i % 3 == 0:
                 entries.append(JournalEntry("anxious about work", d))
             else:
                 entries.append(JournalEntry(CALM, d))
         first = brain.update(brain.load_state(None), entries, T0)
-        # Second qualification day, with a fresh work entry as the new
-        # evidence the replication gate requires.
-        grown = entries + [JournalEntry("anxious about work", T0 + timedelta(days=1))]
+        # Second qualification day: >= 2 fresh work-evidence days since the
+        # first qualification (item 5).
+        grown = entries + [
+            JournalEntry("anxious about work", T0 + timedelta(days=1)),
+            JournalEntry("anxious about work", T0 + timedelta(days=2)),
+        ]
         result = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
         )
         moods = [p for p in result.surfaced if p.kind == "mood_correlation"]
         work = next(p for p in moods if p.label == "work")
@@ -244,13 +263,16 @@ class TestLifecycle:
         rerun = brain.update(brain.load_state(brain.dump_state(first.new_state)), corpus, T0)
         assert dates_only(rerun.new_state).get("temporal:work") == "candidate"
 
-        # A later run adds a second qualification day WITH new evidence (a
-        # fresh work entry) → emerging → surfaced. (The same run on the
-        # unchanged corpus would stay a candidate: consecutive recomputes
-        # of one window are one observation, not replication.)
-        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3))]
+        # A later run adds qualification days WITH >= 2 new evidence days
+        # (fresh work entries; item 5) → emerging → surfaced. (The same run
+        # on the unchanged corpus would stay a candidate: consecutive
+        # recomputes of one window are one observation, not replication.)
+        grown = corpus + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=4)),
+        ]
         later = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=3)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=4)
         )
         assert dates_only(later.new_state).get("temporal:work") == "emerging"
         surfaced = [p for p in later.surfaced if p.label == "work" and p.kind == "temporal"]
@@ -276,8 +298,8 @@ class TestLifecycle:
 
     def test_statistical_kinds_never_surface_on_first_qualification(self):
         # The replication gate: even with occurrences >> STRONG_EVIDENCE, a
-        # statistical claim stays a candidate until it re-qualifies on a
-        # second distinct recompute day (a noise fluke gets one day).
+        # statistical claim stays a candidate until it re-qualifies with
+        # genuinely independent evidence (a noise fluke gets one day).
         days = consecutive(T0 - timedelta(days=69), 70)
         corpus = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]
         first = brain.update(brain.load_state(None), corpus, T0)
@@ -293,11 +315,19 @@ class TestLifecycle:
             brain.load_state(brain.dump_state(first.new_state)), corpus, T0 + timedelta(days=1)
         )
         assert dates_only(next_day.new_state).get("temporal:work") == "candidate"
-        # A second qualification day that DOES add evidence (a fresh work
-        # entry) is a real replication → emerging → surfaced.
-        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1))]
+        # ONE fresh evidence day (a single additional clustered mention) is
+        # STILL not enough (item 5, 2026-09-26): one new day is the same
+        # fluke shape the gate exists to stop.
+        grown_one = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1))]
+        one_day = brain.update(
+            brain.load_state(brain.dump_state(first.new_state)), grown_one, T0 + timedelta(days=1)
+        )
+        assert dates_only(one_day.new_state).get("temporal:work") == "candidate"
+        # A second qualification day that DOES bring >= 2 new evidence days
+        # is a real replication → emerging → surfaced.
+        grown_two = grown_one + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=2))]
         second = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(one_day.new_state)), grown_two, T0 + timedelta(days=2)
         )
         assert dates_only(second.new_state).get("temporal:work") == "emerging"
         assert any(p.kind == "temporal" for p in second.surfaced)
@@ -319,25 +349,31 @@ class TestLifecycle:
     def test_confirmed_by_age(self):
         corpus = self._weak_corpus(T0)
         state = brain.update(brain.load_state(None), corpus, T0).new_state
-        # Second qualification with fresh evidence (a new work entry) —
+        # Second qualification with >= 2 fresh evidence days (item 5) —
         # the replication gate no longer promotes on an unchanged corpus.
-        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3))]
+        grown = corpus + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=4)),
+        ]
         state = brain.update(
-            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=3)
+            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=4)
         ).new_state
         state = brain.update(
-            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=24)
+            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=25)
         ).new_state
         assert dates_only(state).get("temporal:work") == "confirmed"
 
     def test_fading_then_archived_then_dropped(self):
         corpus = self._weak_corpus(T0)
         state = brain.update(brain.load_state(None), corpus, T0).new_state
-        # Re-qualify with fresh evidence so the pattern has SURFACED
-        # (emerging) before the corpus goes quiet.
-        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3))]
+        # Re-qualify with >= 2 fresh evidence days so the pattern has
+        # SURFACED (emerging) before the corpus goes quiet.
+        grown = corpus + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=4)),
+        ]
         state = brain.update(
-            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=3)
+            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=4)
         ).new_state  # emerging
         # The theme stops appearing entirely.
         quiet = [JournalEntry(CALM, e.entry_date) for e in corpus]
@@ -363,20 +399,26 @@ class TestLifecycle:
     def test_requalified_pattern_returns_to_emerging(self):
         corpus = self._weak_corpus(T0)
         state = brain.update(brain.load_state(None), corpus, T0).new_state
-        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3))]
+        grown = corpus + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=4)),
+        ]
         state = brain.update(
-            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=3)
+            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=4)
         ).new_state
         quiet = [JournalEntry(CALM, e.entry_date) for e in corpus]
         faded = brain.update(
             brain.load_state(brain.dump_state(state)), quiet, T0 + timedelta(days=12)
         ).new_state
-        # The theme returns with NEW evidence days: a statistical revival
-        # must replicate like a first promotion — it cannot ride the stale
-        # evidence back in.
-        returned = grown + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=13))]
+        # The theme returns with >= 2 NEW evidence days past the fading: a
+        # statistical revival must replicate like a first promotion — it
+        # cannot ride the stale evidence back in (item 5).
+        returned = grown + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=13)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=14)),
+        ]
         back = brain.update(
-            brain.load_state(brain.dump_state(faded)), returned, T0 + timedelta(days=13)
+            brain.load_state(brain.dump_state(faded)), returned, T0 + timedelta(days=14)
         )
         assert dates_only(back.new_state).get("temporal:work") == "emerging"
 
@@ -426,13 +468,16 @@ class TestMemoryAndDecay:
         days = consecutive(T0 - timedelta(days=69), 70)
         corpus = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]
         state = brain.update(brain.load_state(None), corpus, T0).new_state
-        # Re-qualify with fresh evidence (a new work entry) so the
-        # (statistical) pattern has SURFACED (emerging) before the corpus
-        # goes quiet — a lone candidate archives silently instead (see the
-        # replication gate).
-        grown = corpus + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1))]
+        # Re-qualify with >= 2 fresh evidence days so the (statistical)
+        # pattern has SURFACED (emerging) before the corpus goes quiet — a
+        # lone candidate archives silently instead (see the replication
+        # gate).
+        grown = corpus + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=2)),
+        ]
         state = brain.update(
-            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=2)
         ).new_state
         later = brain.update(brain.load_state(brain.dump_state(state)), [], T0 + timedelta(days=10))
         assert later.stats["total_entries"] == 0
@@ -585,24 +630,101 @@ class TestWithinPersonDetrending:
         assert all(p.label != "food" for p in mood_claims)
 
     def test_day_level_association_survives_detrending(self):
-        # Same corpus, but 'work' days read low RELATIVE TO THEIR WEEK —
-        # a real within-person tie the residuals must still find.
+        # Same corpus shape, but the work dip rides days spread across EVERY
+        # weekday (every third day): a real within-person same-day tie the
+        # de-trended AND weekday-deconfounded residuals must still find
+        # (item 1: a dip confined to one weekday is a weekly cycle, not a
+        # theme association — see TestWeeklyCycleDeconfounding below).
         days = consecutive(T0 - timedelta(days=69), 70)
         entries = []
         for i, d in enumerate(days):
             mood = 0.4 if i < 35 else -0.6  # the trend
-            if d.weekday() == 6:
-                mood -= 0.5  # Sunday dip on top
-            text = "big deadline pressure at work" if d.weekday() == 6 else "ordinary day notes"
+            is_work = i % 3 == 0
+            if is_work:
+                mood -= 0.5  # the same-day dip on top
+            text = "big deadline pressure at work" if is_work else "ordinary day notes"
             entries.append(JournalEntry(text, d, sentiment=mood))
         first = brain.update(brain.load_state(None), entries, T0)
-        # Second day with a fresh (low) work day as new evidence.
+        # Two fresh (low) work days as the new evidence (item 5).
         grown = entries + [
-            JournalEntry("big deadline pressure at work", T0 + timedelta(days=1), sentiment=-0.9)
+            JournalEntry("big deadline pressure at work", T0 + timedelta(days=1), sentiment=-0.9),
+            JournalEntry("big deadline pressure at work", T0 + timedelta(days=2), sentiment=-0.9),
         ]
         result = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
         )
+        moods = [p for p in result.surfaced if p.kind == "mood_correlation" and p.label == "work"]
+        assert moods and moods[0].detail["direction"] == "lower"
+
+    def test_weekday_confounded_association_is_absorbed(self):
+        """Item 1 (2026-09-26 review), regression A: a theme that appears
+        ONLY on Mondays, on a globally-low Monday, must NOT surface a
+        mood_correlation or link card — the per-weekday centering absorbs
+        the shared rhythm. The temporal card may still fire (the theme IS
+        a Monday thing); only the mood association is confounded."""
+        days = consecutive(T0 - timedelta(days=69), 70)
+        entries = []
+        for d in days:
+            if d.weekday() == 0:  # Mondays only
+                entries.append(JournalEntry("quiet morning some work", d, sentiment=-0.6))
+            else:
+                entries.append(JournalEntry("ordinary day notes", d, sentiment=0.3))
+        state = brain.load_state(None)
+        for k in range(4):  # replication room: fresh Mondays + following days
+            grown = entries + [
+                JournalEntry("quiet morning some work", T0 + timedelta(days=1 + j), sentiment=-0.6)
+                if (T0 + timedelta(days=1 + j)).weekday() == 0
+                else JournalEntry("ordinary day notes", T0 + timedelta(days=1 + j), sentiment=0.3)
+                for j in range(k + 1)
+            ]
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=1 + k)
+            )
+            state = result.new_state
+        assert all(
+            not (p.kind == "mood_correlation" and p.label == "work") for p in result.surfaced
+        )
+        assert all(not (p.kind == "link" and p.label == "work") for p in result.surfaced)
+        # The store itself must not even hold a qualified work mood claim.
+        assert "mood_correlation:work" not in result.new_state["patterns"]
+
+    def test_within_weekday_association_surfaces(self):
+        """Item 1, regression B: 'work' on ~half the MONDAYS only, with the
+        work-Mondays lower than the non-work Mondays — a genuine
+        within-weekday contrast the deconfounding must PRESERVE (centering
+        subtracts the Monday mean; work-Mondays sit below it, the others
+        above)."""
+        days = consecutive(T0 - timedelta(days=139), 140)  # 20 Mondays
+        entries = []
+        mondays = [d for d in days if d.weekday() == 0]
+        work_mondays = set(mondays[::2])  # every other Monday
+        for i, d in enumerate(days):
+            # Jittered levels: a constant group carries zero actual
+            # variance and the Welch test now fails CLOSED (item 7) — a
+            # real corpus is never exactly constant.
+            wobble = 0.08 if i % 2 == 0 else -0.08
+            if d in work_mondays:
+                entries.append(JournalEntry("quiet morning some work", d, sentiment=-0.7 + wobble))
+            elif d.weekday() == 0:
+                entries.append(JournalEntry("ordinary day notes", d, sentiment=0.2 + wobble))
+            else:
+                entries.append(JournalEntry("ordinary day notes", d, sentiment=0.3 + wobble))
+        first = brain.update(brain.load_state(None), entries, T0)
+        state = first.new_state
+        result = first
+        extras: list[JournalEntry] = []
+        for k in range(4):  # fresh LOW WORK days accumulate (item 5: >= 2)
+            extra_day = T0 + timedelta(days=1 + k)
+            wobble = 0.08 if k % 2 == 0 else -0.08
+            extras.append(
+                JournalEntry("quiet morning some work", extra_day, sentiment=-0.7 + wobble)
+            )
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), entries + extras, extra_day
+            )
+            state = result.new_state
+            if any(p.kind == "mood_correlation" and p.label == "work" for p in result.surfaced):
+                break
         moods = [p for p in result.surfaced if p.kind == "mood_correlation" and p.label == "work"]
         assert moods and moods[0].detail["direction"] == "lower"
 
@@ -622,22 +744,31 @@ class TestLaggedLinks:
             entries.append(JournalEntry(text, d, sentiment=mood))
         result = brain.update(brain.load_state(None), entries, T0)
         links = [p for p in result.surfaced if p.kind == "link" and p.label == "sleep"]
-        # Candidate on first qualification; replication needs a NEW outcome
-        # day — extend the corpus with a fresh sleep entry and its low
-        # day-after.
+        # Candidate on first qualification; replication needs >= 2 NEW
+        # outcome days (item 5) — extend the corpus with two fresh sleep
+        # entries and their low day-afters.
         if not links:
             grown = entries + [
                 JournalEntry(
                     "could not sleep, restless night", T0 + timedelta(days=1), sentiment=0.1
                 ),
                 JournalEntry("ordinary day notes", T0 + timedelta(days=2), sentiment=-0.6),
+                JournalEntry(
+                    "could not sleep, restless night", T0 + timedelta(days=3), sentiment=0.1
+                ),
+                JournalEntry("ordinary day notes", T0 + timedelta(days=4), sentiment=-0.6),
             ]
             second = brain.update(
-                brain.load_state(brain.dump_state(result.new_state)), grown, T0 + timedelta(days=2)
+                brain.load_state(brain.dump_state(result.new_state)), grown, T0 + timedelta(days=4)
             )
             links = [p for p in second.surfaced if p.kind == "link" and p.label == "sleep"]
         assert links and links[0].detail["direction"] == "lower"
         assert links[0].detail["lag_days"] == 1
+        # Day-after phrasing (item 4): every exposure is gap-1, so the
+        # strict-mode + 70% dominance gate holds.
+        assert (
+            links[0].detail["gap1_days"] >= brain.LINK_DAY_AFTER_SHARE * links[0].detail["n_after"]
+        )
 
     def test_no_link_when_next_day_unrelated(self):
         days = consecutive(T0 - timedelta(days=55), 56)
@@ -905,15 +1036,19 @@ class TestSemanticFlip:
         days = consecutive(T0 - timedelta(days=69), 70)
         sundays = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]
         state = brain.update(brain.load_state(None), sundays, T0).new_state
-        # Emerging needs a second qualification day with new evidence.
-        grown = sundays + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1))]
+        # Emerging needs >= 2 new evidence days since the first
+        # qualification (item 5).
+        grown = sundays + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=2)),
+        ]
         state = brain.update(
-            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(state)), grown, T0 + timedelta(days=2)
         ).new_state
         assert dates_only(state).get("temporal:work") == "emerging"
         wednesdays = [JournalEntry(NEUTRAL_WORK if d.weekday() == 2 else CALM, d) for d in days]
         flipped = brain.update(
-            brain.load_state(brain.dump_state(state)), wednesdays, T0 + timedelta(days=2)
+            brain.load_state(brain.dump_state(state)), wednesdays, T0 + timedelta(days=3)
         )
         pats = flipped.new_state["patterns"]
         assert pats["temporal:work"].state == "fading"
@@ -1123,29 +1258,62 @@ class TestInertiaHonestNull:
 
 
 class TestLinkGapLabeling:
-    def test_gap2_links_report_the_modal_gap(self):
-        # Wednesdays unwritten: Tuesday theme days land their outcome on
-        # Thursday (gap 2). The claim must say so — never "the day after".
-        days = [d for d in consecutive(T0 - timedelta(days=69), 70) if d.weekday() != 2]
+    @staticmethod
+    def _skip_gap_corpus(skip_mod: int, skip_residues: tuple[int, ...]) -> list[JournalEntry]:
+        """A link corpus whose gap mix comes from JOURNALING SKIPS, not a
+        weekday-locked schedule: 'sleep' every 5th day (crossing all
+        weekdays), the outcome day reads low, and for the sleep
+        occurrences whose index k = i//5 satisfies k % skip_mod in
+        skip_residues the user skips the immediate next day — that
+        outcome then lands gap 2. Item 1's weekday deconfounding absorbs
+        a weekday-locked dip (correctly), so a gap-labeling fixture must
+        vary the exposure/outcome weekdays.
+        """
+        days = list(consecutive(T0 - timedelta(days=69), 70))
+        written: dict = {}
+        for i, d in enumerate(days):
+            if i % 5 == 0:
+                written[d] = ("could not sleep, restless night", 0.1 + _jitter(i))
+                if (i // 5) % skip_mod in skip_residues and i + 1 < len(days):
+                    days[i + 1] = None
+        days = [d for d in days if d is not None]
         entries = []
-        for d in days:
-            text = "ordinary day notes"
-            mood = 0.1
-            if d.weekday() == 1:
-                text = "could not sleep, restless night"
-            if d.weekday() == 3:
-                mood = -0.6  # two days after the sleep entry (Wed skipped)
+        for i, d in enumerate(days):
+            if d in written:
+                text, mood = written[d]
+            else:
+                text = "ordinary day notes"
+                mood = 0.1 + _jitter(i)
             entries.append(JournalEntry(text, d, sentiment=mood))
+        # Outcomes: the written day right after each sleep entry reads low.
+        out: list[JournalEntry] = []
+        for i, e in enumerate(entries):
+            if e.text.startswith("could not sleep") and i + 1 < len(entries):
+                nxt = entries[i + 1]
+                out.append(
+                    JournalEntry("ordinary day notes", nxt.entry_date, sentiment=-0.6 + _jitter(i))
+                )
+        by_day = {x.entry_date: x for x in out}
+        return [by_day.get(e.entry_date, e) for e in entries]
+
+    def test_gap2_links_report_the_modal_gap(self):
+        # Most sleep days are followed by a skipped day, so the modal
+        # exposed gap is 2. The claim must say so — never "the day after".
+        # 10 of 14 sleep days are followed by a skipped day -> the modal
+        # exposed gap is 2.
+        entries = self._skip_gap_corpus(skip_mod=4, skip_residues=(1, 2, 3))
         state = brain.load_state(None)
         link = None
-        # The second run extends the corpus with a fresh sleep entry and its
-        # (gap-1) low day-after: replication needs a NEW outcome day. One
-        # gap-1 pair against ten gap-2 pairs leaves the modal gap at 2.
+        # The second run extends the corpus with fresh sleep evidence and
+        # low outcome days: replication needs >= 2 NEW outcome days
+        # (item 5).
         grown = entries + [
             JournalEntry("could not sleep, restless night", T0 + timedelta(days=1), sentiment=0.1),
             JournalEntry("ordinary day notes", T0 + timedelta(days=2), sentiment=-0.6),
+            JournalEntry("could not sleep, restless night", T0 + timedelta(days=3), sentiment=0.1),
+            JournalEntry("ordinary day notes", T0 + timedelta(days=4), sentiment=-0.6),
         ]
-        for offset, current in ((0, entries), (2, grown)):
+        for offset, current in ((0, entries), (4, grown)):
             result = brain.update(
                 brain.load_state(brain.dump_state(state)), current, T0 + timedelta(days=offset)
             )
@@ -1160,6 +1328,42 @@ class TestLinkGapLabeling:
         assert link.detail["lag_days"] == 2  # modal gap, honestly reported
         assert link.detail["gap2_days"] > link.detail["gap1_days"]
         assert "days after" in link.describe()  # gap-aware copy
+        assert "day after '" not in link.describe()
+
+    def test_mixed_gap_majority_never_says_day_after(self):
+        """Item 4 (2026-09-26 review): a gap mix where gap-1 is the mode but
+        NOT a >= 70% majority must render the lag-generic copy. The old
+        tie-break (gap1 >= gap2) printed 'the day after' for such a
+        mixture, overstating the precision of the lag. Corpus: 5 of 14
+        sleep days are followed by a skipped day (gap-2), the rest land
+        gap-1 — gap-1 leads at ~64%, far short of the 70% dominance
+        bar."""
+        entries = self._skip_gap_corpus(skip_mod=3, skip_residues=(0,))
+        state = brain.load_state(None)
+        grown = entries + [
+            JournalEntry("could not sleep, restless night", T0 + timedelta(days=1), sentiment=0.1),
+            JournalEntry("ordinary day notes", T0 + timedelta(days=2), sentiment=-0.6),
+            JournalEntry("could not sleep, restless night", T0 + timedelta(days=3), sentiment=0.1),
+            JournalEntry("ordinary day notes", T0 + timedelta(days=4), sentiment=-0.6),
+        ]
+        link = None
+        for offset, current in ((0, entries), (4, grown)):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)), current, T0 + timedelta(days=offset)
+            )
+            state = result.new_state
+            link = next(
+                (p for p in result.surfaced if p.kind == "link" and p.label == "sleep"), None
+            )
+            if link is not None:
+                break
+        assert link is not None, "the mixed-gap corpus must still surface the link"
+        gap1, gap2 = link.detail["gap1_days"], link.detail["gap2_days"]
+        n_after = link.detail["n_after"]
+        assert gap1 > gap2, "fixture check: gap-1 must (barely) lead the mix"
+        assert gap1 < brain.LINK_DAY_AFTER_SHARE * n_after, "fixture check: not a 70% majority"
+        assert link.detail["lag_days"] == 2  # honest lag-generic copy
+        assert "days after" in link.describe()
         assert "day after '" not in link.describe()
 
 
@@ -1242,19 +1446,24 @@ class TestTopicDiscovery:
         topics = [p for p in result.surfaced if p.kind == "topic" and p.label == "guitar"]
         if not topics:
             # Candidate on first qualification. Rising trends are
-            # p-value-tested INFERENCES (audit H-9), so the second run
-            # needs a genuinely NEW evidence day — one more recent guitar
-            # entry — not just a second calendar day over the same corpus.
+            # p-value-tested INFERENCES (audit H-9), so promotion needs
+            # >= 2 genuinely NEW evidence days (item 5) — two more recent
+            # guitar entries — not just a second calendar day over the
+            # same corpus.
             corpus = self._corpus(T0) + [
                 JournalEntry(
                     "practiced the guitar after dinner, new chord shapes",
                     T0 + timedelta(days=1),
-                )
+                ),
+                JournalEntry(
+                    "played the guitar before breakfast, warmups",
+                    T0 + timedelta(days=2),
+                ),
             ]
             second = brain.update(
                 brain.load_state(brain.dump_state(result.new_state)),
                 corpus,
-                T0 + timedelta(days=1),
+                T0 + timedelta(days=2),
             )
             topics = [p for p in second.surfaced if p.kind == "topic" and p.label == "guitar"]
         assert topics
@@ -1384,23 +1593,31 @@ class TestAuditFixes:
         days = consecutive(T0 - timedelta(days=69), 70)
         entries = [JournalEntry(NEUTRAL_WORK if d.weekday() in (0, 6) else CALM, d) for d in days]
         first = brain.update(brain.load_state(None), entries, T0)
-        # Fresh work entry as the second observation's new evidence. It
-        # lands on a Saturday, so the run now tests THREE weekdays (the
-        # 1-mention Saturday fails the k >= 4 floor but was tested) — the
-        # days_tested pin moved 2 → 3 with the replication-honesty change.
-        grown = entries + [JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1))]
+        # >= 2 fresh work entries as the replication's new evidence (item
+        # 5). They land on Saturday and Monday... T0+1 is a Saturday, so
+        # the run tests THREE weekdays (the 1-mention Saturday fails the
+        # k >= 4 floor but was tested).
+        # T0 is a Friday: T0+1 lands on a Saturday and T0+3 on a Monday,
+        # so the fresh evidence neither creates a new dominant weekday nor
+        # flips the stored claim's semantics.
+        grown = entries + [
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=1)),
+            JournalEntry(NEUTRAL_WORK, T0 + timedelta(days=3)),
+        ]
         result = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=3)
         )
         temporals = [p for p in result.surfaced if p.kind == "temporal" and p.label == "work"]
         assert len(temporals) == 1
-        assert temporals[0].detail["days_tested"] == 3
-        # The stronger day (10 Mondays vs 9-10 Sundays depending on calendar)
-        # wins the dedupe; the surfaced day_count is the max candidate's.
-        assert temporals[0].detail["day_count"] == max(
-            temporals[0].detail["day_count"],
-            [c for c in (10, 10)][0],  # both ~10 in a 70-day run
-        )
+        assert temporals[0].detail["days_tested"] >= 3
+        # The concrete winner, pinned by value (2026-09-26 test-infrastructure
+        # audit, item 7 — this used to read day_count == max(day_count, 10),
+        # a tautology that could never fail). The calendar is FIXED: T0 is a
+        # Friday, the 70-day window holds 10 Mondays/10 Sundays/10 Saturdays,
+        # and the fresh evidence adds one Monday (T0+3) and one Saturday
+        # (T0+1) — so the strongest candidate is Monday at 11 mentions.
+        assert temporals[0].detail["day"] == "Monday"
+        assert temporals[0].detail["day_count"] == 11
 
     def test_nonfinite_client_sentiment_falls_back_to_text(self):
         # A2: a NaN mood tag must poison nothing — the engine re-scores
@@ -1799,31 +2016,48 @@ class TestEnergyMoodCoupling:
 
 
 class TestSenseMaking:
+    SENSEY_A = (
+        "i realize the reason i felt tense was the meeting, because i "
+        "understand now that the deadline caused it and i notice why"
+    )
+    SENSEY_B = (
+        "i realize the reason i felt tense was the meeting, because i "
+        "understand now that the deadline caused it and i notice why, "
+        "and later the walk helped"
+    )
+
     def _corpus(self, recent_sense: bool):
         """Dense causal/insight phrasing in the recent window (or not),
-        plain narrative earlier — density measured per 100 tokens."""
+        plain narrative earlier — density measured per 100 tokens. Two
+        alternating sense-heavy variants: the recent side must carry REAL
+        spread (item 7, 2026-09-26: a constant group's zero actual
+        variance now fails the Welch test closed instead of riding the
+        measurement-noise floor)."""
         plain = "we went to the market and i saw a friend there and walked home"
-        sensey = (
-            "i realize the reason i felt tense was the meeting, because i "
-            "understand now that the deadline caused it and i notice why"
-        )
         entries = []
         for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
-            use_sense = recent_sense and i >= 42
-            entries.append(JournalEntry(sensey if use_sense else plain, d))
+            if recent_sense and i >= 42:
+                text = self.SENSEY_A if i % 2 == 0 else self.SENSEY_B
+            else:
+                text = plain
+            entries.append(JournalEntry(text, d))
         return entries
 
-    def _surface(self, entries, growing_text: str):
-        # The replication gate (audit H-9) applies to sense_making: each
-        # recompute must bring a genuinely NEW high-density evidence day,
-        # so every iteration appends one fresh same-shape entry instead of
-        # re-scoring the same corpus on a later calendar day.
+    def _surface(self, entries, growing_texts: list[str]):
+        # The replication gate (audit H-9) applies to sense_making: the
+        # evidence accumulated since the first qualification must cover
+        # >= 2 new high-density days (item 5), so every iteration appends
+        # one fresh same-shape entry instead of re-scoring the same corpus
+        # on a later calendar day.
         state = brain.load_state(None)
+        result = None
+        growing: list[JournalEntry] = []
         for k in range(6):
             day = T0 + timedelta(days=k)
+            growing.append(JournalEntry(growing_texts[k % len(growing_texts)], day))
             result = brain.update(
                 brain.load_state(brain.dump_state(state)),
-                entries + [JournalEntry(growing_text, day)],
+                entries + growing,
                 day,
             )
             state = result.new_state
@@ -1833,11 +2067,9 @@ class TestSenseMaking:
         return state, result, None
 
     def test_rising_sense_making_density_surfaces(self):
-        sensey = (
-            "i realize the reason i felt tense was the meeting, because i "
-            "understand now that the deadline caused it and i notice why"
+        state, result, found = self._surface(
+            self._corpus(recent_sense=True), [self.SENSEY_A, self.SENSEY_B]
         )
-        state, result, found = self._surface(self._corpus(recent_sense=True), sensey)
         assert found is not None, "rising sense-making density must surface"
         assert found.detail.get("direction") == "higher"
         assert found.detail.get("density_recent", 0) > found.detail.get("density_earlier", 99)
@@ -1845,7 +2077,8 @@ class TestSenseMaking:
 
     def test_flat_density_stays_quiet(self):
         plain = "we went to the market and i saw a friend there and walked home"
-        state, result, found = self._surface(self._corpus(recent_sense=False), plain)
+        plain_b = plain + " and the sky was clear"
+        state, result, found = self._surface(self._corpus(recent_sense=False), [plain, plain_b])
         assert found is None, "no change in density means no claim"
 
     def test_short_entries_are_not_measured(self):
@@ -1854,49 +2087,145 @@ class TestSenseMaking:
 
 
 class TestActivityDiversity:
+    """Item 3 (2026-09-26 review) semantics: Miller-Madow-corrected weekly
+    entropy over weeks that clear the volume floor (>= 2 distinct tagged
+    days AND >= 2 distinct tags); DIVERSITY_MIN_WEEKS per window side."""
+
+    # Tags rotate through a 12-tag pool so NO single tag reaches the
+    # TEMPORAL_MIN_N theme floor: every tag above that floor rides the
+    # theme machinery and adds junk weekday/mood tests to the
+    # Benjamini-Hochberg family — and with DIVERSITY_VARIANCE_FLOOR
+    # bounding the achievable significance from below, an honest
+    # diversity claim cannot top a crowded family (the correction is the
+    # honest verdict; the fixture simply keeps the family clean).
+    SPREAD_POOL = tuple(f"tag{i:02d}" for i in range(12))
+
     def _corpus(self, narrow_recent: bool):
-        """Earlier weeks: 4-5 distinct tags spread. Recent weeks: either 1
-        tag only (narrowing) or the same spread (no claim)."""
-        spread_tags = ("work", "family", "exercise", "friends", "outdoors")
+        """Monday-aligned weeks: ~6 full-pool weeks (high entropy), then
+        narrow weeks — a weekly two-tag pair at ~50/50 (narrowing but
+        still measurable: a one-tag week is EXCLUDED from the sample by
+        the volume floor, not scored as zero entropy). narrow_recent
+        False keeps the pool rotation throughout (no claim)."""
+        start = T0 - timedelta(days=67)  # a Monday
+        days = [start + timedelta(days=i) for i in range((T0 - start).days + 1)]
         entries = []
-        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
-            if i >= 42:
-                tags = ("work",) if narrow_recent else spread_tags[:4]
+        for i, d in enumerate(days):
+            week = (d - timedelta(days=d.weekday())).toordinal()
+            if narrow_recent and d >= date(2026, 8, 10):
+                pair = self.SPREAD_POOL[2 * (week % 5) : 2 * (week % 5) + 2]
+                tags = (pair[i % 2],)
             else:
-                tags = spread_tags
+                # Alternate weekly between a full 7-tag rotation and a
+                # 3-tag rotation: weekly entropies genuinely vary — an
+                # exactly-constant earlier side carries no variance and
+                # fails Welch closed (item 7).
+                if week % 2 == 0:
+                    tags = (self.SPREAD_POOL[(i + 3 * (week // 7)) % len(self.SPREAD_POOL)],)
+                else:
+                    tags = (self.SPREAD_POOL[3 * (i % 3) + (week % 3)],)
             entries.append(JournalEntry("ordinary day notes", d, tags=tags))
         return entries
 
-    def _surface(self, entries, growing_tags: tuple[str, ...]):
-        # Replication gate (audit H-9): activity_diversity is an inference
-        # too — each recompute must add a genuinely NEW narrow (or spread)
-        # day, so every iteration appends one fresh same-shape entry.
-        state = brain.load_state(None)
-        for k in range(6):
-            day = T0 + timedelta(days=k)
-            result = brain.update(
-                brain.load_state(brain.dump_state(state)),
-                entries + [JournalEntry("ordinary day notes", day, tags=growing_tags)],
-                day,
-            )
-            state = result.new_state
-            found = next((p for p in result.surfaced if p.kind == "activity_diversity"), None)
-            if found:
-                return state, result, found
-        return state, result, None
+    def _pair_tags(self, day: date, k: int) -> tuple[str, ...]:
+        """The narrow-phase tag schedule for extension days."""
+        week = (day - timedelta(days=day.weekday())).toordinal()
+        pair = self.SPREAD_POOL[2 * (week % 5) : 2 * (week % 5) + 2]
+        return (pair[k % 2],)
 
-    def test_narrowing_variety_surfaces_with_direction(self):
-        state, result, found = self._surface(self._corpus(narrow_recent=True), ("work",))
-        assert found is not None, "narrowing activity variety must surface"
-        assert found.detail.get("direction") == "narrowed"
-        assert found.detail.get("entropy_recent", 9) < found.detail.get("entropy_earlier", 0)
-        assert "narrowed" in found.describe()
+    def test_narrowing_variety_is_detected_with_direction(self):
+        """Detector level (item 3): the narrowing corpus yields a
+        Miller-Madow-corrected claim with the honest direction and a
+        recent/earlier entropy gap. (Surfacing additionally requires the
+        claim to top the run's Benjamini-Hochberg family and replicate on
+        >= 2 new qualifying WEEKS — the lifecycle bar is pinned directly
+        below, and for evidence-date kinds generally by the temporal
+        replication tests.)"""
+        entries = self._corpus(narrow_recent=True)
+        extension = [
+            JournalEntry(
+                "ordinary day notes",
+                T0 + timedelta(days=k),
+                tags=self._pair_tags(T0 + timedelta(days=k), k),
+            )
+            for k in range(8)
+        ]
+        td: dict[str, set] = {}
+        for e in entries + extension:
+            for t in e.tags:
+                td.setdefault(t, set()).add(e.entry_date)
+        sig = brain._detect_activity_diversity(td, T0 + timedelta(days=7))
+        assert sig is not None, "narrowing activity variety must be measured"
+        assert sig.gate_ok is True
+        assert sig.detail.get("direction") == "narrowed"
+        assert sig.detail.get("entropy_recent", 9) < sig.detail.get("entropy_earlier", 0)
+        assert sig.pvalue is not None and sig.pvalue < 0.05
+
+    def test_diversity_replication_needs_two_new_weeks(self):
+        """Item 5 at the lifecycle seam: a diversity candidate promotes
+        only when the evidence accumulated since its FIRST qualification
+        covers >= 2 new qualifying weeks; one new week is the same
+        single-clustered-mention shape the gate exists to stop."""
+        record = brain.StoredPattern(
+            pid="diversity:activity_tags",
+            kind="activity_diversity",
+            label="activity variety",
+            first_seen="2026-08-20",
+            last_seen="2026-09-08",
+            first_qualified="2026-09-08",
+            last_qualified="2026-09-08",
+            occurrences=4,
+            state="candidate",
+            qualification_days=["2026-09-08", "2026-09-15"],
+            evidence_dates=["2026-08-24", "2026-08-31", "2026-09-07"],
+            feedback={},
+            detail={},
+        )
+        entries = self._corpus(narrow_recent=True)
+        small_extension = [
+            JournalEntry(
+                "ordinary day notes",
+                T0 + timedelta(days=k),
+                tags=self._pair_tags(T0 + timedelta(days=k), k),
+            )
+            for k in range(8)
+        ]
+        td_small: dict[str, set] = {}
+        for e in entries + small_extension:
+            for t in e.tags:
+                td_small.setdefault(t, set()).add(e.entry_date)
+        one_new = brain._detect_activity_diversity(td_small, T0 + timedelta(days=7))
+        assert one_new is not None
+        assert one_new.evidence_days  # fixture check: real evidence exists
+        assert sum(1 for d in one_new.evidence_days if d.isoformat() > "2026-09-08") <= 1
+        assert not brain._replication_satisfied(record, one_new)
+        big_extension = [
+            JournalEntry(
+                "ordinary day notes",
+                T0 + timedelta(days=k),
+                tags=self._pair_tags(T0 + timedelta(days=k), k),
+            )
+            for k in range(19)
+        ]
+        td_big: dict[str, set] = {}
+        for e in entries + big_extension:
+            for t in e.tags:
+                td_big.setdefault(t, set()).add(e.entry_date)
+        two_new = brain._detect_activity_diversity(td_big, T0 + timedelta(days=18))
+        assert two_new is not None
+        assert sum(1 for d in two_new.evidence_days if d.isoformat() > "2026-09-08") >= 2
+        assert brain._replication_satisfied(record, two_new)
 
     def test_steady_variety_stays_quiet(self):
-        state, result, found = self._surface(
-            self._corpus(narrow_recent=False), ("work", "family", "exercise", "friends")
-        )
-        assert found is None, "no change in variety means no claim"
+        entries = self._corpus(narrow_recent=False)
+        state = brain.update(brain.load_state(None), entries, T0).new_state
+        for k in range(4):
+            result = brain.update(
+                brain.load_state(brain.dump_state(state)),
+                entries + [JournalEntry("ordinary day notes", T0 + timedelta(days=k))],
+                T0 + timedelta(days=k),
+            )
+            state = result.new_state
+        assert all(p.kind != "activity_diversity" for p in result.surfaced)
 
     def test_single_tag_history_never_measures(self):
         entries = [
@@ -1907,22 +2236,73 @@ class TestActivityDiversity:
             brain._detect_activity_diversity({"work": {e.entry_date for e in entries}}, T0) is None
         )
 
-    def test_weekly_entropy_is_deterministic_bits(self):
-        mondays = sundays(T0 - timedelta(days=90), 1)
+    def test_low_volume_weeks_are_excluded_not_zero(self):
+        """The volume floor (item 3b): a week with one tagged day or one
+        distinct tag is EXCLUDED from the sample entirely — its 'entropy'
+        was a journaling-volume artifact, not variety."""
+        d0 = T0 - timedelta(days=T0.weekday()) - timedelta(days=60)
+        d0 = d0 - timedelta(days=d0.weekday())  # align to Monday
+        week1 = [d0 + timedelta(days=k) for k in range(7)]
+        week2 = [d0 + timedelta(days=7 + k) for k in range(7)]
+        week3 = [d0 + timedelta(days=14 + k) for k in range(7)]
+        tag_days = {
+            # week 1: rich spread (qualifies)
+            "a": set(week1),
+            "b": set(week1[::2]),
+            "c": set(week1[1::2]),
+            # week 2: one tagged day only (excluded)
+            "a2": {week2[0]},
+            "b2": {week2[0]},
+            # week 3: two days but ONE distinct tag (excluded)
+            "solo": set(week3[:2]),
+        }
+        entropies = brain._weekly_tag_entropies(tag_days)
+        assert [week for week, _ in entropies] == [d0]
+
+    def test_weekly_entropy_is_miller_madow_bits(self):
         # any Monday works for a unit check of the entropy math itself
         d0 = T0 - timedelta(days=T0.weekday()) - timedelta(days=60)
         d0 = d0 - timedelta(days=d0.weekday())  # align to Monday
         days = [d0 + timedelta(days=k) for k in range(14)]
         tag_days = {
-            "a": set(days),
+            "a": set(days[:7]),
             "b": set(days[:7]),
         }
         entropies = brain._weekly_tag_entropies(tag_days)
-        assert len(entropies) == 2
-        # week 1: a+b evenly -> 1 bit; week 2: only a -> 0 bits
-        assert entropies[0][1] == pytest.approx(1.0)
-        assert entropies[1][1] == pytest.approx(0.0)
-        del mondays
+        # Week 1: a+b evenly split over 7 days -> MLE 1 bit, N=14, m=2 ->
+        # Miller-Madow + (2-1)/(2*14*ln2) ~= 0.0514. Week 2 carries no
+        # tags at all: absent, not zero.
+        assert len(entropies) == 1
+        expected = 1.0 + 1 / (2 * 14 * math.log(2))
+        assert entropies[0][1] == pytest.approx(expected)
+
+    def test_entropy_bias_correction_recovers_a_known_distribution(self):
+        """Item 3a regression: for weeks drawn from a KNOWN 4-category
+        uniform distribution, the Miller-Madow estimator's weekly average
+        must sit within tolerance of the true 2 bits — the MLE plug-in
+        sits systematically low, and the corrected estimator must recover
+        most of the gap."""
+        import random as _random
+
+        rng = _random.Random(11)
+        tags = ("work", "family", "exercise", "friends")
+        mle_total = corrected_total = 0.0
+        weeks = 60
+        for _w in range(weeks):
+            counts = {t: 0 for t in tags}
+            for _day in range(12):  # a floor-passing week: 12 tagged days
+                counts[rng.choice(tags)] += 1
+            total = sum(counts.values())
+            m = sum(1 for c in counts.values() if c > 0)
+            mle = -sum((c / total) * math.log2(c / total) for c in counts.values() if c > 0)
+            corrected = mle + (m - 1) / (2 * total * math.log(2))
+            mle_total += mle
+            corrected_total += corrected
+        mle_mean = mle_total / weeks
+        corrected_mean = corrected_total / weeks
+        assert corrected_mean > mle_mean  # the correction pushes UP, as designed
+        assert abs(corrected_mean - 2.0) < abs(mle_mean - 2.0)  # and closer to truth
+        assert corrected_mean == pytest.approx(2.0, abs=0.10)
 
 
 # --- Spanish: the first supported non-English language (2026-09-19 final wave) ---
@@ -2012,3 +2392,377 @@ class TestSpanishEngine:
                 surfaced_any = True
                 break
         assert surfaced_any, "a Spanish corpus must surface dynamics claims"
+
+
+# --- 2026-09-26 statistical review: item regressions -------------------------------
+
+
+class TestEwmaCalibration:
+    """Item 2: the run-rule alarm probability fed to BH is CALIBRATED —
+    seeded Monte Carlo over the exact chart pins the per-recompute
+    false-alarm rate at the constraint (<= 5% at phi = 0.5) and the
+    magnitude-conditioned interpolator's shape."""
+
+    LAMBDA = brain.MOOD_SHIFT_LAMBDA
+    L = brain.MOOD_SHIFT_LIMIT
+
+    @staticmethod
+    def _chart(series: list[float], phi: float) -> bool:
+        """The EXACT _detect_mood_shift rule, mirror-implemented (baseline
+        quarter, AR(1)-inflated limits, last-of-5 run rule)."""
+        n = len(series)
+        baseline = series[: max(brain.MOOD_SHIFT_BASELINE_MIN, n // 4)]
+        mu = sum(baseline) / len(baseline)
+        m = mu
+        var = sum((v - m) ** 2 for v in baseline) / (len(baseline) - 1)
+        sigma = max(math.sqrt(var), brain.MOOD_SHIFT_SIGMA_FLOOR)
+        inflation = min(max((1 + phi) / (1 - phi), 1.0), 16.0)
+        se = sigma * math.sqrt(TestEwmaCalibration.LAMBDA / (2 - TestEwmaCalibration.LAMBDA))
+        se *= math.sqrt(inflation)
+        upper = mu + TestEwmaCalibration.L * se
+        lower = mu - TestEwmaCalibration.L * se
+        ewma = mu
+        signs: list[int] = []
+        for s in series[len(baseline) :]:
+            ewma = TestEwmaCalibration.LAMBDA * s + (1 - TestEwmaCalibration.LAMBDA) * ewma
+            signs.append(1 if ewma > upper else (-1 if ewma < lower else 0))
+        if not signs or signs[-1] == 0:
+            return False
+        tail = signs[-brain.MOOD_SHIFT_TAIL :]
+        return sum(1 for s in tail if s == tail[-1]) >= brain.MOOD_SHIFT_RUN
+
+    @staticmethod
+    def _ar1(rng: random.Random, phi: float, n: int) -> list[float]:
+        out = [rng.gauss(0, 1)]
+        innov = math.sqrt(1 - phi * phi)
+        for _ in range(n - 1):
+            out.append(phi * out[-1] + innov * rng.gauss(0, 1))
+        return out
+
+    def test_false_alarm_rate_at_phi_05_is_within_the_calibrated_band(self):
+        # The review's constraint: the calibrated per-recompute false-alarm
+        # rate is <= 5% at phi = 0.5. 600 seeded null runs; the band allows
+        # the 5% line plus 3 Monte-Carlo sigmas of slack.
+        rng = random.Random(20260926)
+        n = 90
+        alarms = sum(1 for _ in range(600) if self._chart(self._ar1(rng, 0.5, n), phi=0.5))
+        band = 0.05 + 3 * math.sqrt(0.05 * 0.95 / 600)
+        assert alarms / 600 <= band, f"false-alarm rate {alarms / 600:.3f} exceeds the band"
+
+    def test_false_alarm_rate_at_phi_0_stays_small(self):
+        rng = random.Random(7)
+        alarms = sum(1 for _ in range(600) if self._chart(self._ar1(rng, 0.0, 90), phi=0.0))
+        assert alarms / 600 <= 0.05
+
+    def test_power_for_a_large_sustained_shift_stays_high(self):
+        # A 3-sigma sustained shift over the last 10 days must still fire
+        # with high probability (the reason L stopped at 3.1, not higher).
+        rng = random.Random(11)
+        n = 90
+        hits = 0
+        for _ in range(300):
+            series = self._ar1(rng, 0.5, n)
+            series = [v + (3.0 if i >= n - 10 else 0.0) for i, v in enumerate(series)]
+            if self._chart(series, phi=0.5):
+                hits += 1
+        assert hits / 300 >= 0.8, f"detection power {hits / 300:.2f} too low"
+
+    def test_alarm_probability_is_monotone_and_magnitude_aware(self):
+        # Monotone in phi (more autocorrelation, higher null alarm rate)...
+        base = brain._ewma_alarm_probability(0.0, 90, brain.MOOD_SHIFT_LIMIT)
+        for phi in (0.2, 0.4, 0.6, 0.8):
+            assert brain._ewma_alarm_probability(phi, 90, brain.MOOD_SHIFT_LIMIT) >= base
+        # ...and strictly falling in the excursion magnitude (item 2's
+        # detection-power requirement: an honest 9-sigma excursion must
+        # report a far smaller p than a barely-clearing one).
+        tiny = brain._ewma_alarm_probability(0.3, 60, brain.MOOD_SHIFT_LIMIT + 0.1)
+        huge = brain._ewma_alarm_probability(0.3, 60, 9.0)
+        assert 0 < huge < tiny / 1e4
+        # Both stay valid p-values.
+        assert 0.0 < tiny <= brain._MOOD_SHIFT_ALARM_MAX
+        assert 0.0 < huge <= brain._MOOD_SHIFT_ALARM_MAX
+
+    def test_constants_are_the_calibrated_ones(self):
+        assert brain.MOOD_SHIFT_LIMIT == 3.1
+        assert brain.MOOD_SHIFT_TAIL == 5 and brain.MOOD_SHIFT_RUN == 3
+        # The inflation cap [1, 16] survives (item 2c).
+        assert min(max((1 + 0.99) / (1 - 0.99), 1.0), 16.0) == 16.0
+
+
+class TestEwmaDeployedPathCalibration:
+    """Re-audit (2026-09-27), item 2: the MIRROR-implemented chart above
+    validates the alarm TABLE under true phi, but the DEPLOYED detector
+    estimates phi from the data (shrunk low) and now widens its limits
+    with phi_eff = phi_hat + k/sqrt(n-1). The calibration condition —
+    limits widened with the SAME phi the table row assumes — holds only
+    on that deployed path, so the false-alarm rate must be pinned through
+    the REAL _detect_mood_shift: end-to-end seeded nulls at the short
+    chart lengths where the pre-fix p was anti-conservative (measured
+    13.4% at phi=0.5/n=40, 28.1% at phi=0.8/n=21 before phi_eff)."""
+
+    @staticmethod
+    def _day_series(rng: random.Random, phi: float, n: int) -> list[tuple[date, float]]:
+        """An AR(1) null mood series as (date, value) pairs — the shape
+        _detect_mood_shift consumes."""
+        start = date(2026, 1, 1)
+        out = [(start, rng.gauss(0, 1))]
+        innov = math.sqrt(1 - phi * phi)
+        for i in range(1, n):
+            out.append((start + timedelta(days=i), phi * out[-1][1] + innov * rng.gauss(0, 1)))
+        return out
+
+    @staticmethod
+    def _min_p(series: list[tuple[date, float]]) -> float:
+        """The smallest BH-input p the deployed detector reports for this
+        series (its mood_shift signal, or 1.0 when the chart stays calm)."""
+        signals = brain._detect_mood_shift(series)
+        if not signals:
+            return 1.0
+        return min(s.pvalue for s in signals if s.pvalue is not None)
+
+    def test_deployed_false_alarm_rate_at_short_lengths(self):
+        # 400 seeded nulls per cell, driving the REAL detector (baseline
+        # estimation, shrunk phi_hat, phi_eff widening, table lookup). The
+        # re-audit bound: P(min-p <= 0.05) <= 6% per cell (5% line + MC
+        # slack) at the exact (phi, n) corners that failed pre-fix.
+        rng = random.Random(20260927)
+        reps = 400
+        for phi in (0.5, 0.8):
+            for n in (21, 40):
+                violations = sum(
+                    1 for _ in range(reps) if self._min_p(self._day_series(rng, phi, n)) <= 0.05
+                )
+                band = 0.06 + 3 * math.sqrt(0.06 * 0.94 / reps)
+                assert violations / reps <= band, (
+                    f"deployed false-alarm rate at phi={phi}, n={n} is "
+                    f"{violations / reps:.3f} (band {band:.3f})"
+                )
+
+    def test_deployed_phi_zero_is_untouched(self):
+        # phi_eff == phi_hat == 0 keeps the iid chart bit-identical to the
+        # pre-phi_eff behavior: same false-alarm ceiling, no widening.
+        rng = random.Random(31)
+        violations = sum(
+            1 for _ in range(300) if self._min_p(self._day_series(rng, 0.0, 90)) <= 0.05
+        )
+        assert violations / 300 <= 0.08
+
+    def test_power_survives_the_deployed_path(self):
+        # The estimator's upper branch widens limits, costing power. The
+        # K sweep (2026-09-27, seeded, in-tree constants) measured the
+        # frontier: K=1.0 keeps mirror-chart power (0.84) but leaves the
+        # phi=0.8 nulls at 15-23% false alarms — exactly the
+        # anti-conservatism the fix exists to remove. K=2.0 (shipped) is
+        # the smallest K that holds every false-alarm cell near nominal,
+        # at a measured deployed power of ~0.68 for a 3-sigma sustained
+        # shift (phi=0.5, n=90). The old >=0.8 contract was set against
+        # the TRUE-phi mirror chart and was implicitly subsidized by the
+        # invalid p-values; the honest deployed contract is >=0.65.
+        # Recovering 0.8+ deployed power needs a different lever (a longer
+        # chart or a length-scaled L), not a smaller K — see the constant
+        # block in brain.py.
+        rng = random.Random(97)
+        n = 90
+        hits = 0
+        for _ in range(200):
+            series = self._day_series(rng, 0.5, n)
+            shift = 3.0
+            series = [(d, v + (shift if i >= n - 10 else 0.0)) for i, (d, v) in enumerate(series)]
+            if self._min_p(series) <= 0.05:
+                hits += 1
+        assert hits / 200 >= 0.65, f"deployed detection power {hits / 200:.2f} too low"
+
+
+class TestInertiaBoundaryPairOwnership:
+    """Item 8: the pair anchored ON the window boundary carries the
+    boundary day's observation into BOTH windows' correlations; it is now
+    dropped from the EARLIER window (the recent window keeps it), so the
+    Fisher-z samples are built on disjoint observations."""
+
+    def test_boundary_anchored_pair_is_excluded_from_earlier(self):
+        today = date(2026, 9, 30)
+        cutoff = today - timedelta(days=brain.INERTIA_RECENT_DAYS)
+        rng = random.Random(3)
+        carry = 0.0
+
+        def block(days_: list[date]) -> list[tuple[date, float]]:
+            # Strong positive day-to-day carryover inside the block.
+            nonlocal carry
+            out = []
+            for d in days_:
+                carry = 0.8 * carry + 0.2 * rng.uniform(-0.5, 0.5)
+                out.append((d, carry))
+            return out
+
+        # Earlier side: EXACTLY INERTIA_MIN_PAIRS + 1 consecutive pairs
+        # when the boundary-anchored pair (cutoff-1 -> cutoff) counts.
+        # With that pair dropped from the earlier window (item 8), the
+        # earlier side falls to INERTIA_MIN_PAIRS - ... one below? No:
+        # exactly the minimum is REQUIRED; (MIN+1) - 1 = MIN keeps the
+        # signal alive, so the discriminating corpus has exactly MIN
+        # earlier pairs INCLUDING the boundary one: dropped -> MIN - 1
+        # -> no claim; extended by one pre-boundary day -> MIN -> claim.
+        earlier_days = [cutoff - timedelta(days=i) for i in range(brain.INERTIA_MIN_PAIRS, 0, -1)]
+        recent_days = [cutoff + timedelta(days=i) for i in range(1, brain.INERTIA_MIN_PAIRS + 4)]
+        series = block(earlier_days) + block(recent_days)
+        sig_without = brain._inertia_signal(series, "inertia:mood", "inertia", "mood", today)
+        assert sig_without is None, (
+            "fixture check: with the boundary pair dropped the earlier "
+            f"window holds only {brain.INERTIA_MIN_PAIRS - 1} pairs and no "
+            "claim may exist"
+        )
+        # One more pre-boundary day (one more earlier pair, boundary pair
+        # still dropped) revives the signal: the exclusion is exactly the
+        # boundary-anchored pair, no more.
+        extended = block([earlier_days[0] - timedelta(days=1)]) + series
+        sig = brain._inertia_signal(extended, "inertia:mood", "inertia", "mood", today)
+        assert sig is not None
+
+
+class TestLanguageGatingShortAndZeroToken:
+    """Item 9: zero-token corpora report 'other' when text exists; short
+    windows apply the share rule instead of defaulting to English."""
+
+    def test_zero_token_corpora_with_text_report_other(self):
+        for text in ("今天心情不好，很累。", "Мне сегодня тяжело и грустно.", "😞😞😞"):
+            entries = [JournalEntry(text, T0 - timedelta(days=ago)) for ago in range(70, 0, -1)]
+            result = brain.update(brain.load_state(None), entries, T0)
+            assert result.stats["language"] == "other", text
+
+    def test_fully_empty_corpus_keeps_the_english_default(self):
+        entries = [JournalEntry("", T0 - timedelta(days=ago)) for ago in range(70, 0, -1)]
+        result = brain.update(brain.load_state(None), entries, T0)
+        assert result.stats["language"] == "en"
+
+    def test_short_window_with_low_english_share_steps_aside(self):
+        # 20 short Latin-script non-English entries (< 50 scored tokens):
+        # the length-aware tie rule defaults AWAY from English scoring.
+        text = "heute fuehle ich mich ziemlich muede und traurig"
+        entries = [JournalEntry(text, T0 - timedelta(days=ago)) for ago in range(20, 0, -1)]
+        result = brain.update(brain.load_state(None), entries, T0)
+        assert result.stats["language"] == "other"
+
+    def test_short_window_with_clear_english_share_stays_english(self):
+        text = "felt really tired today but the walk helped and i am grateful"
+        entries = [JournalEntry(text, T0 - timedelta(days=ago)) for ago in range(20, 0, -1)]
+        result = brain.update(brain.load_state(None), entries, T0)
+        assert result.stats["language"] == "en"
+
+
+class TestEmojiCanonicalization:
+    """Item 10: emoji are counted on a VS16-canonicalized copy — a bare
+    base scores exactly like its fully-qualified form, and shared-base
+    keys never double-count."""
+
+    @staticmethod
+    def _tokens(text: str) -> list[str]:
+        # The update() pipeline's tokenization: words + canonical emoji.
+        return brain.WORD_RE.findall(
+            brain._fold_sentiment_text(text.lower())
+        ) + brain._emoji_tokens(text)
+
+    def test_bare_heart_scores_like_the_vs16_form(self):
+        with_vs16 = brain.sentiment_score(self._tokens("good day ❤️"))
+        bare = brain.sentiment_score(self._tokens("good day ❤"))
+        assert bare == pytest.approx(with_vs16)
+        assert bare > brain.sentiment_score(["good", "day"])
+
+    def test_occurrences_count_once_per_grapheme(self):
+        # One bare heart and one VS16 heart: exactly two sob/heart tokens —
+        # the old per-key count() could not see the bare form at all, and a
+        # shared-base key pair would have counted the VS16 one twice.
+        tokens = brain._emoji_tokens("love ❤ and love ❤️ and ☀️")
+        assert tokens.count("❤️") == 2
+        assert tokens.count("☀️") == 1
+
+    def test_vs16_canonical_text_equality(self):
+        assert brain._emoji_tokens("🌧") == brain._emoji_tokens("🌧️") == ["🌧️"]
+        assert brain._emoji_tokens("") == []
+
+
+class TestStoredKindTaxonomy:
+    """Item 12: an unknown kind in a stored record is inert — archived on
+    load, never surfaced, never promoted."""
+
+    def _store_with(self, kind: str, state: str = "emerging") -> bytes:
+        raw = {
+            "v": 2,
+            "patterns": {
+                "alien:probe": {
+                    "kind": kind,
+                    "label": "work",
+                    "occurrences": 9,
+                    "state": state,
+                    "first_seen": "2026-08-01",
+                    "last_seen": "2026-09-01",
+                    "first_qualified": "2026-08-01",
+                    "last_qualified": "2026-09-01",
+                    "qualification_days": ["2026-08-01", "2026-09-01"],
+                    "evidence_dates": ["2026-08-01", "2026-09-01"],
+                }
+            },
+            "history": [],
+        }
+        return json.dumps(raw).encode()
+
+    def test_unknown_kind_is_archived_and_never_surfaces(self):
+        state = brain.load_state(self._store_with("sentiment_hologram"))
+        record = state["patterns"]["alien:probe"]
+        assert record.state == "archived"
+        days = consecutive(T0 - timedelta(days=69), 70)
+        entries = [JournalEntry(NEUTRAL_WORK if d.weekday() == 6 else CALM, d) for d in days]
+        result = brain.update(state, entries, T0)
+        assert all(p.detail.get("pattern_pid") != "alien:probe" for p in result.surfaced)
+        assert result.new_state["patterns"]["alien:probe"].state == "archived"
+
+    def test_known_kinds_survive_the_load(self):
+        for kind in sorted(brain.KNOWN_PATTERN_KINDS):
+            state = brain.load_state(self._store_with(kind))
+            assert state["patterns"]["alien:probe"].state == "emerging", kind
+        # The phrase-kind literal list and PHRASE_KINDS stay in sync.
+        assert brain.PHRASE_KINDS <= brain.KNOWN_PATTERN_KINDS
+
+
+class TestSpanishPersonAnchoring:
+    """Item 14: unambiguous Spanish possessive-relation bigrams anchor as
+    people, with no capitalization dependence and no German-caps class."""
+
+    def _es_corpus(self, relation_days_text: str) -> list[JournalEntry]:
+        entries = []
+        calma = "me siento tranquilo y agradecido, un dia con calma"
+        for i, d in enumerate(consecutive(T0 - timedelta(days=69), 70)):
+            if i % 3 == 0:
+                entries.append(JournalEntry(relation_days_text, d, sentiment=-0.6 + _jitter(i)))
+            else:
+                entries.append(JournalEntry(calma, d, sentiment=0.3 + _jitter(i)))
+        return entries
+
+    def test_mi_madre_becomes_a_person_anchor(self):
+        entries = self._es_corpus("hable con mi madre por telefono, fue un dia duro")
+        first = brain.update(brain.load_state(None), entries, T0)
+        grown = entries + [
+            JournalEntry(
+                "hable con mi madre otra vez, muy cansado", T0 + timedelta(days=1), sentiment=-0.6
+            ),
+            JournalEntry(
+                "mi madre llamo de nuevo al dormir", T0 + timedelta(days=2), sentiment=-0.65
+            ),
+        ]
+        result = brain.update(
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
+        )
+        assert any(
+            p.label == "mi madre" and p.detail.get("source") == "person" for p in result.surfaced
+        )
+
+    def test_no_caps_dependence_and_no_noun_harvest(self):
+        # Lowercase "mi madre" mid-sentence, no capitals anywhere; common
+        # non-relation nouns (mi coche) never anchor.
+        entries = self._es_corpus("arregle mi coche otra vez, me dejo tirado")
+        result = brain.update(brain.load_state(None), entries, T0)
+        assert all(p.detail.get("source") != "person" for p in result.surfaced)
+        assert all(p.label != "mi coche" for p in result.surfaced)
+
+    def test_word_boundary_prevents_substring_matches(self):
+        assert brain._mentions_es_relation("mi tiazas se cayeron", "mi tia") is False
+        assert brain._mentions_es_relation("visite a mi tia", "mi tia") is True

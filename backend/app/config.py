@@ -64,6 +64,15 @@ MAX_DB_POOL_TIMEOUT = 600  # seconds waiting for a pooled connection
 # every headroom they could legitimately want while a unit mistake fails
 # fast at boot like the other A-8 bounds.
 MAX_BODY_BYTES = 64 * 1024 * 1024
+# 2026-09-26 audit item 9: HardeningMiddleware buffers up to one COMPLETE
+# request body per in-flight request, so the edge's worst-case buffer memory
+# is max_body_bytes × the server's concurrent-request ceiling. That product
+# must be budgeted at boot, not discovered as an OOM under a body-size
+# flood: refuse the combination when it exceeds this documented budget.
+# 512 MiB: comfortable headroom over the default (2 MiB × 100 concurrent
+# requests = ~200 MiB, matching the Docker entrypoint's
+# --limit-concurrency 100) while sitting below a typical 1 GiB container.
+MAX_BODY_BUFFER_BUDGET_BYTES = 512 * 1024 * 1024
 
 
 def _int_env(name: str, default: int) -> int:
@@ -81,19 +90,72 @@ def _int_env(name: str, default: int) -> int:
         raise ValueError(f"environment variable {name}={raw!r} is not an integer") from exc
 
 
+def _secret_env(name: str, default: str = "") -> str:
+    """Resolve a secret from the env, or from a mounted secret FILE.
+
+    2026-09-26 infra audit: container environment variables are readable
+    through `docker inspect` by anyone with host docker access, so the
+    deployment contract moves secrets to compose `secrets:` file mounts
+    (the same posture the metrics bearer token already had via
+    bearer_token_file). Resolution order: the env var itself (kept as the
+    development/dev-overlay path), else ``<NAME>_FILE`` — the file's
+    content, with surrounding whitespace stripped (secret files
+    conventionally end in exactly one newline). A named file that cannot
+    be read is a hard boot error, never a silent fallback to the default:
+    a half-mounted secret must fail closed like every other config typo.
+    An empty/whitespace-only file resolves to "" (treated as unset),
+    matching the empty-env-var semantics.
+    """
+    raw = os.getenv(name, "")
+    if raw.strip():
+        return raw
+    file_name = os.getenv(f"{name}_FILE", "")
+    if not file_name.strip():
+        return default
+    try:
+        with open(file_name, encoding="utf-8") as handle:
+            content = handle.read().strip()
+    except OSError as exc:
+        raise RuntimeError(
+            f"environment variable {name}_FILE={file_name!r} could not be read: {exc}"
+        ) from exc
+    return content if content else default
+
+
 def _bool_env(name: str, default: bool = False) -> bool:
+    """Parse a bool env var; empty means default, garbage is a hard error.
+
+    2026-09-26 audit item 4: an unrecognized value ("ture", "y") used to
+    silently map to False — a typo'd MINDPATTERN_TRUST_PROXY_HEADERS=true
+    booted with proxy trust OFF, quietly keying all rate limits on the
+    proxy's address. Like _int_env, invalid input now refuses to start:
+    the fail-closed direction for a typo'd ON flag would otherwise be a
+    silent security-relevant behavior change the operator never asked for.
+    """
     raw = os.getenv(name, "").strip().lower()
     if not raw:
         return default
-    return raw in ("1", "true", "yes", "on")
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"environment variable {name}={os.getenv(name)!r} is not a boolean")
 
 
 def _optional_bool_env(name: str) -> bool | None:
-    """A boolean that distinguishes an absent setting from an explicit off."""
+    """A boolean that distinguishes an absent setting from an explicit off.
+
+    Same fail-closed parsing as _bool_env (audit item 4): garbage refuses
+    to boot rather than silently meaning "off".
+    """
     raw = os.getenv(name, "").strip().lower()
     if not raw:
         return None
-    return raw in ("1", "true", "yes", "on")
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"environment variable {name}={os.getenv(name)!r} is not a boolean")
 
 
 def _cors_origins() -> list[str]:
@@ -182,6 +244,67 @@ class Settings:
     database_url: str = field(default="sqlite+aiosqlite:///./mindpattern.db", repr=False)
 
     token_secret: str = field(default=DEFAULT_INSECURE_SECRET, repr=False)
+    # 2026-09-26 remediation — purpose-split secrets. Resolution order for
+    # each specific secret (see the properties below): the specific env
+    # var, else the LEGACY MINDPATTERN_TOKEN_SECRET, else fail exactly as
+    # token_secret itself does (the committed dev default is
+    # development-only). The "else legacy" arm is the documented
+    # deterministic rewrap path: when only the legacy var is set, each
+    # specific secret EQUALS the legacy value (identity derivation), the
+    # only derivation that keeps existing bearer signatures, wrapped TOTP
+    # secrets, and pairing-code digests valid across the upgrade — every
+    # purpose already domain-separates internally through its HKDF info
+    # label (totp-at-rest/v1, pairing-digest/v1, totp-backup-digest/v1),
+    # so key separation TODAY comes from those labels, and setting an
+    # explicit var upgrades a purpose to a fully independent secret
+    # (one-way: wrapped TOTP secrets and live pairing digests re-mint;
+    # bearer tokens invalidate cleanly via the ksv claim in the payload).
+    # Resolution is LIVE (properties over fields) on purpose: tests and
+    # tooling legitimately mutate ``token_secret`` after construction,
+    # and a snapshot taken in __post_init__ would silently split the
+    # secrets from the secret they were derived from.
+    auth_token_secret_explicit: str = field(default="", repr=False)
+    totp_wrap_secret_explicit: str = field(default="", repr=False)
+    pairing_secret_explicit: str = field(default="", repr=False)
+
+    @property
+    def auth_token_secret(self) -> str:
+        """Bearer-token signing secret (deps.require_user, both issuers)."""
+        return self.auth_token_secret_explicit.strip() or self.token_secret
+
+    @property
+    def totp_wrap_secret(self) -> str:
+        """Secret under which therapist TOTP secrets (and their backup-code
+        digests) are wrapped at rest."""
+        return self.totp_wrap_secret_explicit.strip() or self.token_secret
+
+    @property
+    def pairing_secret(self) -> str:
+        """Secret keying pairing-code (and backup-code) HMAC digests."""
+        return self.pairing_secret_explicit.strip() or self.token_secret
+
+    @property
+    def auth_secret_version(self) -> int:
+        """ksv stamped into every token: 1 = resolved-from-legacy, 2 =
+        explicit dedicated auth secret. Tokens embed the version they were
+        minted under and deps refuses a mismatch, so rotating to a split
+        secret invalidates EVEN WHEN an operator copies the same bytes."""
+        return 2 if self.auth_token_secret_explicit.strip() else 1
+
+    # 2026-09-26 remediation (LOW c): server-side scrypt work factor.
+    # Raised 2^16 -> 2^17 as the config default (~70ms and 128 MiB per
+    # hash on current server hardware): the login latency budget stays
+    # comfortably inside the auth admission limiter's 503 boundary, while
+    # an offline attacker who extracts scrypt_salt+verifier pays 2x the
+    # RAM per guess ON TOP of the client-side PBKDF2-600k stretch of the
+    # input. OPERATOR MIGRATION NOTE: scrypt output depends on N, and the
+    # schema stores no per-account work factor — an account whose stored
+    # verifier was hashed under the old 2^16 default fails login after an
+    # upgrade until it re-registers, OR the operator pins
+    # MINDPATTERN_SCRYPT_N=65536 to hold the old factor for existing
+    # fleets. Fresh deployments (and this test suite) create every
+    # account under the configured value.
+    scrypt_n: int = 2**17
     # 2026-09-21 audit C-6: decoy salts for unknown usernames derive from
     # the token secret by default, so rotating MINDPATTERN_TOKEN_SECRET
     # changes every decoy salt — a longitudinal observer could distinguish
@@ -227,6 +350,13 @@ class Settings:
     # Whole-request body cap, enforced before the JSON is parsed. Field-level
     # caps in schemas.py bound what is *stored*; this bounds what is *read*.
     max_body_bytes: int = 2 * 1024 * 1024  # 2 MiB
+    # 2026-09-26 audit item 9: the concurrent-request count the edge body
+    # buffer is budgeted against (see MAX_BODY_BUFFER_BUDGET_BYTES). The
+    # default matches the Docker entrypoint's uvicorn --limit-concurrency
+    # 100; raise it ONLY together with the server's own concurrency cap (the
+    # pair is validated at boot: max_body_bytes × body_buffer_concurrency
+    # must stay within the documented memory budget).
+    body_buffer_concurrency: int = 100
     # Total wall-clock budget to receive one request body. This is a total,
     # not an idle, timeout so trickling one byte before every idle deadline
     # cannot pin an ASGI task indefinitely. The edge proxy mirrors 30s.
@@ -361,6 +491,26 @@ class Settings:
                     "MINDPATTERN_TOKEN_SECRET must be at least 32 characters "
                     f"in environment {self.environment!r}"
                 )
+        # Purpose-split explicit overrides: an explicitly set specific
+        # secret meets the same floor as the legacy secret (each one signs
+        # or wraps credential material). Derived (empty) overrides are
+        # validated transitively — they equal token_secret, checked above.
+        if self.environment != "development":
+            for name, explicit in (
+                ("MINDPATTERN_AUTH_TOKEN_SECRET", self.auth_token_secret_explicit),
+                ("MINDPATTERN_TOTP_WRAP_SECRET", self.totp_wrap_secret_explicit),
+                ("MINDPATTERN_PAIRING_SECRET", self.pairing_secret_explicit),
+            ):
+                if explicit.strip() and len(explicit.strip()) < 32:
+                    raise RuntimeError(f"{name} must be at least 32 characters")
+        # scrypt N: a power of two within [2^15, 2^20]. A non-power-of-two N
+        # is legal for hashlib but has no analyzed cost profile, and a
+        # typo'd order of magnitude must fail at boot, not as a login
+        # latency surprise (or an instant OOM at 2^30).
+        if not (2**15 <= self.scrypt_n <= 2**20) or self.scrypt_n & (self.scrypt_n - 1) != 0:
+            raise RuntimeError(
+                f"scrypt_n must be a power of two between 32768 and 1048576 (got {self.scrypt_n})"
+            )
         # Range-validate everything numeric: "invalid values abort startup"
         # must cover 0/negative too, not just non-integers (a TTL of 0 makes
         # every issued token instantly expired; a window of 0 makes the rate
@@ -468,6 +618,21 @@ class Settings:
         # MAX_BODY_BYTES constant above (A-8-style fail-fast bound).
         if self.max_body_bytes > MAX_BODY_BYTES:
             raise RuntimeError(f"max_body_bytes must be <= {MAX_BODY_BYTES}")
+        # 2026-09-26 audit item 9: the edge buffers one complete body per
+        # in-flight request, so the deployment's worst-case buffer memory is
+        # this product. Refuse the combination up front with the arithmetic
+        # in the message — an operator raising either knob alone must see
+        # exactly which budget they blew.
+        if not 1 <= self.body_buffer_concurrency <= 100_000:
+            raise RuntimeError("body_buffer_concurrency must be between 1 and 100000")
+        if self.max_body_bytes * self.body_buffer_concurrency > MAX_BODY_BUFFER_BUDGET_BYTES:
+            raise RuntimeError(
+                "max_body_bytes * body_buffer_concurrency exceeds the edge "
+                f"body-buffer memory budget ({MAX_BODY_BUFFER_BUDGET_BYTES} bytes): "
+                f"{self.max_body_bytes} * {self.body_buffer_concurrency}. Lower one of "
+                "them (or raise the budget with eyes open) — a body-size flood "
+                "otherwise buffers past the container's memory."
+            )
         if self.db_pool_timeout > MAX_DB_POOL_TIMEOUT:
             raise RuntimeError(f"db_pool_timeout must be <= {MAX_DB_POOL_TIMEOUT}")
         # 2026-09-21 audit B-3: sub-second server timeouts are a self-DoS
@@ -573,8 +738,12 @@ class Settings:
         return cls(
             environment=os.getenv("MINDPATTERN_ENV", "production"),
             database_url=os.getenv("MINDPATTERN_DB_URL", "sqlite+aiosqlite:///./mindpattern.db"),
-            token_secret=os.getenv("MINDPATTERN_TOKEN_SECRET", DEFAULT_INSECURE_SECRET),
-            decoy_secret=os.getenv("MINDPATTERN_DECOY_SECRET", ""),
+            token_secret=_secret_env("MINDPATTERN_TOKEN_SECRET", DEFAULT_INSECURE_SECRET),
+            auth_token_secret_explicit=_secret_env("MINDPATTERN_AUTH_TOKEN_SECRET"),
+            totp_wrap_secret_explicit=_secret_env("MINDPATTERN_TOTP_WRAP_SECRET"),
+            pairing_secret_explicit=_secret_env("MINDPATTERN_PAIRING_SECRET"),
+            scrypt_n=_int_env("MINDPATTERN_SCRYPT_N", 2**17),
+            decoy_secret=_secret_env("MINDPATTERN_DECOY_SECRET"),
             token_ttl_seconds=_int_env("MINDPATTERN_TOKEN_TTL", 86_400),
             processing_session_ttl=_int_env("MINDPATTERN_PROCESSING_TTL", 300),
             unlock_threshold_days=_int_env("MINDPATTERN_UNLOCK_DAYS", 30),
@@ -588,6 +757,7 @@ class Settings:
             read_rate_window=_int_env("MINDPATTERN_READ_RATE_WINDOW", 60),
             body_read_timeout_seconds=_int_env("MINDPATTERN_BODY_READ_TIMEOUT", 30),
             max_body_bytes=_int_env("MINDPATTERN_MAX_BODY_BYTES", 2 * 1024 * 1024),
+            body_buffer_concurrency=_int_env("MINDPATTERN_BODY_BUFFER_CONCURRENCY", 100),
             max_entries_per_user=_int_env("MINDPATTERN_MAX_ENTRIES_PER_USER", 10_000),
             max_user_blob_bytes=_int_env("MINDPATTERN_MAX_USER_BLOB_BYTES", 256 * 1024 * 1024),
             recompute_entry_limit=_int_env("MINDPATTERN_RECOMPUTE_ENTRY_LIMIT", 2_000),

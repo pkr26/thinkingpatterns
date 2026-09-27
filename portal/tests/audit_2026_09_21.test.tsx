@@ -11,6 +11,8 @@
  * pinned by tests/crypto.test.ts against the real WebCrypto).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import React from "react";
 
 vi.mock("../src/api", async (importOriginal) => {
@@ -133,6 +135,14 @@ beforeEach(() => {
 });
 
 describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
+  // 2026-09-26 CSP hardening: the print rules moved from an inline <style>
+  // tag (rendered by the chart) to public/print.css — a real stylesheet
+  // loaded via <link media="print"> — which is what lets style-src drop
+  // 'unsafe-inline'. Print assertions read the stylesheets from disk, and
+  // the chart must render NO <style> element at all anymore.
+  const portalCss = readFileSync(join(__dirname, "../public/portal.css"), "utf8");
+  const printCss = readFileSync(join(__dirname, "../public/print.css"), "utf8");
+
   it("FIX 15: the evidence drill-down's decrypted journal text is excluded from the print tree", async () => {
     mockedApi.patientEntries.mockResolvedValue({
       entries: [
@@ -152,29 +162,38 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
     const composer = root.root.findAllByType("section").find((n) => deepText(n).includes("Notes on this pattern"));
     expect(String(composer?.props.className)).toContain("no-print");
 
-    // …and the print stylesheet hides EVERY direct chart section except the
-    // .print-only summary, so no card can reach paper even unmarked.
-    const css = root.root.findAllByType("style").map((n) => deepText(n)).join("");
-    expect(css).toContain("main > *:not(.print-only) { display: none !important; }");
-    expect(css).toContain(".no-print, .no-print * { display: none !important; }");
-    expect(css).toContain(".print-only { display: block !important; }");
+    // …and the print stylesheet (public/print.css, print media only) hides
+    // EVERY direct chart section except the .print-only summary, so no card
+    // can reach paper even unmarked. No <style> element ships anymore.
+    expect(root.root.findAllByType("style")).toHaveLength(0);
+    expect(printCss).toContain("main > *:not(.print-only) { display: none !important; }");
+    expect(printCss).toContain(".no-print, .no-print * { display: none !important; }");
+    expect(printCss).toContain(".print-only { display: block !important; }");
+    // index.html ships the print sheet with media="print" (CSP: style-src
+    // 'self', no unsafe-inline) and the screen sheet without a media gate.
+    const html = readFileSync(join(__dirname, "../index.html"), "utf8");
+    expect(html).toContain('<link rel="stylesheet" href="/print.css" media="print" />');
+    const csp = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/)![1]!;
+    expect(csp).toContain("style-src 'self';");
+    expect(csp).not.toContain("unsafe-inline");
 
     // The only printed subtree carries the summary — never the raw entries.
     const printOnly = root.root.findAllByType("div").find((n) => n.props.className === "print-only");
     expect(printOnly).toBeTruthy();
     expect(deepText(printOnly!)).toContain("MindPattern session summary — patienta");
     expect(deepText(printOnly!)).not.toContain("decrypted e-1");
-    // Screen behavior is unchanged: the summary stays hidden outside print.
-    expect(printOnly!.props.style.display).toBe("none");
+    // Screen behavior is unchanged: the summary stays hidden outside print
+    // (portal.css owns the screen half of the contract).
+    expect(printOnly!.props.style).toBeUndefined();
+    expect(portalCss).toContain(".print-only { display: none; }");
   });
 
-  it("FIX 15: print forces dark text on white — the inline dark theme cannot leak to paper", async () => {
+  it("FIX 15: print forces dark text on white — the dark theme cannot leak to paper", async () => {
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
-    const css = root.root.findAllByType("style").map((n) => deepText(n)).join("");
-    // <main> carries the inline dark colors (#0d1117 bg / #c3ccdb text);
-    // only an !important author rule can override an inline style object.
-    expect(css).toContain("body, main { background: #fff !important; color: #000 !important; }");
+    // <main>'s dark tokens (var(--bg)/var(--body)) must be overridden by an
+    // !important author rule from the print stylesheet.
+    expect(printCss).toContain("body, main { background: #fff !important; color: #000 !important; }");
   });
 
   it("FIX 15: recorded measures print in the session summary", async () => {
@@ -214,19 +233,24 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
 
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
-    // The rendered note keeps the typed line breaks…
+    // The rendered note keeps the typed line breaks — .note carries
+    // white-space: pre-wrap in portal.css (class-based since the 2026-09-26
+    // CSP hardening; the rule itself is unchanged)…
     const noteP = root.root.findAllByType("p").find((n) => deepText(n).includes("line one"));
-    expect(noteP?.props.style.whiteSpace).toBe("pre-wrap");
-    // …including in the printed summary.
+    expect(String(noteP?.props.className)).toContain("note");
+    expect(portalCss).toMatch(/\.note \{[^}]*white-space: pre-wrap/);
+    // …including in the printed summary (.print-note-p in print.css).
     const printOnly = root.root.findAllByType("div").find((n) => n.props.className === "print-only");
     const printedNoteP = printOnly!.findAllByType("p").find((n) => deepText(n).includes("line one"));
-    expect(printedNoteP?.props.style.whiteSpace).toBe("pre-wrap");
+    expect(String(printedNoteP?.props.className)).toContain("print-note-p");
+    expect(printCss).toContain(".print-note-p { margin: 0; white-space: pre-wrap; }");
 
-    // Drill-down entries render pre-wrap as well.
+    // Drill-down entries render pre-wrap as well (.entry-text).
     await press(root, "See the evidence");
     await flush();
     const entryP = root.root.findAllByType("p").find((n) => deepText(n).includes("journal line one"));
-    expect(entryP?.props.style.whiteSpace).toBe("pre-wrap");
+    expect(String(entryP?.props.className)).toContain("entry-text");
+    expect(portalCss).toMatch(/\.entry-text \{[^}]*white-space: pre-wrap/);
   });
 
   it("FIX 17: the patients list offers a retry that re-triggers the fetch", async () => {

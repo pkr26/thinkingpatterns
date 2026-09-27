@@ -104,6 +104,8 @@ export const API_ERROR_CODES = [
   "entry_payload_malformed",
   "totp_required",
   "totp_code_invalid",
+  "key_scheme_conflict",
+  "envelope_key_mismatch",
   "internal_error",
   "service_unavailable",
   "bad_request",
@@ -144,7 +146,44 @@ interface Session {
 
 let session: Session | null = null;
 
-export function setSession(token: string, userId: string, username: string): void {
+/** Proactive expiry guard (audit 2026-09-26 LOW): TokenResponse.expires_in
+ *  used to be ignored — expiry was only discovered mid-write, as a 401 on
+ *  whatever request happened to cross the deadline. The guard fires the
+ *  SAME session-expiry funnel (App routes it to the sessionLock lockDown)
+ *  slightly BEFORE the server would start refusing the token. */
+const TOKEN_EXPIRY_GUARD_MARGIN_MS = 60_000;
+/** setTimeout's delay ceiling (2^31-1 ms ≈ 24.8 days): anything larger
+ *  overflows to "fire immediately". Real token lifetimes sit far below
+ *  this, so the clamp is purely the overflow backstop. */
+const TOKEN_EXPIRY_GUARD_MAX_MS = 2 ** 31 - 1;
+
+let tokenExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearTokenExpiryGuard(): void {
+  if (tokenExpiryTimer !== null) {
+    clearTimeout(tokenExpiryTimer);
+    tokenExpiryTimer = null;
+  }
+}
+
+function armTokenExpiryGuard(expiresInSeconds: number | undefined): void {
+  clearTokenExpiryGuard();
+  if (typeof expiresInSeconds !== "number" || !Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) return;
+  const delay = Math.min(Math.max(expiresInSeconds * 1000 - TOKEN_EXPIRY_GUARD_MARGIN_MS, 0), TOKEN_EXPIRY_GUARD_MAX_MS);
+  tokenExpiryTimer = setTimeout(() => {
+    tokenExpiryTimer = null;
+    if (!session) return; // a replacement session already cleared this
+    if (!sessionExpiredFired) {
+      sessionExpiredFired = true;
+      sessionExpiredHandler?.(new ApiError(401, "session token expired", "unauthorized"));
+    }
+    clearSession();
+    // No new timer here by contract: only setSession (a fresh acquisition)
+    // arms the guard again — a locked session must not keep timers alive.
+  }, delay);
+}
+
+export function setSession(token: string, userId: string, username: string, expiresInSeconds?: number): void {
   if (!token.trim()) throw new ApiError(0, "invalid empty session token");
   const baseUrl = apiBaseUrl();
   // A replacement session must not leave requests for the old account
@@ -154,9 +193,11 @@ export function setSession(token: string, userId: string, username: string): voi
   // A new session re-arms the expiry latch: every sign-in gets its own
   // one-shot fire, even without a page reload in between.
   sessionExpiredFired = false;
+  armTokenExpiryGuard(expiresInSeconds);
 }
 
 export function clearSession(): void {
+  clearTokenExpiryGuard();
   session?.controller.abort();
   session = null;
 }
@@ -415,6 +456,12 @@ export interface TokenResponse {
   user_id: string;
   expires_in: number;
   role: string;
+  /** The account's key scheme since the 2026-09-26 wave ("v1" | "v2").
+   *  OPTIONAL and ignored-when-absent: an older backend omits it, and the
+   *  unlock flow treats absent as v1 (the only scheme such a backend has).
+   *  Unknown future values never open a new path — anything other than
+   *  "v2" keeps the v1 derivation. */
+  key_scheme?: string;
 }
 
 export interface ServerMeta {
@@ -428,13 +475,41 @@ export interface ServerMeta {
   sharing_disclosure_version: string;
 }
 
+/** GET /auth/key-envelope (bearer): the v2 unlock material. v1 accounts
+ *  answer key_scheme "v1" with null envelope fields. */
+export interface KeyEnvelopeResponse {
+  key_scheme: string;
+  salt: string;
+  kdf_params: unknown;
+  wrapped_data_key: string | null;
+}
+
+/** The v2 registration envelope fields (both or neither — the backend
+ *  rejects a half pair with 422). */
+export interface RegistrationEnvelope {
+  kdfParams: Record<string, unknown>;
+  wrappedDataKeyB64: string;
+}
+
 export const auth = {
   meta: () => authRequest<ServerMeta>("GET", "/meta"),
   saltFor: (username: string) => authRequest<{ salt: string }>("POST", "/auth/salt", { username }),
   login: (username: string, verifierB64: string) =>
     authRequest<TokenResponse>("POST", "/auth/login", { username, verifier: verifierB64 }),
-  register: (username: string, saltB64: string, verifierB64: string) =>
-    authRequest<TokenResponse>("POST", "/auth/register", { username, salt: saltB64, verifier: verifierB64 }),
+  register: (username: string, saltB64: string, verifierB64: string, envelope?: RegistrationEnvelope) =>
+    authRequest<TokenResponse>(
+      "POST",
+      "/auth/register",
+      envelope === undefined
+        ? { username, salt: saltB64, verifier: verifierB64 }
+        : {
+            username,
+            salt: saltB64,
+            verifier: verifierB64,
+            kdf_params: envelope.kdfParams,
+            wrapped_data_key: envelope.wrappedDataKeyB64,
+          },
+    ),
 };
 
 // --- entries -------------------------------------------------------------------
@@ -636,18 +711,32 @@ export interface PairingLookup {
   therapist_id: string;
   display_name: string;
   wrap_pub_key: string;
+  /** SAS out-of-band verification (2026-09-26): the 6-digit "123 456"
+   *  string both pairing screens derive for this live session, and the
+   *  wrap key's coarse 16-hex fingerprint. OPTIONAL: a backend predating
+   *  the wave omits them and the Share view simply hides the comparison
+   *  block (the deeper local key-fingerprint check stays). */
+  sas?: string;
+  wrap_key_fingerprint?: string;
 }
 
 // --- the authenticated endpoint surface -------------------------------------------
 
 export const api = {
   meta: () => request<ServerMeta>("GET", "/meta"),
+  /** The v2 unlock material (see KeyEnvelopeResponse). Called between
+   *  login and vault adoption for key_scheme "v2" accounts only — v1
+   *  accounts keep deriving locally and never pay this round trip. */
+  keyEnvelope: () => request<KeyEnvelopeResponse>("GET", "/auth/key-envelope"),
   /** Logout deliberately does NOT ride the session's AbortController: the
    *  button fires this and then synchronously calls clearSession(), whose
-   *  abort would cancel the very epoch bump (account-wide sign-out) the
-   *  request exists to perform (audit 2026-09-25). It keeps every other
-   *  hardening (deadline, no credentials, redirect refusal, origin recheck)
-   *  and uses the token captured at call time. */
+   *  abort would cancel the very revocation the request exists to perform.
+   *  Per-device since the 2026-09-26 wave: the server records this
+   *  bearer's jti and only THIS token dies — other signed-in devices stay
+   *  live (a legacy jti-less bearer still falls back to the account-wide
+   *  epoch bump server-side). It keeps every other hardening (deadline,
+   *  no credentials, redirect refusal, origin recheck) and uses the token
+   *  captured at call time. */
   logout: async (): Promise<null> => {
     const activeSession = session;
     if (!activeSession) throw new ApiError(0, "not signed in");
@@ -807,6 +896,51 @@ export const api = {
       new_salt: newSaltB64,
       new_verifier: newVerifierB64,
     }),
+
+  /** The O(1) v2 password change (2026-09-26): swap salt + verifier + the
+   *  re-wrapped data-key envelope in ONE server transaction. No rekey, no
+   *  consent re-wrap — the data key itself never rotates. v2 accounts must
+   *  use THIS route; the legacy PUT /account/credential answers them 409
+   *  key_scheme_conflict (swapping the salt without re-wrapping the
+   *  envelope would strand the random data key irrecoverably). Success
+   *  bumps the token epoch — every session, this one included, dies with
+   *  the 204; the caller locks down with honest copy. */
+  changePassword: (payload: {
+    verifierB64: string;
+    newSaltB64: string;
+    newVerifierB64: string;
+    wrappedDataKeyB64: string;
+    newKdfParams?: Record<string, unknown>;
+  }) =>
+    request<null>("PUT", "/account/password", {
+      verifier: payload.verifierB64,
+      new_salt: payload.newSaltB64,
+      new_verifier: payload.newVerifierB64,
+      wrapped_data_key: payload.wrappedDataKeyB64,
+      ...(payload.newKdfParams !== undefined ? { new_kdf_params: payload.newKdfParams } : {}),
+    }),
+
+  /** The v1→v2 self-upgrade (2026-09-26): after unlocking, wrap the
+   *  account's CURRENT data key under the password-derived KEK and upload
+   *  it. Two independent proofs ride the request: the account verifier
+   *  (X-Account-Verifier — derived from the SAME password the KEK came
+   *  from, so a mistyped password fails the verifier BEFORE any envelope
+   *  is stored) and a live processing session opened with the current
+   *  data key (X-Processing-Token — possession proof; 403
+   *  envelope_key_mismatch means the session's key did not authenticate
+   *  stored ciphertext). */
+  upgradeKeyEnvelope: (
+    wrappedDataKeyB64: string,
+    kdfParams: Record<string, unknown>,
+    processingToken: string,
+    verifierB64: string,
+  ) =>
+    request<null>(
+      "POST",
+      "/account/key-envelope/upgrade",
+      { kdf_params: kdfParams, wrapped_data_key: wrappedDataKeyB64 },
+      { "X-Processing-Token": processingToken, "X-Account-Verifier": verifierB64 },
+    ),
 
   pairingLookup: (code: string) => request<PairingLookup>("POST", "/consents/pairing/lookup", { code }),
   grantConsent: (code: string, ephemeralPubB64: string, wrappedKeyB64: string, verifierB64: string) =>

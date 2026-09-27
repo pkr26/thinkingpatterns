@@ -22,7 +22,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrisisCard, crisisSmsLink } from "../src/crisis";
+import { CrisisCard, crisisSmsLink, smsBodySeparator } from "../src/crisis";
 import { BarScale, Dialog, DotScale, MoreMenu, MoodScale, SegmentedControl, ToastHost } from "../src/ui";
 
 let container: HTMLDivElement | null = null;
@@ -333,14 +333,29 @@ describe("crisisSmsLink platform dialect", () => {
     expect(crisisSmsLink()).toBe("sms:741741?body=HOME");
   });
 
-  it("keeps legacy iOS &body= (the only form old Safari honors)", () => {
+  it("is a feature probe, not a userAgent regex: an iOS UA alone changes nothing (audit 2026-09-26 LOW)", () => {
     const original = navigator.userAgent;
     Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)", configurable: true });
     try {
-      expect(crisisSmsLink()).toBe("sms:741741&body=HOME");
+      // This host's URL parser sees `?body=` as a query parameter, so the
+      // standard shape wins regardless of the UA string.
+      expect(crisisSmsLink()).toBe("sms:741741?body=HOME");
     } finally {
       Object.defineProperty(navigator, "userAgent", { value: original, configurable: true });
     }
+  });
+
+  it("falls back to legacy &body= only when the platform's query parsing cannot see ?body=", () => {
+    // The pure decision core: try ?body= first, fall back to &body=.
+    expect(smsBodySeparator(() => true)).toBe("?");
+    expect(smsBodySeparator(() => false)).toBe("&");
+  });
+
+  it("the HOME keyword stays present and correctly delimited on both iOS shapes", () => {
+    for (const separator of ["?", "&"] as const) {
+      expect(`sms:741741${separator}body=HOME`).toMatch(/^sms:741741[?&]body=HOME$/);
+    }
+    expect(crisisSmsLink()).toMatch(/^sms:741741[?&]body=HOME$/);
   });
 
   it("CrisisCard wires the helper into the SMS action", () => {

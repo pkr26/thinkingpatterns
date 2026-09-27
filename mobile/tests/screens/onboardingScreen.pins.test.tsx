@@ -141,12 +141,14 @@ describe("OnboardingScreen pins: the per-node style contract", () => {
     );
   });
 
-  it("panel 3's 13+ line carries its exact single-object style", async () => {
+  it("panel 3's 18+ line carries its exact single-object style", async () => {
+    // 2026-09-27: the age floor moved 13 → 18 with the registration age
+    // gate; this pin evolves with the shipped copy (same node, same style).
     const root = await render(<OnboardingScreen navigation={nav as never} />);
     await flush();
     await pressLabel(root, "Continue");
     await pressLabel(root, "Continue");
-    const age = textNode(root, (s) => s.includes("MindPattern is for people 13 and older"));
+    const age = textNode(root, (s) => s.includes("MindPattern is for people 18 and older"));
     expect(age.props.style).toEqual({ color: "#b6bdc9", fontSize: 13, lineHeight: 19 });
   });
 });

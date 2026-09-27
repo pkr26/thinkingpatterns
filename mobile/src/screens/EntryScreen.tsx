@@ -314,7 +314,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // tone — acknowledge, point at humans, no diagnosis.
       const showCrisisAlert = () =>
         Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
+          // Resources first (offline, static, always); the personal safety
+          // plan (2026-09-27) is offered beside them, never instead.
           { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
+          { text: tr("common.makeSafetyPlan"), onPress: () => navigation.navigate("SafetyPlan") },
           { text: tr("common.notNow"), style: "cancel" },
         ]);
       // Throttled to at most once per calendar day per account
@@ -426,10 +429,21 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       }
       // LOW (2026-09-26): mark the save BEFORE clearing — the synchronous
       // ref is visible to an unmount cleanup that fires before the re-render
-      // commits the cleared text (see justSavedRef above).
-      justSavedRef.current = true;
-      setText("");
-      setDraftRestored(false);
+      // commits the cleared text (see justSavedRef above). The TEXT clear is
+      // guarded by the save-tap snapshot (audit LOW): the editor stays
+      // editable during the save await (line ~589), so words typed between
+      // the tap and this point must not be wiped by the post-save reset.
+      // textRef mirrors the latest text (kept current synchronously in
+      // onChangeText exactly for this comparison); a mismatch means fresh
+      // words are on screen — they keep the editor AND the draft-stash
+      // guarantee (justSavedRef stays false, so the unmount cleanup still
+      // stashes them). The check-in picks clear either way: they belonged
+      // to the entry that just saved, never to whatever is typed next.
+      if (textRef.current.trim() === trimmed) {
+        justSavedRef.current = true;
+        setText("");
+        setDraftRestored(false);
+      }
       setSelectedMood(null); // the check-in is per entry — never carry it over
       setSelectedEnergy(null);
       setSleepQuality(null);
@@ -591,6 +605,12 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             touchActivity(); // typing resets the inactivity auto-lock
             if (draftRestored) setDraftRestored(false);
             justSavedRef.current = false; // new words → the draft guarantee returns
+            // Keep the mirror current SYNCHRONOUSLY (the effect below lags a
+            // commit): the post-save clear compares textRef against the
+            // save-tap snapshot, and a mid-save keystroke landing in the
+            // await window must be visible to that comparison immediately —
+            // not one render later, when the fresh words would be wiped.
+            textRef.current = next;
             setText(next);
           }}
           accessibilityLabel={tr("entry.journalA11y")}

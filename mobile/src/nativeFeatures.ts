@@ -79,6 +79,10 @@ interface NotifeeModule {
   requestPermission(): Promise<unknown>;
   createTriggerNotification(notification: unknown, trigger: unknown): Promise<unknown>;
   cancelAllNotifications(): Promise<unknown>;
+  /** Cancel ONE scheduled/delivered notification by id. Present in every
+   *  notifee build this app can link (9.x); optional only so a hostile or
+   *  ancient mock degrades to the id-replacement guarantee alone. */
+  cancelNotification?(notificationId: string): Promise<unknown>;
   createChannel?(channel: unknown): Promise<unknown>;
 }
 
@@ -92,24 +96,61 @@ const AUTHORIZATION_STATUS_AUTHORIZED = 1;
 const FALLBACK_TRIGGER_TYPE_TIMESTAMP = 0;
 const FALLBACK_REPEAT_FREQUENCY_DAILY = 1;
 
-/** Reminders are the ONLY notifications this app schedules, so a stable
- *  channel id is safe and lets the OS surface "Journal reminders" in
- *  system settings honestly. */
+/** Reminders (the daily nudge and the measure check-in nudge) are the ONLY
+ *  notifications this app schedules, so one stable channel id is safe and
+ *  lets the OS surface "Journal reminders" in system settings honestly. */
 const REMINDER_CHANNEL_ID = "mindpattern-reminders";
+
+/** 2026-09-26 audit MEDIUM: the scheduled reminder also carries a STABLE
+ *  notification id. notifee mints a random id when none is passed, and a
+ *  reschedule (every session start — reminderSync.ts) then STACKED a new
+ *  daily trigger next to the old one: N restarts, N notifications a day.
+ *  With a stable id, creating the notification REPLACES the previous
+ *  schedule with the same id on both platforms (iOS: a same-identifier
+ *  UNNotificationRequest replaces the pending one; Android: the id is the
+ *  NotificationManager id, and notifee's schedule store is keyed by it). */
+const REMINDER_NOTIFICATION_ID = "mindpattern-daily-reminder";
+
+/** The measure check-in nudge (2026-09-27) rides its OWN stable id —
+ *  deliberately DIFFERENT from the daily reminder's so the two schedules
+ *  can never replace or orphan each other (scheduling the measure nudge
+ *  must not kill the daily reminder, and vice versa). */
+export const MEASURE_REMINDER_NOTIFICATION_ID = "mindpattern-measure-reminder";
 
 /** Calm copy for the notification itself: an invitation, never a debt —
  *  no streak counts, no "you missed", nothing to feel bad about. Resolved
  *  through the catalog at schedule time (audit fix 22, 2026-09-21) so the
  *  nudge speaks the app locale; the title is the app name and stays fixed
- *  in every language. */
+ *  in every language. The stable id rides inside the notification (the
+ *  only argument notifee reads it from). */
 function reminderNotification(): {
+  id: string;
   title: string;
   body: string;
   android: { channelId: string };
 } {
   return {
+    id: REMINDER_NOTIFICATION_ID,
     title: "MindPattern",
     body: t("notify.reminderBody"),
+    android: { channelId: REMINDER_CHANNEL_ID },
+  };
+}
+
+/** The measure check-in nudge: same brand title, same channel (one honest
+ *  "MindPattern reminders" surface in system settings), its own stable id
+ *  and its own calm body — an invitation to re-run a questionnaire, never
+ *  a debt (no "overdue", no streak, nothing to feel bad about). */
+function measureReminderNotification(): {
+  id: string;
+  title: string;
+  body: string;
+  android: { channelId: string };
+} {
+  return {
+    id: MEASURE_REMINDER_NOTIFICATION_ID,
+    title: "MindPattern",
+    body: t("notify.measureReminderBody"),
     android: { channelId: REMINDER_CHANNEL_ID },
   };
 }
@@ -135,11 +176,15 @@ function authorizationGranted(result: unknown): boolean {
 
 /**
  * Schedule (or reschedule) the single daily LOCAL reminder at hour:minute.
- * Rescheduling replaces any previous trigger: notifee has no per-trigger
- * cancel here, and reminders are the app's only notification, so the
- * schedule call itself is the update. Returns false — never throws — when
- * the module is absent, permission is denied, or the native call fails;
- * the UI treats false as "not available in this build / not scheduled".
+ * Rescheduling is IDEMPOTENT (2026-09-26 audit MEDIUM): the reminder is
+ * created under a stable notification id that REPLACES any previous
+ * schedule for that id, and the previous id is cancelled explicitly before
+ * the create as belt-and-braces (an old notifee row on a restored/odd
+ * device dies even if its platform build lags on same-id replacement), so
+ * N session starts still leave exactly ONE scheduled daily notification.
+ * Returns false — never throws — when the module is absent, permission is
+ * denied, or the native call fails; the UI treats false as "not available
+ * in this build / not scheduled".
  */
 export async function scheduleDailyReminder(hour: number, minute: number): Promise<boolean> {
   const mod = await probeAsync("@notifee/react-native");
@@ -147,6 +192,13 @@ export async function scheduleDailyReminder(hour: number, minute: number): Promi
   if (api === null) return false;
   try {
     if (!authorizationGranted(await api.requestPermission())) return false;
+    // Cancel-before-create, scoped to the ONE reminder id (never the app's
+    // whole notification set): the belt-and-braces half of idempotency. A
+    // failure here must not block the create — the stable id is the primary
+    // guarantee, and there may be nothing scheduled to cancel yet.
+    if (typeof api.cancelNotification === "function") {
+      await api.cancelNotification(REMINDER_NOTIFICATION_ID).catch(() => {});
+    }
     // Prefer the module's own enum values (named exports
     // TriggerType.TIMESTAMP / RepeatFrequency.DAILY); the constants above
     // are only a fallback for builds that stopped exporting them.
@@ -176,17 +228,132 @@ export async function scheduleDailyReminder(hour: number, minute: number): Promi
 }
 
 /**
- * Remove the scheduled reminder. Reminders are this app's only
- * notifications, so cancelAllNotifications is exactly the reminder
- * schedule. Returns false — never throws — when the module is absent or
- * the native call fails; a stale notification that survives a failed
- * cancel is a benign next-day nudge, not a security or data event.
+ * Schedule (or reschedule) the ONE-SHOT measure check-in nudge at an exact
+ * moment (`fireAt` — reminderSync.ts computes it: only when the cadence is
+ * due, at the next calm 20:00 local). No repeatFrequency: the nudge is
+ * re-evaluated against the cadence at every sync, never left to a blind OS
+ * repeat that would nag daily about a fortnightly check-in. Same
+ * idempotency contract as the daily reminder (stable id + scoped
+ * cancel-before-create), and the same quiet false on absent module /
+ * denied permission / native failure.
+ */
+export async function scheduleMeasureReminder(fireAt: Date): Promise<boolean> {
+  const mod = await probeAsync("@notifee/react-native");
+  const api = notifeeFrom(mod);
+  if (api === null) return false;
+  try {
+    if (!authorizationGranted(await api.requestPermission())) return false;
+    if (typeof api.cancelNotification === "function") {
+      await api.cancelNotification(MEASURE_REMINDER_NOTIFICATION_ID).catch(() => {});
+    }
+    const enums = mod as { TriggerType?: { TIMESTAMP?: number } };
+    const triggerType = enums.TriggerType?.TIMESTAMP ?? FALLBACK_TRIGGER_TYPE_TIMESTAMP;
+    if (typeof api.createChannel === "function") {
+      await api.createChannel({ id: REMINDER_CHANNEL_ID, name: t("notify.channelName") });
+    }
+    await api.createTriggerNotification(measureReminderNotification(), {
+      type: triggerType,
+      timestamp: fireAt.getTime(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove the measure check-in nudge — scoped to ITS id, never the app's
+ *  whole notification set (the daily reminder is a separate schedule).
+ *  Returns false — never throws — when the module is absent or the call
+ *  fails; a stale one-shot nudge that survives is a single calm line, not
+ *  a data event. */
+export async function cancelMeasureReminder(): Promise<boolean> {
+  const api = notifeeFrom(await probeAsync("@notifee/react-native"));
+  if (api === null) return false;
+  try {
+    if (typeof api.cancelNotification === "function") {
+      await api.cancelNotification(MEASURE_REMINDER_NOTIFICATION_ID);
+      return true;
+    }
+    // Ancient builds without per-id cancel: cancel-all is the only tool.
+    // The measure nudge (and any reschedule) self-heals at the next sync.
+    await api.cancelAllNotifications();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove the scheduled daily reminder — scoped to ITS OWN id (2026-09-27:
+ * the app now schedules a second notification, the measure check-in nudge,
+ * and a sign-out / preference-off must not silently kill the user's other
+ * reminder). An ancient notifee build without per-id cancel falls back to
+ * cancelAllNotifications; the measure schedule reschedules itself at the
+ * next session-start sync. Returns false — never throws — when the module
+ * is absent or the native call fails.
  */
 export async function cancelDailyReminder(): Promise<boolean> {
   const api = notifeeFrom(await probeAsync("@notifee/react-native"));
   if (api === null) return false;
   try {
+    if (typeof api.cancelNotification === "function") {
+      await api.cancelNotification(REMINDER_NOTIFICATION_ID);
+      return true;
+    }
     await api.cancelAllNotifications();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Notification-tap routing (2026-09-27)
+// ---------------------------------------------------------------------------
+
+/** The notifee event surface this module touches (see notifeeFrom for the
+ *  scheduling half — the event API is a DIFFERENT, smaller surface). */
+interface NotifeeEventModule {
+  onForegroundEvent(handler: (event: { type: number; detail?: { notification?: { id?: unknown } } }) => void): () => void;
+  getInitialNotification(): Promise<{ notification?: { id?: unknown } } | null>;
+}
+
+/** notifee.EventType.PRESS — the fallback for a build that stopped
+ *  exporting its enums (the module's own value is preferred). */
+const FALLBACK_EVENT_TYPE_PRESS = 1;
+
+/**
+ * Route notification TAPS to screens (the measure nudge's promise: tapping
+ * opens the Measures screen). Called ONCE from App mount; wires both tap
+ * moments — a cold start from a notification (getInitialNotification) and
+ * a tap while the app is foregrounded (onForegroundEvent PRESS) — into the
+ * pure queue in notificationRoute.ts, which the navigator consumes when
+ * the main flow is entered. Returns false — never throws — when the module
+ * is absent or either registration fails: without routing, a tap just
+ * opens the app on the journal (the daily reminder's behavior all along),
+ * which is a degraded nudge, never a broken one.
+ */
+export async function startNotificationPressRouting(): Promise<boolean> {
+  const { queueNotificationRoute } = await import("./notificationRoute");
+  const mod = await probeAsync("@notifee/react-native");
+  if (mod === null || typeof mod !== "object") return false;
+  const candidate = (mod as { default?: unknown }).default ?? mod;
+  if (typeof candidate !== "object" || candidate === null) return false;
+  const api = candidate as Partial<NotifeeEventModule>;
+  if (typeof api.onForegroundEvent !== "function") return false;
+  if (typeof api.getInitialNotification !== "function") return false;
+  try {
+    const enums = mod as { EventType?: { PRESS?: number } };
+    const pressType = enums.EventType?.PRESS ?? FALLBACK_EVENT_TYPE_PRESS;
+    // Cold start: the notification that launched the app (never awaited —
+    // it resolves after the navigator has mounted, and the QUEUE is what
+    // hands it across, not this promise).
+    void api.getInitialNotification().then((initial) => {
+      queueNotificationRoute(initial?.notification?.id);
+    }).catch(() => {});
+    api.onForegroundEvent((event) => {
+      if (event.type === pressType) queueNotificationRoute(event.detail?.notification?.id);
+    });
     return true;
   } catch {
     return false;

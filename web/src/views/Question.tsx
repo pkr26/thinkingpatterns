@@ -48,10 +48,15 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       return;
     }
     setError("");
+    // Keys snapshotted at entry, AFTER the guard (audit 2026-09-26 LOW):
+    // vault.get() used to sit after the network await, where a lock landing
+    // mid-flight turned its throw into a reject-shaped banner. A zeroized
+    // shared buffer simply fails the decrypt below — handled, quiet.
+    const keys = vault.get();
     try {
       const today = await api.questionToday();
       if (generation.current !== run) return;
-      const payload = await decryptQuestion(vault.get().dataKey, owner, today.for_date, today.blob);
+      const payload = await decryptQuestion(keys.dataKey, owner, today.for_date, today.blob);
       setQuestion({ text: payload.question, pid: payload.pattern_pid, forDate: today.for_date });
       setGeneric(null);
     } catch (err) {

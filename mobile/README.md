@@ -19,9 +19,16 @@ npm run verify:native-release          # native-project hardening preflight (ios
 npx stryker run                        # scheduled mutation gate
 ```
 
-The API base URL defaults to `http://localhost:8000` and is configurable in
-Settings. The client prepends `/api/v1` to every endpoint (`src/api/client.ts`);
-the server still answers the deprecated unversioned `/api` alias.
+The API base URL default is build-selected (`src/api/client.ts`): dev
+builds default to the device-local `http://localhost:8000`; release
+builds default to `PRODUCTION_BASE_URL` — a deliberately loud
+`https://api.mindpattern.example` placeholder that operators MUST
+replace at release-config time (a release build that cannot reach it
+fails loudly; it must never silently fall back to a dev URL). The URL is
+configurable in Settings either way, and the login screen always shows
+the resolved server. The client prepends `/api/v1` to every endpoint
+(`src/api/client.ts`); the server still answers the deprecated
+unversioned `/api` alias.
 
 ## Cross-platform crypto verification
 
@@ -70,11 +77,39 @@ recoverable bearer-token secret in app storage.
 
 ## Sync model
 
-Push-only is deliberate v1 scope: a **single-device-writer** design.
-Entries push up; `HistoryScreen` pulls this account's entries back
-(same-device restore after reinstall, or a new device). There is no
-multi-device conflict model — two devices writing concurrently is out of
-scope, not handled.
+Push-up with pull-back reads, and a REAL two-writer contract. Any client
+that can write — this app and the web client, a full write peer since
+2026-09-25 (`tests/twoWriter.test.ts`) — contends through the server's
+compare-and-swap, and this client surfaces every outcome honestly:
+
+- **Reads.** `HistoryScreen` pulls this account's entries back page by
+  page (same-device restore after reinstall, or a new device); rows
+  written by any client decrypt under the same version-bound AAD
+  contract.
+- **Version race (S-3).** An edit PUTs `content_version = stored + 1`.
+  Another device's concurrent edit answers **409 version_conflict**: the
+  client fetches the row, DECRYPTS the other device's text, and — when
+  it differs from the local edit — shows both (snippeted) and asks.
+  Keeping theirs adopts the server's text and version locally;
+  overwriting re-encrypts at the server's version + 1. Overwriting
+  silently is data loss wearing a success message; a second conflict in
+  one flow is surfaced, never looped.
+- **Deleted elsewhere (S-4).** Editing a row another device already
+  deleted answers 404: the edit is not saved and the user learns why.
+- **Rollback guards.** The v2 entry AAD binds the content version into
+  the ciphertext, and `entryVersions.ts` pins a per-entry high-water mark
+  (device-local, encrypted under the data key) — a compromised server
+  replaying an older VALID blob with a truthful older echo is skipped
+  and counted, never rendered as current truth. `stateSeqGuard.ts` gives
+  the insights analysis the same generation check (sealed device-local
+  high-water mark, fail-closed once a mark exists).
+- **Remote rotation (S-8).** A credential/data-key rotation performed on
+  another device makes this device's OLD keys fail CLOSED (decrypt
+  error → re-login), never a wrong plaintext and never a loop.
+
+What stays deliberately per-row single-writer: there is no automatic
+merge — two versions of one entry never blend. The conflict dialog IS
+the merge decision, made by the person whose words they are.
 
 ## Native project setup guide
 
@@ -121,7 +156,14 @@ Gemfile pins the bundler environment; the lock lands per-machine).
 ### 2. iOS hardening checklist
 
 Ordered; items 1–2 are verified by code review on device, 3 is enforced by
-the preflight tool.
+the preflight tool. The executable companion for everything that needs
+REAL hardware — biometry-current-set re-wrap after biometry re-enrollment,
+uninstall/reinstall behavior, reminder delivery after N restarts,
+FLAG_SECURE screenshot blocking, offline-queue flush on foreground — is
+`tools/DEVICE_VERIFICATION_CHECKLIST.md`: an operator runs it per release
+candidate on both platforms and attaches the signed copy (plus the
+preflight output below) to the release notes. It is an artifact to be
+executed, not a record of anything already run.
 
 1. **Keychain accessibility — verify the linked module honors
    `ThisDeviceOnly`.** `src/secureStore.ts` requests

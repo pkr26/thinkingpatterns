@@ -23,7 +23,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.api import insights as insights_module
-from app.cache import FixedWindowCounter
+from app.cache import SlidingWindowCounter
 from app.config import Settings
 from app.main import create_app
 from app.security import crypto, sharing as sharing_crypto
@@ -524,7 +524,7 @@ async def test_ops_endpoints_share_a_rate_bucket():
 def test_rate_counter_runs_on_the_monotonic_clock(monkeypatch):
     import app.cache as cache_module
 
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     fake = 5_000.0
     monkeypatch.setattr(cache_module.time, "monotonic", lambda: fake)
     assert counter.hit("k", 60).count == 1

@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
+import { preserveActiveDraft } from "./entryDraft";
 import { adoptLegacyPlaintextMutes } from "./patternMutes";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from "./sessionLock";
 import { isOnline, localStore, onWindowEvent } from "./platform";
@@ -32,11 +33,12 @@ import { HistoryView } from "./views/History";
 import { PatternsView } from "./views/Patterns";
 import { QuestionView } from "./views/Question";
 import { MeasuresView } from "./views/Measures";
+import { SafetyPlanView } from "./views/SafetyPlan";
 import { ShareView } from "./views/Share";
 import { SettingsView } from "./views/Settings";
 import { vault } from "./vault";
 import { reconcile, type ReconcileOutcome } from "./sync";
-import { t } from "./strings";
+import { subscribeLanguage, t } from "./strings";
 
 type View =
   | { kind: "booting" }
@@ -47,6 +49,7 @@ type View =
   | { kind: "patterns" }
   | { kind: "question" }
   | { kind: "measures" }
+  | { kind: "safetyplan" }
   | { kind: "share" }
   | { kind: "settings" }
   | { kind: "privacy" };
@@ -84,6 +87,11 @@ const PRIMARY_VIEWS: { kind: View["kind"]; labelKey: string; icon: IconName }[] 
 ];
 const MORE_VIEWS: { kind: View["kind"]; labelKey: string; icon: IconName; danger?: boolean }[] = [
   { kind: "measures", labelKey: "nav.measures", icon: "clipboard" },
+  // The local safety plan (clinical review 2026-09-27): reachable from
+  // the More menu AND from the crisis dialog / Settings — and listed here
+  // so the idle/hidden-tab lock stays armed on the view (the audit
+  // 2026-09-25 rule: every live-session view must lock).
+  { kind: "safetyplan", labelKey: "nav.safetyPlan", icon: "heart" },
   { kind: "share", labelKey: "nav.share", icon: "share" },
   { kind: "settings", labelKey: "nav.settings", icon: "sliders" },
   { kind: "privacy", labelKey: "nav.privacy", icon: "shield" },
@@ -114,6 +122,12 @@ export function App(): React.JSX.Element {
   }, []);
 
   const lockDown = useCallback((notice: string | null): void => {
+    // FIRST, seal the in-progress journal draft under the data key while it
+    // still exists (audit 2026-09-26, MEDIUM user-data-loss): the hidden-
+    // tab/idle locks unmount the editor, and the draft used to die with it.
+    // Fire-and-forget by contract — the key bytes are snapshotted
+    // synchronously and a failed seal never blocks the lock.
+    void preserveActiveDraft();
     // Fence any in-flight queue commit; the ciphertext itself stays parked
     // for the account (sign-out keeps it, D-9).
     abortInFlightFlush();
@@ -122,6 +136,12 @@ export function App(): React.JSX.Element {
     setUsername("");
     setView({ kind: "login", ...(notice ? { notice } : {}) });
   }, []);
+
+  // Language preference (audit 2026-09-26 LOW): a change in Settings
+  // applies LIVE — the strings seam notifies and the shell re-renders, so
+  // every t() on screen re-resolves without waiting for the next load.
+  const [, setLanguageTick] = useState(0);
+  useEffect(() => subscribeLanguage(() => setLanguageTick((tick) => tick + 1)), []);
 
   // Session-expiry funnel: any 401/410 from the client fires once per
   // session and lands here with the reason.
@@ -206,7 +226,7 @@ export function App(): React.JSX.Element {
     // copy must not survive until the user happens to visit Patterns (the
     // idempotent Patterns mount call stays). Best-effort by contract: it
     // never blocks app start.
-    if (vault.ownerUserId() === success.userId) {
+    if (vault.ownerUserId() === success.userId && vault.isUnlocked()) {
       void adoptLegacyPlaintextMutes(vault.get().dataKey, success.userId).catch(() => undefined);
     }
     if (hasSeenOnboarding(success.userId, localStore.get)) {
@@ -223,8 +243,11 @@ export function App(): React.JSX.Element {
   }, []);
 
   const signOut = useCallback(() => {
-    // Logout bumps the token epoch account-wide (every device, including
-    // the mobile app, signs out too) — the button copy says so.
+    // Logout is PER-DEVICE since the 2026-09-26 wave: the server records
+    // this bearer's jti and only this session's token dies — other signed-
+    // in devices stay live (the button copy says exactly that). Legacy
+    // jti-less bearers still trigger the account-wide epoch bump
+    // server-side; this client always holds a jti-bearing token.
     void api.logout().catch(() => undefined);
     // W-6 (audit 2026-09-25): sign-out wipes this browser's non-content
     // mindpattern.* flags (onboarding/mute/threshold stamps) like mobile
@@ -245,7 +268,7 @@ export function App(): React.JSX.Element {
   const navItems: NavItem[] = PRIMARY_VIEWS.map((item) => ({ id: item.kind, label: t(item.labelKey), icon: item.icon }));
   const moreItems = [
     ...MORE_VIEWS.map((item) => ({ id: item.kind, label: t(item.labelKey), icon: item.icon })),
-    { id: "signout", label: t("nav.signOutAll"), icon: "logout" as IconName, danger: true },
+    { id: "signout", label: t("nav.signOut"), icon: "logout" as IconName, danger: true },
   ];
   const onNavSelect = useCallback((id: string) => {
     if (id === "signout") {
@@ -296,17 +319,32 @@ export function App(): React.JSX.Element {
             <QuestionView onRefreshed={(message) => notify(message)} />
           ) : view.kind === "measures" ? (
             <MeasuresView onCrisis={() => setCrisisOpen(true)} />
+          ) : view.kind === "safetyplan" ? (
+            <SafetyPlanView onCrisis={() => setCrisisOpen(true)} />
           ) : view.kind === "share" ? (
             <ShareView />
           ) : view.kind === "settings" ? (
-            <SettingsView onLockdown={(notice) => lockDown(notice)} />
+            <SettingsView onLockdown={(notice) => lockDown(notice)} onOpenSafetyPlan={() => setView({ kind: "safetyplan" })} />
           ) : (
             <HistoryView />
           )}
           {username && <Note tone="muted">{t("app.signedInAs", { name: username })}</Note>}
         </div>
       )}
-      {crisisOpen && <CrisisCard onClose={() => setCrisisOpen(false)} />}
+      {/* The crisis overlay's plan link closes the overlay and opens the
+          plan view; CrisisCard itself renders the link ONLY while the
+          vault is unlocked (the plan is data-key-encrypted), and always
+          BELOW the static crisis resources — the numbers stay first in
+          every state. */}
+      {crisisOpen && (
+        <CrisisCard
+          onClose={() => setCrisisOpen(false)}
+          onMakeSafetyPlan={() => {
+            setCrisisOpen(false);
+            setView({ kind: "safetyplan" });
+          }}
+        />
+      )}
       {inApp && (
         <BottomNav
           items={navItems}

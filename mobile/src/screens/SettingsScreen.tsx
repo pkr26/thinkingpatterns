@@ -26,9 +26,18 @@ import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacit
 import { api, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
-import { cancelDailyReminder, reminderCapability } from "../nativeFeatures";
+import { cancelDailyReminder, cancelMeasureReminder, reminderCapability } from "../nativeFeatures";
 import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPrefs } from "../reminders";
-import { syncReminderSchedule } from "../reminderSync";
+import { syncReminderSchedule, syncMeasureReminderSchedule } from "../reminderSync";
+import {
+  clearMeasureReminderPrefs,
+  clearLastMeasureDate,
+  getMeasureReminderPrefs,
+  MEASURE_INTERVAL_WEEKS,
+  setMeasureReminderEnabled,
+  setMeasureReminderInterval,
+} from "../measureReminders";
+import { clearSafetyPlan } from "../safetyPlan";
 import {
   clearMoodMirrorPref,
   ensureStateOfMindWriteAccess,
@@ -46,6 +55,8 @@ import { vault } from "../vault";
 import { useSession } from "../store";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
 import { rotatePassword } from "../rotation";
+import { upgradeKeyProtection } from "../envelopeUpgrade";
+import { fetchEnvelope, type KeyScheme } from "../keyScheme";
 import { passwordPolicyError } from "./LoginScreen";
 import {
   rejectedEntryCount,
@@ -64,9 +75,14 @@ import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/butt
 import { requestFailureCopy, calmFallbackCopy } from "../components/errors";
 import { t as tr } from "../strings";
 
-/** Keep in sync with package.json; shown in About (the server reports its
- *  own version via /api/meta). */
-const APP_VERSION = "1.0.0";
+/** The React Native build-time constant: babel.config.cjs inlines this
+ *  identifier as the package.json version at bundle time, and the vitest
+ *  environment defines the same global from the same manifest — so the
+ *  About line and the shipped version can never drift apart (2026-09-26
+ *  audit LOW; this used to be a hardcoded "1.0.0"). The server still
+ *  reports its own version via /api/meta next to it. */
+declare const __APP_VERSION__: string;
+const APP_VERSION: string = __APP_VERSION__;
 
 /** The offered reminder times — an evening default, never a morning alarm.
  *  A custom stored time appears as its own extra chip. Labels resolve at
@@ -86,6 +102,10 @@ type PendingAction =
   // the Keychain indefinitely — the same standing as grant/delete, so it
   // takes the same typed-password card instead of one confirm tap.
   | { kind: "bio" }
+  // v1→v2 key-envelope upgrade (2026-09-26): ships the data key to the
+  // server (inside the password-wrapped envelope), so it takes the same
+  // typed-password card.
+  | { kind: "upgrade" }
   | null;
 
 export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.Element {
@@ -114,6 +134,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // text typed into one silently appeared in the other (a password entered
   // for rotation could satisfy a later destructive re-auth card unseen).
   const [rotateCurrentPassword, setRotateCurrentPassword] = useState("");
+  // The account's key scheme (2026-09-26): "v1" shows the upgrade card and
+  // the rekey-style rotation copy; "v2" shows the O(1) rotation copy. null
+  // = unknown (unreachable server / old server) — neither card claims
+  // anything it cannot prove.
+  const [keyScheme, setKeyScheme] = useState<KeyScheme | null>(null);
 
   React.useEffect(() => {
     getBaseUrl().then(setUrl);
@@ -147,6 +172,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           setReminderTimeState({ hour: prefs.hour, minute: prefs.minute });
         })
         .catch(() => {});
+      // The check-in reminder preference (non-sensitive, per account).
+      getMeasureReminderPrefs(userId)
+        .then((prefs) => {
+          setMeasureReminderOn(prefs.enabled);
+          setMeasureIntervalState(prefs.intervalWeeks);
+        })
+        .catch(() => {});
       // The Health mirror opt-in (non-sensitive, per account) — the
       // preference reads back even while the Health module is absent.
       getMoodMirrorPref(userId).then(setMirrorHealthOn).catch(() => {});
@@ -154,6 +186,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }).catch(() => {});
     hasLegacyQueueRecovery().then(setLegacyQueueRecovery).catch(() => {});
     biometricsSupported().then(setBioSupported).catch(() => {});
+    // Key scheme (2026-09-26): one quiet read decides which rotation copy
+    // and whether the upgrade card appears. Failures leave it unknown.
+    fetchEnvelope()
+      .then((fetched) => {
+        if (fetched.status === "ok") setKeyScheme(fetched.envelope.scheme);
+      })
+      .catch(() => {});
   }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
      []);
 
@@ -240,6 +279,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           return;
         }
         await enableBiometricWrap(userId);
+      } else if (pending.kind === "upgrade") {
+        await runUpgrade(password, reauth.verifierB64);
       } else {
         await deleteAccountOnServer(reauth.verifierB64);
       }
@@ -288,11 +329,18 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           await clearFeedback(userId); // and the pending question-feedback taps
           await clearThresholdNotice(userId); // and the one-time threshold card stamp
           await clearReminderPrefs(userId); // and the reminder opt-in
+          await clearMeasureReminderPrefs(userId); // and the check-in opt-in
+          await clearLastMeasureDate(userId); // and the cadence stamp
           await clearMoodMirrorPref(userId); // and the Health mirror opt-in
+          await clearSafetyPlan(userId); // and the encrypted local safety plan
           await disableBiometricUnlock(userId); // and the biometric data-key wrap
           await cancelDailyReminder().catch(() => {}); // a deleted account must not be nudged
+          await cancelMeasureReminder().catch(() => {}); // on either schedule
         }
-        if (username) await api.clearCachedSalt(username);
+        if (username) {
+          await api.clearCachedSalt(username);
+          await api.clearCachedKeyEnvelope(username);
+        }
       } catch {
         // Reported in the success dialog below.
       }
@@ -355,6 +403,33 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     await setReminderTime(userId, hour, minute).catch(() => {});
     setReminderTimeState({ hour, minute });
     void syncReminderSchedule(userId).catch(() => {});
+  };
+
+  /** Check-in reminders (2026-09-27): the same persist-first-then-sync
+   *  contract as the daily reminder — the preference is real whatever this
+   *  build can schedule, and the sync decides whether a nudge is due. */
+  const toggleMeasureReminders = async (on: boolean) => {
+    touchActivity();
+    const userId = await api.getUserId().catch(() => null);
+    if (!userId) return;
+    try {
+      await setMeasureReminderEnabled(userId, on);
+    } catch {
+      Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody"));
+      return;
+    }
+    setMeasureReminderOn(on);
+    void syncMeasureReminderSchedule(userId).catch(() => {});
+  };
+
+  /** Choose the check-in cadence (weeks); same contract as the time chips. */
+  const chooseMeasureInterval = async (weeks: number) => {
+    touchActivity();
+    const userId = await api.getUserId().catch(() => null);
+    if (!userId) return;
+    await setMeasureReminderInterval(userId, weeks).catch(() => {});
+    setMeasureIntervalState(weeks);
+    void syncMeasureReminderSchedule(userId).catch(() => {});
   };
 
   /** Health mirror opt-in (2026-09-19): persist first (the preference is
@@ -444,7 +519,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       const outcome = await rotatePassword({ username, userId, oldPassword: rotateCurrentPassword, newPassword });
       if (outcome.ok) {
         const rewrapNote =
-          outcome.rewrapFailures.length > 0
+          outcome.scheme === "v2"
+            ? "" // v2 keeps every grant under the unchanged data key — nothing to report
+            : outcome.rewrapFailures.length > 0
             ? `\n\n${tr("settings.rotateRewrapFailed", { names: outcome.rewrapFailures.join(", ") })}`
             : "";
         // Audit fix 7 (2026-09-21): rotatePassword itself already locked the
@@ -455,9 +532,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // session so the next unlock goes through the NEW password's login.
         Alert.alert(
           tr("settings.rotateSuccessTitle"),
-          `${tr("settings.rotateSuccessBody")}${rewrapNote}`,
+          `${outcome.scheme === "v2" ? tr("settings.rotateSuccessBodyV2") : tr("settings.rotateSuccessBody")}${rewrapNote}`,
           [{ text: tr("common.ok"), onPress: () => void signOut() }],
         );
+        // v2: the vault kept the SAME (still-correct) data key and adopted
+        // the new auth key — but the change-password copy signs out anyway:
+        // one honest place to re-verify, and other devices need their
+        // unlock refreshed regardless.
+        if (outcome.scheme === "v2") setKeyScheme("v2");
       } else if (outcome.reason === "wrong-password") {
         Alert.alert(tr("settings.rotateFailedTitle"), tr("settings.rotateWrongOld"));
       } else if (outcome.reason === "offline") {
@@ -480,6 +562,48 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       setNewPassword("");
       setBusy(false);
     }
+  };
+
+  /** v1→v2 key-envelope upgrade (2026-09-26): runs after the typed password
+   *  passed reauth. Returns true when the password card should STAY UP for
+   *  a corrected retry (the typed password was rejected server-side);
+   *  false when the flow concluded either way. */
+  const runUpgrade = async (password: string, verifierB64: string): Promise<boolean> => {
+    const userId = await api.getUserId().catch(() => null);
+    const username = await api.getUsername().catch(() => null);
+    if (!userId || !username) {
+      Alert.alert(tr("common.reauthNoAccount"));
+      return true;
+    }
+    const outcome = await upgradeKeyProtection({ username, userId, password, verifierB64 });
+    if (outcome.ok) {
+      setKeyScheme("v2");
+      Alert.alert(
+        outcome.already ? tr("settings.upgradeAlreadyTitle") : tr("settings.upgradeSuccessTitle"),
+        outcome.already ? tr("settings.upgradeAlreadyBody") : tr("settings.upgradeSuccessBody"),
+      );
+      return false;
+    }
+    if (outcome.reason === "wrong-password") {
+      Alert.alert(tr("common.passwordMismatchTitle"), tr("common.passwordMismatchBody"));
+      return true;
+    }
+    if (outcome.reason === "session-expired") {
+      Alert.alert(tr("common.sessionExpiredTitle"), tr("common.unlockAgainBody"));
+      return false;
+    }
+    if (outcome.reason === "key-mismatch") {
+      // 403 envelope_key_mismatch: the server proved this device's key is
+      // not the account's. Never auto-retried — the honest next step is a
+      // fresh unlock with the current password.
+      Alert.alert(tr("settings.upgradeFailedTitle"), tr("settings.upgradeKeyMismatchBody"));
+      return false;
+    }
+    Alert.alert(
+      tr("settings.upgradeFailedTitle"),
+      outcome.detail ?? (outcome.reason === "offline" ? tr("common.reauthOffline") : tr("errors.generic")),
+    );
+    return false;
   };
 
   const deleteEverything = () => {
@@ -519,6 +643,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // disabled then, never hidden-with-a-guess.
   const [reminderOn, setReminderOn] = useState(false);
   const [reminderTime, setReminderTimeState] = useState({ hour: 20, minute: 0 });
+  // The MBC check-in reminder preference (2026-09-27): opt-in + cadence
+  // (2/4/8 weeks, default 4) — readable even when the native side is
+  // unavailable in this build, the daily-reminder honesty rules.
+  const [measureReminderOn, setMeasureReminderOn] = useState(false);
+  const [measureInterval, setMeasureIntervalState] = useState(4);
   // The Health mirror preference (healthkit.ts) — same honesty rules.
   const [mirrorHealthOn, setMirrorHealthOn] = useState(false);
   // Biometric unlock wrap state — the section only appears when this
@@ -620,9 +749,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
               ? tr("settings.reauthDeleteTitle")
               : pending.kind === "bio"
                 ? tr("settings.reauthBioTitle")
-                : tr("settings.reauthLlmTitle", {
-                    action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
-                  })}
+                : pending.kind === "upgrade"
+                  ? tr("settings.reauthUpgradeTitle")
+                  : tr("settings.reauthLlmTitle", {
+                      action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
+                    })}
           </Text>
           <TextInput
             style={themed.input}
@@ -767,6 +898,59 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         )}
       </View>
 
+      {/* MBC check-in reminders (2026-09-27): an opt-in nudge to re-run a
+          wellbeing questionnaire when the last one is older than the chosen
+          cadence — local only, gentle by contract. */}
+      <Text style={themed.label}>{tr("settings.measureReminderLabel")}</Text>
+      <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
+        <Text style={themed.footnote}>{tr("settings.measureReminderNote")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
+          <Text style={themed.rowText}>{tr("settings.measureReminderRow")}</Text>
+          <Switch
+            value={measureReminderOn}
+            disabled={!reminders.available}
+            onValueChange={(on) => void toggleMeasureReminders(on)}
+            trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
+            accessibilityLabel={tr("settings.measureReminderA11y")}
+            accessibilityState={{ checked: measureReminderOn, disabled: !reminders.available }}
+          />
+        </View>
+        {measureReminderOn && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }} accessibilityLabel={tr("settings.measureIntervalA11y")}>
+            {MEASURE_INTERVAL_WEEKS.map((weeks) => {
+              const selected = measureInterval === weeks;
+              const label = tr("settings.intervalWeeks", { count: weeks });
+              return (
+                <TouchableOpacity
+                  key={weeks}
+                  style={[
+                    styles.timeChip,
+                    {
+                      backgroundColor: selected ? t.colors.primary : t.colors.cardDeep,
+                      borderRadius: t.radius.md,
+                      minHeight: t.minTouch,
+                    },
+                  ]}
+                  onPress={() => void chooseMeasureInterval(weeks)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={tr("settings.measureIntervalOptionA11y", { label })}
+                >
+                  <Text style={{ color: selected ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+        {!reminders.available && (
+          <Text style={themed.footnote}>
+            {tr("settings.reminderUnavailableNote", { reason: reminders.reason ?? "" })}
+          </Text>
+        )}
+      </View>
+
       {/* HealthKit State of Mind mirror (2026-09-19): WRITE-ONLY — the
           honest disclosure rides with the row; the preference is always
           real, the switch only works where the module is linked. */}
@@ -829,12 +1013,38 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         onPress={() => navigation.navigate("Measures")}
         accessibilityLabel={tr("settings.measuresA11y")}
       />
+      {/* The local safety plan (2026-09-27): encrypted on this device,
+          never sent anywhere — one tap from Settings, one tap from crisis
+          help. */}
+      <GhostButton
+        label={tr("common.makeSafetyPlan")}
+        center={false}
+        onPress={() => navigation.navigate("SafetyPlan")}
+        accessibilityLabel={tr("settings.safetyPlanA11y")}
+      />
       <GhostButton
         label={tr("settings.whyExport")}
         center={false}
         onPress={explainExportUnavailable}
         accessibilityLabel={tr("settings.whyExportA11y")}
       />
+      {/* v1→v2 key-envelope upgrade (2026-09-26): shown only for accounts the
+          SERVER says are v1 — the copy is honest that nothing is re-encrypted
+          and the benefit is instant password changes. Unknown scheme (old or
+          unreachable server) shows nothing rather than guessing. */}
+      {keyScheme === "v1" && (
+        <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
+          <Text style={{ color: t.colors.text, fontSize: 15, fontWeight: "600" }}>{tr("settings.upgradeTitle")}</Text>
+          <Text style={themed.footnote}>{tr("settings.upgradeBody")}</Text>
+          <PrimaryButton
+            label={tr("settings.upgradeButton")}
+            disabled={busy}
+            onPress={() => setPending({ kind: "upgrade" })}
+            accessibilityLabel={tr("settings.upgradeButton")}
+          />
+        </View>
+      )}
+
       <GhostButton
         label={showRotate ? tr("settings.changePasswordCancel") : tr("settings.changePasswordLabel")}
         disabled={busy}
@@ -842,8 +1052,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       />
       {showRotate && (
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
-          <Text style={[styles.reauthTitle, { color: t.colors.text }]}>{tr("settings.changePasswordTitle")}</Text>
-          <Text style={themed.footnote}>{tr("settings.changePasswordBody")}</Text>
+          <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
+            {tr(keyScheme === "v2" ? "settings.changePasswordTitleV2" : "settings.changePasswordTitle")}
+          </Text>
+          {/* 2026-09-26: v2 accounts get the honest O(1) copy — no rekey,
+              grants keep working; v1 accounts keep the rekey disclosure. */}
+          <Text style={themed.footnote}>
+            {tr(keyScheme === "v2" ? "settings.changePasswordBodyV2" : "settings.changePasswordBody")}
+          </Text>
           {/* 2026-09-26 audit LOW: bound to rotateCurrentPassword — the
               rotation card's own state, never the re-auth card's. */}
           <TextInput
@@ -867,10 +1083,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             textContentType="newPassword"
           />
           <PrimaryButton
-            label={busy ? tr("settings.rotateWorking") : tr("settings.changePasswordButton")}
+            label={busy ? tr("settings.rotateWorking") : tr(keyScheme === "v2" ? "settings.changePasswordButtonV2" : "settings.changePasswordButton")}
             onPress={() => void runRotate()}
             disabled={busy || !rotateCurrentPassword || !newPassword}
-            accessibilityLabel={tr("settings.changePasswordButton")}
+            accessibilityLabel={tr(keyScheme === "v2" ? "settings.changePasswordButtonV2" : "settings.changePasswordButton")}
           />
           <GhostButton
             label={tr("common.cancel")}

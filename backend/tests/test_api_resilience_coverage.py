@@ -164,12 +164,16 @@ async def test_entry_paging_retries_when_metadata_row_disappears():
 
     user = _race_user("paging-disappeared")
     session = _EntryPagingRaceSession(user, fetched_rows=[], metadata_size=32, actual_size=0)
+    # 2026-09-26 audit item 22: the shared page verifier answers mid-page
+    # drift with the CANONICAL 409 collection_changed (entries' old
+    # ``conflict`` code for the same condition is deliberately retired) —
+    # one error code for every paginated collection.
     with pytest.raises(ApiError, match="entries changed while paging") as raised:
         await entries_api.list_entries(
             Response(), user=user, session=session, since=None, offset=0, limit=1, page_bytes=64
         )
     assert raised.value.status_code == 409
-    assert raised.value.code == "conflict"
+    assert raised.value.code == "collection_changed"
 
 
 async def test_entry_paging_retries_when_blob_grows_after_metadata():
@@ -186,7 +190,7 @@ async def test_entry_paging_retries_when_blob_grows_after_metadata():
             Response(), user=user, session=session, since=None, offset=0, limit=1, page_bytes=64
         )
     assert raised.value.status_code == 409
-    assert raised.value.code == "conflict"
+    assert raised.value.code == "collection_changed"
 
 
 async def test_entries_replacement_invalid_and_missing_ids_are_both_not_found(client):

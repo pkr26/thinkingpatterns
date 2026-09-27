@@ -97,66 +97,66 @@ GENERIC_QUESTIONS: tuple[str, ...] = (
 # pool is pinned by test (same length, same rotation index → the
 # equivalent question in either language).
 GENERIC_QUESTIONS_ES: tuple[str, ...] = (
-    '¿Qué ocupó la mayor parte de su mente hoy?',
-    '¿Qué se sintió diferente hoy en comparación con ayer?',
-    '¿Cuándo se sintió más usted mismo o usted misma hoy?',
-    '¿Qué pequeña cosa salió bien hoy?',
-    '¿Qué pensamiento se repitió hoy?',
-    'Si hoy tuviera un título, ¿cuál sería?',
-    '¿Qué se lleva consigo hacia mañana?',
-    '¿Qué notó hoy que suele pasar por alto?',
-    '¿Qué notó su cuerpo antes que su mente hoy?',
-    '¿Cuál fue el momento más tranquilo de su día?',
-    '¿Qué sonido recuerda de hoy?',
-    '¿Qué vio hoy que le gustaría volver a ver?',
-    '¿Qué le diría a un amigo que hubiera tenido su día?',
-    '¿Qué hizo hoy que le exigió esfuerzo?',
-    '¿Qué se perdonó hoy?',
-    '¿Qué haría que mañana fuera un 1% más amable con usted?',
-    '¿Qué tres cosas salieron más o menos bien hoy?',
-    '¿Quién hizo su día un poco más ligero hoy?',
-    '¿Hay algo que espera con ilusión?',
-    '¿Qué la confortó hoy?',
-    '¿Qué vale la pena conservar de hoy?',
-    '¿Qué fue lo que más le importó hoy?',
-    '¿Cuándo sintió que hoy tenía sentido?',
-    '¿Qué valor suyo apareció en algo que hizo hoy?',
-    '¿Qué le gustaría tener más en su vida?',
-    'Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?',
-    '¿Qué emoción lo visitó más hoy?',
-    '¿Qué emoción lo sorprendió hoy?',
-    '¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?',
-    '¿En quién pensó hoy?',
-    '¿Qué conversación se quedó con usted hoy?',
-    '¿Cuándo se sintió comprendido o comprendida hoy?',
-    '¿Cuándo se sintió solo o sola hoy, y cómo fue eso?',
-    '¿Qué le dio energía hoy?',
-    '¿Qué lo agotó hoy?',
-    '¿A qué dijo no hoy?',
-    '¿Qué dejó ir hoy?',
-    '¿Qué parte del día se sintió más larga?',
-    '¿Cuándo estuvo más absorbido o absorbida en algo hoy?',
-    '¿Cómo sintió el ritmo de hoy?',
-    '¿Cuál fue la parte más difícil de hoy?',
-    '¿Qué atravesó hoy que se sintió pesado?',
-    '¿Qué está evitando, dicho con gentileza?',
-    '¿Qué preocupación se hizo más pequeña al escribirla?',
-    '¿Sobre qué tiene curiosidad ahora mismo?',
-    '¿Qué pregunta lleva rondándole últimamente?',
-    '¿Qué le gustaría recordar de esta época?',
-    '¿Qué pequeña cosa tiene curiosidad por intentar mañana?',
-    '¿Qué saboreó hoy y recuerda?',
-    '¿Dónde se sintió más a gusto hoy?',
-    '¿En qué lugar habría preferido estar hoy?',
+    "¿Qué ocupó la mayor parte de su mente hoy?",
+    "¿Qué se sintió diferente hoy en comparación con ayer?",
+    "¿Cuándo se sintió más usted mismo o usted misma hoy?",
+    "¿Qué pequeña cosa salió bien hoy?",
+    "¿Qué pensamiento se repitió hoy?",
+    "Si hoy tuviera un título, ¿cuál sería?",
+    "¿Qué se lleva consigo hacia mañana?",
+    "¿Qué notó hoy que suele pasar por alto?",
+    "¿Qué notó su cuerpo antes que su mente hoy?",
+    "¿Cuál fue el momento más tranquilo de su día?",
+    "¿Qué sonido recuerda de hoy?",
+    "¿Qué vio hoy que le gustaría volver a ver?",
+    "¿Qué le diría a un amigo que hubiera tenido su día?",
+    "¿Qué hizo hoy que le exigió esfuerzo?",
+    "¿Qué se perdonó hoy?",
+    "¿Qué haría que mañana fuera un 1% más amable con usted?",
+    "¿Qué tres cosas salieron más o menos bien hoy?",
+    "¿Quién hizo su día un poco más ligero hoy?",
+    "¿Hay algo que espera con ilusión?",
+    "¿Qué la confortó hoy?",
+    "¿Qué vale la pena conservar de hoy?",
+    "¿Qué fue lo que más le importó hoy?",
+    "¿Cuándo sintió que hoy tenía sentido?",
+    "¿Qué valor suyo apareció en algo que hizo hoy?",
+    "¿Qué le gustaría tener más en su vida?",
+    "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?",
+    "¿Qué emoción lo visitó más hoy?",
+    "¿Qué emoción lo sorprendió hoy?",
+    "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?",
+    "¿En quién pensó hoy?",
+    "¿Qué conversación se quedó con usted hoy?",
+    "¿Cuándo se sintió comprendido o comprendida hoy?",
+    "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?",
+    "¿Qué le dio energía hoy?",
+    "¿Qué lo agotó hoy?",
+    "¿A qué dijo no hoy?",
+    "¿Qué dejó ir hoy?",
+    "¿Qué parte del día se sintió más larga?",
+    "¿Cuándo estuvo más absorbido o absorbida en algo hoy?",
+    "¿Cómo sintió el ritmo de hoy?",
+    "¿Cuál fue la parte más difícil de hoy?",
+    "¿Qué atravesó hoy que se sintió pesado?",
+    "¿Qué está evitando, dicho con gentileza?",
+    "¿Qué preocupación se hizo más pequeña al escribirla?",
+    "¿Sobre qué tiene curiosidad ahora mismo?",
+    "¿Qué pregunta lleva rondándole últimamente?",
+    "¿Qué le gustaría recordar de esta época?",
+    "¿Qué pequeña cosa tiene curiosidad por intentar mañana?",
+    "¿Qué saboreó hoy y recuerda?",
+    "¿Dónde se sintió más a gusto hoy?",
+    "¿En qué lugar habría preferido estar hoy?",
     "¿Qué se siente más como 'usted' en estos días?",
-    '¿Qué está cambiando en usted lenta y lentamente?',
-    '¿Qué se ha mantenido estable en usted últimamente?',
-    'Si hoy fuera un clima, ¿cuál habría sido?',
-    '¿Cómo sería mañana en un mundo ideal?',
-    'Si pudiera enviarse una nota esta mañana, ¿qué diría?',
-    '¿Qué hizo hoy puramente porque quería?',
-    '¿Qué le pidió hoy el día?',
-    '¿Por qué le agradece hoy a su yo del pasado?',
+    "¿Qué está cambiando en usted lenta y lentamente?",
+    "¿Qué se ha mantenido estable en usted últimamente?",
+    "Si hoy fuera un clima, ¿cuál habría sido?",
+    "¿Cómo sería mañana en un mundo ideal?",
+    "Si pudiera enviarse una nota esta mañana, ¿qué diría?",
+    "¿Qué hizo hoy puramente porque quería?",
+    "¿Qué le pidió hoy el día?",
+    "¿Por qué le agradece hoy a su yo del pasado?",
 )
 
 TEMPLATE_BY_KIND: dict[str, tuple[str, ...]] = {
@@ -296,8 +296,7 @@ TEMPLATE_BY_KIND_ES: dict[str, tuple[str, ...]] = {
         "ellos). ¿Cómo es el día siguiente cuando eso pasa?",
     ),
     "cadence": (
-        "Su ritmo de escritura ha sido menos regular que antes — ¿qué ha ido "
-        "moldeando los huecos?",
+        "Su ritmo de escritura ha sido menos regular que antes — ¿qué ha ido moldeando los huecos?",
         "Ha habido silencios más largos entre días de escritura últimamente. "
         "¿Qué pasa en esos tramos?",
     ),
@@ -586,9 +585,38 @@ def question_for_today(
     2026-09-26 audit M-B3: the language selects the whole pool (templates
     and generics together), so the same corpus still yields the same
     question — determinism is per-language, and the ES pool is
-    positionally parallel to the EN one."""
+    positionally parallel to the EN one.
+
+    Rotation stability (2026-09-26 statistical review): the
+    day's index is derived from the FIRST pool snapshot computed for the
+    (user, day, language) and pinned for the rest of the day in a
+    bounded memo — a pool-size change mid-day (an evening entry
+    qualifying a new pattern, a fade, a mute) used to re-index the
+    rotation and serve a DIFFERENT question hours after the first one,
+    exactly the answered-question swap the API layer's
+    pin-on-first-write exists to prevent. The module now holds the same
+    invariant itself: the first call of the day fixes the served
+    question regardless of later pool churn; the API pin stays as the
+    cross-process guarantee. The memo is a pure cache — same inputs,
+    same outputs — bounded and cleared FIFO so a long-lived process
+    cannot grow it without limit."""
+    key = (user_id, today.toordinal(), language)
+    pinned = _DAY_PINNED_QUESTIONS.get(key)
+    if pinned is not None:
+        return pinned
     pool = build_pool(patterns, language) or list(
         GENERIC_QUESTIONS_ES if language == "es" else GENERIC_QUESTIONS
     )
     index = (today.toordinal() + user_rotation_offset(user_id)) % len(pool)
-    return pool[index]
+    question = pool[index]
+    while len(_DAY_PINNED_QUESTIONS) >= _DAY_PIN_LIMIT:
+        _DAY_PINNED_QUESTIONS.pop(next(iter(_DAY_PINNED_QUESTIONS)))
+    _DAY_PINNED_QUESTIONS[key] = question
+    return question
+
+
+# The per-(user, day, language) first-computation memo behind
+# question_for_today's rotation stability (see above). Bounded;
+# insertion-ordered (FIFO eviction).
+_DAY_PINNED_QUESTIONS: dict[tuple[str, int, str], str] = {}
+_DAY_PIN_LIMIT = 4096

@@ -596,6 +596,51 @@ describe("EntryScreen save pipeline", () => {
     expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(true);
   });
 
+  // 2026-09-26 audit LOW: the keystroke window between the save tap and
+  // the busy re-render (the editor is editable until the render commits
+  // !busy) used to be wiped by the post-save clear. The clear now runs
+  // only when the editor still shows the SAVED snapshot — fresh words
+  // survive, and they keep the draft-stash guarantee (not marked as
+  // just-saved).
+  it("a keystroke landing between the save tap and the busy re-render is not wiped by the clear", async () => {
+    let resolveCreate: ((v: unknown) => void) | undefined;
+    vi.mocked(api.createEntry).mockImplementation(
+      () => new Promise((resolve) => (resolveCreate = resolve)),
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "first words");
+    const { firePress, act } = await import("../helpers/rtr");
+    stashDraft.mockClear();
+    await firePress(root, "Save entry");
+    // The pre-busy keystroke: onChangeText fires while the upload promise
+    // is still pending (the mock, like RN in that window, is not yet
+    // disabled).
+    await writeEntry(root, "first words and more");
+    await act(async () => {
+      resolveCreate?.({});
+    });
+    await flush();
+    // The save succeeded…
+    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    expect(textOf(root)).toContain("Saved ✓");
+    // …and the editor still holds the words typed after the tap.
+    expect(inputByPlaceholder(root, "What's going on today?").props.value).toBe("first words and more");
+    // Those words are a NEW draft, not consumed by the save: an unmount
+    // stashes them (the just-saved guard did not eat the stash).
+    await act(async () => {
+      root.unmount();
+    });
+    expect(stashDraft).toHaveBeenCalledWith("user-1", "first words and more");
+  });
+
+  it("the clear still fires when nothing was typed mid-save (the unchanged case)", async () => {
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "clean save");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(inputByPlaceholder(root, "What's going on today?").props.value).toBe("");
+  });
+
   it("shows a soft character count only near the 100k cap", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await writeEntry(root, "short");

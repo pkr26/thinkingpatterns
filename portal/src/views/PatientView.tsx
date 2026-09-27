@@ -9,6 +9,14 @@
  * "Since your last visit" is computed locally (localStorage holds only a
  * date stamp per patient, never content): patterns whose first_seen is
  * newer than the last visit are flagged — the pre-session delta.
+ *
+ * Item 9 (clinical review 2026-09-27): a decrypted phq9 payload carrying
+ * an endorsed item 9 renders a clearly-visible bordered safety row in the
+ * measures card AND the printed summary ("Item 9 endorsed (self-harm
+ * question) — follow your clinical protocol · C-SSRS follow-up
+ * recommended"). Surfacing a fact the clinician's workflow requires is
+ * the app's charter; interpreting the score is not — the notice never
+ * says anything about severity or diagnosis.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -130,9 +138,13 @@ function describePattern(pattern: PatternPayload): string {
       // to a positive-sounding claim for undefined).
       return `Entries read ${String(d.direction ?? "?")} on days '${pattern.label}' appears (mood delta ${String(d.mood_delta ?? "?")}).`;
     case "link":
-      return `About ${String(d.lag_days ?? 1)} day(s) after '${pattern.label}' comes up, entries read ${String(d.direction ?? "lower")}.`;
+      // Same L-82 rule as mood_correlation: direction is absent when the
+      // backend could not resolve one — render the honest unknown, never a
+      // fabricated "lower" (2026-09-26 audit round, L).
+      return `About ${String(d.lag_days ?? 1)} day(s) after '${pattern.label}' comes up, entries read ${String(d.direction ?? "?")}.`;
     case "mood_shift":
-      return `Entries have read ${String(d.direction ?? "lower")} than the patient's own baseline lately.`;
+      // Ditto — "lower" used to be invented for an undefined direction.
+      return `Entries have read ${String(d.direction ?? "?")} than the patient's own baseline lately.`;
     case "inertia":
       return "Mood has been carrying over day to day more than usual for this patient.";
     case "instability":
@@ -187,7 +199,7 @@ function MoodSparkline(props: { points: { date: string; sentiment: number }[] })
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
-      style={{ width: "100%", maxWidth: 420, height: 48, display: "block", marginTop: 8 }}
+      className="sparkline"
       role="img"
       aria-label={`Mood over the ${pts.length} mood-tagged evidence entries (average ${(avg).toFixed(2)})`}
     >
@@ -222,8 +234,16 @@ function patternKey(pattern: PatternPayload, index: number): string {
   return pattern.detail.pattern_pid ?? `${pattern.kind}:${pattern.label}:${index}`;
 }
 
-function isRetryableCollectionChange(error: unknown): boolean {
-  // The backend signals "rows changed while paging" two ways: the
+/** Item 9 (clinical review 2026-09-27): the render gate for the safety
+ *  row — a PHQ-9 reading whose raw item-9 response is endorsed (> 0).
+ *  The phq9 check lives HERE as well as in the crypto sanitizers: the
+ *  field names a PHQ-9 question, so no other instrument's row may ever
+ *  render it, whatever a (hostile or future) payload carries. */
+function isItem9Flagged(reading: MeasureReading): boolean {
+  return reading.measure === "phq9" && (reading.item9 ?? 0) > 0;
+}
+
+function isRetryableCollectionChange(error: unknown): boolean {  // The backend signals "rows changed while paging" two ways: the
   // revision-aware `collection_changed` and the legacy code `conflict`
   // (same 409, same "…changed while paging; retry the request" detail).
   // Both are safe to answer with exactly one restart from offset zero —
@@ -357,8 +377,13 @@ export function PatientView(props: {
   /** Notes search filter (client-side: notes are already decrypted here). */
   const [noteQuery, setNoteQuery] = useState("");
   /** P3 (2026-09-21): the note edit history — decrypted prior texts per
-   *  note id, loaded on demand from the revisions endpoint. */
+   *  note id, loaded on demand from the revisions endpoint.
+   *  2026-09-26 audit round (L): historyFailed records, per note id, that
+   *  revisions EXISTED but could not be decrypted (cross-key or corrupt
+   *  blobs) — clinically distinct from "this note was never edited", which
+   *  is what an empty list must keep meaning. */
   const [history, setHistory] = useState<Record<string, string[]>>({});
+  const [historyFailed, setHistoryFailed] = useState<Record<string, boolean>>({});
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   /** The note being edited (id + textarea buffer). */
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -371,6 +396,13 @@ export function PatientView(props: {
   // ineligible to repopulate React state.
   const loadGeneration = useRef(0);
   const drilldownGeneration = useRef(0);
+  /** 2026-09-26 audit round (L): the per-context idempotency key for note
+   *  creation — minted on a draft's first save attempt, reused across its
+   *  retries, cleared on success/conflict (see saveNote). */
+  const pendingNoteId = useRef<{ general: string | null; pattern: string | null }>({
+    general: null,
+    pattern: null,
+  });
 
   const load = useCallback(async () => {
     const operation = ++loadGeneration.current;
@@ -619,13 +651,28 @@ export function PatientView(props: {
       try {
         const revisions = await api.noteRevisions(note.id);
         const texts: string[] = [];
-        for (const rev of revisions) {
-          texts.push(
-            await decryptNote(session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob),
-          );
+        try {
+          for (const rev of revisions) {
+            texts.push(
+              await decryptNote(session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob),
+            );
+          }
+        } catch (err) {
+          // 2026-09-26 audit round (L): the FETCH succeeded but a revision
+          // blob failed to decrypt. Storing [] alone rendered "no earlier
+          // text recorded" — making a corrupt/cross-key history read as a
+          // never-edited note in a clinical record. Record the failure
+          // distinctly (rendered as its own honest line below) and log it
+          // instead of swallowing it silently.
+          console.warn("note history failed to decrypt", { noteId: note.id, err });
+          setHistoryFailed((prev) => ({ ...prev, [note.id]: true }));
+          setHistory((prev) => ({ ...prev, [note.id]: [] }));
+          return;
         }
         setHistory((prev) => ({ ...prev, [note.id]: texts }));
       } catch {
+        // The revisions FETCH itself failed: an honest empty history for a
+        // load that never happened (the pinned P3 degradation).
         setHistory((prev) => ({ ...prev, [note.id]: [] }));
       } finally {
         setHistoryBusy(null);
@@ -790,8 +837,18 @@ export function PatientView(props: {
     if (!draft.trim() || busy) return;
     setBusy(true);
     setError("");
+    // 2026-09-26 audit round (L): the client_note_id is allocated on the
+    // FIRST save attempt of the current draft and REUSED across retries of
+    // that draft (the backend contract at app/api/therapist.py —
+    // idempotency on (therapist, client_note_id) — rewrites in place, so
+    // a timeout + user re-press no longer mints a second clinical note).
+    // A fresh id is minted only after a SUCCESSFUL save (the next note is a
+    // new note) or a 409 conflict (the id is burned server-side). The id is
+    // scoped per draft context, like the draft buffers themselves (F-6).
+    const scope = selected ? "pattern" : "general";
+    if (!pendingNoteId.current[scope]) pendingNoteId.current[scope] = newNoteId();
+    const clientNoteId = pendingNoteId.current[scope];
     try {
-      const clientNoteId = newNoteId();
       const sealed = await encryptNote(
         session.noteKey,
         session.userId,
@@ -806,7 +863,16 @@ export function PatientView(props: {
       });
       setNotes((prev) => [...prev, { ...created, text: draft.trim() }]);
       setDraft("");
+      pendingNoteId.current[scope] = null;
     } catch (err) {
+      // An explicit conflict means the server rejected THIS id (e.g. it was
+      // already used for another patient): retrying with it can only fail
+      // again, so the id is burned and the next attempt mints a fresh one.
+      // Any other failure (timeout, offline) KEEPS the id — that is exactly
+      // the idempotent-retry case the backend contract exists for.
+      if (err instanceof ApiError && err.status === 409 && err.code === "conflict") {
+        pendingNoteId.current[scope] = null;
+      }
       setError(err instanceof Error ? err.message : "could not save the note");
     } finally {
       setBusy(false);
@@ -853,7 +919,7 @@ export function PatientView(props: {
     label.length > 0 && text.toLowerCase().includes(label.toLowerCase());
 
   return (
-    <main className="portal-main" style={{ minHeight: "100vh" }}>
+    <main className="portal-main">
       <header className="portal-head">
         <div>
           <h1>{patient.username}</h1>
@@ -872,13 +938,13 @@ export function PatientView(props: {
       </header>
 
       {!notesOnly && (
-        <div className="no-print" style={{ marginBottom: 14 }}>
+        <div className="no-print row row--wrap mb-14">
           <Button
             label={lastReviewed ? "Mark reviewed (update the delta anchor)" : "Mark reviewed (start the delta anchor)"}
             small
             onPress={() => {
-              // L-80 (2026-09-20): the anchor is the LOCAL calendar date,
-              // not a UTC instant — a clinician east of UTC marking reviewed
+              // L-80 (2026-09-20): the anchor is the CLINICIAN-LOCAL calendar
+              // date, not a UTC instant — a clinician east of UTC marking reviewed
               // in their evening must not see "yesterday" as the anchor.
               // L-75: the stamp persists in per-tab sessionStorage (it
               // survives idle locks and dies with the browser session).
@@ -888,7 +954,7 @@ export function PatientView(props: {
               setNewCount(0);
             }}
           />
-          <span style={{ color: theme.muted, fontSize: 12, marginLeft: 10 }}>
+          <span className="hint">
             {lastReviewed
               ? `New-pattern counting is anchored to ${lastReviewed} on this computer's calendar; it moves only when you mark reviewed.`
               : "The new-pattern count anchors the first time you mark reviewed."}
@@ -901,7 +967,7 @@ export function PatientView(props: {
         // Audit fix 17 (2026-09-21): recovery from a failed load used to
         // require a reload or sign-out; the retry re-runs the whole load
         // (it invalidates any earlier generation's results itself).
-        <div className="no-print" style={{ marginTop: 8 }}>
+        <div className="no-print mt-8">
           <Button label="Retry loading this patient" small onPress={() => void load()} />
         </div>
       )}
@@ -921,9 +987,25 @@ export function PatientView(props: {
       {measureGroups.length > 0 && (
         <Card title={`Recorded measures (${measures?.length ?? 0})`}>
           {measureGroups.map((group) => (
-            <NoteText key={group.instrument}>
-              {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
-            </NoteText>
+            <div key={group.instrument}>
+              <NoteText>
+                {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+              </NoteText>
+              {/* Item 9 (clinical review 2026-09-27): an endorsed PHQ-9
+                  item 9 mandates follow-up REGARDLESS of the total — the
+                  raw response now rides the payload, and each flagged
+                  reading surfaces as a bordered row. This is a FACT the
+                  clinician's workflow requires, surfaced verbatim: no
+                  score interpretation, no diagnosis language (the app's
+                  charter). Readings without the field render exactly as
+                  before, and the phq9 guard lives HERE too, not only in
+                  the crypto layer — a gad7 row must never show it. */}
+              {group.readings.filter(isItem9Flagged).map((m) => (
+                <div key={`${group.instrument}-${m.measureDate}-item9`} className="measure-flag">
+                  {`${m.measureDate}: PHQ-9 item 9 endorsed (self-harm question) — follow your clinical protocol · C-SSRS follow-up recommended`}
+                </div>
+              ))}
+            </div>
           ))}
           {hiddenMeasureCount > 0 && (
             <NoteText tone="warn">
@@ -979,7 +1061,7 @@ export function PatientView(props: {
           <NoteText>{describePattern(selected)}</NoteText>
           <dl className="evidence-grid">
             {evidenceRows(selected).map(([k, v]) => (
-              <div key={k} style={{ display: "contents" }}>
+              <div key={k}>
                 <dt>{k}</dt>
                 <dd>{v}</dd>
               </div>
@@ -1021,14 +1103,14 @@ export function PatientView(props: {
             <NoteText>No decryptable entries behind this pattern (the evidence window may predate the shared corpus).</NoteText>
           )}
           {entries?.map((entry) => (
-            <div key={entry.id} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8 }}>
-              <strong style={{ color: theme.text, fontSize: 13 }}>{entry.entry_date}</strong>
+            <div key={entry.id} className="entry-row">
+              <strong className="entry-date">{entry.entry_date}</strong>
               {typeof entry.sentiment === "number" && (
-                <span style={{ color: theme.muted, fontSize: 12, marginLeft: 8 }}>mood {entry.sentiment.toFixed(2)}</span>
+                <span className="entry-mood">mood {entry.sentiment.toFixed(2)}</span>
               )}
               {/* Audit fix 16 (2026-09-21): journal entries are multi-line;
-                  pre-wrap keeps the patient's line breaks. */}
-              <p style={{ margin: "4px 0 0", fontSize: 14, lineHeight: 1.5, color: theme.body, whiteSpace: "pre-wrap" }}>
+                  pre-wrap keeps the patient's line breaks (.entry-text). */}
+              <p className="entry-text">
                 {selected && labelMatches(entry.text, selected.label) ? <mark>{entry.text}</mark> : entry.text}
               </p>
             </div>
@@ -1045,8 +1127,7 @@ export function PatientView(props: {
             onChange={(e) => setNoteQuery(e.target.value)}
             placeholder="Search notes…"
             aria-label="Search notes"
-            className="input"
-            style={{ fontSize: 14 }}
+            className="input note-search"
           />
         )}
         {selected && patternNotes.length === 0 && <NoteText>No notes on this pattern yet.</NoteText>}
@@ -1054,7 +1135,7 @@ export function PatientView(props: {
         {(selected ? patternNotes : generalNotes)
           .filter((n) => n.text.toLowerCase().includes(noteQuery.trim().toLowerCase()))
           .map((note) => (
-          <div key={note.id} style={{ borderTop: `1px solid ${theme.border}`, paddingTop: 8 }}>
+          <div key={note.id} className="entry-row">
             {editing?.id === note.id ? (
               <>
                 <textarea
@@ -1065,7 +1146,7 @@ export function PatientView(props: {
                   rows={3}
                   className="textarea"
                 />
-                <div className="row" style={{ marginTop: 6 }}>
+                <div className="row mt-6">
                   <Button label={busy ? "Saving…" : "Save edit"} small onPress={() => void saveNoteEdit(note)} disabled={busy || !editing.text.trim()} />
                   <Button label="Cancel" small onPress={() => setEditing(null)} disabled={busy} />
                 </div>
@@ -1074,7 +1155,7 @@ export function PatientView(props: {
               <NoteText>{note.text}</NoteText>
             )}
             <div className="row">
-              <span style={{ color: theme.muted, fontSize: 11 }}>{dayOf(note.created_at)}</span>
+              <span className="note-date">{dayOf(note.created_at)}</span>
               <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
               {/* Final-verification 2026-09-22: the note edit history used to
                   be reachable ONLY from a button inside this screen's hidden
@@ -1095,6 +1176,11 @@ export function PatientView(props: {
                   onPress={() => {
                     if (history[note.id] !== undefined) {
                       setHistory((prev) => {
+                        const next = { ...prev };
+                        delete next[note.id];
+                        return next;
+                      });
+                      setHistoryFailed((prev) => {
                         const next = { ...prev };
                         delete next[note.id];
                         return next;
@@ -1122,7 +1208,7 @@ export function PatientView(props: {
                 disabled={busy}
               />
               {confirmDeleteId === note.id && (
-                <span style={{ color: theme.accentBright, fontSize: 12 }}>
+                <span className="delete-confirm">
                   Permanently delete this note? Press again to confirm.
                 </span>
               )}
@@ -1130,17 +1216,26 @@ export function PatientView(props: {
             {(() => {
               const priorTexts = history[note.id];
               if (priorTexts === undefined) return null;
+              if (historyFailed[note.id] === true) {
+                // 2026-09-26 audit round (L): revisions existed but their
+                // blobs would not decrypt — never read as "never edited".
+                return (
+                  <p className="history-line">
+                    (earlier versions could not be decrypted)
+                  </p>
+                );
+              }
               if (priorTexts.length === 0) {
                 return (
-                  <p style={{ margin: "6px 0 0 12px", fontSize: 12, color: theme.muted }}>
+                  <p className="history-line">
                     no earlier text recorded
                   </p>
                 );
               }
               return (
-                <div style={{ margin: "6px 0 0 12px", fontSize: 12, color: theme.muted }}>
+                <div className="history-line">
                   {priorTexts.map((text, i) => (
-                    <p key={i} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                    <p key={i}>
                       previous ({i + 1}): {text}
                     </p>
                   ))}
@@ -1149,8 +1244,8 @@ export function PatientView(props: {
             })()}
           </div>
         ))}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-          <span style={{ color: theme.muted, fontSize: 12, alignSelf: "center" }}>Start from:</span>
+        <div className="tpl-row">
+          <span className="hint tpl-row__label">Start from:</span>
           {NOTE_TEMPLATES.map((tpl) => (
             <button
               key={tpl}
@@ -1197,10 +1292,16 @@ ${tpl}` : tpl)}
 
       {/* Print-only session summary (2026-09-17): everything a paper record
           needs, nothing the interactive chrome shows. Under print this is
-          the ONLY visible block (audit 15, 2026-09-21). */}
-      <div className="print-only" style={{ display: "none" }}>
-        <h1 style={{ fontSize: 18 }}>MindPattern session summary — {patient.username}</h1>
-        <p style={{ fontSize: 12 }}>
+          the ONLY visible block (audit 15, 2026-09-21). 2026-09-26 CSP
+          hardening: the block's presentation lives entirely in
+          public/print.css (.print-* classes — loaded via
+          <link media="print"> in index.html) and in portal.css
+          (.print-only { display: none } keeps it hidden on screen), so the
+          inline <style> tag — and with it style-src 'unsafe-inline' — is
+          gone from the chart. */}
+      <div className="print-only">
+        <h1>MindPattern session summary — {patient.username}</h1>
+        <p className="print-meta">
           {notesOnly
             ? `Sharing ended ${patient.revoked_at ? dayOf(patient.revoked_at) : "recently"} — notes-only record`
             : `Sharing since ${dayOf(patient.granted_at)}`}{" "}
@@ -1209,7 +1310,7 @@ ${tpl}` : tpl)}
           {newCount > 0 && ` · ${newCount} new pattern${newCount === 1 ? "" : "s"}`}
         </p>
         {stats && (
-          <p style={{ fontSize: 12 }}>
+          <p className="print-meta">
             {stats.total_entries ?? "?"} entries · {stats.active_days ?? "?"} active days
             {typeof stats.avg_sentiment === "number" && ` · average reading ${stats.avg_sentiment.toFixed(2)}`}
           </p>
@@ -1220,33 +1321,43 @@ ${tpl}` : tpl)}
             measurement-based-care trail. */}
         {measureGroups.length > 0 && (
           <>
-            <h2 style={{ fontSize: 14, marginTop: 10 }}>Recorded measures</h2>
+            <h2 className="print-h2">Recorded measures</h2>
             {measureGroups.map((group) => (
-              <p key={group.instrument} style={{ fontSize: 12, margin: "2px 0" }}>
-                {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
-                {group.hidden > 0 && ` · +${group.hidden} earlier not shown`}
-              </p>
+              <div key={group.instrument}>
+                <p className="print-line">
+                  {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
+                  {group.hidden > 0 && ` · +${group.hidden} earlier not shown`}
+                </p>
+                {/* Item 9 (2026-09-27): the paper record carries the same
+                    flagged facts as the screen — plain text, bordered, no
+                    clickable affordances (audit 15's print rule). */}
+                {group.readings.filter(isItem9Flagged).map((m) => (
+                  <p key={`${group.instrument}-${m.measureDate}-item9`} className="print-line print-flag">
+                    {`${m.measureDate}: PHQ-9 item 9 endorsed (self-harm question) — follow your clinical protocol · C-SSRS follow-up recommended`}
+                  </p>
+                ))}
+              </div>
             ))}
           </>
         )}
         {(patterns ?? []).map((pattern, index) => (
-          <div key={patternKey(pattern, index)} style={{ borderTop: "1px solid #999", paddingTop: 6, marginTop: 6 }}>
-            <strong style={{ fontSize: 13 }}>{pattern.detail.sensitive ? "A difficult thought (non-quoting)" : `${pattern.kind} — ${pattern.label}`}</strong>
-            <p style={{ fontSize: 12, margin: "2px 0" }}>{describePattern(pattern)}</p>
-            <p style={{ fontSize: 11, color: "#333" }}>
+          <div key={patternKey(pattern, index)} className="print-item">
+            <strong>{pattern.detail.sensitive ? "A difficult thought (non-quoting)" : `${pattern.kind} — ${pattern.label}`}</strong>
+            <p className="print-line">{describePattern(pattern)}</p>
+            <p className="print-evidence">
               {evidenceRows(pattern).map(([k, v]) => `${k}: ${v}`).join(" · ")}
             </p>
           </div>
         ))}
         {(selected ? patternNotes : generalNotes).length > 0 && (
           <>
-            <h2 style={{ fontSize: 14, marginTop: 10 }}>Therapist notes ({selected ? "this pattern" : "general"})</h2>
+            <h2 className="print-h2">Therapist notes ({selected ? "this pattern" : "general"})</h2>
             {(selected ? patternNotes : generalNotes).map((note) => {
               const edited = note.updated_at > note.created_at;
               const priorTexts = history[note.id];
               return (
-                <div key={note.id} style={{ fontSize: 12, borderTop: "1px solid #999", paddingTop: 4 }}>
-                  <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                <div key={note.id} className="print-note">
+                  <p className="print-note-p">
                     {dayOf(note.created_at)} — {note.text}
                     {/* Final-verification 2026-09-22: this summary is paper —
                         it must never carry a clickable affordance (the old
@@ -1256,52 +1367,34 @@ ${tpl}` : tpl)}
                         print only when the therapist loaded them from the
                         interactive notes card above. */}
                     {edited && (
-                      <span style={{ marginLeft: 8, fontSize: 11, color: "#555" }}>edited</span>
+                      <span className="print-edited">edited</span>
                     )}
                   </p>
                   {priorTexts !== undefined && priorTexts.length > 0 && (
-                    <div style={{ margin: "4px 0 0 12px", color: "#666" }}>
+                    <div className="print-prior">
                       {priorTexts.map((text, i) => (
-                        <p key={i} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                        <p key={i}>
                           previous ({i + 1}): {text}
                         </p>
                       ))}
                     </div>
                   )}
                   {priorTexts !== undefined && priorTexts.length === 0 && (
-                    <p style={{ margin: "2px 0 0 12px", color: "#666" }}>no earlier text recorded</p>
+                    <p className="print-prior-line">
+                      {historyFailed[note.id] === true
+                        ? "(earlier versions could not be decrypted)"
+                        : "no earlier text recorded"}
+                    </p>
                   )}
                 </div>
               );
             })}
           </>
         )}
-        <p style={{ fontSize: 10, color: "#555", marginTop: 10 }}>
+        <p className="print-footer">
           Observations from the patient's own encrypted journal — not a diagnosis. Generated by MindPattern.
         </p>
       </div>
-
-      {/* Audit fix 15 (2026-09-21): under print, ONLY the .print-only session
-          summary may render. The old rule hid two header rows and let every
-          card print light-on-dark — including the evidence drill-down's full
-          decrypted journal text, exactly what this block exists to exclude.
-          The child-selector rule hides every other direct section of the
-          chart; .no-print additionally excludes the interactive sections
-          that carry raw text (evidence drill-down, note composer, controls)
-          even if the DOM later gains wrapper elements between them and
-          <main>. `!important` is required on both sides: it is the only
-          author-origin way to override the inline style objects above, and
-          .print-only's inline display:none is what keeps the summary hidden
-          on screen. The color rule strips the inline dark-theme colors from
-          paper — the summary's own #333/#555 accents stay legible on white. */}
-      <style>{`
-        @media print {
-          main > *:not(.print-only) { display: none !important; }
-          .no-print, .no-print * { display: none !important; }
-          .print-only { display: block !important; }
-          body, main { background: #fff !important; color: #000 !important; }
-        }
-      `}</style>
     </main>
   );
 }

@@ -32,7 +32,9 @@ async def _insight_phase_user(client, username: str) -> ClientEmulator:
     await emu.register(client)
     await emu.backdate_account(client, days=34)
     for day in daterange(32, TODAY):
-        await emu.create_entry(client, "quiet day some reading", day, client_entry_id=f"lr-{day.isoformat()}")
+        await emu.create_entry(
+            client, "quiet day some reading", day, client_entry_id=f"lr-{day.isoformat()}"
+        )
     return emu
 
 
@@ -63,14 +65,12 @@ async def test_local_recompute_stores_blobs_without_a_processing_session(client,
     # client's bytes verbatim (the server never decrypts them).
     async with app.state.sessionmaker() as session:
         rows = (
-            (
-                await session.execute(
-                    select(Insight.kind, Insight.state_seq, Insight.blob).where(
-                        Insight.user_id == emu.user_id
-                    )
+            await session.execute(
+                select(Insight.kind, Insight.state_seq, Insight.blob).where(
+                    Insight.user_id == emu.user_id
                 )
-            ).all()
-        )
+            )
+        ).all()
     kinds = {kind: (seq, bytes(blob)) for kind, seq, blob in rows}
     assert kinds["brain"][0] == 1
     assert kinds["patterns"][0] == 1

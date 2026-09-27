@@ -1,9 +1,20 @@
-"""Fixed-window rate limiting with an in-memory counter.
+"""Sliding-window rate limiting with an in-memory counter.
 
-v1 ships the in-process counter, which is exact for the single-process
+v1 shipped the in-process counter, which is exact for the single-process
 deployment the brief describes (multi-worker uvicorn would fragment every
 bucket — run one worker per instance or front several instances with a
 shared counter before scaling out).
+
+2026-09-26 audit item 2: the original FIXED-window counter admitted up to
+2x the configured limit across a window boundary (a full budget at the end
+of one window plus a full budget at the start of the next both fit inside
+one sliding 60-second span). The counter is now an exact sliding window:
+every hit is aged out precisely ``window_seconds`` after it landed, so any
+window-aligned burst trick no longer doubles the budget. Memory stays
+bounded two ways: the per-key hit log compresses its OLDEST entries once
+it passes a small entry cap (compression keeps the counts exact and ages
+them at the OLDEST timestamp — strictly more conservative, never less),
+and the registry caps tracked keys with eviction (below).
 """
 
 from __future__ import annotations
@@ -12,8 +23,9 @@ import heapq
 import ipaddress
 import threading
 import time
+from collections import deque
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -24,13 +36,51 @@ from .deps import ApiError
 # identities (spoofed XFF, IPv6). Past the cap the OLDEST windows are evicted
 # even if not yet stale — worst case a few attackers' buckets reset early,
 # which beats unbounded growth.
-MAX_TRACKED_KEYS = 10_000
+#
+# 2026-09-26 audit item 3: raised 10_000 -> 50_000. Under an identity flood
+# the old cap let ~10k fresh attacker keys evict *active* buckets, resetting
+# real clients' counters mid-window; 5x headroom means an attacker must mint
+# 50k distinct rate-limit identities before ANY active bucket is touched.
+# Documented trade-off: 50k keys of (at most) ~128 compressed log entries
+# each is a few MiB of Python objects in the absolute worst case — bounded,
+# and only reachable by an attacker who already sent 50k+ requests inside
+# one window (each key requires a real request to exist).
+MAX_TRACKED_KEYS = 50_000
 
 # Eviction runs when the cap is crossed and clears down to the cap minus
 # this batch: the O(n) stale-scan under the lock is paid once per batch of
 # over-cap hits instead of on every single hit (the counter is touched on
 # the event loop's request path, so per-hit full scans add latency).
 EVICTION_BATCH = MAX_TRACKED_KEYS // 10
+
+# Per-key bound on DISTINCT hit timestamps retained. Beyond it the two
+# oldest entries merge (older timestamp, summed counts): counts stay exact
+# and can only age out LATER than the truth — fail-closed for limiting —
+# while a key hammered thousands of times in one window costs O(1) memory.
+# Legitimate traffic never reaches this (the highest default limit is 300
+# hits/min); it exists so an attacker cannot grow one key's log unboundedly.
+_MAX_LOG_ENTRIES = 128
+
+
+@dataclass
+class _WindowLog:
+    """One key's retained hits: (timestamp, count) pairs, oldest first.
+
+    ``window_seconds`` is bookkeeping the eviction path uses to judge
+    idleness without a live call; hit() rewrites it on every hit. A key's
+    count is always the exact sum of retained entries; merging (above)
+    preserves the total while aging it conservatively.
+    """
+
+    window_seconds: int
+    log: deque[tuple[float, int]] = field(default_factory=deque)
+    total: int = 0
+
+    def last_activity(self) -> float:
+        return self.log[-1][0]
+
+    def oldest_activity(self) -> float:
+        return self.log[0][0]
 
 
 @dataclass(frozen=True)
@@ -39,21 +89,25 @@ class HitResult:
     retry_after: int  # seconds until this window resets (>= 1 while limited)
 
 
-class FixedWindowCounter:
-    """Per-key fixed windows keyed on wall-clock time.
+class SlidingWindowCounter:
+    """Per-key exact sliding windows keyed on the monotonic clock.
 
-    The window length is supplied by the CALLER on every hit()/check(); the
-    window_seconds stored per key is bookkeeping the eviction path uses to
-    judge staleness, and hit() rewrites it on every call. A slot's count is
-    therefore judged against the window passed with the current call — in
-    practice each bucket prefix uses one window from settings, so callers
-    never observe a mismatch.
+    The window length is supplied by the CALLER on every hit()/check();
+    ``window_seconds`` stored per key is bookkeeping the eviction path uses
+    to judge idleness, and hit() rewrites it on every call. A key's count is
+    judged against the window passed with the current call — in practice
+    each bucket prefix uses one window from settings, so callers never
+    observe a mismatch.
+
+    Sliding semantics (audit item 2): a hit recorded at time T stops
+    counting at exactly T + window. ``count`` therefore never exceeds the
+    configured limit within ANY window-aligned span — the fixed-window 2x
+    boundary burst is gone. ``retry_after`` reports when the OLDEST retained
+    hit ages out, i.e. the earliest moment the count can decrease.
     """
 
     def __init__(self) -> None:
-        self._hits: dict[
-            str, tuple[int, float, int]
-        ] = {}  # key -> (count, window_start, window_seconds)
+        self._hits: dict[str, _WindowLog] = {}
         self._lock = threading.Lock()
 
     def hit(self, key: str, window_seconds: int, now: float | None = None) -> HitResult:
@@ -65,15 +119,29 @@ class FixedWindowCounter:
         # stretch Retry-After; elapsed time is what a window measures.
         current = now if now is not None else time.monotonic()
         with self._lock:
-            count, start, _ = self._hits.get(key, (0, 0.0, window_seconds))
-            if current - start >= window_seconds:
-                count, start = 0, current
-            count += 1
-            self._hits[key] = (count, start, window_seconds)
+            state = self._hits.get(key)
+            if state is None:
+                state = _WindowLog(window_seconds=window_seconds)
+                self._hits[key] = state
+            state.window_seconds = window_seconds
+            self._prune_locked(state, current, window_seconds)
+            if state.log and state.log[-1][0] == current:
+                stamp, count = state.log.pop()
+                state.log.append((stamp, count + 1))
+            else:
+                state.log.append((current, 1))
+            if len(state.log) > _MAX_LOG_ENTRIES:
+                # Merge the two oldest entries under the OLDER timestamp:
+                # the total is preserved exactly and the merged mass ages
+                # out no earlier than the truth (fail-closed for limiting).
+                stamp, count = state.log.popleft()
+                next_stamp, next_count = state.log.popleft()
+                state.log.appendleft((stamp, count + next_count))
+            state.total += 1
             if len(self._hits) > MAX_TRACKED_KEYS:
-                self._evict_oldest_locked(current)
-            retry_after = max(1, int(start + window_seconds - current) + 1)
-            return HitResult(count=count, retry_after=retry_after)
+                self._evict_locked(current)
+            retry_after = self._retry_after_locked(state, current, window_seconds)
+            return HitResult(count=state.total, retry_after=retry_after)
 
     def check(self, key: str, window_seconds: int, now: float | None = None) -> HitResult:
         """Read the current count WITHOUT recording a hit.
@@ -90,30 +158,56 @@ class FixedWindowCounter:
             raise ValueError("window_seconds must be positive")
         current = now if now is not None else time.monotonic()
         with self._lock:
-            count, start, _ = self._hits.get(key, (0, 0.0, window_seconds))
-            if current - start >= window_seconds:
-                count = 0
-            retry_after = max(1, int(start + window_seconds - current) + 1)
-            return HitResult(count=count, retry_after=retry_after)
+            state = self._hits.get(key)
+            if state is None:
+                return HitResult(count=0, retry_after=1)
+            self._prune_locked(state, current, window_seconds)
+            retry_after = self._retry_after_locked(state, current, window_seconds)
+            return HitResult(count=state.total, retry_after=retry_after)
 
-    def _evict_oldest_locked(self, now: float) -> None:
-        # Drop stale windows first; if still near the cap, evict among active
-        # keys by smallest count then oldest start, in one batch down to
-        # MAX_TRACKED_KEYS - EVICTION_BATCH so the next batch of over-cap
-        # hits does not each pay a full scan. An attacker rotating identities
-        # mints thousands of single-hit buckets; a real user's multi-hit
-        # bucket must be the LAST active key evicted (evicting by window
-        # start alone let 10k fresh garbage keys reset a victim's count
-        # mid-window). Uses the same clock the hit was recorded under — a
-        # synthetic now from hit(now=...) must not be judged against
-        # wall-clock time.
-        stale = [k for k, (_, s, w) in self._hits.items() if now - s >= w]
+    @staticmethod
+    def _prune_locked(state: _WindowLog, now: float, window_seconds: int) -> None:
+        # Age out every entry whose instant left the sliding window. The
+        # boundary is >=: a hit exactly ``window`` old no longer counts
+        # (matches the fixed-window contract at exact elapsed windows).
+        log = state.log
+        total = state.total
+        while log and now - log[0][0] >= window_seconds:
+            total -= log.popleft()[1]
+        state.total = total
+
+    @staticmethod
+    def _retry_after_locked(state: _WindowLog, now: float, window_seconds: int) -> int:
+        if not state.log:
+            return 1
+        return max(1, int(state.oldest_activity() + window_seconds - now) + 1)
+
+    def _evict_locked(self, now: float) -> None:
+        # 2026-09-26 audit item 3: prefer reclaiming buckets that are IDLE
+        # beyond their own window — such a key cannot influence any future
+        # count, so dropping it is free. Only when the stale sweep is not
+        # enough do ACTIVE keys go, smallest total first then oldest
+        # activity, in one batch down to MAX_TRACKED_KEYS - EVICTION_BATCH
+        # so the next batch of over-cap hits does not each pay a full scan.
+        # An attacker rotating identities mints thousands of single-hit
+        # buckets; a real user's multi-hit bucket must be the LAST active
+        # key evicted (evicting by activity alone let 10k fresh garbage keys
+        # reset a victim's count mid-window). Uses the same clock the hits
+        # were recorded under — a synthetic now from hit(now=...) must not
+        # be judged against wall-clock time.
+        stale = [
+            k
+            for k, state in self._hits.items()
+            if not state.log or now - state.last_activity() >= state.window_seconds
+        ]
         for k in stale:
             del self._hits[k]
         overflow = len(self._hits) - (MAX_TRACKED_KEYS - EVICTION_BATCH)
         if overflow > 0:
             victims = heapq.nsmallest(
-                overflow, self._hits, key=lambda k: (self._hits[k][0], self._hits[k][1])
+                overflow,
+                self._hits,
+                key=lambda k: (self._hits[k].total, self._hits[k].last_activity()),
             )
             for k in victims:
                 del self._hits[k]
@@ -137,14 +231,14 @@ def _aggregate_host(host: str) -> str:
     return str(ipaddress.ip_network(f"{ip}/64", strict=False).network_address) + "/64"
 
 
-def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
+def client_key(request: Request, trust_proxy_headers: bool = False) -> str | None:
     """Best-effort client identity for rate limiting (FastAPI call sites).
 
     Reads the request's ``state``/``client`` attributes directly (rather
     than delegating through ``request.scope``) because call sites — and the
     suite's duck-typed request doubles — promise exactly those two fields.
-    :func:`client_key_from_scope` implements the same rules over a raw
-    ASGI scope for the middleware's pre-dispatch gate; the two are pinned
+    :func:`client_key_from_scope` implements the same rules over a raw ASGI
+    scope for the middleware's pre-dispatch gate; the two are pinned
     to agree by test.
 
     Behind a reverse proxy every request appears to come from the proxy's
@@ -155,6 +249,17 @@ def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
     ``state.mindpattern_forwarded_client`` address. This function
     intentionally never treats a raw X-Forwarded-For header as proof: a
     direct client can freely forge one.
+
+    2026-09-26 audit item 5: a transport that exposes NO socket peer used to
+    fold every request into one shared "unknown-client" bucket — a single
+    client could 429 that entire surface for everyone. There is no honest
+    identity to rate limit by in that case, and a per-request unique id
+    would be fail-OPEN (the limiter would never bind), so the identity is
+    reported as UNAVAILABLE (None) and every consumer refuses the request
+    (429) instead: fail closed, loudly, matching the module's philosophy.
+    A correct deployment always has a TCP peer (uvicorn populates it); a
+    socketless frontend is a topology bug this surfaces instead of silently
+    degrading either availability or the limits.
     """
     if trust_proxy_headers and getattr(request.state, "mindpattern_trusted_proxy", False):
         forwarded = getattr(request.state, "mindpattern_forwarded_client", None)
@@ -162,10 +267,12 @@ def client_key(request: Request, trust_proxy_headers: bool = False) -> str:
             return _aggregate_host(forwarded)
     if request.client and request.client.host:
         return _aggregate_host(request.client.host)
-    return "unknown-client"
+    return None
 
 
-def client_key_from_scope(scope: Mapping[str, Any], trust_proxy_headers: bool = False) -> str:
+def client_key_from_scope(
+    scope: Mapping[str, Any], trust_proxy_headers: bool = False
+) -> str | None:
     """The same identity :func:`client_key` computes, from a raw ASGI scope.
 
     HardeningMiddleware needs the rate-limit key BEFORE the request enters
@@ -175,6 +282,8 @@ def client_key_from_scope(scope: Mapping[str, Any], trust_proxy_headers: bool = 
     address in ``scope["state"]`` — exactly the fields ``client_key`` reads
     through ``request.state`` — so both paths MUST agree on the key or the
     edge counter and the dependency counter would silently split buckets.
+    Returns None under the same no-peer condition as ``client_key``
+    (audit item 5): callers refuse rather than share one bucket.
     """
     state = scope.get("state") or {}
     if trust_proxy_headers and state.get("mindpattern_trusted_proxy"):
@@ -184,7 +293,7 @@ def client_key_from_scope(scope: Mapping[str, Any], trust_proxy_headers: bool = 
     client = scope.get("client")
     if client and client[0]:
         return _aggregate_host(client[0])
-    return "unknown-client"
+    return None
 
 
 def _limit_response(retry_after: int) -> HTTPException:
@@ -193,6 +302,20 @@ def _limit_response(retry_after: int) -> HTTPException:
         detail="rate limit exceeded",
         code="rate_limited",
         headers={"Retry-After": str(max(1, retry_after))},
+    )
+
+
+def _no_identity_response() -> HTTPException:
+    """429 for a request whose rate-limit identity does not exist (item 5).
+
+    Same envelope family as _limit_response so clients branch identically;
+    the detail names the cause so an operator running a socketless frontend
+    sees the topology problem in logs instead of debugging silence.
+    """
+    return ApiError(
+        status_code=429,
+        detail="no client identity available for rate limiting",
+        code="rate_limited",
     )
 
 
@@ -216,8 +339,10 @@ class RateLimitCheck:
         settings = request.app.state.settings
         limit = getattr(settings, self.limit_attr)
         window = getattr(settings, self.window_attr)
-        counter: FixedWindowCounter = request.app.state.rate_counter
+        counter: SlidingWindowCounter = request.app.state.rate_counter
         key = client_key(request, trust_proxy_headers=settings.trust_proxy_headers)
+        if key is None:
+            raise _no_identity_response()
         result = counter.hit(f"{self.bucket}:{key}", window)
         if result.count > limit:
             raise _limit_response(result.retry_after)
@@ -239,7 +364,7 @@ def check_keyed_limit_without_count(request: Request, key: str, limit: int, wind
     cannot 429 the legitimate first registrant of a free name. Login needs
     no such helper: it is deliberately IP-only.
     """
-    counter: FixedWindowCounter = request.app.state.rate_counter
+    counter: SlidingWindowCounter = request.app.state.rate_counter
     result = counter.check(key, window)
     # Unlike ``make_rate_limiter()``, the failing action is recorded *after*
     # this preflight.  ``> limit`` therefore admitted one extra conflict:
@@ -252,5 +377,87 @@ def check_keyed_limit_without_count(request: Request, key: str, limit: int, wind
 
 def record_keyed_failure(request: Request, key: str, window: int) -> None:
     """Count one failure against a keyed bucket (see above)."""
-    counter: FixedWindowCounter = request.app.state.rate_counter
+    counter: SlidingWindowCounter = request.app.state.rate_counter
     counter.hit(key, window)
+
+
+# --- single-token revocation (2026-09-26 remediation wave) ----------------------
+#
+# Logout now kills ONLY the presented token: its 128-bit ``jti`` is recorded
+# here with a ttl equal to the token's own expiry, and deps.require_user
+# refuses any bearer whose jti is resident. The account-wide epoch bump
+# remains the GLOBAL revocation primitive (credential rotation, deletion).
+# In-process by the same standing as the rate counter and the processing
+# keystore: exact for the single-process deployment topology this server
+# documents (one host per database, enforced at boot); a multi-host
+# deployment must move the table to shared state along with those.
+#
+# Wall-clock TTLs on purpose: a revoked jti must expire exactly when its
+# token does (``exp`` is wall-clock), and the store is pruned lazily on
+# every mutation plus a size cap with oldest-expiry eviction so an
+# attacker spamming logout on minted tokens cannot grow it unboundedly
+# (every revocation requires a VALID bearer, so growth is bounded by
+# legitimate logins per 24h in practice).
+
+MAX_TRACKED_REVOCATIONS = 100_000
+
+
+class TokenRevocationStore:
+    """In-memory jti -> expiry map; membership means "this token was
+    logged out and is dead until its own exp passes"."""
+
+    def __init__(self, max_entries: int = MAX_TRACKED_REVOCATIONS) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
+        self._by_expiry: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._max_entries = max_entries
+
+    def revoke(self, jti: str, expires_at_epoch: float, now: float | None = None) -> None:
+        """Record one revoked token id until its expiry.
+
+        A jti whose token already expired is accepted and immediately
+        prunable — harmless, and keeps the logout path branch-free."""
+        if not jti:
+            raise ValueError("jti must be non-empty")
+        current = now if now is not None else time.time()
+        with self._lock:
+            self._prune_locked(current)
+            self._by_expiry[jti] = max(expires_at_epoch, current)
+            if len(self._by_expiry) > self._max_entries:
+                # Oldest expiry first: those entries are closest to freeing
+                # themselves anyway, so eviction loses the least future
+                # protection per dropped entry.
+                overflow = len(self._by_expiry) - self._max_entries
+                for oldest in sorted(self._by_expiry, key=self._by_expiry.__getitem__)[:overflow]:
+                    del self._by_expiry[oldest]
+
+    def is_revoked(self, jti: str | None, now: float | None = None) -> bool:
+        """Membership check for a (possibly legacy, jti-less) token."""
+        if not jti:
+            return False
+        current = now if now is not None else time.time()
+        with self._lock:
+            expiry = self._by_expiry.get(jti)
+            if expiry is None:
+                return False
+            if current >= expiry:
+                del self._by_expiry[jti]
+                return False
+            return True
+
+    def _prune_locked(self, now: float) -> int:
+        expired = [jti for jti, exp in self._by_expiry.items() if now >= exp]
+        for jti in expired:
+            del self._by_expiry[jti]
+        return len(expired)
+
+    def prune(self, now: float | None = None) -> int:
+        """Drop every entry past its expiry (observability/tests)."""
+        with self._lock:
+            return self._prune_locked(now if now is not None else time.time())
+
+    def __len__(self) -> int:
+        with self._lock:
+            self._prune_locked(time.time())
+            return len(self._by_expiry)

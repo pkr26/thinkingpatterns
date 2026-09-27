@@ -270,6 +270,121 @@ describe("audit 2026-09-25 hardening", () => {
     expect(await queueLength("user-1")).toBe(1);
   });
 
+  it("enqueue and requeueRejected serialize through the SAME Web Lock as the flush (audit 2026-09-26 MEDIUM)", async () => {
+    // The read-modify-write used to be per-process only: two signed-in
+    // tabs could interleave their read→write windows and last-write-wins
+    // DROP a queued entry. Every mutation now runs under the flush path's
+    // lock name (a different name could still interleave with a flush's
+    // read→commit window).
+    const names: string[] = [];
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: async <T,>(name: string, callback: () => Promise<T>): Promise<T> => {
+          names.push(name);
+          return callback();
+        },
+      },
+    });
+    await enqueue(item(1));
+    expect(names).toEqual(["queue-flush"]);
+    // Park one item in the rejected store so requeueRejected has work, then
+    // verify it takes the same lock.
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    await enqueue(item(2));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const envelope = JSON.parse(map.get(queueKey)!) as { items: unknown[] };
+    const rejectedKey = queueKey.replace(".items.", ".rejected.");
+    map.set(rejectedKey, JSON.stringify(envelope));
+    map.delete(queueKey);
+    names.length = 0;
+    await requeueRejected("user-1");
+    expect(names).toEqual(["queue-flush"]);
+  });
+
+  it("a mutation waits while another holder owns the queue lock — real serialization, not a banner call", async () => {
+    // A lock stub with REAL mutual exclusion (like the browser's): the
+    // first holder's section is slow; the second enqueue must not run
+    // until the lock is released — and nothing gets dropped.
+    const started: string[] = [];
+    let held = false;
+    const waiters: Array<() => void> = [];
+    const acquire = async (): Promise<void> => {
+      if (held) await new Promise<void>((resolve) => waiters.push(resolve));
+      held = true;
+    };
+    const release = (): void => {
+      held = false;
+      waiters.shift()?.();
+    };
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstSection = true;
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: async <T,>(name: string, callback: () => Promise<T>): Promise<T> => {
+          await acquire();
+          try {
+            started.push(`section:${name}`);
+            if (firstSection) {
+              firstSection = false;
+              await firstGate; // hold the lock like a slow flush would
+            }
+            return await callback();
+          } finally {
+            release();
+          }
+        },
+      },
+    });
+    const first = enqueue(item(1));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(started).toEqual(["section:queue-flush"]);
+    const second = enqueue(item(2)); // queues behind the held lock
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(started).toEqual(["section:queue-flush"]); // still waiting — serialized
+    releaseFirst();
+    await first;
+    await second;
+    expect(started).toEqual(["section:queue-flush", "section:queue-flush"]);
+    expect(await queueLength("user-1")).toBe(2); // nothing dropped
+  });
+
+  it("the drain reads the queue ONCE per flush, not once per item (audit 2026-09-26 LOW)", async () => {
+    // Five queued items; the old loop re-read and re-parsed the whole
+    // queue for every one of them (O(n²)). A counting kv backend makes
+    // the read count observable.
+    const inner = freshBackend();
+    let itemsReads = 0;
+    setKvBackendForTests({
+      getItem: async (k) => {
+        if (k.includes(".items.")) itemsReads += 1;
+        return inner.backend.getItem(k);
+      },
+      setItem: inner.backend.setItem,
+      removeItem: inner.backend.removeItem,
+    });
+    for (let n = 1; n <= 5; n += 1) await enqueue(item(n));
+    stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
+    const before = itemsReads;
+    expect(await flushQueue("user-1")).toBe(5);
+    // One read for the drain batch + one for the single write-back commit.
+    expect(itemsReads - before).toBe(2);
+    expect(await queueLength("user-1")).toBe(0);
+  });
+
   it("a wipe racing the enqueue commit is rolled back — nothing outlives sign-out", async () => {
     const map = new Map<string, string>();
     let bumped = false;

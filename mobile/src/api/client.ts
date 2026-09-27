@@ -8,6 +8,7 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "../secureStore";
+import type { KdfParams } from "../crypto/keyEnvelope";
 
 /** Every endpoint is versioned under /api/v1. The server still mounts the
  *  legacy /api tree during the transition, but new clients speak v1 — the
@@ -28,7 +29,44 @@ const USERNAME_KEY = "@mindpattern/username";
  *  be replayed as another's (cross-origin KDF poisoning). */
 const saltKey = (username: string): string => `@mindpattern/salt_${username}`;
 
-export const DEFAULT_BASE_URL = "http://localhost:8000";
+/** Per-username key-envelope cache key (the same origin-bound discipline;
+ *  see api.cacheKeyEnvelope). */
+const envelopeKey = (username: string): string => `@mindpattern/keyenvelope_${username}`;
+
+/** The cached envelope record: what a v2 (or v1-marker) offline unlock
+ *  needs. v2 records carry the wrapped data key + the kdf_params blob the
+ *  wrap authenticated under; v1 records are a scheme marker only (offline
+ *  v1 unlock keeps using the sealed unlock proof). */
+export interface KeyEnvelopeCacheRecord {
+  scheme: "v1" | "v2";
+  saltB64: string;
+  kdfParams: unknown | null;
+  wrappedB64: string | null;
+}
+
+/** The React Native build-mode global (dev bundle vs release bundle). It is
+ *  injected by the Metro environment, not imported — declared here because
+ *  this repo ships no RN globals .d.ts. The typeof guard keeps a plain
+ *  node evaluation (vitest, scripts) on the release branch instead of
+ *  throwing on an undeclared identifier. */
+declare const __DEV__: boolean;
+
+/** RELEASE CONFIG POINT (2026-09-26 audit LOW) — the default server origin
+ *  for PRODUCTION builds. ***PLACEHOLDER — NOT A REAL DEPLOYMENT***:
+ *  operations MUST replace api.mindpattern.example with the real HTTPS
+ *  origin at release-config time. A release build left on the placeholder
+ *  fails loudly (no such host) — the correct failure; the alternative this
+ *  constant exists to end was a release build silently defaulting to a
+ *  device-local dev server. */
+export const PRODUCTION_BASE_URL = "https://api.mindpattern.example";
+
+/** 2026-09-26 audit LOW: the default is selected by BUILD, not shipped
+ *  once: dev builds keep the device-local loopback server, release builds
+ *  get the production HTTPS constant above. A user-selected URL (Settings)
+ *  always wins over either default; LoginScreen's server disclosure reads
+ *  the resolved URL, so it stays honest on both branches. */
+export const DEFAULT_BASE_URL =
+  typeof __DEV__ !== "undefined" && __DEV__ ? "http://localhost:8000" : PRODUCTION_BASE_URL;
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ERROR_MESSAGE_CHARS = 200;
@@ -98,11 +136,30 @@ export interface ListedConsent {
 }
 
 /** The pairing-lookup answer: who the code belongs to, before any data
- *  moves. The user sees exactly this before deciding to share. */
+ *  moves. The user sees exactly this before deciding to share.
+ *  sas/wrap_key_fingerprint (2026-09-26): the server-computed out-of-band
+ *  verification pair — the SAS ("123 456") is an HMAC over the code, the
+ *  wrap key DER and the patient id, so a substituted key changes it and
+ *  the mismatch is HUMAN-visible. Absent/empty on servers that predate
+ *  the field; the screen renders the pair only when well-formed. */
 export interface PairingLookup {
   therapist_id: string;
   display_name: string;
   wrap_pub_key: string;
+  sas?: string;
+  wrap_key_fingerprint?: string;
+}
+
+/** GET /auth/key-envelope (bearer): the account's key-scheme state. v2
+ *  accounts carry the wrapped random data key (opaque to the server);
+ *  v1 accounts answer key_scheme="v1" with null envelope fields. The
+ *  server is untrusted — keyScheme.ts sanitizes before anything acts on
+ *  it. Unknown fields pass through untouched. */
+export interface KeyEnvelopeResponse {
+  key_scheme: string;
+  salt: string;
+  kdf_params: Record<string, unknown> | null;
+  wrapped_data_key: string | null;
 }
 
 /** `URL#hostname` is canonicalized before it reaches this check. Keep the
@@ -198,13 +255,18 @@ export function setOriginChangeHandler(handler: (() => void | Promise<void>) | n
   onOriginChange = handler;
 }
 
-/** Every per-account and per-origin local value: salts, unlock proofs,
- *  recompute stamps, mood logs, pending question feedback, queue
- *  quarantine, analysis-generation marks, entry-version marks. All of it
- *  belongs to the origin it was created against. */
+/** Every per-account and per-origin local value: salts, key envelopes,
+ *  unlock proofs, recompute stamps, mood logs, pending question feedback,
+ *  queue quarantine, analysis-generation marks, entry-version marks. All
+ *  of it belongs to the origin it was created against. */
 function isOriginBoundKey(key: string): boolean {
   return (
     key.startsWith("@mindpattern/salt_") ||
+    // v2 key-envelope cache (2026-09-26): same origin-binding rule as the
+    // salt — one server's wrapped data key must never be unwrapped against
+    // another server's account (the AAD's username would match, the KEK's
+    // salt would not — but fail-closed by deletion is the cleaner wall).
+    key.startsWith("@mindpattern/keyenvelope_") ||
     key.startsWith("@mindpattern/unlockproof_") ||
     key.startsWith("@mindpattern/last_recompute_") ||
     // Same prefix as questionFeedback.ts's key() — that module exports no
@@ -370,6 +432,16 @@ export const API_ERROR_CODES = [
   // H-1 (2026-09-20): the rotation endpoints' specific failures.
   "rekey_key_mismatch",
   "processing_session_invalid",
+  // v2 key scheme (2026-09-26): the OLD credential-rotation endpoint
+  // answers this 409 for v2 accounts — swapping the salt without
+  // re-wrapping the data-key envelope would strand the random data key
+  // behind a locker whose KEK no longer exists. rotation.ts branches on it
+  // to surface honest "this account upgraded elsewhere" copy.
+  "key_scheme_conflict",
+  // The v1→v2 upgrade's possession probe refused the processing session's
+  // key: it did not authenticate stored ciphertext (wrong data key). The
+  // client must not blindly retry — the envelope would brick the account.
+  "envelope_key_mismatch",
   // 2026-09-20 audit H-14: the server returns this 409 when a legacy v1
   // sharing consent cannot cover a measures read; TherapistShareScreen
   // branches on it to show the calm "sharing terms updated" state.
@@ -489,6 +561,18 @@ async function request(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response: Response;
+  // TRANSPORT TRUST POSTURE (2026-09-26 audit MEDIUM, accepted risk):
+  // this fetch trusts the PLATFORM TLS stack — system CAs, no SPKI pinning.
+  // Deliberate: pinning needs a native networking interceptor (OkHttp
+  // CertificatePinner / NSURLSession trust evaluation), i.e. a new native
+  // dependency this client does not carry. The compensating mitigations
+  // are the first-login origin pin (M-3: a phished "support server" URL is
+  // visible before the password is ever typed), redirect:"error" below
+  // (a hostile origin cannot bounce credentials off-site), and the
+  // cleartext refusal for every non-loopback host. The residual — a MITM
+  // with a system-trusted certificate on the REAL origin — is documented
+  // in docs/SECURITY_RESIDUALS.md ("Mobile transport residuals") together
+  // with the native-pin design for when a native CI build exists.
   try {
     response = await fetch(`${base}${path}`, {
       method,
@@ -741,8 +825,38 @@ export const api = {
 
   meta: () => request("GET", `${API_PREFIX}/meta`),
 
-  register: (username: string, saltB64: string, authKeyB64: string) =>
-    request("POST", `${API_PREFIX}/auth/register`, { username, salt: saltB64, verifier: authKeyB64 }, {}, { sensitive: true }),
+  /** v2 registration (2026-09-26): kdf_params and wrapped_data_key arrive
+   *  together or not at all — the pair is enforced HERE (mirroring the
+   *  server's 422) so a caller bug can never strand a v1 account whose
+   *  client then tries to unwrap, or a v2 registration the server rejects.
+   *  The wrapped key is opaque to the server (see crypto/keyEnvelope.ts);
+   *  sensitive = the verifier + envelope ship together, redirect-refused. */
+  register: (
+    username: string,
+    saltB64: string,
+    authKeyB64: string,
+    kdfParams?: KdfParams,
+    wrappedDataKeyB64?: string,
+  ) => {
+    const hasParams = kdfParams !== undefined;
+    const hasWrapped = wrappedDataKeyB64 !== undefined;
+    if (hasParams !== hasWrapped) {
+      throw new ApiError(0, "v2 registration requires kdf_params and wrapped_data_key together");
+    }
+    return request(
+      "POST",
+      `${API_PREFIX}/auth/register`,
+      {
+        username,
+        salt: saltB64,
+        verifier: authKeyB64,
+        ...(hasParams ? { kdf_params: kdfParams } : {}),
+        ...(hasWrapped ? { wrapped_data_key: wrappedDataKeyB64 } : {}),
+      },
+      {},
+      { sensitive: true },
+    );
+  },
   // POST body, never a URL path: usernames must not land in proxy access logs.
   saltFor: (username: string) => request("POST", `${API_PREFIX}/auth/salt`, { username }),
   cacheSalt: async (username: string, saltB64: string) => {
@@ -783,13 +897,65 @@ export const api = {
   clearCachedSalt: async (username: string) => {
     await AsyncStorage.removeItem(saltKey(username));
   },
+  /** v2 key-envelope cache (2026-09-26): the last server-known envelope for
+   *  this username FROM THE CURRENT SERVER. The wrapped data key is
+   *  password-locked ciphertext (exactly what the server stores — a device
+   *  backup yields nothing without the password), so caching it locally is
+   *  what makes OFFLINE unlock possible for v2 accounts: unwrap the cached
+   *  envelope, and the GCM authentication is the password proof. Origin-
+   *  bound like the salt cache; the record carries the scheme so an
+   *  offline unlock also knows a v1 account when it sees one. */
+  cacheKeyEnvelope: async (username: string, record: KeyEnvelopeCacheRecord) => {
+    await AsyncStorage.setItem(
+      envelopeKey(username),
+      JSON.stringify({ v: 1, o: await getBaseUrl(), ...record }),
+    );
+  },
+  getCachedKeyEnvelope: async (username: string): Promise<KeyEnvelopeCacheRecord | null> => {
+    const raw = await AsyncStorage.getItem(envelopeKey(username));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as { v?: unknown; o?: unknown } & Partial<KeyEnvelopeCacheRecord>;
+      if (parsed.v !== 1) return null;
+      if (typeof parsed.o !== "string" || parsed.o !== (await getBaseUrl())) return null;
+      if (parsed.scheme !== "v1" && parsed.scheme !== "v2") return null;
+      if (typeof parsed.saltB64 !== "string") return null;
+      if (parsed.scheme === "v2" && (typeof parsed.wrappedB64 !== "string" || parsed.kdfParams === undefined)) {
+        return null;
+      }
+      return {
+        scheme: parsed.scheme,
+        saltB64: parsed.saltB64,
+        kdfParams: parsed.kdfParams ?? null,
+        wrappedB64: parsed.wrappedB64 ?? null,
+      };
+    } catch {
+      return null; // legacy/corrupt record: refuse rather than guess
+    }
+  },
+  clearCachedKeyEnvelope: async (username: string) => {
+    await AsyncStorage.removeItem(envelopeKey(username));
+  },
   login: (username: string, authKeyB64: string) =>
     // noBearer: a login 401 means the VERIFIER was wrong (wrong password),
     // never that the stored bearer died — so the vault-lock hook must not
     // fire on it (biometric sessions use this endpoint for the online
     // re-auth check; see reauth.ts).
+    // TOKEN OPACITY (2026-09-26): the bearer is an opaque string here — the
+    // client never parses it, so the server's newer claims (jti, purpose,
+    // ksv) and response fields (key_scheme, role, expires_in) pass through
+    // untouched. Consumers read body.token/body.user_id only; keyScheme.ts
+    // reads key_scheme separately when it needs the scheme.
     request("POST", `${API_PREFIX}/auth/login`, { username, verifier: authKeyB64 }, {}, { sensitive: true, noBearer: true }),
-  /** Server-side kill switch: invalidates every bearer token for the account. */
+  /** The account's key-scheme state (bearer). v2 unlock material: salt +
+   *  kdf_params + the wrapped random data key; v1 answers null envelope
+   *  fields. Nothing here is a client secret — the wrapped key is
+   *  password-locked ciphertext — so it ships as a plain GET. */
+  keyEnvelope: (): Promise<KeyEnvelopeResponse> => request("GET", `${API_PREFIX}/auth/key-envelope`),
+  /** Per-device sign-out (2026-09-26): the server revokes THIS bearer's
+   *  jti; other devices' sessions for the account stay valid. The
+   *  account-wide epoch bump now lives only where invalidating everything
+   *  is the point (credential rotation, password change, deletion). */
   logout: () => request("POST", `${API_PREFIX}/auth/logout`),
 
   createEntry: (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number) =>
@@ -1076,13 +1242,63 @@ export const api = {
     ),
   /** Retire the current login credential (salt + verifier) for a new one.
    *  Old-password proof required; bumps the server-side epoch, so every
-   *  bearer (including this device's) dies with it. */
+   *  bearer (including this device's) dies with it. v2 accounts are
+   *  refused with 409 key_scheme_conflict — changePassword is their path. */
   rotateCredential: (oldVerifierB64: string, newSaltB64: string, newVerifierB64: string) =>
     request(
       "PUT",
       `${API_PREFIX}/account/credential`,
       { verifier: oldVerifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64 },
       {},
+      { sensitive: true },
+    ),
+  /** v2 password change (2026-09-26): swap the credential AND the data-key
+   *  envelope in ONE server transaction — the client unwrapped the random
+   *  data key locally with the old password and re-wrapped the SAME key
+   *  under the new salt (O(1), no corpus rekey). Old-password verifier
+   *  proof gates it; the epoch bump still kills every bearer, so the
+   *  caller must re-login afterwards. new_kdf_params is optional — omit it
+   *  to keep the account's current cost profile (the default blob on v1
+   *  accounts upgrading through this endpoint). */
+  changePassword: (
+    oldVerifierB64: string,
+    newSaltB64: string,
+    newVerifierB64: string,
+    wrappedDataKeyB64: string,
+    newKdfParams?: KdfParams,
+  ) =>
+    request(
+      "PUT",
+      `${API_PREFIX}/account/password`,
+      {
+        verifier: oldVerifierB64,
+        new_salt: newSaltB64,
+        new_verifier: newVerifierB64,
+        wrapped_data_key: wrappedDataKeyB64,
+        ...(newKdfParams !== undefined ? { new_kdf_params: newKdfParams } : {}),
+      },
+      {},
+      { sensitive: true },
+    ),
+  /** v1→v2 self-service upgrade (2026-09-26): wrap the account's CURRENT
+   *  data key under the password-derived KEK and upload — the account
+   *  flips to key_scheme="v2" and future password changes become O(1).
+   *  Two independent proofs: the password verifier (header) and POSSESSION
+   *  of the current data key (a processing-session token whose key
+   *  authenticates stored ciphertext — a wrong key answers 403
+   *  envelope_key_mismatch, and storing an envelope over it would brick
+   *  every future unlock). */
+  upgradeKeyEnvelope: (
+    kdfParams: KdfParams,
+    wrappedDataKeyB64: string,
+    processingToken: string,
+    verifierB64: string,
+  ) =>
+    request(
+      "POST",
+      `${API_PREFIX}/account/key-envelope/upgrade`,
+      { kdf_params: kdfParams, wrapped_data_key: wrappedDataKeyB64 },
+      { "X-Processing-Token": processingToken, "X-Account-Verifier": verifierB64 },
       { sensitive: true },
     ),
   /** Swap the wrapped data key of one ACTIVE grant after a rekey. */

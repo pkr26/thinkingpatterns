@@ -75,11 +75,16 @@ async def test_h6_revision_cap_evicts_oldest_beyond_the_cap(client, monkeypatch)
     therapist, patient, note = await _note_fixture(client, "cap")
 
     app = client._transport.app  # noqa: SLF001 — test reachability into state
+    # Item 15: each edit names the version it is based on (the note starts
+    # at version 1; every changing PATCH advances it).
     for version in range(1, 6):  # five changing edits against a cap of 3
         response = await client.patch(
             f"/api/therapist/notes/{note['id']}",
             headers=therapist.headers,
-            json={"blob": therapist.encrypt_note(patient, "h6-note", f"v{version}")},
+            json={
+                "blob": therapist.encrypt_note(patient, "h6-note", f"v{version}"),
+                "base_version": version,
+            },
         )
         assert response.status_code == 200, response.text
 
@@ -94,13 +99,11 @@ async def test_h6_revision_cap_evicts_oldest_beyond_the_cap(client, monkeypatch)
     # v0's and v1's revisions were evicted oldest-first), newest first.
     from app.security import crypto as note_crypto
 
-    aad = note_crypto.build_aad(
-        "note", therapist.user_id or "", patient.user_id or "", "h6-note"
-    )
+    aad = note_crypto.build_aad("note", therapist.user_id or "", patient.user_id or "", "h6-note")
     texts = [
-        json.loads(
-            note_crypto.decrypt(therapist.notes_key, base64.b64decode(row["blob"]), aad)
-        )["text"]
+        json.loads(note_crypto.decrypt(therapist.notes_key, base64.b64decode(row["blob"]), aad))[
+            "text"
+        ]
         for row in rows
     ]
     assert texts == ["v4", "v3", "v2"]
@@ -110,9 +113,7 @@ async def test_h6_revision_cap_evicts_oldest_beyond_the_cap(client, monkeypatch)
         count = len(
             (
                 await session.execute(
-                    select(TherapistNoteRevision).where(
-                        TherapistNoteRevision.note_id == note["id"]
-                    )
+                    select(TherapistNoteRevision).where(TherapistNoteRevision.note_id == note["id"])
                 )
             )
             .scalars()
@@ -127,9 +128,7 @@ async def test_h6_revision_cap_evicts_oldest_beyond_the_cap(client, monkeypatch)
     )
     assert notes.status_code == 200
     live = json.loads(
-        note_crypto.decrypt(
-            therapist.notes_key, base64.b64decode(notes.json()[0]["blob"]), aad
-        )
+        note_crypto.decrypt(therapist.notes_key, base64.b64decode(notes.json()[0]["blob"]), aad)
     )["text"]
     assert live == "v5"
 
@@ -150,22 +149,26 @@ async def test_h6_revisions_consume_the_chart_byte_budget(client, monkeypatch):
     edited = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": therapist.encrypt_note(patient, "h6-note", "v1")},
+        json={
+            "blob": therapist.encrypt_note(patient, "h6-note", "v1"),
+            "base_version": 1,
+        },
     )
     assert edited.status_code == 200, edited.text
 
     refused = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": therapist.encrypt_note(patient, "h6-note", "v2")},
+        json={
+            "blob": therapist.encrypt_note(patient, "h6-note", "v2"),
+            "base_version": 2,
+        },
     )
     assert refused.status_code == 413, refused.text
     assert refused.json()["code"] == "blob_quota_exceeded"
 
 
-async def test_h6_note_bytes_count_once_per_chart_not_once_per_revision(
-    client, monkeypatch
-):
+async def test_h6_note_bytes_count_once_per_chart_not_once_per_revision(client, monkeypatch):
     """2026-09-26 audit follow-up (quota fan-out): the chart byte budget
     sums the LIVE note blob once, no matter how many revisions sit beside
     it. The first H-6 cut summed note bytes across the revision outer
@@ -187,14 +190,20 @@ async def test_h6_note_bytes_count_once_per_chart_not_once_per_revision(
         edited = await client.patch(
             f"/api/therapist/notes/{note['id']}",
             headers=therapist.headers,
-            json={"blob": therapist.encrypt_note(patient, "h6-note", f"v{version}")},
+            json={
+                "blob": therapist.encrypt_note(patient, "h6-note", f"v{version}"),
+                "base_version": version,
+            },
         )
         assert edited.status_code == 200, f"edit v{version} must fit: {edited.text}"
 
     overflow = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": therapist.encrypt_note(patient, "h6-note", "v4")},
+        json={
+            "blob": therapist.encrypt_note(patient, "h6-note", "v4"),
+            "base_version": 4,
+        },
     )
     assert overflow.status_code == 413, overflow.text
     assert overflow.json()["code"] == "blob_quota_exceeded"
@@ -316,7 +325,9 @@ async def test_mb1_stale_epoch_cannot_grant_consent(client, app):
     code = await therapist.create_pairing_code(client)
 
     wrap = patient_wrap_for(patient, therapist.wrap_pub_key, therapist.user_id)
-    body = ConsentGrantRequest(code=code, disclosure=consents_api.SHARING_DISCLOSURE_VERSION, **wrap)
+    body = ConsentGrantRequest(
+        code=code, disclosure=consents_api.SHARING_DISCLOSURE_VERSION, **wrap
+    )
     async with app.state.sessionmaker() as session:
         stale_user = await _stale_auth_user(app, session, patient.user_id)
         with pytest.raises(ApiError) as raised:
@@ -974,11 +985,16 @@ def test_l1_tied_tod_corpus_stays_deterministic_and_unnarrowed():
 
     today = t0 + timedelta(weeks=8)
     first = brain.update(brain.load_state(None), corpus, today)
+    # Two fresh evidence days (2026-09-26 item 5: a single new clustered
+    # mention is not replication) that preserve the EXACT tie: one more
+    # evening, one more morning — 5:5 keeps the 70% dominance bar out of
+    # reach on every seed.
     grown = corpus + [
-        JournalEntry("another busy work day", today + timedelta(weeks=1), tod="evening")
+        JournalEntry("another busy work day", today + timedelta(days=1), tod="evening"),
+        JournalEntry("another busy work day", today + timedelta(days=2), tod="morning"),
     ]
     second = brain.update(
-        brain.load_state(brain.dump_state(first.new_state)), grown, today + timedelta(weeks=1)
+        brain.load_state(brain.dump_state(first.new_state)), grown, today + timedelta(days=2)
     )
     cards = [p for p in second.surfaced if p.kind == "temporal" and p.label == "work"]
     assert cards, "the tie corpus must still surface the temporal card"
@@ -1108,9 +1124,7 @@ async def test_low_meta_joins_the_ops_rate_bucket(client, app):
     free unauthenticated flood surface is gone."""
     app.state.settings.ops_rate_limit = 3
     app.state.settings.ops_rate_window = 60
-    statuses = [
-        (await client.get("/api/meta")).status_code for _ in range(5)
-    ]
+    statuses = [(await client.get("/api/meta")).status_code for _ in range(5)]
     assert statuses[:3] == [200, 200, 200]
     assert 429 in statuses[3:], statuses
 
@@ -1257,6 +1271,5 @@ def test_low_pyproject_pins_match_requirements_in():
         pin = re.search(rf'"{package}==([^"]+)"', pyproject)
         assert pin, f"{package} missing (or not exact-pinned) in pyproject.toml"
         assert pin.group(1) == m.group(1), (
-            f"{package} drift: requirements.in pins {m.group(1)} but "
-            f"pyproject pins {pin.group(1)}"
+            f"{package} drift: requirements.in pins {m.group(1)} but pyproject pins {pin.group(1)}"
         )

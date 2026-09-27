@@ -37,6 +37,14 @@ import {
   maxScoreForMeasure,
   type MeasureId,
 } from "../measures";
+import {
+  clearPendingMeasure,
+  loadPendingMeasure,
+  savePendingMeasure,
+  type PendingMeasure,
+} from "../pendingMeasure";
+import { recordMeasureCompleted } from "../measureReminders";
+import { syncMeasureReminderSchedule } from "../reminderSync";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
@@ -113,6 +121,21 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The pending record the current in-progress answers belong to (audit
+   *  LOW, 2026-09-26): completed answers are persisted BEFORE their send
+   *  (client_measure_id is the server's idempotency key) and every retry —
+   *  a manual re-tap after an offline status, or the mount retry below —
+   *  reuses the SAME id, so a send that landed-but-was-never-acked can
+   *  never be recorded twice. */
+  const pendingRef = useRef<PendingMeasure | null>(null);
+  /** The mount-retry runs exactly once per mount (a ref, not state: this
+   *  is a flow flag, not render input). */
+  const retriedRef = useRef(false);
+
+  /** Element-wise equality for the guarded post-send reset: answers the
+   *  user changed while a send was in flight are NOT wiped by it. */
+  const samePicks = (a: ReadonlyArray<number | null>, b: ReadonlyArray<number | null>): boolean =>
+    a.length === b.length && a.every((value, index) => value === b[index]);
 
   /** Transient status; replaces itself cleanly and never stacks (the
    *  EntryScreen/HistoryScreen idiom, 2026-09-26 audit LOW). */
@@ -161,42 +184,99 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     void load();
   }, [load]);
 
-  const submit = async () => {
-    if (busy || !measureComplete(active, responses)) return;
+  /** Record the completed questionnaire. `retryOf` (the mount-retry path)
+   *  sends a specific persisted record; a plain tap reuses the pending
+   *  record when the on-screen answers still match it, so the SAME
+   *  client_measure_id rides every attempt of one questionnaire. */
+  const submit = async (retryOf?: PendingMeasure) => {
+    if (busy) return;
+    const reusable =
+      retryOf ??
+      (pendingRef.current !== null &&
+        pendingRef.current.kind === active &&
+        samePicks(pendingRef.current.picks, responses)
+        ? pendingRef.current
+        : undefined);
+    if (reusable === undefined && !measureComplete(active, responses)) return;
     setBusy(true);
-    const safetyFlagged = safetyItemEndorsed(active, responses);
+    // Hoisted for the catch paths (try and catch are separate scopes): the
+    // 409 branch must clear the very pending record this send used.
+    let finishSent: () => void = () => {};
+    let sentUserId: string | null = null;
+    // Re-audit 2026-09-27 (L): the data key SNAPSHOT for this submit —
+    // zeroized in the finally below. vault.get() shares its buffers with
+    // the vault, so re-reading it after each await means a lock that lands
+    // mid-submit (a backgrounding app) zeroizes the key BETWEEN the
+    // isUnlocked check and the payload encrypt — the record would then
+    // persist and ship sealed under all-zero bytes, permanently unreadable.
+    // One copy taken at the check, used for both the persistence and the
+    // encrypt, closes that window (the savePendingMeasure keyCopy idiom).
+    let keyCopy: Buffer | null = null;
     try {
       const userId = await api.getUserId();
       if (!userId) {
         Alert.alert(tr("measures.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
         return;
       }
+      sentUserId = userId;
       if (!vault.isUnlocked()) {
         Alert.alert(tr("measures.lockedTitle"), tr("measures.lockedBody"));
         return;
       }
+      keyCopy = Buffer.from(vault.get().dataKey);
       const today = localDateISO();
-      const clientMeasureId = newMeasureId(today);
+      // 2026-09-26 audit LOW: persist BEFORE the send (a status-0 failure
+      // can be a timeout AFTER the server committed; the stable id is what
+      // makes every retry idempotent). A persistence failure never blocks
+      // the send — the answers are also still on screen.
+      const record: PendingMeasure =
+        reusable ?? { kind: active, clientMeasureId: newMeasureId(today), picks: [...responses] as number[], date: today };
+      pendingRef.current = record;
+      await savePendingMeasure(keyCopy, userId, record).catch(() => {});
+      const safetyFlagged = safetyItemEndorsed(record.kind, record.picks);
       const blob = encrypt(
-        vault.get().dataKey,
-        Buffer.from(measurePayload(active, responses, today), "utf8"),
-        buildAad("measure", userId, clientMeasureId),
+        keyCopy,
+        Buffer.from(measurePayload(record.kind, record.picks, record.date), "utf8"),
+        buildAad("measure", userId, record.clientMeasureId),
       ).toString("base64");
-      await api.createMeasure(clientMeasureId, blob, today);
-      setResponses(Array.from({ length: instrument.items }, () => null));
+      // The post-send reset, guarded like EntryScreen's editor clear: only
+      // reset when the on-screen answers are still the ones that shipped —
+      // answers changed while the send was in flight are kept for a fresh
+      // Record tap.
+      finishSent = () => {
+        pendingRef.current = null;
+        setResponses((previous) =>
+          samePicks(previous, record.picks)
+            ? Array.from({ length: INSTRUMENTS[record.kind].items }, () => null)
+            : previous,
+        );
+      };
+      await api.createMeasure(record.clientMeasureId, blob, record.date);
+      await clearPendingMeasure(userId).catch(() => {});
+      finishSent();
       showStatus(tr("measures.recordedStatus"), "ok");
+      // The MBC cadence clock (2026-09-27): a completed questionnaire
+      // restarts the check-in countdown AND retires any nudge scheduled
+      // before it landed (syncMeasureReminderSchedule cancels what is no
+      // longer due). Best-effort by design — a lost stamp only ever means
+      // one slightly-early nudge.
+      await recordMeasureCompleted(userId, record.date).catch(() => {});
+      void syncMeasureReminderSchedule(userId).catch(() => {});
       await load();
       // SAFETY: only after the response is safely stored. Same throttle
       // stamp and calm copy as the entry crisis dialog.
       if (safetyFlagged) {
-        const flagged = await crisisDialogShownOn(userId, today).catch(() => false);
+        const flagged = await crisisDialogShownOn(userId, record.date).catch(() => false);
         if (!flagged) {
-          await recordCrisisDialogShown(userId, today).catch(() => {});
+          await recordCrisisDialogShown(userId, record.date).catch(() => {});
           Alert.alert(
             tr("measures.crisisTitle"),
             tr("measures.crisisBody"),
             [
+              // Resources FIRST (the same offline static list as ever); the
+              // personal safety plan is offered beside them, never instead.
               { text: tr("measures.viewResources"), onPress: () => navigation.navigate("Crisis") },
+              { text: tr("common.makeSafetyPlan"), onPress: () => navigation.navigate("SafetyPlan") },
               { text: tr("common.notNow"), style: "cancel" },
             ],
           );
@@ -204,6 +284,11 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
+        // Idempotent retry of a send that already landed: the record dies
+        // here too (under its OWN account id — never a fallback ""), or
+        // every mount would retry it forever.
+        if (sentUserId) await clearPendingMeasure(sentUserId).catch(() => {});
+        finishSent();
         showStatus(tr("measures.alreadyRecorded"), "neutral");
         await load();
         return;
@@ -212,17 +297,45 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       // inline status, not a modal. The picks deliberately stay selected and
       // the Record button stays enabled (the completion gate drives it) —
       // that IS the retry affordance: when connectivity returns, the same
-      // tap re-submits the same picks. A modal here interrupted the screen
-      // for a condition the user can do nothing about right now.
+      // tap re-submits the same picks under the same id. The pending record
+      // stays persisted, so the answers also survive a remount (app
+      // backgrounding locks the vault and unmounts this screen; the next
+      // mount restores and retries them — see the effect below).
       if (err instanceof ApiError && err.status === 0) {
         showStatus(tr("measures.recordOfflineBody"), "neutral");
         return;
       }
       Alert.alert(tr("measures.notRecordedTitle"), tr("measures.recordFailedBody"));
     } finally {
+      // The snapshot dies with the submit, success or failure.
+      if (keyCopy) keyCopy.fill(0);
       setBusy(false);
     }
   };
+
+  // 2026-09-26 audit LOW: restore + retry a persisted pending questionnaire
+  // once per mount. The answers come back on screen (the honest restore)
+  // and the send uses the SAME client_measure_id (idempotent by contract).
+  // Offline again → the record simply stays for the next mount; the
+  // restored picks keep the Record button enabled either way.
+  useEffect(() => {
+    if (retriedRef.current) return;
+    retriedRef.current = true;
+    void (async () => {
+      try {
+        const userId = await api.getUserId();
+        if (!userId || !vault.isUnlocked()) return;
+        const pending = await loadPendingMeasure(vault.get().dataKey, userId);
+        if (pending === null) return;
+        setActive(pending.kind);
+        setResponses(pending.picks);
+        await submit(pending);
+      } catch {
+        // Locked vault / dead storage: the record stays; nothing to show.
+      }
+    })();
+  }, // Stryker disable next-line ArrayDeclaration: a mount-once flow guarded by retriedRef — the effect body is idempotent under a double fire
+     []);
 
   return (
     <MainShell current="Settings" navigation={navigation}>

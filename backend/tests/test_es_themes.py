@@ -80,9 +80,7 @@ class TestThemeLookupGating:
         seen: dict[str, str] = {}
         for theme, words in brain.THEME_LEXICON_ES.items():
             for word in words:
-                assert word not in seen, (
-                    f"{word!r} in both {seen[word]!r} and {theme!r}"
-                )
+                assert word not in seen, f"{word!r} in both {seen[word]!r} and {theme!r}"
                 seen[word] = theme
 
     def test_english_union_trap_stays_closed(self):
@@ -116,7 +114,9 @@ class TestSpanishThemeCards:
         # theme word) must NOT mint Spanish-map themes: the ES map only
         # reads under language "es".
         corpus = [
-            JournalEntry(f"quiet day, read a book, went to a fiesta nearby {i}", T0 - timedelta(days=i))
+            JournalEntry(
+                f"quiet day, read a book, went to a fiesta nearby {i}", T0 - timedelta(days=i)
+            )
             for i in range(70)
         ]
         result = brain.update(brain.load_state(None), corpus, T0)

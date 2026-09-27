@@ -26,11 +26,23 @@ minimal-risk, no-PHI behavioral study of the app AS SHIPPED.
 
 - Inclusion: 18+, owns a smartphone, willing to journal ≥3×/week for 4
   weeks, fluent in English or Spanish.
-- Exclusion: current suicidal ideation requiring active treatment
-  (screened at baseline with the same self-report gate the app itself
-  uses; positive screens receive the same crisis-resource referral
-  PLUS a documented referral out of the study), or participation in
-  concurrent psychotherapy research.
+- Exclusion: current suicidal ideation requiring active treatment.
+  Screened at baseline with validated instruments per standard
+  behavioral-research practice — **PHQ-9 item 9 endorsement (score ≥1)**
+  (Kroenke et al. 2001) **AND** the **Columbia-Suicide Severity Rating
+  Scale (C-SSRS) screener version** (Posner et al. 2011) — NOT the app's
+  own crisis-language phrase gate (which is a conservative client-side
+  suppression heuristic, not a validated screening instrument, and
+  cannot serve as an eligibility gate). Either positive screen refers
+  the participant out of the study with the same crisis-resource
+  referral PLUS a documented clinical referral; the C-SSRS
+  ideation-behavior severity items govern the referral path (passive
+  ideation → resources + study-team clinical consultant same-day
+  review; active ideation or any behavior → immediate referral and
+  exclusion). Re-screen at week 2 and week 4 sessions with the same
+  instruments; new positives keep the participant's data but trigger
+  the referral path and a safety-protocol review. Participation in
+  concurrent psychotherapy research is also exclusionary.
 
 ## 3. Measures (all participant-reported, outside the app)
 

@@ -2,8 +2,10 @@
  * UI kit — calm, clinical, no dependencies (redesign 2026-09-26).
  * Components render through the token-driven classes in public/portal.css;
  * the `theme` object stays exported (refreshed values + the previously
- * MISSING `warn` token) because the views carry inline styles that read
- * it — those inline styles now pick up the refined palette automatically.
+ * MISSING `warn` token) for the views' SVG stroke/fill ATTRIBUTES (e.g.
+ * the mood sparkline), which CSP style-src does not govern. Every former
+ * inline style object moved to portal.css classes in the 2026-09-26 CSP
+ * hardening, so nothing here or in the views may set a style attribute.
  *
  * Contracts kept: Buttons are real <button>s whose handler is absent when
  * disabled; cards are sections with h2 titles; Field wraps its input in
@@ -108,8 +110,11 @@ export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "dang
   const classes = ["note"];
   if (props.tone) classes.push(`note--${props.tone}`);
   // Audit fix 16 (2026-09-21): NOTE_TEMPLATES invite multi-line drafts; a
-  // plain <p> collapsed the therapist's (and the patient's) line breaks.
-  return <p role={props.role} className={classes.join(" ")} style={{ whiteSpace: "pre-wrap" }}>{props.children}</p>;
+  // plain <p> collapsed the therapist's (and patient's) line breaks —
+  // .note carries white-space: pre-wrap in portal.css (the inline copy of
+  // the rule left with the 2026-09-26 CSP hardening, which drops
+  // style-src 'unsafe-inline').
+  return <p role={props.role} className={classes.join(" ")}>{props.children}</p>;
 }
 
 /** 4-segment password-strength meter under the register form's Password
@@ -149,12 +154,13 @@ export function ErrorBanner({ message }: { message: string }): React.JSX.Element
 /** Info banner (session notices on the login screen — App.tsx). Same
  *  live-region contract as ErrorBanner: role=status announces politely,
  *  and `flush` drops the corner radius for the full-width notices App
- *  pins to the very top of the page (identical DOM to the markup App
- *  used to hand-write). */
+ *  pins to the very top of the page (class-based since the 2026-09-26
+ *  CSP hardening — the banner is identical DOM to the markup App used to
+ *  hand-write, minus the inline style attribute). */
 export function InfoBanner({ message, flush }: { message: string; flush?: boolean }): React.JSX.Element | null {
   if (!message) return null;
   return (
-    <div role="status" className="banner banner--info" style={flush ? { borderRadius: 0 } : undefined}>
+    <div role="status" className={flush ? "banner banner--info banner--flush" : "banner banner--info"}>
       {message}
     </div>
   );

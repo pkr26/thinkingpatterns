@@ -113,21 +113,13 @@ async def test_wrap_key_rotation_and_patient_rewrap_without_repairing(client, ap
     # private key (the post-rotation material) unwraps the patient's data key.
     async with app.state.sessionmaker() as session:
         row = (
-            (
-                await session.execute(
-                    select(Consent).where(Consent.id == consent_id)
-                )
-            )
-            .scalars()
-            .one()
+            (await session.execute(select(Consent).where(Consent.id == consent_id))).scalars().one()
         )
         assert row.ephemeral_pub == wrap["ephemeral_pub"]
-        audit_seen = (
-            await session.execute(
-                select(AccessLog).where(
-                    AccessLog.actor_id == therapist.user_id,
-                    AccessLog.action == "wrap_key_rotate",
-                )
+        audit_seen = await session.execute(
+            select(AccessLog).where(
+                AccessLog.actor_id == therapist.user_id,
+                AccessLog.action == "wrap_key_rotate",
             )
         )
         assert audit_seen.scalars().first() is not None, "rotation must be audit-logged"
@@ -138,6 +130,7 @@ async def test_wrap_key_rotation_and_patient_rewrap_without_repairing(client, ap
         patient, wrap["ephemeral_pub"], wrap["wrapped_key"]
     )
     assert data_key == patient.data_key
+
 
 async def test_wrap_key_rotation_requires_the_current_verifier(client):
     emu = TherapistEmulator("ther-wrap-g", "deep-password")

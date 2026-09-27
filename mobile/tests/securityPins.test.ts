@@ -62,6 +62,11 @@ vi.mock("../src/api/client", async (importOriginal) => {
       getCachedSalt: async () => apiState.cachedSalt,
       saltFor: async () => ({ salt: apiState.cachedSalt }),
       cacheSalt: vi.fn(async () => {}),
+      // v2 key-scheme routing (2026-09-26): default v1 so the H-1 pins below
+      // keep exercising the resumable rekey ladder; the v2 branch (O(1)
+      // rewrap via PUT /account/password) has its own suite in
+      // tests/rotationV2.test.ts.
+      keyEnvelope: async () => ({ key_scheme: "v1", salt: apiState.cachedSalt, kdf_params: null, wrapped_data_key: null }),
       openProcessingSession: async (key: string) => ({ session_token: `tok-${key.slice(0, 6)}` }),
       rekeyStoredData: vi.fn(async () => {
         if (apiState.failAt === "rekey") {
@@ -111,6 +116,10 @@ vi.mock("../src/crypto/MindPatternCrypto", async (importOriginal) => {
 });
 
 import { checkAnalysisGeneration, FRESHNESS_ERROR, forgetAnalysisGeneration } from "../src/stateSeqGuard";
+// 2026-09-26 audit LOW: the state-seq mark persists through the sealed
+// secureStore lane now — assertions about the stored copy round-trip
+// through the same facade the guard uses.
+import { secureStore } from "../src/secureStore";
 // M-3/L-7 client-shape tests live in tests/client.rotation.test.ts against
 // the REAL client module (this file mocks it for the rotation flow).
 import {
@@ -164,8 +173,10 @@ describe("stateSeqGuard fail-closed (M-1)", () => {
     // ...but the mirror remembers: a both-copies rollback still throws.
     await expect(checkAnalysisGeneration("m1b", 4, 4)).rejects.toThrow(FRESHNESS_ERROR);
     // And the persisted copy was rewritten (self-heal), so the defense
-    // survives a process restart too.
-    expect(store.get("mindpattern.stateSeq.m1b")).toBe("9");
+    // survives a process restart too. 2026-09-26: the rewrite is sealed
+    // (secureStore envelope, GCM-verified under the Keychain-held key) —
+    // read it back through the same facade, never the raw slot.
+    expect(await secureStore.getItem("mindpattern.stateSeq.m1b")).toBe("9");
   });
 
   it("still catches payload/echo disagreement", async () => {

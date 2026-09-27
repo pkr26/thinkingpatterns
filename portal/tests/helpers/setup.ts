@@ -19,6 +19,12 @@ const makeStorage = (store: Map<string, string>) => ({
 // synthesize events (e.g. a persisted pageshow) without a DOM.
 const listeners = new Map<string, Set<(event: unknown) => void>>();
 
+// 2026-09-26 audit round (idle lock): the visibilitychange handler
+// registers on document (the event does not bubble to window), so the shim
+// needs a document too — its OWN listener map, a mutable `hidden` flag the
+// tests flip, and the same dispatchEvent shape as window.
+const documentListeners = new Map<string, Set<(event: unknown) => void>>();
+
 // The shim is for the DEFAULT node environment only. The jest-axe a11y
 // suite (audit H-9c, delivered 2026-09-22) runs under
 // `@vitest-environment jsdom`, where a REAL window exists — installing the
@@ -44,6 +50,28 @@ if (typeof (globalThis as { window?: unknown }).window === "undefined") {
       print: () => undefined,
       localStorage: makeStorage(mem),
       sessionStorage: makeStorage(sessionMem),
+    },
+  });
+}
+
+if (typeof (globalThis as { document?: unknown }).document === "undefined") {
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      hidden: false,
+      addEventListener: (type: string, listener: (event?: unknown) => void) => {
+        if (!documentListeners.has(type)) documentListeners.set(type, new Set());
+        documentListeners.get(type)!.add(listener as (event: unknown) => void);
+      },
+      removeEventListener: (type: string, listener: (event?: unknown) => void) => {
+        documentListeners.get(type)?.delete(listener as (event: unknown) => void);
+      },
+      dispatchEvent: (event: { type: string }) => {
+        for (const listener of documentListeners.get(event.type) ?? []) {
+          listener(event);
+        }
+        return true;
+      },
     },
   });
 }

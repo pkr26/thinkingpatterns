@@ -24,14 +24,17 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
+  View,
 } from "react-native";
 import qcrypto from "react-native-quick-crypto";
 import { api, ApiError, getBaseUrl } from "../api/client";
 import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
-import { zeroize } from "../crypto/kdf";
+import { KDF_ITERATIONS, zeroize } from "../crypto/kdf";
+import { buildRegistrationEnvelope, cachedEnvelope, cacheEnvelope, fetchEnvelope, unwrapSessionDataKey, type EnvelopeInfo } from "../keyScheme";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { storeUnlockProof } from "../unlockProof";
@@ -105,6 +108,13 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [password, setPassword] = useState("");
   // Stryker disable next-line StringLiteral: dead initializer — register mode is reachable only through the toggle (which clears confirm in the same batch) and login mode never reads confirm
   const [confirm, setConfirm] = useState("");
+  // AGE GATE (2026-09-27, clinical): registration requires an explicit
+  // "I am 18 or older" self-declaration. It gates the Create-account button
+  // AND the submit path (defense in depth — a keyboard submit or a bypassed
+  // disabled state must never reach the network). Nothing is STORED: the
+  // declaration is an act of the moment, not account data (no date of
+  // birth, no attestation record — the gate is the checkbox, once, here).
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   // M-3 (2026-09-20): the first origin this device ever authenticated
   // against is pinned; a DIFFERENT selected server renders a prominent
@@ -123,6 +133,9 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     const name = username.trim();
     if (!name || !password || busy) return;
     if (mode === "register") {
+      // The age gate precedes every other check: no policy alerts, no
+      // network, nothing — until the 18+ declaration is made.
+      if (!ageConfirmed) return;
       const policyError = passwordPolicyError(password);
       if (policyError) {
         Alert.alert(
@@ -138,6 +151,11 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     }
     setBusy(true);
     let derived: Keys | null = null;
+    /** v2 sessions: the data key that actually overrides derived.dataKey —
+     *  a fresh random key at registration, the unwrapped envelope key at
+     *  login. Held here so the catch can zeroize it if the flow dies before
+     *  the vault takes ownership. */
+    let sessionDataKey: Buffer | null = null;
     // L-65 (2026-09-20 audit): once api.register resolves, the ACCOUNT
     // EXISTS on the server no matter what happens next. A later failure
     // (session write, unlock proof, salt cache — typically a connection
@@ -155,13 +173,33 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         const salt = Buffer.from(qcrypto.randomBytes(16));
         // Async derivation: no 100–400ms JS-thread freeze mid-flow.
         derived = await deriveKeysAsync(password, salt);
-        const body = await api.register(name, salt.toString("base64"), derived.authKey.toString("base64"));
+        // v2 KEY ENVELOPE (2026-09-26) — the default for every NEW account:
+        // a fresh RANDOM data key, wrapped under a KEK derived from the
+        // same PBKDF2 master key that produced the login verifier. A later
+        // password change rewraps this envelope in O(1) instead of
+        // re-encrypting the whole journal, and the password never again
+        // directly derives the storage key.
+        const envelope = await buildRegistrationEnvelope(password, salt, name);
+        sessionDataKey = envelope.dataKey;
+        const body = await api.register(
+          name,
+          salt.toString("base64"),
+          derived.authKey.toString("base64"),
+          envelope.kdfParams,
+          envelope.wrappedB64,
+        );
         accountCreated = true;
         await api.setSession(body.token, body.user_id, name);
         // The account was created on THIS device: seal the offline-unlock
-        // proof under the data key right away.
-        await storeUnlockProof(derived.dataKey, body.user_id);
+        // proof under the RANDOM data key right away.
+        await storeUnlockProof(envelope.dataKey, body.user_id);
         await api.cacheSalt(name, salt.toString("base64"));
+        await cacheEnvelope(name, {
+          scheme: "v2",
+          saltB64: salt.toString("base64"),
+          kdfParams: envelope.kdfParams,
+          wrappedB64: envelope.wrappedB64,
+        }).catch(() => {});
         verifiedUserId = body.user_id;
       } else {
         const { salt: saltB64 } = await api.saltFor(name);
@@ -171,14 +209,70 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
         const body = await api.login(name, derived.authKey.toString("base64"));
         await api.setSession(body.token, body.user_id, name);
-        // Login SUCCEEDED — the password is verified. Seal the proof that
-        // offline unlocks will be checked against (see UnlockScreen).
-        await storeUnlockProof(derived.dataKey, body.user_id);
+        // KEY SCHEME (2026-09-26): v2 accounts fetch the envelope and
+        // unwrap LOCALLY (the username-bound AAD means this blob opens only
+        // under this account's password); v1 accounts keep the derived
+        // data key, byte-for-byte as before. The sealed proof below is
+        // stored under whichever key won.
+        const fetched = await fetchEnvelope();
+        const envelope: EnvelopeInfo | null =
+          fetched.status === "ok" ? fetched.envelope : await cachedEnvelope(name);
+        // Re-audit 2026-09-27 (M): when the account is v2 but the envelope
+        // can be NEITHER fetched ("invalid" — the server answered with a
+        // shape this client refuses; "unreachable" — the endpoint failed)
+        // NOR read from this device's cache, the old fall-through unlocked
+        // the vault on the v1-DERIVED data key. Every entry written that
+        // session sealed under a key the account's real (envelope) key can
+        // never open — silent, permanent corruption. REFUSE the session
+        // instead: the password was accepted, so the honest copy says the
+        // key could not be verified and NOTHING was changed. ("legacy" — a
+        // 404 from a pre-envelope server — cannot host a v2 account and
+        // keeps v1 semantics, as does a cached v1 marker.)
+        if (envelope === null && (fetched.status === "invalid" || fetched.status === "unreachable")) {
+          throw new Error(tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "login.envelopeUnavailable"));
+        }
+        if (envelope !== null && envelope.scheme === "v2") {
+          const unwrapped = await unwrapSessionDataKey({
+            password,
+            username: name,
+            envelope,
+            derivedMaster: { key: derived.masterKey, saltB64, iterations: KDF_ITERATIONS },
+          });
+          if (!unwrapped.ok) {
+            // The password was just accepted ONLINE, so a tamper failure is
+            // not "wrong password" — the envelope does not belong to this
+            // password on this server. Fail closed with our own local copy
+            // (a plain Error passes through requestFailureCopy verbatim).
+            throw new Error(tr("login.envelopeFailed"));
+          }
+          sessionDataKey = unwrapped.dataKey;
+          await storeUnlockProof(unwrapped.dataKey, body.user_id);
+          await cacheEnvelope(name, envelope).catch(() => {});
+        } else {
+          // Login SUCCEEDED — the password is verified. Seal the proof that
+          // offline unlocks will be checked against (see UnlockScreen).
+          await storeUnlockProof(derived.dataKey, body.user_id);
+          // A v1 marker (or a fetched-but-v1 envelope) is cached so the
+          // next OFFLINE unlock knows the sealed-proof path is the right
+          // one without another round-trip.
+          if (envelope !== null) await cacheEnvelope(name, envelope).catch(() => {});
+        }
         verifiedUserId = body.user_id;
       }
       // The vault records WHICH account these keys belong to — key-shipping
-      // operations (processing sessions) verify that binding.
-      vault.unlock(derived, verifiedUserId || undefined); // takes ownership; zeroizes the master key
+      // operations (processing sessions) verify that binding. For v2 the
+      // data key is the envelope's RANDOM key; the (now unused) v1 data
+      // label is zeroized immediately.
+      if (sessionDataKey !== null && derived !== null) {
+        vault.unlock(
+          { masterKey: derived.masterKey, authKey: derived.authKey, dataKey: sessionDataKey },
+          verifiedUserId || undefined,
+        );
+        zeroize(derived.dataKey);
+      } else {
+        vault.unlock(derived!, verifiedUserId || undefined); // takes ownership; zeroizes the master key
+      }
+      sessionDataKey = null; // the vault owns it now
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
       setConfirm("");
@@ -188,6 +282,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       if (mode === "register") queueOnboarding();
       markLoggedIn();
     } catch (err) {
+      if (sessionDataKey) zeroize(sessionDataKey);
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
       vault.lock();
       Alert.alert(
@@ -301,9 +396,26 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           {tr("login.noReset")}
         </Text>
       )}
+      {mode === "register" && (
+        // The 18+ self-declaration (2026-09-27): a checkbox row the user
+        // must actively check — never pre-ticked, never inferred. Calm copy,
+        // no explanation owed beyond the statement itself.
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, flex: 1, lineHeight: 19 }}>
+            {tr("login.ageConfirm")}
+          </Text>
+          <Switch
+            value={ageConfirmed}
+            onValueChange={(on) => setAgeConfirmed(on)}
+            accessibilityLabel={tr("login.ageConfirmA11y")}
+            accessibilityState={{ checked: ageConfirmed }}
+          />
+        </View>
+      )}
       <PrimaryButton
         label={mode === "login" ? tr("login.signIn") : tr("login.createAccount")}
         onPress={submit}
+        disabled={mode === "register" && !ageConfirmed}
         busy={busy}
       />
       <GhostButton
@@ -311,6 +423,9 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         onPress={() => {
           setMode(mode === "login" ? "register" : "login");
           setConfirm("");
+          // Re-entering register mode re-arms the declaration: a mode flip
+          // must never carry a stale "18+" across contexts.
+          setAgeConfirmed(false);
         }}
       />
       {/* Crisis help needs no account and no network. */}

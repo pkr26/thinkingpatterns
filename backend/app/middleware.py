@@ -39,7 +39,7 @@ import re
 from collections.abc import Callable
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 
-from .cache import FixedWindowCounter, RateLimitCheck, client_key_from_scope
+from .cache import RateLimitCheck, SlidingWindowCounter, client_key_from_scope
 from .config import Settings
 
 logger = logging.getLogger("mindpattern")
@@ -136,8 +136,9 @@ class HardeningMiddleware:
         trust_proxy_headers: bool = False,
         trusted_proxy_ips: list[str] | tuple[str, ...] = (),
         rate_limit_rules: tuple[RateLimitRule, ...] = (),
-        rate_counter: FixedWindowCounter | None = None,
+        rate_counter: SlidingWindowCounter | None = None,
         rate_limit_settings: Settings | None = None,
+        settings_provider: Callable[[], Settings] | None = None,
         cors_origins: list[str] | tuple[str, ...] = (),
         cors_expose_headers: list[str] | tuple[str, ...] = (),
         status_observer: Callable[[int], None] | None = None,
@@ -163,6 +164,16 @@ class HardeningMiddleware:
         self._rate_rules = rate_limit_rules
         self._rate_counter = rate_counter
         self._rate_limit_settings = rate_limit_settings
+        # 2026-09-26 audit item 6: optional LIVE accessor for the app's
+        # settings object. When wired (create_app passes
+        # ``lambda: app.state.settings``), this layer resolves max_body_bytes
+        # and the rate-limit attributes per request instead of trusting the
+        # constructor's snapshot — the dependencies read app.state.settings
+        # at request time, and tests swap that object at runtime, so a stale
+        # snapshot here made the edge gate and the dependencies disagree
+        # after any swap. Direct constructions without a provider keep the
+        # historical static behavior.
+        self._settings_provider = settings_provider
         # Exact-match CORS allow-list + the expose list, mirroring what
         # CORSMiddleware (which sits INSIDE this layer) would put on a
         # normal response. Empty allow-list (the default deployment: the
@@ -188,6 +199,20 @@ class HardeningMiddleware:
             return False
         return any(peer in network for network in self.trusted_proxy_networks)
 
+    def _live_settings(self) -> Settings | None:
+        """The app's CURRENT settings object, or None when not wired.
+
+        Audit item 6: callers fall back to the constructor snapshot only for
+        direct (non-app) constructions.
+        """
+        if self._settings_provider is None:
+            return None
+        return self._settings_provider()
+
+    def _effective_max_body_bytes(self) -> int:
+        live = self._live_settings()
+        return live.max_body_bytes if live is not None else self.max_body_bytes
+
     def _cors_extra_headers(
         self, raw_headers: list[tuple[bytes, bytes]]
     ) -> list[tuple[bytes, bytes]]:
@@ -212,9 +237,18 @@ class HardeningMiddleware:
             if name.lower() == b"origin":
                 origin = value.decode("ascii", "ignore")
                 break
-        if origin is None or origin not in self._cors_origins:
+        if origin is None:
             return []
-        headers = [(b"access-control-allow-origin", origin.encode("ascii", "ignore"))]
+        # 2026-09-26 audit item 8: every response that varied on the request
+        # Origin must say so, even when the origin was NOT allow-listed and
+        # no CORS headers were added — a shared cache (or an intermediary
+        # that ignores no-store) could otherwise serve an allow-listed
+        # client a cached non-CORS copy, or vice versa. Defense in depth on
+        # top of the no-store these responses already carry.
+        vary = [(b"vary", b"Origin")]
+        if origin not in self._cors_origins:
+            return vary
+        headers = vary + [(b"access-control-allow-origin", origin.encode("ascii", "ignore"))]
         if self._cors_expose_value:
             headers.append((b"access-control-expose-headers", self._cors_expose_value))
         return headers
@@ -269,6 +303,10 @@ class HardeningMiddleware:
         # the deprecated /api mount serves" is true without qualification.
         legacy_api = _is_legacy_api_path(scope.get("path", ""))
         headers = {k.lower(): v for k, v in raw_headers}
+        # Audit item 6: per-request body cap from the LIVE settings when a
+        # provider is wired (create_app always wires one) — a runtime swap
+        # of app.state.settings now moves this layer with the dependencies.
+        max_body_bytes = self._effective_max_body_bytes()
         direct_peer_is_trusted = self._direct_peer_is_trusted(scope)
         trusted_forwarding = self.trust_proxy_headers and direct_peer_is_trusted
         # State is the authenticated handoff between this outer ASGI layer
@@ -324,7 +362,9 @@ class HardeningMiddleware:
             value for name, value in raw_headers if name.lower() == b"transfer-encoding"
         ]
         if len(content_lengths) > 1:
-            await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api)
+            await self._send_simple(
+                send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api
+            )
             return
         # A request may use either a length OR chunked transfer coding, never
         # both. The ASGI server normally normalizes legitimate HTTP/1.1
@@ -332,12 +372,16 @@ class HardeningMiddleware:
         # reject all other transfer-coding chains rather than making this
         # layer disagree with an upstream proxy about message boundaries.
         if content_lengths and transfer_encodings:
-            await self._send_simple(send, 400, _BAD_FRAMING, raw_headers=raw_headers, legacy=legacy_api)
+            await self._send_simple(
+                send, 400, _BAD_FRAMING, raw_headers=raw_headers, legacy=legacy_api
+            )
             return
         if transfer_encodings and (
             len(transfer_encodings) != 1 or transfer_encodings[0].lower() != b"chunked"
         ):
-            await self._send_simple(send, 400, _BAD_FRAMING, raw_headers=raw_headers, legacy=legacy_api)
+            await self._send_simple(
+                send, 400, _BAD_FRAMING, raw_headers=raw_headers, legacy=legacy_api
+            )
             return
         content_length = content_lengths[0] if content_lengths else None
         declared_length: int | None = None
@@ -350,14 +394,20 @@ class HardeningMiddleware:
                 if not content_length or any(
                     byte < ord("0") or byte > ord("9") for byte in content_length
                 ):
-                    await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api)
+                    await self._send_simple(
+                        send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api
+                    )
                     return
                 declared_length = int(content_length)
-                if declared_length > self.max_body_bytes:
-                    await self._send_simple(send, 413, _OVERSIZE_BODY, raw_headers=raw_headers, legacy=legacy_api)
+                if declared_length > max_body_bytes:
+                    await self._send_simple(
+                        send, 413, _OVERSIZE_BODY, raw_headers=raw_headers, legacy=legacy_api
+                    )
                     return
             except ValueError:
-                await self._send_simple(send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api)
+                await self._send_simple(
+                    send, 400, _BAD_LENGTH, raw_headers=raw_headers, legacy=legacy_api
+                )
                 return
 
         # --- 2. Bound-and-replay the COMPLETE body before dispatch ----------
@@ -389,12 +439,16 @@ class HardeningMiddleware:
         while True:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                await self._send_simple(send, 408, _BODY_TIMEOUT, raw_headers=raw_headers, legacy=legacy_api)
+                await self._send_simple(
+                    send, 408, _BODY_TIMEOUT, raw_headers=raw_headers, legacy=legacy_api
+                )
                 return
             try:
                 message = await asyncio.wait_for(receive(), timeout=remaining)
             except TimeoutError:
-                await self._send_simple(send, 408, _BODY_TIMEOUT, raw_headers=raw_headers, legacy=legacy_api)
+                await self._send_simple(
+                    send, 408, _BODY_TIMEOUT, raw_headers=raw_headers, legacy=legacy_api
+                )
                 return
             buffered.append(message)
             if message["type"] == "http.disconnect":
@@ -405,8 +459,10 @@ class HardeningMiddleware:
                 # than silently changing protocol semantics.
                 break
             seen += len(message.get("body", b""))
-            if seen > self.max_body_bytes:
-                await self._send_simple(send, 413, _OVERSIZE_BODY, raw_headers=raw_headers, legacy=legacy_api)
+            if seen > max_body_bytes:
+                await self._send_simple(
+                    send, 413, _OVERSIZE_BODY, raw_headers=raw_headers, legacy=legacy_api
+                )
                 return
             if not message.get("more_body", False):
                 break
@@ -432,19 +488,41 @@ class HardeningMiddleware:
         # check() count >= limit — a valid request sees the same admission
         # decision it always had, one layer earlier and without the parse.
         rate_counter = self._rate_counter
-        rate_settings = self._rate_limit_settings
+        # Audit item 6: the live settings object wins when a provider is
+        # wired; the constructor snapshot stays as the direct-construction
+        # fallback only.
+        rate_settings = self._live_settings() or self._rate_limit_settings
         matched_checks: tuple[RateLimitCheck, ...] = ()
         rate_key: str | None = None
         if rate_counter is not None and rate_settings is not None and self._rate_rules:
             matched_checks = self._matched_rate_checks(scope)
             if matched_checks:
                 rate_key = client_key_from_scope(scope, self.trust_proxy_headers)
+                if rate_key is None:
+                    # Audit item 5 (cache.py): no socket peer means no
+                    # rate-limit identity. One shared bucket let a single
+                    # client 429 the whole socketless surface; a fresh
+                    # per-request key would disable limiting entirely.
+                    # Fail closed: refuse before the app spends anything.
+                    if self._status_observer is not None:
+                        self._status_observer(429)
+                    await self._send_simple(
+                        send,
+                        429,
+                        _RATE_LIMITED,
+                        raw_headers=raw_headers,
+                        extra_headers=[(b"retry-after", b"1")],
+                        legacy=legacy_api,
+                    )
+                    return
                 for check in matched_checks:
                     limit = getattr(rate_settings, check.limit_attr)
                     window = getattr(rate_settings, check.window_attr)
                     result = rate_counter.check(f"{check.bucket}:{rate_key}", window)
                     if result.count >= limit:
-                        await self._reject_over_limit(send, raw_headers, result.retry_after, legacy=legacy_api)
+                        await self._reject_over_limit(
+                            send, raw_headers, result.retry_after, legacy=legacy_api
+                        )
                         return
 
         async def limited_receive():
@@ -475,9 +553,7 @@ class HardeningMiddleware:
                 # Deprecation header, so a client can notice
                 # programmatically (alongside /api/meta's api_version,
                 # which points at the canonical /api/v1 base).
-                if "deprecation" not in existing and _is_legacy_api_path(
-                    scope.get("path", "")
-                ):
+                if "deprecation" not in existing and _is_legacy_api_path(scope.get("path", "")):
                     message["headers"].append((b"deprecation", b"true"))
                 # M-1: the validation handler flagged this 422 as a BODY-PARSE
                 # failure (error type json_invalid — schema failures flow
@@ -528,7 +604,9 @@ class HardeningMiddleware:
                 # signal alive during exactly the crash loops that matter.
                 if self._status_observer is not None:
                     self._status_observer(500)
-                await self._send_simple(send, 500, _INTERNAL, raw_headers=raw_headers, legacy=legacy_api)
+                await self._send_simple(
+                    send, 500, _INTERNAL, raw_headers=raw_headers, legacy=legacy_api
+                )
             return
 
     async def _send_simple(

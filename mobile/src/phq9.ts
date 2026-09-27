@@ -66,7 +66,12 @@ export function phq9Complete(responses: readonly (number | null)[]): boolean {
 }
 
 /** The encrypted-payload contract (consumed by the therapist portal):
- * {"v":1,"measure":"phq9","score":N,"completed_at":ISO-date}. */
+ * {"v":1,"measure":"phq9","score":N,"item9":M,"completed_at":ISO-date}.
+ * "item9" is the RAW response to the safety item (0–3) — an endorsed
+ * item 9 mandates clinical follow-up regardless of the total, so it rides
+ * as its own field next to the score (2026-09-27 clinical contract;
+ * GAD-7/PHQ-2 payloads never carry it, and item9-less payloads remain
+ * valid on every reader). The score itself is unchanged. */
 export function phq9Payload(responses: readonly (number | null)[], completedAt: string): string {
   return measurePayload("phq9", responses, completedAt);
 }

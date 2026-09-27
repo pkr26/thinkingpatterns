@@ -20,12 +20,15 @@ reproduces the audit's main finding).*
    not a tweak; it is conforming to the field's core standard.
 
 2. **The strongest-evidence patterns we could detect (meta-analytic support):**
-   within-person **sleep → next-day mood** (lag-1; Konjarski et al. 2018,
-   *Sleep Medicine Reviews* 42, meta-analysis of experience-sampling studies),
+   within-person **sleep → next-day mood** (lag-1; Bourke et al. 2026,
+   *Sleep Medicine Reviews*, meta-analysis of 118 studies of within-person
+   sleep–affect associations — the current meta-analytic anchor; Konjarski
+   et al. 2018, *Sleep Medicine Reviews* 42, is the earlier systematic
+   review of experience-sampling studies),
    **day-of-week and time-of-day rhythms** (Golder & Macy 2011, Science;
    Mappiness), **mood inertia** (autocorrelation; Houben et al. 2015 meta-analysis), and
    **EWMA control charts over daily mood with a personal baseline** — which we already
-   implement, correctly citing Snippe et al. 2024. We are right about EWMA and wrong
+   implement, correctly citing Snippe et al. 2023. We are right about EWMA and wrong
    about almost everything downstream of sentiment.
 
 3. **Our deterministic, no-fake-insights philosophy is validated and differentiated —
@@ -139,11 +142,84 @@ Evidence grades: **[S]trong** (meta-analytic or large-scale replication), **[M]o
 | **[S] Idiographic > nomothetic** — group-level structures often don't describe the individual (non-ergodicity); personalized models required | Fisher, Medaglia & Jeronimus 2018, *PNAS* 115(27) (non-ergodicity); Wright & Woods 2020, *Annu Rev Clin Psychol* 16:49–74 (personalized models of psychopathology); Fried et al. 2023 WARN-D protocol | Our per-user engine is architecturally right; frame it as "idiographic, within-person" — that language is the accepted standard. |
 | **[S] Momentary vs retrospective are different measures** | Stone & Shiffman 2002 | Tag entries as momentary ("right now") vs end-of-day; don't mix streams silently. |
 
+### 2.1a Shipped-methodology addendum (2026-09-26 statistical review)
+
+The 2026-09-26 statistical review hardened the engine's inferential layer
+further; every constant below is live in `backend/app/services/brain.py`
+(and pinned by regression tests), so this section documents shipped
+behavior, not intent:
+
+- **Weekly-cycle deconfounding for every mood-association test**
+  (`_strip_weekday_effects`, brain.py): within-person detrending removes
+  the person's trend but not their weekly CYCLE — a theme co-occurring
+  with a weekday mood dip (work-Mondays) could otherwise surface through
+  the shared rhythm alone. Every residual entering a `mood_correlation`
+  or `link` test is now centered per-weekday (subtracting each weekday's
+  own mean residual — the OLS solution of regressing the residuals on
+  weekday dummies), on top of the Bolger & Laurenceau rolling baseline.
+  The day-of-week confounder mandate in §2.3 is thereby implemented, not
+  just recommended.
+- **EWMA control limit recalibrated by Monte Carlo** (`MOOD_SHIFT_LAMBDA
+  = 0.18`, `MOOD_SHIFT_LIMIT = 3.1`, run rule: ≥3 of the last 5 points
+  beyond limit, same sign): the classic 2.7σ limit measured a 5.2–7.3%
+  per-recompute false-alarm probability at φ=0.5 for 21–40-day windows
+  (one-off simulation of the exact rule, 40k–100k runs/cell, AR(1)
+  mood, chart sigma estimated exactly as the code does). L=3.1 brings
+  the worst cell to 4.7% ≤ 5% while keeping detection power high (a
+  sustained 2σ shift over the last 10 days still fires with p≈0.92 at
+  n=60). The reported p-value is a **calibrated alarm probability** — a
+  bilinear interpolation over the simulated (φ, n) table times a
+  magnitude-conditioning factor S(n, z) — replacing the naive marginal
+  erfc tail that ignored both the scan structure and the excursion's
+  evidence (`_MOOD_SHIFT_ALARM_TABLE`, `_MOOD_SHIFT_ALARM_S`,
+  brain.py).
+- **Miller–Madow bias-corrected entropy for activity diversity**
+  (`DIVERSITY_MIN_WEEKS = 4`, `DIVERSITY_MIN_TAG_DAYS = 2`,
+  `DIVERSITY_MIN_DISTINCT_TAGS = 2`): MLE plug-in entropy is downward
+  biased by ≈(m−1)/(2N ln 2) bits — simulation measured −0.56 bits on
+  weeks of this engine's shape, larger than the 0.35-bit effect gate,
+  so the raw estimator could manufacture or swallow whole claims. Weeks
+  below the tag-volume floor are EXCLUDED from the sample (not scored
+  as zero), and the per-side floor is 4 weekly observations (at 3, the
+  Welch–Satterthwaite df ≈ 3–4 inflate the t critical value ~40% and
+  the gate rides almost pure noise).
+- **Honest "the day after" labeling** (`LINK_DAY_AFTER_SHARE = 0.70`):
+  the lag-1 link card may say "the day after" only when gap-1 exposures
+  are ≥70% of the measured exposed outcomes AND the strict mode; the
+  label otherwise reports the modal exposed gap it actually measured.
+- **Replication gates split by claim flavor** (EVIDENCE_DATE vs
+  WINDOW_STAT kinds; `REPLICATION_MIN_SPREAD_DAYS = 2`): statistical
+  kinds need ≥2 qualification days that constitute an independent
+  second observation — a NEW evidence day for evidence-date kinds, and
+  qualification days ≥2 calendar days apart for window-stat kinds
+  (consecutive recomputes share ~179 of 180 window days). This closes
+  the measured ~17% false-card rate of the plain "qualified twice" rule
+  on daily-cadence pure noise.
+- **Cadence effective-sample honesty**: the cadence detector's gap
+  comparisons deflate their sample sizes by the gap series' lag-1
+  autocorrelation (`statsig.effective_sample_size`) — the same
+  autocorrelation-aware n the mood tests use.
+- **Language verdict by share rule, with an honest "other"**: short
+  windows no longer default to English; each language scores the
+  window's tokens against its own detection set and the higher share
+  wins only if it clears `LANGUAGE_HIT_FLOOR = 0.10` (with
+  `LANGUAGE_MIN_TOKENS = 50`); anything else is `"other"` and the
+  historical suppressions apply.
+- **Spanish person anchoring** (`_ES_PERSON_CANDIDATES`): recurring
+  "mi madre"-style proper-person references anchor themes in Spanish
+  journals too, under the same gating as the English capitalization
+  heuristic — every other language anchors nothing.
+- **Stable question pool pin** (`_DAY_PINNED_QUESTIONS`,
+  questions.py): the day's question index is derived from the FIRST
+  pool snapshot computed for the (user, day, language) and pinned for
+  the rest of the day, so a pool-size change mid-day (an evening entry
+  qualifying a new pattern) cannot swap an already-answered question.
+
 ### 2.2 Mood dynamics (what to detect)
 
 | Signal | Evidence | Notes for the brain |
 |---|---|---|
-| **EWMA control chart, personal baseline** | **[S]** Snippe et al. 2024, *J Psychopathol Clin Sci* (foresaw recurrence in patients tapering antidepressants); Smit, Schat & Ceulemans 2023, *Assessment* (methods paper: λ ≈ 0.05–0.25 on day-averaged EMA, person-specific limits) | Already implemented. Note: their λ is much smaller than our 0.3 → smoother, fewer false alarms. Restlessness was the idiographic prodrome — multi-signal EWMA (per-theme mood, not just global) is the validated extension. |
+| **EWMA control chart, personal baseline** | **[S]** Snippe et al. 2023, *J Psychopathol Clin Sci* (foresaw recurrence in patients tapering antidepressants); Smit, Schat & Ceulemans 2023, *Assessment* (methods tutorial: λ ≈ 0.05–0.25 is the classic recommended range — Montgomery's EWMA guidance as relayed by the tutorial — on day-averaged EMA, person-specific limits) | Already implemented. Note: the recommended band is centered near our shipped λ=0.18 → smoother, fewer false alarms than the λ=0.3 this document originally proposed (the drift is recorded in `PLAN.md`). Restlessness was the idiographic prodrome — multi-signal EWMA (per-theme mood, not just global) is the validated extension. |
 | **Mood inertia (lag-1 autocorrelation)** | **[S]** Kuppens, Allen & Sheeber 2010; Koval et al. 2012; Houben et al. 2015 meta-analysis (*Psychological Bulletin*): inertia/instability ↔ lower wellbeing, prospective prediction of onset | New detector, trivially computable on daily sentiment series: "your mood has been carrying over day-to-day more than usual." |
 | **Affective instability (variance/switch frequency)** | **[M]** Henry 2012; Stange 2016; Taylor 2021 (bipolar prospective) | Surface as *observation* ("bigger swings than your usual"), never "bipolar flag" — individual cutoffs unvalidated, diagnosis language crosses FDA line. |
 | **Critical slowing down (rising autocorr + variance before transition)** | **[C]** van de Leemput et al. 2014, *PNAS*; mixed replications (2024 *Clinical Psychological Science* replication: ~33% of participants; Wichers 2016 N-of-1 success; Helmich 2024 methodological critique) | Use only as a *supporting* signal bundled with EWMA, or skip. Never as a standalone claim. |
@@ -162,7 +238,7 @@ Evidence grades: **[S]trong** (meta-analytic or large-scale replication), **[M]o
 
 | Signal | Evidence | Notes |
 |---|---|---|
-| **Sleep → next-day mood (stronger than reverse)** | **[S]** Konjarski et al. 2018, *Sleep Medicine Reviews* 42 (meta-analysis of experience-sampling/daily-diary studies); Triantafillou et al. 2019; Difrancesco et al. 2021 | Lag-1/lag-2 within-person cross-correlation between theme-days and next-day mood. Our audit's recommendation #3, now meta-analytically grounded. Phrasing: "the day after 'sleep' comes up, your entries read lower" — observation, causality never claimed. |
+| **Sleep → next-day mood (stronger than reverse)** | **[S]** Bourke et al. 2026, *Sleep Medicine Reviews* (meta-analysis of 118 studies of within-person sleep–affect associations); Konjarski et al. 2018, *Sleep Medicine Reviews* 42 (systematic review of experience-sampling/daily-diary studies); Triantafillou et al. 2019; Difrancesco et al. 2021 | Lag-1/lag-2 within-person cross-correlation between theme-days and next-day mood. Our audit's recommendation #3, now meta-analytically grounded. Phrasing: "the day after 'sleep' comes up, your entries read lower" — observation, causality never claimed. |
 | **Stress spillover / slow recovery** | **[S]** Bolger, DeLongis, Kessler & Wethington 1989 (classic 42-day diary); daily-stress literature | Stressor-theme day → mood not recovered next day = "slow recovery" link. |
 | **Physical activity → same/next-day affect** | **[S]** Liao, Shonkoff & Dunton 2015 review | Our 'health' theme partially proxies activity; with wearable data (later) this strengthens. |
 
@@ -334,19 +410,22 @@ pmc.ncbi.nlm.nih.gov/articles/PMC10632923/ (MindDoc).
 Stone & Shiffman 2002 (*Ann Behav Med*); Bolger & Laurenceau 2013 (*Intensive
 Longitudinal Methods*, Guilford); Fisher, Medaglia & Jeronimus 2018 (*PNAS*
 115(27)); Wright & Woods 2020 (*Annu Rev Clin Psychol* 16:49–74, personalized
-models); Fried et al. 2023 WARN-D (*Clin Psychol Sci*); Snippe et al. 2024 (*J
+models); Fried et al. 2023 WARN-D (*Clin Psychol Sci*); Snippe et al. 2023 (*J
 Psychopathol Clin Sci*); Smit, Schat & Ceulemans 2023 (*Assessment* 30(5)); Schreuder et al. 2024;
 van de Leemput et al. 2014 (*PNAS* 111(1)) + 2014 critique letter + Wichers 2016
 (*Psychosom Psychother*) + 2024 replication (*Clin Psychol Sci*); Kuppens, Allen &
 Sheeber 2010 (*Psychol Sci* 21(7)); Koval et al. 2012 (*Cogn Emot*); Houben et al.
-2015 (*Psychol Bull* 141(4):901–930); Birchwood, Spencer & McGovern 2000 (*Adv Psychiatr
+2015 (*Psychol Bull* 141(4):904–940); Birchwood, Spencer & McGovern 2000 (*Adv Psychiatr
 Treat*); Morriss et al. 2018 (Cochrane); Golder & Macy 2011 (*Science* 333);
 Bryson & MacKerron 2017 (*Econ J*, Mappiness); Monk et al. 1990 (SRM); Frank et al.
 1997 (*Biol Psychiatry*); Rosenthal et al. 1984 (*Arch Gen Psychiatry*);
-Konjarski et al. 2018 (*Sleep Med Rev* 42, meta-analysis); Triantafillou et al. 2019
+Bourke et al. 2026 (*Sleep Medicine Reviews*, "Sleep well, feel well and vice
+versa? A meta-analysis of within-person associations between sleep and affect" —
+118 studies; ScienceDirect S1087079226000043); Konjarski et al. 2018
+(*Sleep Med Rev* 42, systematic review); Triantafillou et al. 2019
 (*JMIR Ment Health*); Difrancesco et al. 2021 (*J Affect Disord*); Liao, Shonkoff &
 Dunton 2015 (*Front Psychol*);
-Al-Mosaiwi & Johnstone 2018 (*Clin Psychol Sci* 6(2)); Edwards & Holtzman 2017
+Al-Mosaiwi & Johnstone 2018 (*Clin Psychol Sci* 6(4)); Edwards & Holtzman 2017
 (*J Res Pers*); Kashdan, Barrett & McKnight 2015 (*Curr Dir Psychol Sci*); Erbas et al.
 2022 (*Assessment*); Ehring & Watkins 2008 (*Int J Cogn Ther*); Rosenkranz et al. 2020;
 Pennebaker & Beall 1986 (*J Abnorm Psychol*); Frattaroli 2006 (*Psychol Bull* 132);

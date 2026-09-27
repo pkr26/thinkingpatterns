@@ -36,8 +36,12 @@ vi.mock("../src/biometricUnlock", () => ({
   disableBiometricUnlock: (...args: unknown[]) => disableBiometricUnlock(...(args as [string])),
 }));
 const cancelDailyReminder = vi.fn(async () => true);
+const cancelMeasureReminder = vi.fn(async () => true);
 vi.mock("../src/nativeFeatures", () => ({
   cancelDailyReminder: () => cancelDailyReminder(),
+  // 2026-09-27 clinical wave: sign-out also cancels the opt-in check-in
+  // reminder (its own stable notification id, same device-global class).
+  cancelMeasureReminder: () => cancelMeasureReminder(),
   reminderCapability: () => ({ available: false, reason: "notification module not linked" }),
   // 2026-09-26 audit LOW: biometricCapability was deleted (dead probe of a
   // non-dependency) — dropped from this mock with it.

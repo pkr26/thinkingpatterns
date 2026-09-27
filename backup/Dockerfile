@@ -3,7 +3,15 @@
 # installed while the image is built, never from the running backup loop: a
 # scheduled backup must not depend on a live package-repository fetch before
 # it can protect a database.
-FROM postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+#
+# Reproducibility note (2026-09-26 infra audit): `apk add` resolves against
+# Alpine's LIVE repositories at build time, so two builds of the same digest
+# can pick different package builds. Version-pinning apk packages trades
+# that drift for guaranteed build breakage when the pinned versions leave
+# the repo — the chosen trade is: base digest-pinned, packages floating,
+# with CI's docker job building this image on every push so drift surfaces
+# in CI rather than at a disaster-recovery rebuild.
+FROM postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
 
 USER root
 RUN apk add --no-cache openssl python3

@@ -349,14 +349,18 @@ describe("EntryScreen pins: node-exact style contracts", () => {
 });
 
 describe("EntryScreen pins: the crisis support dialog contract", () => {
-  it("the support alert's buttons are exactly View-resources / Not-now(cancel)", async () => {
+  it("the support alert's buttons are exactly View-resources / Make-a-safety-plan / Not-now(cancel)", async () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await writeEntry(root, "I have been thinking about how to end it all");
     await pressLabel(root, "Save entry");
     await flush();
     const { lastAlert } = await import("../helpers/rtr");
+    // 2026-09-27 clinical wave: the safety-plan action sits BETWEEN the
+    // static resources (always first — the plan is a supplement, never a
+    // gate) and the cancel.
     expect(lastAlert()[2]).toEqual([
       { text: "View support resources", onPress: expect.any(Function) },
+      { text: "Make a safety plan", onPress: expect.any(Function) },
       { text: "Not now", style: "cancel" },
     ]);
   });

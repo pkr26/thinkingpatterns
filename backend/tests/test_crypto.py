@@ -140,16 +140,40 @@ def test_encrypt_with_nonce_absent_from_production_paths():
     from pathlib import Path
 
     app_root = Path(crypto.__file__).resolve().parents[1]
+    # 2026-09-26: app/security/envelope.py joined the allowlist. It is the
+    # v2 key-envelope REFERENCE implementation (vector generation only —
+    # the same standing security/sharing.py's wrap functions have): its
+    # wrap_data_key takes a REQUIRED explicit nonce because deterministic
+    # output is the point for pinned vectors. No request path calls it —
+    # pinned below by scanning the API layer for BOTH seams.
     definition_module = (app_root / "security" / "crypto.py").resolve()
+    envelope_module = (app_root / "security" / "envelope.py").resolve()
     offenders = []
     for source in sorted(app_root.rglob("*.py")):
-        if source.resolve() == definition_module:
+        if source.resolve() in (definition_module, envelope_module):
             continue
         text = source.read_text(encoding="utf-8")
         if "encrypt_with_nonce(" in text:
             offenders.append(str(source))
     assert not offenders, (
-        "encrypt_with_nonce( called outside app/security/crypto.py (the "
-        "definition module) — a fixed-nonce seam must never be reachable "
-        f"from a request path: {offenders}"
+        "encrypt_with_nonce( called outside app/security/{crypto,envelope}.py "
+        "(the definition module and the vector-only envelope reference) — a "
+        "fixed-nonce seam must never be reachable from a request path: " + str(offenders)
+    )
+    # The stronger half of the 2026-09-26 update: neither fixed-nonce seam
+    # may appear ANYWHERE in the request-path layer (the API layer imports
+    # the envelope module only for its size constant).
+    api_offenders = []
+    for source in sorted((app_root / "api").rglob("*.py")):
+        text = source.read_text(encoding="utf-8")
+        for seam in ("encrypt_with_nonce(", "envelope.wrap_data_key("):
+            if seam in text:
+                api_offenders.append(f"{seam} in {source}")
+    for extra in (app_root / "main.py", app_root / "middleware.py"):
+        text = extra.read_text(encoding="utf-8")
+        for seam in ("encrypt_with_nonce(", "envelope.wrap_data_key("):
+            if seam in text:
+                api_offenders.append(f"{seam} in {extra}")
+    assert not api_offenders, "fixed-nonce encryption reachable from the API layer: " + str(
+        api_offenders
     )

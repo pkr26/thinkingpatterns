@@ -45,6 +45,10 @@ from .config import MAX_USER_BLOB_BYTES as _MAX_USER_BLOB_BYTES  # noqa: E402
 
 MAX_STATE_BLOB_B64 = (_MAX_USER_BLOB_BYTES // 3 + 1) * 4  # b64 of the ceiling
 
+# 2026-09-26 v2 key scheme: the wrapped data key is nonce(12)+ct(32)+tag(16)
+# = 60 decoded bytes -> 80 b64 chars. The cap sits just above the exact size.
+MAX_WRAPPED_DATA_KEY_B64 = 128
+
 
 class RegisterRequest(StrictRequestModel):
     username: str = Field(pattern=USERNAME_PATTERN)
@@ -52,6 +56,18 @@ class RegisterRequest(StrictRequestModel):
     verifier: str = Field(
         min_length=1, max_length=MAX_VERIFIER_B64
     )  # b64, exactly 32 decoded bytes
+    # v2 registration (2026-09-26 envelope remediation) — BOTH fields come
+    # together or neither does (the route enforces the pairing): the
+    # versioned client KDF parameters blob (validated/canonicalized by
+    # security.kdf.validate_kdf_params) and the opaque AES-GCM envelope of
+    # the random 32-byte data key (server stores bytes it cannot decrypt).
+    # Typed ``object`` deliberately: pydantic coercion must not silently
+    # accept 600000.0-as-int or true-as-1 — the KDF bounds are judged by
+    # the one validator that also canonicalizes the blob for the AAD rule.
+    kdf_params: object | None = None
+    wrapped_data_key: str | None = Field(
+        default=None, min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64
+    )
 
 
 class LoginRequest(StrictRequestModel):
@@ -73,6 +89,25 @@ class TokenResponse(BaseModel):
     # Additive (2026-09-16): the portal branches on it; existing clients
     # ignore the extra field. Every pre-sharing account is "user".
     role: str = "user"
+    # Additive (2026-09-26 v2 key scheme): which client crypto flow the
+    # account is on. "v1" = password-derived data key (rekey-on-change);
+    # "v2" = random data key behind a password-wrapped envelope (fetch the
+    # envelope material via GET /auth/key-envelope and unwrap locally).
+    key_scheme: str = "v1"
+
+
+class KeyEnvelopeResponse(BaseModel):
+    """GET /auth/key-envelope — everything a v2 client needs to unwrap its
+    random data key locally after login (the KEK input never exists
+    server-side, so this response is safe to hand to the authenticated
+    account). v1 accounts answer key_scheme="v1" with null envelope
+    fields: the legacy password-derived flow, plus a hint that the client
+    MAY offer the POST /account/key-envelope/upgrade path."""
+
+    key_scheme: str
+    salt: str
+    kdf_params: dict[str, int | str] | None = None
+    wrapped_data_key: str | None = None
 
 
 class SaltLookupRequest(StrictRequestModel):
@@ -188,11 +223,63 @@ class CredentialRotateRequest(StrictRequestModel):
     Deliberately login-credential-only: the journal's data key is untouched,
     so no stored ciphertext changes meaning. A data-key change is the separate
     POST /processing/rekey flow (run BEFORE this endpoint with both keys).
+
+    v2 accounts (2026-09-26): this endpoint answers 409 key_scheme_conflict
+    — swapping a v2 account's salt WITHOUT re-wrapping the envelope would
+    destroy the only copy of the data key's locker. v2 clients use
+    PUT /account/password, which swaps credential AND envelope atomically.
     """
 
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
     new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
     new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+
+
+class PasswordChangeRequest(StrictRequestModel):
+    """PUT /account/password — the v2 password change (2026-09-26).
+
+    One atomic swap of EVERYTHING the old password protects: the login
+    credential (salt + scrypt verifier, exactly the register payload's
+    shape) AND the data-key envelope. The client unwraps its random data
+    key locally with the OLD password, derives a fresh salt + kdf_params
+    from the NEW password, and uploads the re-wrapped envelope — the data
+    key itself NEVER changes, so NO corpus rekey and no per-consent
+    re-wrap is needed (the stored ciphertext and every therapist wrap
+    keep opening under the same random key). The old-password verifier
+    proof and the same lifecycle fence as PUT /account/credential apply;
+    the token epoch bumps (all bearers die) and processing sessions
+    purge. A v1 account that sends this endpoint migrates to v2 (the
+    envelope upload IS the migration — it must wrap the account's CURRENT
+    data key, which the client proves by opening a processing session
+    with it first).
+    """
+
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
+    new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    # Optional: defaults to keeping the account's current params blob (a
+    # pure password change usually keeps the KDF; an explicit blob is how
+    # a client UPGRADES its cost parameters together with the password).
+    new_kdf_params: object | None = None
+    wrapped_data_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
+
+
+class KeyEnvelopeUpgradeRequest(StrictRequestModel):
+    """POST /account/key-envelope/upgrade — v1 -> v2 self-service migration.
+
+    After a v1 client unlocks locally (it holds the data key), it MAY wrap
+    that SAME random-or-derived key under the password-derived KEK and
+    upload the envelope, flipping the account to key_scheme="v2". From
+    then on password changes are O(1). Verifier-gated (password
+    re-authentication, like every destructive lifecycle action) AND
+    possession-gated: the X-Processing-Token header must carry a live
+    session whose key authenticates the account's stored ciphertext —
+    the server cannot otherwise distinguish "the real data key" from any
+    32 bytes.
+    """
+
+    kdf_params: object | None = None
+    wrapped_data_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
 
 
 class TotpSetupRequest(StrictRequestModel):
@@ -321,6 +408,15 @@ class ExportBundle(BaseModel):
     # ("measure", user_id, client_measure_id) exactly as the client
     # encrypted it.
     measures: list[MeasureOut] = []
+    # v2 key scheme (2026-09-26, additive): the wrapped data-key envelope and
+    # the account's kdf_params travel with the user's own document — for a
+    # v2 account they are as essential as the salt (without them the random
+    # data key is unrecoverable and the export is undecryptable after
+    # account deletion). Null/absent for v1 accounts and old bundles: the
+    # password-derived flow needs only the salt.
+    key_scheme: str = "v1"
+    wrapped_data_key: str | None = None
+    kdf_params: dict[str, int | str] | None = None
 
 
 def entry_out(row: Entry) -> EntryOut:
@@ -446,6 +542,31 @@ class PairingLookupResponse(BaseModel):
     therapist_id: str
     display_name: str
     wrap_pub_key: str
+    # SAS out-of-band verification (2026-09-26 remediation): the 6-digit
+    # string ("123 456") derived from HMAC(pairing_code, wrap-key DER +
+    # patient user id) and the wrap key's SHA-256 fingerprint (first 16
+    # hex). The therapist's portal derives and displays the SAME pair for
+    # the same live pairing session (GET /therapist/pairing/sas); the two
+    # humans compare them out of band before the patient confirms the
+    # grant — a malicious server substituting its own wrap key changes
+    # both values. Additive fields: older clients ignore them.
+    sas: str = ""
+    wrap_key_fingerprint: str = ""
+
+
+class TherapistPairingSasResponse(BaseModel):
+    """The therapist-side half of the out-of-band pairing comparison.
+
+    Same SAS construction as the patient's pairing/lookup response, over
+    the therapist's CURRENT live pairing session and the named patient;
+    the portal displays it next to the wrap-key fingerprint."""
+
+    sas: str
+    wrap_key_fingerprint: str
+    # How much longer the underlying pairing code lives (seconds) — lets
+    # the portal warn "request a fresh code" instead of comparing a SAS
+    # that is about to expire.
+    expires_in: int
 
 
 class ConsentGrantRequest(StrictRequestModel):
@@ -528,6 +649,16 @@ class MeasureOut(BaseModel):
     received_at: datetime
 
 
+class MeasureDeleteResponse(BaseModel):
+    """Outcome of the verifier-gated measure correction delete (2026-09-26
+    audit item 21). The post-delete collection marker is echoed in the body
+    AND the X-Measures-Revision header, so a paged-sync client can resume
+    without an extra GET — exactly how the entry delete exposes its
+    marker."""
+
+    measures_revision: int
+
+
 class NoteCreateRequest(StrictRequestModel):
     client_note_id: str = Field(pattern=CLIENT_ID_PATTERN)
     # min_length=1 (2026-09-20 audit fix L-29): an EMPTY string is not a
@@ -539,7 +670,18 @@ class NoteCreateRequest(StrictRequestModel):
 
 
 class NoteUpdateRequest(StrictRequestModel):
+    """PATCH /therapist/notes/{id} payload (2026-09-26 audit item 15).
+
+    Clinical notes now carry optimistic concurrency: the client MUST name
+    the note version its edit was based on. ``base_version`` absent is a
+    400 ``version_required`` (fail-closed — these are clinical notes, and
+    last-write-wins would silently destroy a clinician's edit); a mismatch
+    is a 409 ``version_conflict`` (refetch and re-apply). The same
+    code convention as the entries' version-bound replacement.
+    """
+
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+    base_version: int | None = Field(default=None, ge=1, le=2**63 - 1)
 
 
 class NoteOut(BaseModel):
@@ -549,6 +691,11 @@ class NoteOut(BaseModel):
     blob: str
     created_at: datetime
     updated_at: datetime
+    # Additive (2026-09-26 audit item 15): the note's optimistic-concurrency
+    # version — 1 on create, +1 on every changing PATCH. Clients echo it
+    # back as NoteUpdateRequest.base_version; older serialized copies
+    # without the field still decode (additive response-field rule).
+    version: int = 1
 
 
 class LocalRecomputeRequest(StrictRequestModel):
@@ -572,6 +719,12 @@ class LocalRecomputeRequest(StrictRequestModel):
     analysis_dates: list[Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]] = Field(
         min_length=1, max_length=366
     )
+    # 2026-09-26 audit item 13: the client-declared count of patterns in the
+    # opaque payload, so the response can report patterns_stored honestly.
+    # The server CANNOT count them itself (the blob is client-encrypted and
+    # this path exists precisely so the data key never crosses the wire), so
+    # the truthful server-only alternative is 0; absent keeps that old value.
+    patterns_count: int | None = Field(default=None, ge=0, le=10_000)
 
 
 class NoteRevisionOut(BaseModel):

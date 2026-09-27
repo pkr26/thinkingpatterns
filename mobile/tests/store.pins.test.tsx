@@ -29,11 +29,22 @@ vi.mock("../src/offlineQueue", () => ({
 
 vi.mock("../src/unlockProof", () => ({ clearUnlockProof: vi.fn(async () => {}) }));
 vi.mock("../src/brainSync", () => ({ clearRecomputeStamp: vi.fn(async () => {}) }));
+// Re-audit 2026-09-27 (L): signOut also wipes the measure-cadence stamp and
+// the measure reminder prefs — spied so the hygiene contract is pinned.
+vi.mock("../src/measureReminders", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/measureReminders")>();
+  return {
+    ...actual,
+    clearLastMeasureDate: vi.fn(async () => {}),
+    clearMeasureReminderPrefs: vi.fn(async () => {}),
+  };
+});
 
 const { api } = await import("../src/api/client");
 const { abortInFlightFlush, flushQueueOnReconnect } = await import("../src/offlineQueue");
 const { clearUnlockProof } = await import("../src/unlockProof");
 const { clearRecomputeStamp } = await import("../src/brainSync");
+const { clearLastMeasureDate, clearMeasureReminderPrefs } = await import("../src/measureReminders");
 const { resetApi } = await import("./helpers/apiMock");
 const { SessionProvider, useSession } = await import("../src/store");
 const { vault } = await import("../src/vault");
@@ -69,6 +80,8 @@ beforeEach(() => {
   vi.mocked(flushQueueOnReconnect).mockClear();
   vi.mocked(clearUnlockProof).mockClear();
   vi.mocked(clearRecomputeStamp).mockClear();
+  vi.mocked(clearLastMeasureDate).mockClear();
+  vi.mocked(clearMeasureReminderPrefs).mockClear();
   vi.mocked(AppState.addEventListener).mockClear();
   vault.lock();
 });
@@ -220,7 +233,7 @@ describe("store pins: refreshActiveDays guard", () => {
 });
 
 describe("store pins: signOut account hygiene", () => {
-  it("clears the unlock proof, recompute stamp and cached salt for the CURRENT ids", async () => {
+  it("clears the unlock proof, recompute stamp, cadence stamp, reminder prefs, cached envelope and cached salt for the CURRENT ids", async () => {
     vi.mocked(api.getUserId).mockResolvedValue("u-9");
     vi.mocked(api.getUsername).mockResolvedValue("kim");
     await mount(
@@ -234,6 +247,12 @@ describe("store pins: signOut account hygiene", () => {
     });
     expect(clearRecomputeStamp).toHaveBeenCalledWith("u-9");
     expect(clearUnlockProof).toHaveBeenCalledWith("u-9");
+    // Re-audit 2026-09-27 (L): per-account measure traces die with the
+    // session, alongside the crisis-dialog stamp.
+    expect(clearLastMeasureDate).toHaveBeenCalledWith("u-9");
+    expect(clearMeasureReminderPrefs).toHaveBeenCalledWith("u-9");
+    // The v2 offline-unlock envelope is account material like the salt.
+    expect(api.clearCachedKeyEnvelope).toHaveBeenCalledWith("kim");
     expect(api.clearCachedSalt).toHaveBeenCalledWith("kim");
   });
 
@@ -251,6 +270,9 @@ describe("store pins: signOut account hygiene", () => {
     });
     expect(clearRecomputeStamp).not.toHaveBeenCalled();
     expect(clearUnlockProof).not.toHaveBeenCalled();
+    expect(clearLastMeasureDate).not.toHaveBeenCalled();
+    expect(clearMeasureReminderPrefs).not.toHaveBeenCalled();
+    expect(api.clearCachedKeyEnvelope).not.toHaveBeenCalled();
     expect(api.clearCachedSalt).not.toHaveBeenCalled();
   });
 });

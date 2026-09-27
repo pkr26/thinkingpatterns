@@ -292,6 +292,10 @@ vi.mock("../src/api/client", async (importOriginal) => {
       getCachedSalt: vi.fn(async () => "U0FMVFNLQVM="),
       saltFor: vi.fn(async () => ({ salt: "U0FMVFNLQVM=" })),
       cacheSalt: vi.fn(async () => undefined),
+      // v2 key-scheme routing (2026-09-26): default v1 so every pin below
+      // still exercises the resumable rekey ladder; the v2 branch has its
+      // own suite (tests/rotationV2.test.ts).
+      keyEnvelope: vi.fn(async () => ({ key_scheme: "v1", salt: "U0FMVFNLQVM=", kdf_params: null, wrapped_data_key: null })),
       openProcessingSession: vi.fn(async (keyB64: string) => ({ session_token: `tok-${keyB64.slice(0, 4)}` })),
       rekeyStoredData: vi.fn(async () => ({ entries: 3, insights: 1, measures: 2 })),
       listEntriesPage: vi.fn(async () => ({ entries: [] })),

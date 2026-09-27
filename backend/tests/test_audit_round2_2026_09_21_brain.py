@@ -87,9 +87,10 @@ class TestAvgSentimentTruncationLegacyAnalyzer:
         tagged = [JournalEntry("ordinary day notes", d, sentiment=0.7) for d in days]
         blanks = [JournalEntry("", T0 + timedelta(days=k)) for k in range(10)]
 
-        assert patterns.analyze(tagged + blanks).avg_sentiment == patterns.analyze(
-            tagged
-        ).avg_sentiment
+        assert (
+            patterns.analyze(tagged + blanks).avg_sentiment
+            == patterns.analyze(tagged).avg_sentiment
+        )
 
     def test_blank_entry_with_explicit_tag_still_counts(self):
         days = consecutive(T0 - timedelta(days=19), 20)
@@ -106,11 +107,13 @@ class TestAvgSentimentTruncationLegacyAnalyzer:
 
 
 def _work_corpus(days: int = 70) -> list[JournalEntry]:
-    """Anxious-work Sundays (10 theme-days, past TEMPORAL_MIN_N) and calm
-    text otherwise — the standard mood_correlation:work shape."""
+    """Anxious-work days every third day (~23 theme-days, past
+    TEMPORAL_MIN_N, spread across every weekday — item 1's weekday
+    deconfounding absorbs a one-weekday pattern) and calm text otherwise:
+    the standard mood_correlation:work shape."""
     return [
-        JournalEntry(ANXIOUS_WORK if d.weekday() == 6 else CALM, d)
-        for d in consecutive(T0 - timedelta(days=days - 1), days)
+        JournalEntry(ANXIOUS_WORK if i % 3 == 0 else CALM, d)
+        for i, d in enumerate(consecutive(T0 - timedelta(days=days - 1), days))
     ]
 
 
@@ -135,10 +138,11 @@ class TestTaggedTruncationResiduals:
         with_blanks = brain.update(brain.load_state(None), base + truncated, today)
 
         assert _mood_stats(with_blanks) == _mood_stats(without)
-        # Prevalence keeps the truncated days: 10 text Sundays + 10 tagged
-        # blank days = 20 theme-days against 10 without them.
-        assert with_blanks.new_state["patterns"]["mood_correlation:work"].occurrences == 20
-        assert without.new_state["patterns"]["mood_correlation:work"].occurrences == 10
+        # Prevalence keeps the truncated days: the tagged blank days that
+        # fall on non-work days join the theme set, so the with-blanks
+        # corpus counts strictly more theme-days than the base alone.
+        base_occ = without.new_state["patterns"]["mood_correlation:work"].occurrences
+        assert with_blanks.new_state["patterns"]["mood_correlation:work"].occurrences > base_occ
 
     def test_blank_tagged_entry_with_sentiment_still_contributes(self):
         # Positive control: a blank entry carrying BOTH the activity tag and
@@ -147,16 +151,14 @@ class TestTaggedTruncationResiduals:
         # the text Sundays (same-date second entries), so the work group's
         # day-means absorb the -0.9 reports directly.
         base = _work_corpus()
-        sundays = [d for d in consecutive(T0 - timedelta(days=69), 70) if d.weekday() == 6]
-        reported = [JournalEntry("", d, tags=("work",), sentiment=-0.9) for d in sundays]
+        work_days = [e.entry_date for e in base if e.text == ANXIOUS_WORK]
+        reported = [JournalEntry("", d, tags=("work",), sentiment=-0.9) for d in work_days]
         today = T0 + timedelta(days=9)
 
         without = brain.update(brain.load_state(None), base, today)
         with_reports = brain.update(brain.load_state(None), base + reported, today)
 
-        delta_without = without.new_state["patterns"]["mood_correlation:work"].detail[
-            "mood_delta"
-        ]
+        delta_without = without.new_state["patterns"]["mood_correlation:work"].detail["mood_delta"]
         delta_with = with_reports.new_state["patterns"]["mood_correlation:work"].detail[
             "mood_delta"
         ]

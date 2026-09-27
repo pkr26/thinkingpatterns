@@ -153,10 +153,12 @@ class TestMalformedJsonRateLimiting:
         counter = app.state.rate_counter
         bucket_keys = [k for k in counter._hits if k.startswith("auth-salt:")]
         assert len(bucket_keys) == 1
-        count, _start, window = counter._hits[bucket_keys[0]]
+        state = counter._hits[bucket_keys[0]]  # noqa: SLF001
         # The two admitted parse failures are the only recorded events; the
         # four flood 429s beyond them added nothing (and restarted nothing).
-        assert count == 2, (count, window)
+        # (Sliding-window internals, audit item 2: total is the retained
+        # hit count; window bookkeeping lives on the state object.)
+        assert state.total == 2, (state.total, state.window_seconds)
 
     async def test_route_rules_are_built_from_the_live_router(self):
         """The edge counter's route→bucket map comes from the registered
@@ -472,6 +474,11 @@ class TestSettingsReprHidesSecrets:
         assert hidden == {
             "database_url",
             "token_secret",
+            # 2026-09-26 purpose-split secret overrides (the resolved
+            # properties are computed, never stored fields).
+            "auth_token_secret_explicit",
+            "totp_wrap_secret_explicit",
+            "pairing_secret_explicit",
             "decoy_secret",
             "metrics_token",
             "llm_api_key",

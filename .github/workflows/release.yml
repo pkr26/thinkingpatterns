@@ -146,7 +146,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_PASSWORD: ci-postgres-password
           POSTGRES_DB: mindpattern_test
@@ -187,15 +187,73 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Write a throwaway compose environment
+      - name: Write a throwaway compose environment and secret files
+        # The production compose is FAIL-CLOSED on compose `secrets:` mounts
+        # (2026-09-26 infra audit): .env alone is not enough — `compose up`
+        # refuses to start until all four files under deploy/secrets/
+        # (MINDPATTERN_SECRETS_DIR default, ./deploy/secrets relative to this
+        # checkout) exist. Materialize them from the SAME single-generation
+        # values the .env carries (one `openssl rand` per secret, two sinks);
+        # auth_token_secret is deliberately empty per the documented
+        # derive-from-token_secret path. Re-audit 2026-09-27: the first
+        # tagged release previously died at `compose up` with no secret
+        # files on disk at all.
         run: |
+          set -euo pipefail
+          token_secret=$(openssl rand -hex 32)
+          pg_password=$(openssl rand -hex 16)
+          backup_key=$(openssl rand -base64 32)
+          test -n "$token_secret" && test -n "$pg_password" && test -n "$backup_key" \
+            || { echo "::error::openssl produced an empty secret" >&2; exit 1; }
           {
-            echo "MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)"
-            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
-            echo "BACKUP_KEY=$(openssl rand -base64 32)"
+            echo "MINDPATTERN_TOKEN_SECRET=$token_secret"
+            echo "POSTGRES_PASSWORD=$pg_password"
+            echo "BACKUP_KEY=$backup_key"
             echo "MINDPATTERN_API_IMAGE=${{ needs.image.outputs.api_image }}"
             echo "MINDPATTERN_BACKUP_IMAGE=${{ needs.image.outputs.backup_image }}"
           } > .env
+          mkdir -p deploy/secrets
+          printf '%s\n' "$token_secret" > deploy/secrets/token_secret
+          : > deploy/secrets/auth_token_secret
+          printf '%s\n' "$pg_password" > deploy/secrets/postgres_password
+          printf '%s\n' "$backup_key" > deploy/secrets/backup_key
+          chmod 600 .env deploy/secrets/token_secret \
+            deploy/secrets/auth_token_secret deploy/secrets/postgres_password \
+            deploy/secrets/backup_key
+      - name: Assert the db password is ONE value across .env and the secret file
+        # Same fail-fast contract as ci.yml's docker job (re-audit
+        # 2026-09-27): the api interpolates POSTGRES_PASSWORD from .env into
+        # MINDPATTERN_DB_URL while the db reads the mounted secret file;
+        # divergence means `up --wait` fails deep into the job. Assert the
+        # two sinks agree AND that the rendered compose contract carries the
+        # file's value, before any image is pulled.
+        run: |
+          set -euo pipefail
+          for f in .env deploy/secrets/token_secret deploy/secrets/auth_token_secret \
+                   deploy/secrets/postgres_password deploy/secrets/backup_key; do
+            test -f "$f" || { echo "::error::required file $f was not written by the previous step" >&2; exit 1; }
+          done
+          env_password=$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)
+          file_password=$(cat deploy/secrets/postgres_password)
+          if [ -z "$env_password" ]; then
+            echo "::error::.env carries no POSTGRES_PASSWORD" >&2
+            exit 1
+          fi
+          if [ "$env_password" != "$file_password" ]; then
+            echo "::error::POSTGRES_PASSWORD mismatch: .env and deploy/secrets/postgres_password hold DIFFERENT values — the api's MINDPATTERN_DB_URL could never authenticate to the db" >&2
+            exit 1
+          fi
+          rendered_url=$(docker compose config \
+            | sed -n 's/^[[:space:]]*MINDPATTERN_DB_URL:[[:space:]]*//p' | head -n 1)
+          case "$rendered_url" in
+            *"$file_password"*)
+              echo "compose render: api MINDPATTERN_DB_URL contains the deploy/secrets/postgres_password value"
+              ;;
+            *)
+              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): ${rendered_url:-<empty>}" >&2
+              exit 1
+              ;;
+          esac
       - name: Validate the digest-pinned production Compose contract
         run: |
           docker compose config --quiet
@@ -232,8 +290,11 @@ jobs:
           done
           test "$found" = 1
           restore_name="mindpattern-restore-${GITHUB_RUN_ID:-local}-${RANDOM}"
+          # Digest matches docker-compose.yml's db service (re-pinned
+          # 2026-09-26; the previous cf78e766… pin was superseded — see the
+          # deploy/README.md digest-pin inventory).
           docker run --rm -d --name "$restore_name" -e POSTGRES_PASSWORD=restore \
-            postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685 >/dev/null
+            postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea >/dev/null
           cleanup_restore() { docker rm -f "$restore_name" >/dev/null 2>&1 || true; }
           trap cleanup_restore EXIT
           for attempt in $(seq 1 20); do
@@ -241,10 +302,13 @@ jobs:
             sleep 1
           done
           docker exec "$restore_name" pg_isready -U postgres >/dev/null
+          # -pass file: (re-audit 2026-09-27, aligned with ci.yml): the key
+          # travels via the mounted /run/secrets/backup_key the compose
+          # contract guarantees, not a container-environment copy.
           docker compose --profile backups exec -T backup sh -ceu '
             set -- /backups/mindpattern-*.dump.enc
             mindpattern-backup-mac verify "$1"
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -in "$1"
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:/run/secrets/backup_key -in "$1"
           ' | docker exec -i "$restore_name" pg_restore --no-owner -U postgres -d postgres
           docker exec "$restore_name" psql -U postgres -d postgres -tAc \
             "SELECT count(*) FROM users WHERE username = 'backup-restore-probe'" | grep -qx '1'
@@ -327,23 +391,78 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
-      - name: Trivy vulnerability scan of both candidate images (audit G-6)
+      - name: Build single-arch local copies for pre-push scanning
+        # 2026-09-26 infra audit (latent Trivy failure root-caused): the
+        # multi-platform builds above never load into the local daemon
+        # (load: is single-platform-only), so a by-tag Trivy scan via
+        # docker.sock had NOTHING to scan and fell back to an
+        # unauthenticated registry pull that cannot see the just-pushed
+        # private candidate; on non-tag runs (push=false) there was no
+        # image anywhere at all. These cache-warm single-arch copies give
+        # the scanner real bytes in every mode; tag pushes additionally
+        # scan the pushed immutable digests by registry auth below.
+        id: local-images
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backend
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: mindpattern-api:release-scan
+          cache-from: type=gha
+      - name: Build single-arch local backup copy for scanning
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backup
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: mindpattern-backup:release-scan
+          cache-from: type=gha
+      - name: Trivy vulnerability scan of the candidate images (audit G-6)
         # 2026-09-21 audit G-6: OS-package coverage the dependency audits
-        # (pip-audit/npm) cannot see. Scan the BUILT candidates by tag
-        # (pre-digest, same bytes); HIGH/CRITICAL findings with a fix
+        # (pip-audit/npm) cannot see. HIGH/CRITICAL findings with a fix
         # available fail the release. The scanner itself is digest-pinned
         # (final verification 2026-09-22), matching the ci.yml docker job.
+        # Scans the locally-loaded single-arch copies (same layer bytes via
+        # build-cache reuse) and, on tag pushes, the PUSHED immutable
+        # digests of both images via registry auth — the exact artifacts
+        # deployers pull.
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          for image in \
-            "${{ steps.candidate-tags.outputs.api_tag }}" \
-            "${{ steps.candidate-tags.outputs.backup_tag }}"; do
-            echo "trivy: scanning $image"
+          scan() {
+            echo "trivy: scanning $1"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -e TRIVY_USERNAME -e TRIVY_PASSWORD \
               aquasec/trivy:0.61.0@sha256:6967db29ce5294d054121e94b3cb1262de858af63b4547bb1bade66a4306f2e4 image \
               --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed \
-              --no-progress "$image"
-          done
+              --no-progress "$1"
+          }
+          scan mindpattern-api:release-scan
+          scan mindpattern-backup:release-scan
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            scan "${{ steps.candidate-tags.outputs.api_repository }}@${{ steps.api-image.outputs.digest }}"
+            scan "${{ steps.candidate-tags.outputs.backup_repository }}@${{ steps.backup-image.outputs.digest }}"
+          fi
+      - name: Install cosign (keyless signing)
+        # 2026-09-26 infra audit: provenance/SBOM attestation was configured
+        # but nothing was ever SIGNED — an external auditor would find zero
+        # signature records. Cosign keyless signs with the runner's OIDC
+        # identity; deploy/README.md documents verification.
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
+      - name: Sign both pushed digests (cosign keyless)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          API_IMAGE: ${{ steps.candidate-tags.outputs.api_repository }}@${{ steps.api-image.outputs.digest }}
+          BACKUP_IMAGE: ${{ steps.candidate-tags.outputs.backup_repository }}@${{ steps.backup-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$API_IMAGE"
+          cosign sign --yes "$BACKUP_IMAGE"
       - name: Expose immutable candidate deployment image references
         id: image-references
         if: startsWith(github.ref, 'refs/tags/v')

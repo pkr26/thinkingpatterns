@@ -42,6 +42,10 @@ export const es: Record<string, string> = {
   "common.unlockAgainBody": "Vuelva a desbloquear.",
   "common.couldNotCompleteTitle": "No se pudo completar",
   "common.neverWrongMove": "Hablar con un profesional nunca es un paso equivocado.",
+  // 2026-09-27: la etiqueta de acción del plan de seguridad local — la
+  // comparten el enlace de la pantalla de crisis, el tercer botón de los
+  // diálogos de crisis y la fila de Ajustes.
+  "common.makeSafetyPlan": "Hacer un plan de seguridad",
   "common.streakOne": "Racha de escritura: {count} día",
   "common.streakMany": "Racha de escritura: {count} días",
 
@@ -107,6 +111,11 @@ export const es: Record<string, string> = {
   "crisis.findhelpline": "Abrir findahelpline.com",
   "crisis.findhelpline.detail": "Abrir findahelpline.com — líneas de crisis de todo el mundo",
   "crisis.findhelpline.fallback": "Aún puede visitar findahelpline.com en un navegador.",
+  // El plan de seguridad local (2026-09-27): un complemento DESPUÉS de los
+  // recursos, nunca una puerta antes de ellos. El enlace aparece solo con
+  // la bóveda desbloqueada; los recursos de arriba nunca dependen de él.
+  "crisis.makePlanA11y": "Hacer un plan de seguridad — privado, cifrado en este dispositivo",
+  "crisis.makePlanNote": "Privado, cifrado en este dispositivo — escriba lo que le ayuda a atravesarlo.",
   "crisis.localeNote": "Estos son servicios de EE. UU. Fuera de EE. UU., encuentre su línea local en findahelpline.com.",
   "crisis.regionNote": "Su región no parece ser EE. UU. — busque primero su línea local:",
   "crisis.usServicesNote": "En EE. UU., estos son los servicios nacionales (988 y 741741 son solo de EE. UU.):",
@@ -127,6 +136,11 @@ export const es: Record<string, string> = {
   "unlock.noAccount": "no hay ninguna cuenta guardada en este dispositivo — inicie sesión",
   "unlock.offlineNotEnabled":
     "el desbloqueo sin conexión aún no está activado en este dispositivo — inicie sesión una vez con conexión para activarlo",
+  // Sobrellave v2 (2026-09-26): la contraseña fue aceptada (en línea) o el
+  // sobre guardado era legible, pero el sobre no se pudo abrir o no sirve —
+  // un mensaje sereno sobre el servidor o los datos, nunca "contraseña incorrecta".
+  "unlock.envelopeFailed":
+    "el sobre de llaves de esta cuenta no se pudo abrir en este servidor. No se cambió nada — inténtelo de nuevo y contacte a soporte si se repite.",
 
   // ----------------------------------------------------------------- login
   "login.subtitle": "Sus patrones, a partir de sus palabras. Cifrado en este dispositivo.",
@@ -159,6 +173,11 @@ export const es: Record<string, string> = {
     "No existe recuperación de contraseña. Si la olvida, nadie — incluyéndonos a nosotros — podrá recuperar su diario.",
   "login.signIn": "Iniciar sesión",
   "login.createAccount": "Crear cuenta",
+  // PUERTA DE EDAD (2026-09-27, clínica): el registro exige una
+  // declaración explícita de 18 años o más. Copia de seguridad crítica —
+  // una afirmación llana, idéntica en significado en cada idioma.
+  "login.ageConfirm": "Tengo 18 años o más",
+  "login.ageConfirmA11y": "Confirmación de edad — tengo 18 años o más",
   "login.switchToRegister": "¿Primera vez aquí? Crear una cuenta",
   "login.switchToSignIn": "¿Ya tiene una cuenta? Iniciar sesión",
   "login.registerFailedTitle": "No se pudo crear la cuenta",
@@ -170,6 +189,20 @@ export const es: Record<string, string> = {
   "login.registerPartialTitle": "Cuenta creada",
   "login.registerPartialBody":
     "Su cuenta fue creada, pero este dispositivo no pudo terminar de iniciar la sesión. Cambie a iniciar sesión y use su nuevo usuario y contraseña.",
+  // Sobrellave v2 (2026-09-26): la contraseña fue aceptada en línea, pero el
+  // sobre de llaves de la cuenta no se abrió con ella en este servidor — no
+  // es un mensaje de contraseña incorrecta.
+  "login.envelopeFailed":
+    "Su contraseña fue aceptada, pero el sobre de llaves de esta cuenta no se pudo abrir en este servidor. No se cambió nada — inténtelo de nuevo, o contacte a soporte si se repite.",
+  // Re-auditoría 2026-09-27 (M): la cuenta v2 en línea cuyo sobre de llaves
+  // no pudo obtenerse NI del servidor NI de la caché caía antes a la
+  // semántica v1 — la bóveda se abría con la llave derivada v1 y las notas
+  // escritas en esa sesión quedaban ilegibles para siempre. Ahora la sesión
+  // se rechaza: honesto, sereno, y explícito en que no se cambió nada.
+  "login.envelopeUnavailable":
+    "No pudimos verificar su clave de cifrado con el servidor. Compruebe su conexión e inténtelo de nuevo — no se cambió nada.",
+  "login.envelopeUnrecognized":
+    "No pudimos verificar su clave de cifrado — el servidor envió una respuesta que esta aplicación no entiende. No se cambió nada; actualizar la aplicación puede ayudar.",
 
   // ------------------------------------------------------------- onboarding
   "onboarding.panel1Title": "Escriba cada día",
@@ -184,7 +217,10 @@ export const es: Record<string, string> = {
   "onboarding.stepOf": "{current} de {total}",
   "onboarding.remindQuestion": "¿Quiere un recordatorio amable cada día? Puede cambiarlo cuando quiera en Ajustes.",
   "onboarding.readPrivacy": "Leer la política de privacidad",
-  "onboarding.ageNotice": "MindPattern es para personas de 13 años o más — al continuar, usted confirma que lo es.",
+  // 2026-09-27: el mínimo de edad pasó a 18 con la puerta de edad del
+  // registro (login.ageConfirm) — esta línea declara el mismo mínimo para
+  // que nunca se contradigan.
+  "onboarding.ageNotice": "MindPattern es para personas de 18 años o más — al continuar, usted lo confirma.",
   "onboarding.start": "Entiendo — empezar a escribir",
   "onboarding.continueA11y": "Continuar al panel {next} de {total}",
 
@@ -298,6 +334,10 @@ export const es: Record<string, string> = {
   // lea un recordatorio en español.
   "notify.reminderBody": "Un momento tranquilo para escribir, cuando le venga bien.",
   "notify.channelName": "Recordatorios del diario",
+  // El empuje de los cuestionarios (2026-09-27): una invitación, nunca una
+  // deuda — sin "atrasado", sin rachas, nada que sentir mal (el mismo
+  // contrato de mensajería segura que el recordatorio diario).
+  "notify.measureReminderBody": "Un momento tranquilo para un cuestionario de bienestar, cuando le venga bien.",
 
   // ---------------------------------------------------------------- history
   "history.snapshotReload": "Su diario cambió mientras se cargaban las entradas más antiguas. Recargando el historial más reciente desde el principio.",
@@ -653,17 +693,44 @@ export const es: Record<string, string> = {
   "settings.changePasswordTitle": "Cambie su contraseña",
   "settings.changePasswordBody":
     "Esto rota su credencial de acceso Y vuelve a cifrar su diario con una clave nueva: es el paso de recuperación si su contraseña o clave se expuso alguna vez. Todos los dispositivos cerrarán sesión; los permisos de compartir activos se re-envuelven automáticamente.",
+  // Copia v2 (2026-09-26): las cuentas con sobre de llave cambian la
+  // contraseña SIN volver a cifrar nada — la descripción honesta de O(1).
+  "settings.changePasswordTitleV2": "Cambie su contraseña",
+  "settings.changePasswordBodyV2":
+    "Esto cambia la contraseña que bloquea su clave de cifrado. Su diario no se vuelve a cifrar — queda exactamente como está, y compartir con su terapeuta sigue funcionando sin cambios. Todos los dispositivos cerrarán sesión.",
   "settings.newPasswordPlaceholder": "Contraseña nueva (12+ caracteres)",
   "settings.newPasswordA11y": "Contraseña nueva",
   "settings.changePasswordButton": "Rotar claves e iniciar sesión de nuevo",
+  "settings.changePasswordButtonV2": "Cambiar contraseña e iniciar sesión de nuevo",
   "settings.rotateWorking": "Rotando…",
   "settings.rotateSuccessTitle": "Contraseña cambiada",
   "settings.rotateSuccessBody":
     "Su diario ahora está cifrado con su nueva contraseña. Inicie sesión de nuevo en este dispositivo y en cualquier otro que use.",
+  "settings.rotateSuccessBodyV2":
+    "Su contraseña ahora abre una copia recién envuelta de su clave de cifrado; la clave en sí no cambió, así que su diario y sus permisos de compartir quedaron tal como estaban. Inicie sesión de nuevo en este dispositivo y en cualquier otro que use.",
   "settings.rotateFailedTitle": "No se pudo cambiar la contraseña",
   "settings.rotateWrongOld": "La contraseña actual no fue aceptada. No se cambió nada.",
   "settings.rotateRewrapFailed":
-    "Estos permisos de compartir no pudieron re-envolverse y deben emparejarse de nuevo con el código del terapeuta: {names}",  "settings.reauthLlmTitle": "Escriba su contraseña para {action} el análisis con IA de terceros",
+    "Estos permisos de compartir no pudieron re-envolverse y deben emparejarse de nuevo con el código del terapeuta: {names}",
+  // --- Mejora v1 → v2 del sobre de llaves (2026-09-26) --------------------
+  // Alcance honesto: nada se vuelve a cifrar, la clave de datos no cambia;
+  // el beneficio es que cambiar la contraseña pasa a ser instantáneo. La
+  // acción envía la clave de datos ACTUAL al servidor (dentro del sobre
+  // protegido por contraseña), por eso va detrás de la tarjeta de contraseña.
+  "settings.upgradeTitle": "Mejorar la protección de llaves",
+  "settings.upgradeBody":
+    "Un cambio único en cómo su contraseña protege su diario: hoy su contraseña deriva directamente su clave de cifrado, así que cambiarla vuelve a cifrar todo. Tras la mejora, una clave aleatoria aparte cifra su diario y su contraseña la bloquea — los cambios futuros de contraseña serán instantáneos y su diario guardado no cambia en nada. Esto pide su contraseña y toma un momento.",
+  "settings.upgradeButton": "Mejorar ahora",
+  "settings.reauthUpgradeTitle": "Escriba su contraseña para mejorar la protección de llaves",
+  "settings.upgradeSuccessTitle": "Protección de llaves mejorada",
+  "settings.upgradeSuccessBody":
+    "Su diario no cambió y se abre igual que antes. A partir de ahora, cambiar su contraseña no vuelve a cifrarlo.",
+  "settings.upgradeAlreadyTitle": "Ya está mejorada",
+  "settings.upgradeAlreadyBody":
+    "Esta cuenta ya usa la protección de llaves más nueva. No había nada que cambiar.",
+  "settings.upgradeFailedTitle": "No se pudo mejorar la protección de llaves",
+  "settings.upgradeKeyMismatchBody":
+    "La clave de cifrado de este dispositivo no coincide con los datos guardados en el servidor, así que no se cambió nada. Bloquee la app y desbloquéela de nuevo con su contraseña actual, y vuelva a intentarlo.",  "settings.reauthLlmTitle": "Escriba su contraseña para {action} el análisis con IA de terceros",
   "settings.enableWord": "activar",
   "settings.disableWord": "desactivar",
   "settings.appearanceLabel": "APARIENCIA",
@@ -680,6 +747,16 @@ export const es: Record<string, string> = {
   "settings.reminderTimeA11y": "Hora del recordatorio",
   "settings.reminderTimeOptionA11y": "Hora del recordatorio: {label}",
   "settings.reminderUnavailableNote": "{reason}. La preferencia se guarda y el aviso comenzará cuando esta versión incorpore las notificaciones.",
+  // --- Recordatorios de cuestionarios (2026-09-27) ------------------------
+  "settings.measureReminderLabel": "RECORDATORIOS DE CUESTIONARIOS",
+  "settings.measureReminderRow": "Recordatorios de cuestionarios",
+  "settings.measureReminderA11y": "Recordatorios de cuestionarios",
+  "settings.measureReminderNote":
+    "Un empuje amable para completar un cuestionario de bienestar cuando el último tenga más del intervalo que elija. Solo local — no se envía nada a ningún lugar.",
+  "settings.measureIntervalA11y": "Intervalo de los cuestionarios",
+  "settings.measureIntervalOptionA11y": "Intervalo de los cuestionarios: {label}",
+  "settings.intervalWeeks": "{count} semanas",
+  "settings.safetyPlanA11y": "Abrir su plan de seguridad",
   "settings.healthMirrorLabel": "APP DE SALUD",
   "settings.healthMirrorRow": "Reflejar mis registros de ánimo en la app Salud",
   "settings.healthMirrorA11y": "Reflejar mis registros de ánimo en la app Salud",
@@ -778,6 +855,39 @@ export const es: Record<string, string> = {
   "measures.phq2.item1": "Poco interés o placer en hacer las cosas",
   "measures.phq2.item2": "Sentirse desanimado/a, deprimido/a o sin esperanza",
 
+  // ------------------------------------------- plan de seguridad (2026-09-27)
+  // El plan de seguridad personal, local y cifrado (estructura inspirada en
+  // Stanley-Brown; véase src/safetyPlan.ts). Copia DE SEGURIDAD CRÍTICA:
+  // serena, clara, en primera persona donde el campo son las palabras del
+  // usuario; los números y URL nunca cambian por idioma.
+  "safetyplan.navTitle": "Mi plan de seguridad",
+  "safetyplan.intro":
+    "Un plan de seguridad es suyo: cómo se ven sus señales de alerta, qué le ayuda, a quién acudir. Se queda en este dispositivo, cifrado con su llave — nunca se envía a ningún lugar. Es una herramienta personal en la que apoyarse, no un sustituto de la ayuda profesional.",
+  "safetyplan.field.warningSigns": "Mis señales de alerta",
+  "safetyplan.hint.warningSigns": "Pensamientos, sentimientos, situaciones o comportamientos que le indican que comienza un momento difícil",
+  "safetyplan.field.copingStrategies": "Cosas que puedo hacer para afrontarlo",
+  "safetyplan.hint.copingStrategies": "Qué le ha calmado o dado estabilidad antes — en sus propias palabras",
+  "safetyplan.field.peoplePlaces": "Personas y lugares que ayudan",
+  "safetyplan.hint.peoplePlaces": "Nombres, números y lugares a los que puede acudir",
+  "safetyplan.field.askForHelp": "A quién puedo pedir ayuda",
+  "safetyplan.hint.askForHelp": "Personas en las que confía lo suficiente para decir «necesito ayuda»",
+  "safetyplan.field.professionals": "Profesionales y servicios",
+  "safetyplan.hint.professionals": "Su terapeuta, médico o clínica — las líneas de crisis de abajo ya están rellenas como punto de partida",
+  "safetyplan.field.environmentSafer": "Hacer mi entorno más seguro",
+  "safetyplan.hint.environmentSafer": "Qué podría mover, guardar bajo llave o apartar antes de un momento difícil",
+  // El RELLENO inicial del campo de profesionales para un plan nuevo: las
+  // líneas de crisis integradas de la app, tal cual la pantalla de crisis
+  // (los números y URL son idénticos en todos los idiomas por diseño).
+  "safetyplan.prefillProfessionals":
+    "988 Suicide & Crisis Lifeline — llame o envíe un mensaje de texto al 988, o chatee en 988lifeline.org/chat\nCrisis Text Line — envíe HOME al 741741\nEmergencias (EE. UU.) — llame al 911\nFuera de EE. UU. — findahelpline.com",
+  "safetyplan.save": "Guardar mi plan de seguridad",
+  "safetyplan.saved": "Guardado — cifrado, como siempre.",
+  "safetyplan.saveFailedTitle": "No se pudo guardar",
+  "safetyplan.saveFailedBody": "Su plan sigue en pantalla tal como lo escribió — inténtelo de nuevo.",
+  "safetyplan.lockedTitle": "Bloqueado",
+  "safetyplan.lockedBody":
+    "Su plan de seguridad está cifrado con su llave — desbloquéelo para leerlo o editarlo. Los recursos de crisis siguen a un toque abajo, como siempre.",
+
   // -------------------------------------------------------- therapist share
   "share.codeNotFoundTitle": "Código no encontrado",
   "share.codeNotFoundBody": "Revise el código con su terapeuta — expira 15 minutos después de que lo genere.",
@@ -809,12 +919,23 @@ export const es: Record<string, string> = {
   "share.stoppedOn": "Detenido {date}",
   "share.addLabel": "Agregue a su terapeuta",
   "share.addBody": "Pida a su terapeuta un código de emparejamiento desde su portal y escríbalo aquí. Los códigos expiran después de 15 minutos.",
+  // SAS (2026-09-26): fija la expectativa junto al campo del código — tras
+  // la búsqueda, un código de coincidencia de 6 dígitos y la huella de la
+  // llave deben compararse con el terapeuta por otro canal antes de compartir.
+  "share.sasIntro":
+    "Después de escribir el código, esta app muestra un código de coincidencia y la huella de una llave. Léale ambos a su terapeuta y compruebe que coinciden con lo que muestra su portal antes de compartir nada.",
   "share.codePlaceholder": "p. ej. 7X2KQM4N",
   "share.codeA11y": "Código de emparejamiento del terapeuta",
   "share.lookingUp": "Buscando…",
   "share.findTherapist": "Encontrar a mi terapeuta",
   "share.fingerprintNote":
     "Huella de la llave: {fingerprint}\nLéala de vuelta a su terapeuta y compruebe que coincide con la que muestra su portal — una discrepancia significa que la llave fue sustituida en el camino.",
+  // SAS (2026-09-26): la suma de verificación del emparejamiento calculada
+  // por el servidor sobre (código, llave pública, su cuenta). Una llave
+  // sustituida la cambia; dos personas comparándola por otro canal son la
+  // detección. Solo se muestra cuando tiene un formato válido.
+  "share.sasNote":
+    "Código de coincidencia: {sas}\nLéalo de vuelta a su terapeuta y compruebe que coincide con el que muestra su portal para este emparejamiento — una discrepancia significa que el emparejamiento podría haber sido alterado. No continúe.",
   // C-7 (2026-09-21): la comprobación de la huella es una ACCIÓN — el
   // consentimiento solo continúa tras pulsar «las huellas coinciden».
   "share.fingerprintsMatch": "Las huellas coinciden — continuar",

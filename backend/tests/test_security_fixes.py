@@ -11,7 +11,7 @@ history (commits 2026-09-16 .. 2026-09-21).
 from __future__ import annotations
 from app import singleprocess
 from app.api.auth import SCRYPT_N, decoy_salt
-from app.cache import FixedWindowCounter, MAX_TRACKED_KEYS
+from app.cache import SlidingWindowCounter, MAX_TRACKED_KEYS
 from app.config import Settings
 from app.main import create_app
 from app.security import crypto, enclave, kdf
@@ -211,7 +211,7 @@ async def test_replace_delete_race_is_serialized_and_never_500(client):
 
 
 async def test_unknown_name_flood_never_consumes_login_buckets(client, app):
-    from app.cache import FixedWindowCounter
+    from app.cache import SlidingWindowCounter
 
     emu = ClientEmulator("lockvictim", "pw-lock-victim")
     await emu.register(client)
@@ -223,7 +223,7 @@ async def test_unknown_name_flood_never_consumes_login_buckets(client, app):
         await client.post(
             "/api/auth/login", json={"username": "no-such-user-anywhere", "verifier": wrong}
         )
-    counter: FixedWindowCounter = app.state.rate_counter
+    counter: SlidingWindowCounter = app.state.rate_counter
     assert not any(k.startswith("login-name:") for k in counter._hits)
 
     # A failed verification for a REAL account is still IP-throttled, but it
@@ -243,9 +243,9 @@ async def test_unknown_name_flood_never_consumes_login_buckets(client, app):
 
 
 def test_eviction_prefers_single_hit_garbage_over_multi_hit_victim():
-    from app.cache import MAX_TRACKED_KEYS, FixedWindowCounter
+    from app.cache import MAX_TRACKED_KEYS, SlidingWindowCounter
 
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     now = 1000.0
     counter.hit("login-name:victim", 60, now=now)  # count 1
     counter.hit("login-name:victim", 60, now=now + 1)  # count 2
@@ -912,8 +912,11 @@ TODAY = date.today()
 
 
 def test_scrypt_params_meet_hardened_floor():
-    # N=2^16 (64 MiB) with the input already PBKDF2-600k stretched client-side.
-    assert SCRYPT_N == 2**16
+    # 2026-09-26 remediation (LOW c): N=2^17 (128 MiB) with the input
+    # already PBKDF2-600k stretched client-side (raised from 2^16; the
+    # config knob MINDPATTERN_SCRYPT_N/Settings.scrypt_n holds the same
+    # default for operators carrying pre-upgrade verifiers).
+    assert SCRYPT_N == 2**17
 
 
 def test_auth_scrypt_has_a_dedicated_capacity_limiter(settings):
@@ -1304,7 +1307,7 @@ def test_keystore_destroy_zeroizes_internal_bytes():
 
 
 def test_counter_memory_is_bounded_under_key_rotation():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     for i in range(MAX_TRACKED_KEYS + 500):
         counter.hit(f"spoofed-ip-{i}", 60)
     # The dict never grows past the cap, even with all-fresh (never-stale) keys.

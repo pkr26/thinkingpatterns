@@ -61,15 +61,29 @@ async def require_user(
     session: AsyncSession = Depends(get_session),
 ) -> User:
     # Every failure is the same flat 401: distinguishing expired / bad
-    # signature / unknown user only helps token-lifecycle probing.
+    # signature / unknown user / revoked-token only helps token-lifecycle
+    # probing.
     failure = ApiError(status_code=401, detail="invalid token", code="unauthorized")
     if not authorization or not authorization.startswith("Bearer "):
         raise failure
     token = authorization[len("Bearer ") :].strip()
     try:
-        payload = tokens.verify_token(token, request.app.state.settings.token_secret)
+        payload = tokens.verify_token(token, request.app.state.settings.auth_token_secret)
     except tokens.TokenError:
         raise failure from None
+    # ksv (2026-09-26 purpose-split secrets): the signing-secret scheme the
+    # token was minted under must equal the live one. A token issued under
+    # scheme 1 is dead the moment an operator sets MINDPATTERN_AUTH_TOKEN_SECRET
+    # — even when its bytes equal the legacy secret, the rotation is
+    # EXPLICIT. Tokens without a ksv claim are legacy and count as scheme 1.
+    if payload.get("ksv", 1) != request.app.state.settings.auth_secret_version:
+        raise failure
+    # Single-token revocation (2026-09-26): a logout records the token's
+    # jti until its own exp. Legacy jti-less tokens cannot be individually
+    # revoked — they remain covered by the account-wide epoch below.
+    jti = payload.get("jti")
+    if isinstance(jti, str) and request.app.state.token_revocations.is_revoked(jti):
+        raise failure
     user = await session.get(User, payload["uid"])
     if user is None or not user.is_active:
         raise failure
@@ -77,6 +91,14 @@ async def require_user(
     # issued before it — stateless tokens still get a server-side kill switch.
     if payload.get("ep", 1) != user.token_epoch:
         raise failure
+    # Expose the authenticated jti for in-fence re-checks (the processing-
+    # session mint re-verifies revocation inside the lifecycle fence, the
+    # same M-2 staleness rule it applies to the epoch). Real requests
+    # always carry Starlette state; direct-call test doubles may not —
+    # skip the stash rather than fail an otherwise-authenticated call.
+    request_state = getattr(request, "state", None)
+    if request_state is not None:
+        request_state.mindpattern_token_jti = jti if isinstance(jti, str) else None
     # End the auth read transaction immediately: the session stays usable
     # (the next query auto-begins), but the pooled connection is NOT pinned
     # open for the rest of the request — a recompute holds no transaction

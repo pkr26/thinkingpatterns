@@ -18,6 +18,16 @@ import { ApiError, api, sessionUserId } from "./api/client";
 import { currentOrigin, withLock } from "./platform";
 import { kv } from "./kvstore";
 
+/** The single Web Lock name for EVERY queue operation (audit 2026-09-26
+ *  MEDIUM): the flush path already serialized drains cross-tab; the
+ *  mutation paths (enqueue/requeue/clear) now take the SAME lock, so a
+ *  read-modify-write in one signed-in tab can never interleave with a
+ *  drain or another mutation in another tab — last-write-wins used to
+ *  DROP a queued entry. Same name on purpose: a mutation that held a
+ *  different lock could still interleave with a flush's read→commit
+ *  window. */
+const QUEUE_LOCK_NAME = "queue-flush";
+
 const STORAGE_PREFIX = "mindpattern/queue.v1";
 export const MAX_QUEUE_LENGTH = 200;
 /** Serialized byte ceiling for one scope's queue value (mobile M-13): the
@@ -282,7 +292,12 @@ export async function rejectedEntryCount(userId?: string): Promise<number> {
 
 export async function enqueue(item: QueuedEntry): Promise<void> {
   const scope = await scopeFor(item.userId);
-  return serialized(async () => {
+  // Cross-tab serialization FIRST (Web Lock), per-process serialization
+  // second (the mutex): two signed-in tabs used to interleave their
+  // read→write windows — the per-process mutex could not see the other
+  // tab — and last-write-wins silently dropped a queued entry (audit
+  // 2026-09-26 MEDIUM).
+  return withLock(QUEUE_LOCK_NAME, () => serialized(async () => {
     const generation = queueGeneration;
     const queue = await readItems(scope.queue, scope, generation);
     if (wipedSince(generation)) throw new QueueAbandonedError();
@@ -307,7 +322,7 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
       await kv.removeItem(scope.queue);
       throw new QueueAbandonedError();
     }
-  });
+  }));
 }
 
 function retryDelayMs(attempts: number): number {
@@ -363,21 +378,36 @@ async function verifyDuplicateOutcome(clientEntryId: string): Promise<FlushOutco
   }
 }
 
-/** Upload due items for exactly one origin/account scope. */
+/** Upload due items for exactly one origin/account scope.
+ *
+ *  2026-09-26 audit LOW: the drain used to re-read and re-parse the whole
+ *  queue for EVERY item — O(n²) in queued entries. It now reads the batch
+ *  ONCE, drains it in memory (network I/O outside the storage mutex, so an
+ *  enqueue in this tab never blocks on a slow server), and commits every
+ *  item's outcome with ONE write-back — still under the per-process mutex
+ *  + generation fence, and cross-tab under the queue-flush Web Lock that
+ *  flushQueueOnReconnect holds around this call. */
 export async function flushQueue(currentUserId: string): Promise<number> {
   const scope = await scopeFor(currentUserId);
+  const batch = await serialized(async () => {
+    const generation = queueGeneration;
+    return { generation, items: await readItems(scope.queue, scope, generation) };
+  });
+  const { generation } = batch;
   let sent = 0;
-  for (;;) {
-    if (scope.origin !== currentOrigin()) return sent;
-    const peek = await serialized(async () => {
-      const generation = queueGeneration;
-      const queue = await readItems(scope.queue, scope, generation);
-      const item = queue.find((entry) => entry.notBefore === undefined || entry.notBefore <= Date.now());
-      return { generation, item };
-    });
-    const item = peek.item;
-    if (!item) return sent;
+  if (batch.items.length === 0) return sent;
 
+  const removed = new Set<string>(); // sent / verified duplicate / rejected
+  const requeued = new Map<string, QueuedEntry>(); // retry / session-expired
+  const rejects: QueuedEntry[] = [];
+  let sessionExpired = false;
+  let stop = false;
+
+  for (const item of batch.items) {
+    if (stop || scope.origin !== currentOrigin()) break;
+    // In order, skipping items still inside a backoff/advisory window —
+    // exactly the "first due item" the per-item drain used to pick.
+    if (item.notBefore !== undefined && item.notBefore > Date.now()) continue;
     let outcome: FlushOutcome;
     try {
       // A queue upload is always the first generation of its id.
@@ -389,69 +419,71 @@ export async function flushQueue(currentUserId: string): Promise<number> {
           ? await verifyDuplicateOutcome(item.clientEntryId)
           : classifyError(error);
     }
-
-    if (outcome.kind === "session-expired") {
-      // Keep EVERY item queued: the unattempted ones untouched, the
-      // attempted one under a long notBefore so a dead session is not
-      // hammered item-by-item.
-      const preserved = await serialized(async () => {
-        const queue = await readItems(scope.queue, scope, peek.generation);
-        if (wipedSince(peek.generation)) return false;
-        const index = queue.findIndex((entry) => entry.clientEntryId === item.clientEntryId);
-        if (index >= 0) {
-          queue[index] = {
-            ...item,
-            attempts: (item.attempts ?? 0) + 1,
-            notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS,
-          };
-          await writeItems(scope.queue, queue);
-          if (wipedSince(peek.generation)) return false;
-        }
-        return true;
-      });
-      if (!preserved) return sent;
-      throw new SessionExpiredError();
-    }
-
-    const committed = await serialized(async () => {
-      const queue = await readItems(scope.queue, scope, peek.generation);
-      if (wipedSince(peek.generation)) return false;
-      const index = queue.findIndex((entry) => entry.clientEntryId === item.clientEntryId);
-      if (index < 0) return true; // another flush resolved it
-      switch (outcome.kind) {
-        case "sent":
-        case "duplicate":
-          queue.splice(index, 1);
-          await writeItems(scope.queue, queue);
-          break;
-        case "reject":
-        case "reject-and-stop":
-          queue.splice(index, 1);
-          await appendRejected(scope, [item], peek.generation);
-          if (wipedSince(peek.generation)) return false;
-          await writeItems(scope.queue, queue);
-          break;
-        case "retry": {
-          const attempts = item.attempts ?? 0;
-          const delay =
-            outcome.retryAfterMs !== undefined
-              ? Math.min(Math.max(outcome.retryAfterMs, SERVER_ADVISORY_MIN_MS), SERVER_ADVISORY_MAX_MS)
-              : retryDelayMs(attempts);
-          queue[index] = {
-            ...item,
-            attempts: attempts + 1,
-            notBefore: Date.now() + delay,
-          };
-          await writeItems(scope.queue, queue);
-          break;
-        }
+    switch (outcome.kind) {
+      case "sent":
+        removed.add(item.clientEntryId);
+        sent += 1;
+        break;
+      case "duplicate":
+        removed.add(item.clientEntryId);
+        break;
+      case "reject":
+      case "reject-and-stop":
+        removed.add(item.clientEntryId);
+        rejects.push(item);
+        stop = outcome.kind === "reject-and-stop";
+        break;
+      case "session-expired":
+        // Keep EVERY item queued: the unattempted ones untouched, the
+        // attempted one under a long notBefore so a dead session is not
+        // hammered item-by-item.
+        requeued.set(item.clientEntryId, {
+          ...item,
+          attempts: (item.attempts ?? 0) + 1,
+          notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS,
+        });
+        sessionExpired = true;
+        stop = true;
+        break;
+      case "retry": {
+        const attempts = item.attempts ?? 0;
+        const delay =
+          outcome.retryAfterMs !== undefined
+            ? Math.min(Math.max(outcome.retryAfterMs, SERVER_ADVISORY_MIN_MS), SERVER_ADVISORY_MAX_MS)
+            : retryDelayMs(attempts);
+        requeued.set(item.clientEntryId, {
+          ...item,
+          attempts: attempts + 1,
+          notBefore: Date.now() + delay,
+        });
+        stop = outcome.stop;
+        break;
       }
+    }
+  }
+
+  if (removed.size > 0 || requeued.size > 0 || rejects.length > 0) {
+    const committed = await serialized(async () => {
+      if (wipedSince(generation)) return false;
+      // Re-read under the mutex and apply by id: entries enqueued in THIS
+      // process while the drain was awaiting the network survive untouched
+      // (and an item another flush already resolved is simply not found).
+      const current = await readItems(scope.queue, scope, generation);
+      if (wipedSince(generation)) return false;
+      if (rejects.length > 0) await appendRejected(scope, rejects, generation);
+      if (wipedSince(generation)) return false;
+      await writeItems(
+        scope.queue,
+        current
+          .filter((entry) => !removed.has(entry.clientEntryId))
+          .map((entry) => requeued.get(entry.clientEntryId) ?? entry),
+      );
       return true;
     });
     if (!committed) return sent;
-    if (outcome.kind === "sent") sent += 1;
-    if (outcome.kind === "reject-and-stop" || (outcome.kind === "retry" && outcome.stop)) return sent;
   }
+  if (sessionExpired) throw new SessionExpiredError();
+  return sent;
 }
 
 /** Sign-out fences in-flight writes but keeps ciphertext for the correct
@@ -462,7 +494,9 @@ export function abortInFlightFlush(): void {
 
 export async function requeueRejected(userId?: string): Promise<number> {
   const scope = await scopeFor(await resolveUserId(userId));
-  return serialized(async () => {
+  // The same cross-tab Web Lock discipline as enqueue (audit 2026-09-26):
+  // a rejected-store drain is a read-modify-write over the same keys.
+  return withLock(QUEUE_LOCK_NAME, () => serialized(async () => {
     const generation = queueGeneration;
     const [queue, rejected] = await Promise.all([
       readItems(scope.queue, scope, generation),
@@ -489,7 +523,7 @@ export async function requeueRejected(userId?: string): Promise<number> {
     if (wipedSince(generation)) return 0;
     await writeItems(scope.rejected, stillRejected);
     return moved;
-  });
+  }));
 }
 
 const RECONNECT_FLUSH_MIN_INTERVAL_MS = 10_000;
@@ -505,14 +539,17 @@ export async function flushQueueOnReconnect(): Promise<void> {
   lastReconnectFlushAt = now;
   const userId = sessionUserId();
   if (!userId || (await queueLength(userId)) === 0) return;
-  await withLock("queue-flush", () => flushQueue(userId)).catch(() => {});
+  await withLock(QUEUE_LOCK_NAME, () => flushQueue(userId)).catch(() => {});
 }
 
-/** Delete only this account's data for this origin. */
+/** Delete only this account's data for this origin. Cross-tab serialized
+ *  with every other queue mutation (audit 2026-09-26). */
 export async function clearQueue(userId?: string): Promise<void> {
   const scope = await scopeFor(await resolveUserId(userId));
-  queueGeneration += 1;
-  await kv.multiRemove([scope.queue, scope.rejected, scope.quarantine]);
+  await withLock(QUEUE_LOCK_NAME, async () => {
+    queueGeneration += 1;
+    await kv.multiRemove([scope.queue, scope.rejected, scope.quarantine]);
+  });
 }
 
 export async function queueLength(userId?: string): Promise<number> {

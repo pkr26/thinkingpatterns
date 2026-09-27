@@ -94,6 +94,19 @@ def do_run_migrations(connection: Connection) -> None:
         connection.exec_driver_sql("SET lock_timeout = '15s'")
         connection.exec_driver_sql("SET statement_timeout = '300s'")
         connection.exec_driver_sql(f"SELECT pg_advisory_lock({ADVISORY_LOCK_ID})")
+        # The statements above AUTOBEGIN a transaction on the connection.
+        # Alembic's context.begin_transaction() treats an already-open
+        # transaction as externally owned and never commits it — the
+        # engine.connect() exit below then rolls the whole migration back,
+        # so `alembic upgrade head` against Postgres silently persisted
+        # NOTHING (2026-09-26 audit wave 6 root cause; SQLite was immune
+        # because its branch runs no preamble statements). Session-level
+        # advisory locks — unlike pg_advisory_xact_lock — survive COMMIT,
+        # and plain SET is session-scoped too, so committing here returns
+        # the connection to a clean state while keeping the serialization
+        # contract intact, letting alembic own and commit the migration
+        # transaction.
+        connection.commit()
     try:
         context.configure(
             connection=connection,

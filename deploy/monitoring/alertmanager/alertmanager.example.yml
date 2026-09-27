@@ -1,35 +1,17 @@
-# MINIMAL ALERTMANAGER EXAMPLE — 2026-09-21 audit workstream 6 follow-up.
+# MINIMAL ALERTMANAGER EXAMPLE — 2026-09-21 audit workstream 6 follow-up;
+# DEFAULT-ON since the 2026-09-26 infra audit (alerts evaluated but never
+# delivered was the finding): the monitoring compose runs a digest-pinned
+# alertmanager under the `monitoring` profile, and prometheus.yml points at
+# it. The config travels by fail-closed file mount (`configs:` in the
+# monitoring compose), so `docker compose up` REFUSES to start until
+# alertmanager.yml exists:
 #
-# This file is an EXAMPLE, deliberately not enabled: nothing in the
-# monitoring compose runs it, because where S1/S2 pages land is an
-# operator decision (PagerDuty? Slack? email? your existing pager).
-# alerts evaluate inside Prometheus either way (its UI /api/v1/alerts);
-# this config is the shortest honest path from "firing" to "delivered".
+#   1. Copy this file to alertmanager.yml (same directory).
+#   2. Fill in the receiver(s) — where S1/S2 pages land is an operator
+#      decision (PagerDuty? Slack? email? your existing pager).
+#   3. `docker compose ... --profile monitoring up -d` — done.
 #
-# To enable:
-#   1. Copy this file to alertmanager.yml and fill in the receiver(s).
-#   2. Add an `alertmanager` service to deploy/monitoring/docker-compose.yml
-#      with the same hardening quartet the other services carry, e.g.:
-#
-#        alertmanager:
-#          image: prom/alertmanager:v0.28.0   # PIN A DIGEST before production
-#          cap_drop: ["ALL"]
-#          security_opt: ["no-new-privileges:true"]
-#          read_only: true
-#          tmpfs: [/tmp]
-#          volumes:
-#            - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-#          ports: ["127.0.0.1:9093:9093"]     # loopback only, like Grafana
-#          networks: [internal]
-#          restart: unless-stopped
-#
-#   3. Point Prometheus at it (prometheus.yml):
-#
-#        alerting:
-#          alertmanagers:
-#            - static_configs:
-#                - targets: ["alertmanager:9093"]
-#
+
 # Severity routing mirrors docs/INCIDENT_RUNBOOK.md: S1/S2 page (the
 # runbook's 15-minute target), S3 lands in the low-priority channel only.
 

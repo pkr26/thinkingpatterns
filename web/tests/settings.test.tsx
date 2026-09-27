@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "../src/views/Settings";
 import { decryptEntry, encryptEntry } from "../src/crypto/patient";
+import { unwrapEnvelope } from "../src/crypto/envelope";
 import { buildAad } from "../src/crypto/aad";
 import { deriveMasterKey, encrypt, fromBase64, toBase64, zeroize } from "../src/crypto/core";
 import { derivePatientKeys } from "../src/crypto/keys";
@@ -18,9 +19,12 @@ import { recentMoods, recordMood } from "../src/moodLog";
 import { observeEntryVersions } from "../src/entryVersions";
 import { checkAnalysisGeneration, forgetAnalysisGeneration } from "../src/stateSeqGuard";
 import { readMutedPids, writeMutedPids } from "../src/patternMutes";
+import { readMeasureCadence } from "../src/measureCadence";
+import { savePendingMeasure } from "../src/pendingMeasure";
+import { applyLanguagePref, getLanguagePref, getLocale } from "../src/strings";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, render, settle, textOf, typeInto } from "./helpers/rtr";
+import { press, pressAria, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -371,6 +375,155 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
   });
 });
 
+describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
+  const V2_NEW_PASSWORD = "a-fresh-long-passphrase-7";
+  const KDF_PARAMS = { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 };
+  /** The upgrade flow asks /auth/salt for the CURRENT account salt — the
+   *  KEK (and the verifier) derive from (typed password, THIS salt). */
+  const UPGRADE_SALT_B64 = toBase64(new Uint8Array(new ArrayBuffer(16)).fill(0));
+
+  /** baseStubs + the GET /auth/key-envelope route every scheme-aware test
+   *  needs ("broken" = the honest unknown state; extra.upgrade intercepts
+   *  the upgrade POST; extra.password intercepts the v2 change PUT;
+   *  extra.consents overrides the grant list). */
+  function schemeStubs(
+    scheme: "v1" | "v2" | "broken",
+    extra: { upgrade?: (url: string, init: RequestInit) => Response; password?: (url: string, init: RequestInit) => Response; consents?: unknown[] } = {},
+  ): ReturnType<typeof stubFetch> {
+    const mock = baseStubs();
+    const inner = mock.getMockImplementation() as (url: string, init: RequestInit) => Response;
+    mock.mockImplementation((url: string, init: RequestInit) => {
+      if (url.endsWith("/auth/key-envelope")) {
+        if (scheme === "broken") return jsonResponse({ detail: "cannot say" }, { status: 500 });
+        return scheme === "v2"
+          ? jsonResponse({ key_scheme: "v2", salt: UPGRADE_SALT_B64, kdf_params: KDF_PARAMS, wrapped_data_key: "QQ==" })
+          : jsonResponse({ key_scheme: "v1", salt: UPGRADE_SALT_B64, kdf_params: null, wrapped_data_key: null });
+      }
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: UPGRADE_SALT_B64 });
+      if (extra.upgrade && url.endsWith("/account/key-envelope/upgrade")) return extra.upgrade(url, init);
+      if (extra.password && url.endsWith("/account/password")) return extra.password(url, init);
+      if (extra.consents && url.endsWith("/consents")) return jsonResponse(extra.consents);
+      return inner(url, init);
+    });
+    return mock;
+  }
+
+  it("a v2 account changes its password via the O(1) re-wrap: ONE request, no rekey, no grant re-wrap, honest lockdown", async () => {
+    const activeGrant = {
+      id: "b".repeat(32),
+      therapist_id: "t-1",
+      display_name: "Dr. River",
+      username: "river",
+      status: "active",
+      granted_at: "2026-09-01T00:00:00Z",
+      revoked_at: null,
+      therapist_wrap_pub_key: "K".repeat(124),
+    };
+    const mock = schemeStubs("v2", { consents: [activeGrant], password: () => new Response(null, { status: 204 }) });
+    const onLockdown = vi.fn();
+    const vaultKeyB64 = toBase64(vault.get().dataKey);
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    // The card routes to the v2 copy: no re-encryption is promised.
+    expect(textOf(root)).toContain("without re-encrypting");
+    expect(textOf(root)).not.toContain("Upgrade key protection");
+
+    await typeInto(root, "New password", V2_NEW_PASSWORD);
+    await typeInto(root, "Confirm new password", V2_NEW_PASSWORD);
+    await press(root, "Change password");
+    await settle(120, 6);
+
+    const calls = mock.mock.calls as [string, RequestInit][];
+    const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
+    expect(put).toBeTruthy();
+    const body = JSON.parse(String(put![1].body)) as Record<string, string>;
+    expect(body.verifier).toBe(toBase64(OLD_KEY)); // the vault's auth key
+    expect(atob(body.new_salt!).length).toBe(16);
+    expect(atob(body.wrapped_data_key!).length).toBe(60);
+    // The re-wrapped blob opens the SAME data key under the NEW password —
+    // the whole O(1) contract in one assertion.
+    const newMaster = await deriveMasterKey(V2_NEW_PASSWORD, fromBase64(body.new_salt!));
+    const reopened = await unwrapEnvelope(newMaster, fromBase64(body.new_salt!), "tester", body.wrapped_data_key!, KDF_PARAMS);
+    expect(toBase64(reopened)).toBe(vaultKeyB64);
+    // And nothing else ran: no rekey, no credential rotation, no consent
+    // re-wrap (the data key never rotated), no processing session at all.
+    expect(calls.some(([url]) => url.endsWith("/processing/rekey"))).toBe(false);
+    expect(calls.some(([url]) => url.endsWith("/account/credential"))).toBe(false);
+    expect(calls.some(([url]) => url.endsWith("/processing/sessions"))).toBe(false);
+    expect(calls.some(([url, init]) => url.includes("/rewrap") && init.method === "PUT")).toBe(false);
+    // Success killed every session (epoch bump) — honest lockdown copy.
+    expect(onLockdown).toHaveBeenCalledTimes(1);
+    expect(onLockdown.mock.calls[0]![0]).toContain("no re-encryption was needed");
+  });
+
+  it("a v1 account sees the upgrade action; the upgrade proves possession + password and flips the card to v2", async () => {
+    const upgrade = vi.fn(() => new Response(null, { status: 204 }));
+    schemeStubs("v1", { upgrade });
+    const root = await render(<SettingsView onLockdown={vi.fn()} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Upgrade key protection");
+
+    await typeInto(root, "Current password (to authorize the upgrade)", "the-current-passphrase-3");
+    await press(root, "Upgrade key protection");
+    await settle(120, 6);
+
+    expect(upgrade).toHaveBeenCalledTimes(1);
+    const [url, init] = upgrade.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${ORIGIN}/api/v1/account/key-envelope/upgrade`);
+    const headers = init.headers as Record<string, string>;
+    // The possession proof: a processing session opened with the vault's
+    // CURRENT data key (the stub mints "pst" for every session).
+    expect(headers["X-Processing-Token"]).toBe("pst");
+    // The password proof derives from the TYPED password (not the vault) —
+    // a mistyped password must fail the verifier before any envelope is
+    // stored. Prove it: derive the same verifier here.
+    const typedMaster = await deriveMasterKey("the-current-passphrase-3", fromBase64(UPGRADE_SALT_B64));
+    const typed = await derivePatientKeys(typedMaster);
+    expect(headers["X-Account-Verifier"]).toBe(toBase64(typed.authKey));
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.kdf_params).toEqual(KDF_PARAMS);
+    expect(atob(String(body.wrapped_data_key)).length).toBe(60);
+    // The wrap IS the vault's current data key under the typed password —
+    // the corpus keeps decrypting unchanged.
+    const opened = await unwrapEnvelope(typedMaster, fromBase64(UPGRADE_SALT_B64), "tester", String(body.wrapped_data_key), KDF_PARAMS);
+    expect(toBase64(opened)).toBe(toBase64(OLD_KEY));
+    zeroize(typedMaster, typed.masterKey, typed.authKey, typed.dataKey);
+    // Success: honest note, and the password card now routes to v2.
+    expect(textOf(root)).toContain("next change will be instant");
+    expect(textOf(root)).toContain("without re-encrypting");
+    expect(textOf(root)).not.toContain("Upgrade key protection");
+  });
+
+  it("a 403 envelope_key_mismatch on upgrade surfaces the honest copy and keeps the account on v1", async () => {
+    schemeStubs("v1", {
+      upgrade: () => jsonResponse(
+        { detail: "the processing session's key did not authenticate stored ciphertext", code: "envelope_key_mismatch" },
+        { status: 403 },
+      ),
+    });
+    const root = await render(<SettingsView onLockdown={vi.fn()} />);
+    await settle(40, 3);
+    await typeInto(root, "Current password (to authorize the upgrade)", "the-current-passphrase-3");
+    await press(root, "Upgrade key protection");
+    await settle(120, 6);
+    expect(textOf(root)).toContain("could not be verified against your stored journal");
+    // Still v1: the upgrade action stays available for a fresh retry.
+    expect(textOf(root)).toContain("Upgrade key protection");
+  });
+
+  it("an UNKNOWN scheme (envelope read failed) blocks the password card honestly instead of guessing", async () => {
+    schemeStubs("broken");
+    const root = await render(<SettingsView onLockdown={vi.fn()} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("could not be confirmed");
+    // No change BUTTON, no upgrade card — guessing could 409 a v2 account
+    // or promise v2 behavior to a v1 account. (The card TITLE stays: it is
+    // the anchor explaining why the options are hidden.)
+    expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Change password")).toBe(false);
+    expect(textOf(root)).not.toContain("Upgrade key protection");
+  });
+});
+
 describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
   it("after deleteAccount, no per-account data remains in any IndexedDB-backed store", async () => {
     // Seed EVERY per-account kv store the app persists.
@@ -380,6 +533,9 @@ describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
     await observeEntryVersions(USER, OLD_KEY, [{ clientEntryId: "e-d-1", contentVersion: 3 }]);
     await checkAnalysisGeneration(USER, 11, 11);
     await writeMutedPids(OLD_KEY, USER, ["topic:seed"]);
+    // Re-audit 2026-09-27: the pending-measure slot rides the sweep too —
+    // an in-flight questionnaire must not outlive DELETE /account.
+    await savePendingMeasure(OLD_KEY, USER, { kind: "phq9", clientMeasureId: "cm-delete-1", picks: [0, 1, 2, 3, 0, 1, 2, 3, 0], date: "2026-09-26" });
     const seeded = (await kv.keys()).filter((k) => k.startsWith("mindpattern"));
     expect(seeded.length).toBeGreaterThanOrEqual(6);
 
@@ -421,5 +577,70 @@ describe("SettingsView LLM unknown state (LOW b, audit 2026-09-26)", () => {
     expect(textOf(root)).not.toContain("Could not confirm whether this server offers LLM analysis");
     // The section renders the consent switch (redesign 2026-09-26).
     expect(root.root.findAllByType("button").some((node) => node.props.role === "switch")).toBe(true);
+  });
+});
+
+describe("SettingsView language preference (audit 2026-09-26 LOW)", () => {
+  afterEach(() => {
+    applyLanguagePref("auto");
+  });
+
+  it("the Language control applies the catalog LIVE and persists the choice", async () => {
+    baseStubs();
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Appearance");
+    expect(textOf(root)).toContain("Dark is easier on evening eyes");
+    await press(root, "Español");
+    await settle(20, 2);
+    // The SAME view re-renders in Spanish — no reload needed.
+    expect(textOf(root)).toContain("Apariencia");
+    expect(textOf(root)).toContain("El modo oscuro descansa la vista");
+    expect(getLocale()).toBe("es");
+    expect(getLanguagePref()).toBe("es");
+    expect(window.localStorage.getItem("mindpattern.language.pref")).toBe("es");
+    // Back to Automatic: the device locale wins again, live.
+    await press(root, "Automático");
+    await settle(20, 2);
+    expect(getLanguagePref()).toBe("auto");
+    expect(textOf(root)).toContain("Appearance");
+  });
+});
+
+/** The opt-in check-in cadence (clinical review 2026-09-27): the Settings
+ *  toggle + interval persist in the per-account kvstore slot, default OFF
+ *  with a 4-week interval, and the safety-plan entry points at the local
+ *  encrypted plan view. */
+describe("SettingsView check-in cadence + safety plan entry (2026-09-27)", () => {
+  it("the toggle persists ON with the 4-week default, and the interval choice persists beside it", async () => {
+    baseStubs();
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Remind me to complete a check-in");
+    // OFF by default (opt-in), nothing in the slot yet.
+    expect(await readMeasureCadence(USER)).toEqual({ enabled: false, intervalWeeks: 4, snoozedUntil: null });
+    await pressAria(root, "Remind me to complete a check-in");
+    await settle(20, 2);
+    expect(await readMeasureCadence(USER)).toEqual({ enabled: true, intervalWeeks: 4, snoozedUntil: null });
+    // The interval control renders only while the reminder is on.
+    expect(textOf(root)).toContain("Every 4 weeks");
+    await press(root, "Every 8 weeks");
+    await settle(20, 2);
+    expect(await readMeasureCadence(USER)).toEqual({ enabled: true, intervalWeeks: 8, snoozedUntil: null });
+    // Toggling back off keeps the chosen interval for the next opt-in.
+    await pressAria(root, "Remind me to complete a check-in");
+    await settle(20, 2);
+    expect(await readMeasureCadence(USER)).toEqual({ enabled: false, intervalWeeks: 8, snoozedUntil: null });
+  });
+
+  it("the safety-plan entry renders only with the navigation handoff, and opens the plan view", async () => {
+    baseStubs();
+    const onOpenSafetyPlan = vi.fn();
+    const root = await render(<SettingsView onLockdown={() => undefined} onOpenSafetyPlan={onOpenSafetyPlan} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("My safety plan");
+    expect(textOf(root)).toContain("never synced, exported, or shared");
+    await press(root, "Open my safety plan");
+    expect(onOpenSafetyPlan).toHaveBeenCalledTimes(1);
   });
 });

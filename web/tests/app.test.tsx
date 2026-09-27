@@ -9,6 +9,7 @@ import { api, hasSession } from "../src/api/client";
 import { enqueue } from "../src/offlineQueue";
 import { vault } from "../src/vault";
 import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
+import { applyLanguagePref } from "../src/strings";
 import { flush, press, render, textOf } from "./helpers/rtr";
 
 // The real LoginView is covered by tests/login.test.tsx with REAL crypto;
@@ -91,7 +92,7 @@ describe("App", () => {
     // Sign out (W-6): every mindpattern.* localStorage flag goes with the
     // session — a shared browser keeps no trace an account used it.
     await press(root, "More");
-    await press(root, "Sign out (all devices)");
+    await press(root, "Sign out (this device)");
     await flush();
     expect(textOf(root)).toContain("Sign in");
     expect(hasSession()).toBe(false);
@@ -227,7 +228,9 @@ describe("App", () => {
   // Audit 2026-09-25: sessionActive had drifted to miss the later-phase
   // views — the idle lock (and bfcache guard) was disarmed exactly where
   // decrypted data and exports live. Every in-app view must lock.
-  for (const navLabel of ["Measures", "Share", "Settings"]) {
+  // (2026-09-27: the safety-plan view joins the loop — it renders
+  // decrypted plan text, so it must lock like the rest.)
+  for (const navLabel of ["Measures", "Safety plan", "Share", "Settings"]) {
     it(`the idle lock stays armed on the ${navLabel} view`, async () => {
       authStubs();
       const root = await render(<App />);
@@ -325,7 +328,28 @@ describe("App", () => {
     expect(textOf(root)).toContain("988");
   });
 
-  it("sign out issues the epoch-killing logout request", async () => {
+  it("a language preference change re-renders the whole shell LIVE (audit 2026-09-26 LOW)", async () => {
+    authStubs();
+    const root = await render(<App />);
+    await vi.advanceTimersByTimeAsync(50);
+    await flush();
+    await signIn(root);
+    await press(root, "Next");
+    await press(root, "Next");
+    await press(root, "Start journaling");
+    await flush();
+    expect(textOf(root)).toContain("Today's entry");
+    // The Settings seam flipped the catalog; the shell (this test mounts the
+    // REAL App, not a stand-in) must follow without a reload.
+    applyLanguagePref("es");
+    await flush();
+    expect(textOf(root)).toContain("La entrada de hoy");
+    applyLanguagePref("auto");
+    await flush();
+    expect(textOf(root)).toContain("Today's entry");
+  });
+
+  it("sign out issues the per-device logout request (jti revocation, 2026-09-26)", async () => {
     authStubs();
     const root = await render(<App />);
     await vi.advanceTimersByTimeAsync(50);
@@ -337,7 +361,7 @@ describe("App", () => {
     await flush();
     const fetchMock = (globalThis as unknown as { fetch?: { mock: { calls: [string][] } } }).fetch;
     await press(root, "More");
-    await press(root, "Sign out (all devices)");
+    await press(root, "Sign out (this device)");
     await flush();
     expect(textOf(root)).toContain("Sign in");
     const calls = fetchMock?.mock.calls ?? [];

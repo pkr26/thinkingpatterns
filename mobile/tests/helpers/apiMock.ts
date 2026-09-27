@@ -39,6 +39,15 @@ export function makeApiMock() {
   cacheSalt: vi.fn(async () => {}),
   getCachedSalt: vi.fn(async () => null),
   clearCachedSalt: vi.fn(async () => {}),
+    // v2 key envelope (2026-09-26): default v1 — a scheme this app's v1
+    // paths treat exactly as before. Tests for the v2 unlock/register/
+    // rotation/upgrade flows override keyEnvelope with a wrapped blob.
+    keyEnvelope: vi.fn(async () => ({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null })),
+    cacheKeyEnvelope: vi.fn(async () => {}),
+    getCachedKeyEnvelope: vi.fn(async () => null),
+    clearCachedKeyEnvelope: vi.fn(async () => {}),
+    changePassword: vi.fn(async () => ({})),
+    upgradeKeyEnvelope: vi.fn(async () => ({})),
     login: vi.fn(async () => ({ token: "tok", user_id: "user-1" })),
     logout: vi.fn(async () => ({})),
     createEntry: vi.fn(async () => ({})),

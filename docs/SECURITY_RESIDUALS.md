@@ -27,12 +27,29 @@ changes, and before any v2 security review.
 | `H1.metadata-inference` | h_privacy | The server holds per-entry dates and sizes (metadata inference) — documented in README security note #7; content stays opaque. |
 | `G3.tracked-secrets` | g_infra | The tracked-secrets hygiene rule matches any git-tracked path ending in `.env`, which catches `mobile/ios/.xcode.env` — the React Native Xcode template that resolves `NODE_BINARY` for script phases. It is REQUIRED to be versioned (the per-developer override is the unversioned `.xcode.env.local`), contains no credential, key, or connection string (only `export NODE_BINARY=$(command -v node)`), and was inspected line-by-line when registered. Re-review if that file ever grows anything beyond the NODE_BINARY export. |
 
-## Web client residuals (2026-09-25)
+## Web client residuals (2026-09-25; re-swept 2026-09-26)
 
-The patient web client's accepted residuals (open-tab offline, English
-chrome in v1, the in-memory plaintext window, single-tab drafts, the
-pending first Stryker floor) are named and reasoned in
-`docs/WEB_THREAT_MODEL.md` — the honest register this file keeps.
+The patient web client's accepted residuals are named and reasoned in
+`docs/WEB_THREAT_MODEL.md` — the honest register this file keeps. The
+2026-09-26 re-sweep (documentation pass) removed residuals that have
+since been FIXED — English-only chrome (audit M-W5: all view copy now
+routes through both catalogs), plaintext draft loss at lock (the draft
+now parks as ciphertext, `web/src/entryDraft.ts`), measures lost on a
+mid-flow lock (encrypted pending-measure persistence,
+`web/src/pendingMeasure.ts`), multi-tab queue double-flush
+(`navigator.locks` serialization + idempotent ids), and CSP
+`style-src 'unsafe-inline'` (dropped everywhere in the 2026-09-26
+hardening pass — all four config surfaces ship `'self'`-only,
+test-pinned). What stands: open-tab offline only, the in-memory
+plaintext window (bounded by the 5-min idle/hidden-tab/bfcache locks),
+GC-owned memory strings, the single encrypted draft slot (no cross-tab
+merge), the first Stryker floor (run pending), and the inherited
+server-side analysis window. One NEW alignment note: the deploy/nginx
+**portal** vhost example still carries `style-src 'self'
+'unsafe-inline'` while the portal's shipped meta CSP does not —
+browsers enforce both policies (the intersection), so this is
+example-config drift, not a live hole; align it when next touching
+that template.
 
 ## Mobile transport residuals (2026-09-26, audit F-2 decision)
 
@@ -94,6 +111,39 @@ then be rewritten to disclose it). The access-log rows deliberately
 SURVIVE the cascade (730-day window) — that trade-off is documented in
 `docs/DPIA_SKELETON.md` §4, not here.
 
+## Architecture residuals (2026-09-26 documentation pass)
+
+Standing design-level residuals, re-verified against the current tree
+and stated plainly so no marketing claim outruns them (each already
+appears in the README's security section; they are collected here
+because this file is the register reviewers read):
+
+- **Client KDF is PBKDF2-SHA-256 (600k), not Argon2id.** The documented
+  WebCrypto tradeoff: browsers expose PBKDF2 natively but not Argon2id,
+  so shipping Argon2 in the web client would mean a WASM implementation
+  outside the platform's audited crypto. The versioned `kdf_params`
+  blob (`backend/app/security/kdf.py` validates argon2id
+  memory/parallelism/iterations server-side WITHOUT computing them) is
+  the upgrade path: a client can adopt Argon2id later with no server
+  change. No client ships it today — stated, not implied otherwise.
+- **The processing enclave is an in-process seam** (`app/security/
+  enclave.py`): no TEE/SGX attestation, and the analyzer's Python/JS
+  string copies are GC-reclaimed only — a process memory image during a
+  consented recompute can contain plaintext. The processing WINDOW
+  itself is unchanged by the 2026-09-26 waves (still the single-use
+  ≤5-min session); the on-device port is the closing path.
+- **Single-process deployment:** the sliding-window rate counter,
+  keystore, and token epochs are in-process state (one worker per
+  instance; scale horizontally behind a shared counter when needed).
+- **Consented LLM egress is plaintext at the provider** (unchanged;
+  `D2.plaintext-egress` above) — provider retention is disclosed at
+  consent time and out of the operator's hands once sent.
+- **The access audit log outlives account deletion** for
+  `MINDPATTERN_ACCESS_LOG_RETENTION_DAYS` (default 730 days, 1–3650
+  selectable) — deliberate and defended in `docs/DPIA_SKELETON.md` §4;
+  a shorter window is an operator trade of accountability for
+  minimisation.
+
 ## Tracked deferrals (not harness FINDINGs)
 
 Hardening the audit plan asked for that shipped as "next" rather than v1,
@@ -135,5 +185,16 @@ recorded here so they are not silently dropped (audit round 2, F-6):
   adversarial harness set delivered with P9 (see WEB_PLAN's Phase 9
   note). The deferral is owned by WEB_PLAN 9.10 — its checkbox stays
   unchecked until the campaign directory exists with every mutant
-  killed. Re-review: after the first scheduled Stryker measurements
-  land, or before any v2 security review.
+      killed. Re-review: after the first scheduled Stryker measurements
+      land, or before any v2 security review.
+- **README↔RESEARCH.md citation-resolution gate** — PLANNED (registered
+      2026-09-26 documentation pass). The README's error-code list is
+      CI-enforced against `backend/app/**` (the contract-gates scan),
+      but nothing yet machine-checks that every author-year citation the
+      README names (e.g. "Bourke et al. 2026") resolves to a
+      RESEARCH.md bibliography entry — the class of drift that let a
+      Snippe year error survive until the 2026-09-26 sweep. A
+      contract-gate test extracting author-year references from README's
+      brain table and asserting each appears in RESEARCH.md's
+      bibliography is the intended shape; until it exists, citation
+      claims are hand-verified only.

@@ -267,6 +267,20 @@ export interface TokenResponse {
   user_id: string;
   expires_in: number;
   role: string;
+  /** The account's key scheme (2026-09-26 wave). OPTIONAL and ignored by
+   *  this client: therapist accounts stay v1 (the envelope is a patient-
+   * side scheme), and the portal treats the bearer as an opaque string —
+   *  unknown response fields must never break session adoption. */
+  key_scheme?: string;
+}
+
+/** The therapist-side pairing SAS read (2026-09-26): the SAME "123 456"
+ *  the patient's app shows for this live pairing session, plus the wrap
+ *  key's coarse fingerprint. Both humans compare them out of band. */
+export interface TherapistPairingSas {
+  sas: string;
+  wrap_key_fingerprint: string;
+  expires_in: number;
 }
 
 /** Non-personal deployment policy advertised by GET /meta. */
@@ -567,17 +581,17 @@ export interface PatientNotesPage {
 export const api = {
   /** 2026-09-26 audit M-P1: server-side revocation for every lock boundary
    *  (sign-out button, 10-minute idle lock, 401 expiry latch, bfcache
-   *  restore). POST /auth/logout bumps the account's token epoch and kills
-   *  EVERY bearer at once (backend app/api/auth.py) — the default token TTL
-   *  is 24h, so without this a bearer copied off a shared clinic machine
-   *  stayed valid long after "sign out". Both patient clients call it
-   *  (web/src/api/client.ts, mobile/src/api/client.ts); the portal now does
-   *  too.
+   *  restore). Since the 2026-09-26 remediation wave the server revokes
+   *  THIS bearer's jti (per-device sign-out — other sessions of the same
+   *  account stay live); a legacy jti-less bearer still falls back to the
+   *  account-wide epoch bump server-side. The default token TTL is 24h,
+   *  so without this call a bearer copied off a shared clinic machine
+   *  stayed valid long after "sign out".
    *
    *  Deliberately does NOT ride the session's AbortController (the same
    *  contract as the web client's logout): the caller fires this
    *  immediately before clearSession(), whose abort would cancel the very
-   *  epoch bump the request exists to perform. Every other hardening stays
+   *  revocation the request exists to perform. Every other hardening stays
    *  — 15 s deadline, no ambient credentials, redirect refusal, response
    *  origin recheck — and the request runs on the token captured at call
    *  time. Callers MUST treat it as best-effort: a failure (offline
@@ -777,6 +791,23 @@ export const api = {
     request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, { blob }),
   deleteNote: (noteId: string) => request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),
   newPairingCode: () => request<{ code: string; expires_in: number }>("POST", "/therapist/pairing-codes"),
+  /** The therapist-side SAS read (2026-09-26): the patient reads their
+   *  verification code (and their account id) back after entering this
+   *  session's pairing code; entering that id here pulls the SAS the
+   *  SERVER derived for the same (code, wrap key, patient) triple, so the
+   *  two humans can compare by voice before the grant is confirmed. The
+   *  code rides the X-Pairing-Code HEADER (never the URL — a live
+   *  single-use credential must not sit on request lines that generic
+   *  proxies and logs capture); the account id rides the query string (an
+   *  opaque random id the patient reads aloud). Unknown/expired/consumed
+   *  codes answer the flat 404 — indistinguishable by design. */
+  pairingSas: (patientUserId: string, pairingCode: string) =>
+    request<TherapistPairingSas>(
+      "GET",
+      `/therapist/pairing/sas?patient_user_id=${encodeURIComponent(patientUserId)}`,
+      undefined,
+      { "X-Pairing-Code": pairingCode },
+    ),
   /** Audit NEW-3 / F.4 (2026-09-22): PUT /account/credential — rotate the
    *  LOGIN credential (backend schemas.CredentialRotateRequest). Verifier-
    *  gated on the CURRENT password's derived verifier, so a stolen bearer

@@ -63,28 +63,33 @@ async def test_brain_state_row_exists_and_is_encrypted(client, monkeypatch):
     await emu.register(client)
     await seed(client, emu, days=70)
 
+    # The first recompute runs two days back (2026-09-20 L-1: the calendar
+    # is the shared UTC anchor — patch _utc_today itself) so the fixture
+    # can then add >= 2 fresh REAL-DAY work entries (item 5, 2026-09-26:
+    # a single new evidence day is a clustered mention, not replication).
+    # Working two days back also makes the fixture weekday-independent:
+    # the fresh days TODAY-1/TODAY always postdate the first
+    # qualification, whatever weekday TODAY is.
+    monkeypatch.setattr("app.api.insights._utc_today", lambda: date.today() - timedelta(days=2))
     await emu.recompute(client)
     state = await decrypt_brain_state(client, emu)
     assert state["v"] == 2
     assert state["patterns"], "the store must hold the qualified patterns"
     temporal = state["patterns"]["temporal:work"]
     # Replication gate: statistical kinds qualify as `candidate` on the first
-    # recompute day and surface only after re-qualifying on a SECOND distinct
-    # recompute day — the instant STRONG_EVIDENCE promotion path was removed
-    # for statistical kinds because a single-day extreme can be noise.
+    # recompute day and surface only after >= 2 NEW evidence days — the
+    # instant STRONG_EVIDENCE promotion path was removed for statistical
+    # kinds because a single-day extreme can be noise.
     assert temporal["state"] == "candidate"
-    assert temporal["first_qualified"] == TODAY.isoformat()
+    assert temporal["first_qualified"] == (TODAY - timedelta(days=2)).isoformat()
 
-    # 2026-09-20 (L-1): the recompute day moved from date_type.today()
-    # (host-local) to the shared UTC anchor, so the "next day" seam moved
-    # with it — patch _utc_today itself.
     monkeypatch.setattr("app.api.insights._utc_today", lambda: date.today() + timedelta(days=1))
-    # The second observation needs NEW evidence: a work entry on a day the
-    # fixture wrote CALM text for (never a Sunday). A next-day recompute of
-    # the unchanged corpus no longer promotes statistical kinds — that was
-    # the same window re-scored, not replication.
-    fresh_day = TODAY if TODAY.weekday() != 6 else TODAY - timedelta(days=1)
-    await emu.create_entry(client, WORK_ANXIOUS, fresh_day, client_entry_id="fresh-work")
+    # Two fresh work entries on days after the first qualification. A
+    # next-day recompute of the unchanged corpus never promotes
+    # statistical kinds — that was the same window re-scored, not
+    # replication.
+    await emu.create_entry(client, WORK_ANXIOUS, TODAY - timedelta(days=1), client_entry_id="fw-1")
+    await emu.create_entry(client, WORK_ANXIOUS, TODAY, client_entry_id="fw-2")
     await emu.recompute(client)
     state = await decrypt_brain_state(client, emu)
     assert state["patterns"]["temporal:work"]["state"] == "emerging"

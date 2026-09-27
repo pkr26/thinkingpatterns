@@ -19,7 +19,7 @@ import pytest
 from unittest.mock import MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.cache import EVICTION_BATCH, FixedWindowCounter, MAX_TRACKED_KEYS, client_key
+from app.cache import EVICTION_BATCH, SlidingWindowCounter, MAX_TRACKED_KEYS, client_key
 from app.config import _bool_env
 from app.security import crypto
 from app.security.tokens import TokenError, _b64url_encode, verify_token
@@ -384,7 +384,7 @@ def test_verify_token_rejects_signed_but_non_json_body():
 
 
 def test_counter_evicts_stale_windows_when_capped():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     for i in range(MAX_TRACKED_KEYS):
         counter.hit(f"k{i}", window_seconds=1, now=1_000.0)
     # All existing windows are stale by now=2_000; crossing the cap must
@@ -396,7 +396,7 @@ def test_counter_evicts_stale_windows_when_capped():
 
 
 def test_counter_evicts_oldest_when_nothing_is_stale():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     for i in range(MAX_TRACKED_KEYS):
         counter.hit(f"k{i}", window_seconds=10_000, now=1_000.0)
     result = counter.hit("newcomer", window_seconds=10_000, now=1_001.0)
@@ -410,11 +410,17 @@ def test_counter_evicts_oldest_when_nothing_is_stale():
 
 
 def test_client_key_falls_back_when_request_has_no_client():
+    # 2026-09-26 audit item 5: a transport with NO socket peer no longer
+    # folds every request into one shared "unknown-client" bucket (one
+    # client could 429 the whole socketless surface). The identity is
+    # UNAVAILABLE (None) and every consumer refuses the request instead —
+    # fail closed, because the alternatives are a shared bucket (denial by
+    # one client) or a per-request fresh key (limiting disabled).
     from starlette.requests import Request
 
     scope = {"type": "http", "headers": [], "method": "GET", "path": "/"}
     request = Request(scope)
-    assert client_key(request) == "unknown-client"
+    assert client_key(request) is None
 
 
 # ---------------------------------------------------------------------------

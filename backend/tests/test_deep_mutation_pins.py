@@ -33,7 +33,12 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 
 from app.api import account, auth, entries, insights
-from app.cache import EVICTION_BATCH, MAX_TRACKED_KEYS, FixedWindowCounter
+from app.cache import (
+    EVICTION_BATCH,
+    MAX_TRACKED_KEYS,
+    SlidingWindowCounter,
+    TokenRevocationStore,
+)
 from app.config import (
     MAX_PROCESSING_SESSION_TTL,
     MAX_RATE_LIMIT,
@@ -251,11 +256,11 @@ async def test_register_integrity_race_returns_409_contract(monkeypatch, setting
         async def rollback(self):
             pass
 
-    from app.cache import FixedWindowCounter
+    from app.cache import SlidingWindowCounter
 
     request = SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(settings=settings, rate_counter=FixedWindowCounter())
+            state=SimpleNamespace(settings=settings, rate_counter=SlidingWindowCounter())
         )
     )
     body = auth.RegisterRequest(
@@ -275,7 +280,7 @@ async def test_login_unknown_user_burns_exact_dummy_inputs(client, monkeypatch):
     login: a 32-byte key over a 16-byte salt, both zero-filled."""
     calls: list[tuple] = []
 
-    async def recorder(key, salt, limiter=None):
+    async def recorder(key, salt, limiter=None, n=None):
         calls.append((bytes(key), bytes(salt)))
         return b"\x00" * 64
 
@@ -297,7 +302,7 @@ async def test_login_known_user_bad_b64_verifier_uses_empty_bytes(client, monkey
     await emu.register(client)
     calls: list[tuple] = []
 
-    async def recorder(key, salt, limiter=None):
+    async def recorder(key, salt, limiter=None, n=None):
         calls.append((bytes(key), bytes(salt)))
         return b"\x00" * 64
 
@@ -945,7 +950,16 @@ async def test_require_user_commit_failure_recovers_user(monkeypatch):
     secret = "flaky-session-secret"
     token = tokens.issue_token(user.id, secret, 60, epoch=1)
     request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(token_secret=secret)))
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                settings=SimpleNamespace(
+                    token_secret=secret,
+                    auth_token_secret=secret,
+                    auth_secret_version=1,
+                ),
+                token_revocations=TokenRevocationStore(),
+            )
+        )
     )
     result = await require_user(request, f"Bearer {token}", FlakySession())
     assert result is user, "a failed commit must keep the authenticated user usable"
@@ -1223,11 +1237,15 @@ async def test_middleware_xff_warns_once_with_exact_message(caplog):
 
 
 def test_eviction_batch_is_a_tenth_of_the_cap():
-    assert EVICTION_BATCH == MAX_TRACKED_KEYS // 10 == 1_000
+    # 2026-09-26 audit item 3: the cap rose 10_000 -> 50_000 (identity-flood
+    # headroom — an attacker must mint 50k distinct rate-limit identities
+    # before ANY active bucket is evicted); the batch stays a tenth of it.
+    assert EVICTION_BATCH == MAX_TRACKED_KEYS // 10 == 5_000
+    assert MAX_TRACKED_KEYS == 50_000
 
 
 def test_counter_window_must_be_positive():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     with pytest.raises(ValueError, match=r"^window_seconds must be positive$"):
         counter.hit("k", 0, now=1.0)
     with pytest.raises(ValueError, match=r"^window_seconds must be positive$"):
@@ -1237,23 +1255,26 @@ def test_counter_window_must_be_positive():
 
 
 def test_counter_window_reset_and_retry_after_math():
-    counter = FixedWindowCounter()
+    # 2026-09-26 audit item 2: sliding semantics. A hit ages out exactly
+    # `window` after IT landed; retry_after points at the oldest retained
+    # hit's expiry, so a late limiter sees a small honest number.
+    counter = SlidingWindowCounter()
     first = counter.hit("k", 60, now=100.0)
     assert (first.count, first.retry_after) == (1, 61)
-    # one second before expiry: still inside the window
+    # one second before the first hit ages out: still inside the window
     inside = counter.hit("k", 60, now=159.0)
     assert inside.count == 2
     assert inside.retry_after == 2
-    # exactly at the boundary the window resets: count is 1, not 3
+    # exactly at the boundary the FIRST hit ages out — not the whole window
     reset = counter.hit("k", 60, now=160.0)
-    assert reset.count == 1
-    assert reset.retry_after == 61
-    # check() mirrors the same boundary without counting
+    assert reset.count == 2  # the 159.0 hit (1s old) still counts
+    assert reset.retry_after == 60  # until 159.0 + 60
+    # once every retained hit is beyond the window, count is fresh
     assert counter.check("k", 60, now=220.0).count == 0
 
 
 def test_counter_check_does_not_count():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     counter.hit("k", 60, now=100.0)
     assert counter.check("k", 60, now=101.0).count == 1
     assert counter.check("k", 60, now=102.0).count == 1  # unchanged
@@ -1262,7 +1283,7 @@ def test_counter_check_does_not_count():
 
 
 def test_counter_check_retry_after_math():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     counter.hit("k", 60, now=100.0)
     assert counter.check("k", 60, now=101.0).retry_after == 60
     assert counter.check("k", 60, now=159.5).retry_after == 1
@@ -1270,7 +1291,7 @@ def test_counter_check_retry_after_math():
 
 
 def test_counter_eviction_overflow_edges():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     # exactly at (cap - batch): no eviction may fire (overflow == 0)
     for i in range(MAX_TRACKED_KEYS - EVICTION_BATCH):
         counter.hit(f"fill-{i}", 3600, now=1000.0 + i)
@@ -1301,12 +1322,14 @@ async def test_user_locks_evict_down_to_cap():
             await gate.wait()
 
     tasks = [asyncio.create_task(hold_until_released(k)) for k in ("a", "b", "c")]
-    for _ in range(200):  # two dedicated holders + one shared overflow holder
-        if len(locks._locks) == 2 and locks._overflow_refs == 1:
+    # 2026-09-26 audit item 7: overflow is sharded; the third key falls back
+    # to its OWN shard's lock (total_overflow_refs sums the shards).
+    for _ in range(200):  # two dedicated holders + one shard-overflow holder
+        if len(locks._locks) == 2 and locks.total_overflow_refs() == 1:
             break
         await asyncio.sleep(0.01)
     assert len(locks._locks) == 2
-    assert locks._overflow_refs == 1
+    assert locks.total_overflow_refs() == 1
     gate.set()
     await asyncio.gather(*tasks)
 

@@ -638,3 +638,48 @@ describe("session-expiry hook (2026-09-17)", () => {
     expect(fired).toHaveLength(0);
   });
 });
+
+describe("pairing SAS + token tolerance (2026-09-26 wave)", () => {
+  it("pairingSas: GET /therapist/pairing/sas with the id in the query and the LIVE code in a header, never the URL", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ sas: "482 913", wrap_key_fingerprint: "a1b2c3d4e5f60718", expires_in: 780 })));
+    const result = await api.pairingSas("0123456789abcdef0123456789abcdef", "7X2KQM4N");
+    const [url, init] = vi.mocked(fetch).mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://api.example.com/api/v1/therapist/pairing/sas?patient_user_id=0123456789abcdef0123456789abcdef");
+    expect(url).not.toContain("7X2KQM4N"); // the live code never rides a logged request line
+    expect(init.method).toBe("GET");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Pairing-Code"]).toBe("7X2KQM4N");
+    expect(headers.Authorization).toBe("Bearer tok-1");
+    expect(result).toEqual({ sas: "482 913", wrap_key_fingerprint: "a1b2c3d4e5f60718", expires_in: 780 });
+    // Opaque ids are URL-encoded, not interpolated raw.
+    await api.pairingSas("id with spaces", "CODE");
+    const [encoded] = vi.mocked(fetch).mock.calls[1]! as [string, RequestInit];
+    expect(encoded).toContain("patient_user_id=id%20with%20spaces");
+  });
+
+  it("F: response tolerance — login/register answers carrying key_scheme and unknown future fields resolve unchanged", async () => {
+    // Tokens since the 2026-09-26 wave carry jti/purpose/ksv claims and the
+    // response carries key_scheme; the portal treats the bearer as an
+    // opaque string and must adopt a session regardless of extra fields
+    // (this pins that no strict shape check ever lands on these paths).
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      token: "header.eyJKdGkiOiI4ODE…fake-but-opaque",
+      user_id: "therapist-1",
+      expires_in: 900,
+      role: "therapist",
+      key_scheme: "v1",
+      jti: "0123456789abcdef0123456789abcdef",
+      purpose: "therapist",
+      ksv: 1,
+      future_field: { nested: [1, 2, 3] },
+    })));
+    const token = await auth.login("https://api.example.com", "drx", "verif");
+    expect(token.token).toBe("header.eyJKdGkiOiI4ODE…fake-but-opaque");
+    expect(token.role).toBe("therapist");
+    expect(token.key_scheme).toBe("v1"); // present-but-ignored by this client
+    // And the opaque token installs into a session without any parsing.
+    expect(() => setSession(token.token, "https://api.example.com")).not.toThrow();
+    clearSession();
+  });
+});

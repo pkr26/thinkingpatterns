@@ -1,9 +1,30 @@
+# Production deployment contract.
+#
+# SECRETS (2026-09-26 infra audit): the token/backup secrets mount as compose
+# `secrets:` FILES (0600, never in the container environment, invisible to
+# `docker inspect`), consumed via the app's `<VAR>_FILE` resolution — the same
+# posture the monitoring stack's bearer token already had. Copy each example
+# from deploy/secrets/, fill it, chmod 600:
+#
+#   mkdir -p deploy/secrets
+#   for f in token_secret backup_key postgres_password; do
+#     cp deploy/secrets/$f.example deploy/secrets/$f; chmod 600 deploy/secrets/$f
+#   done
+#   openssl rand -hex 32 > deploy/secrets/token_secret
+#   openssl rand -base64 32 > deploy/secrets/backup_key
+#   openssl rand -hex 16 > deploy/secrets/postgres_password
+#
+# POSTGRES_PASSWORD additionally stays in .env: the api service interpolates
+# it raw into MINDPATTERN_DB_URL below (compose-level interpolation cannot
+# read secret files), so the database container itself reads it from the
+# mounted file while the api's copy remains env-based — documented residual,
+# rotatable, and lower blast-radius than the signing secrets.
 services:
   api:
     # The image CMD (docker-entrypoint.sh) runs `alembic upgrade head`
     # against MINDPATTERN_DB_URL before starting uvicorn, so this service is
     # migrated on every deploy without a separate step. A database created by a
-    # pre-migrations (create_all-era) deploy must be adopted once with
+    # pre-migrations (create_all-era) deploy must be adopted once with a
     # `alembic stamp head` — see backend/alembic/README.md.
     # Production deliberately never builds from this checkout.  The release
     # asset supplies this variable as a fully-qualified manifest-list digest
@@ -32,6 +53,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+    secrets:
+      - token_secret
     environment:
       # POSTGRES_PASSWORD is interpolated RAW into this URL: it must be a
       # hex string (openssl rand -hex 16, as the db service example shows)
@@ -41,7 +64,12 @@ services:
       # (2026-09-19 audit, L-86).
       MINDPATTERN_ENV: production
       MINDPATTERN_DB_URL: postgresql+asyncpg://${POSTGRES_USER:-mindpattern}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-mindpattern}
-      MINDPATTERN_TOKEN_SECRET: ${MINDPATTERN_TOKEN_SECRET:?set a real secret in .env}
+      # The signing secret reads from the mounted file (empty env var falls
+      # through to <VAR>_FILE in app.config); the dev overlay may keep the
+      # plain env form.
+      MINDPATTERN_TOKEN_SECRET: ${MINDPATTERN_TOKEN_SECRET:-}
+      MINDPATTERN_TOKEN_SECRET_FILE: /run/secrets/token_secret
+      MINDPATTERN_AUTH_TOKEN_SECRET_FILE: /run/secrets/auth_token_secret
       MINDPATTERN_UNLOCK_DAYS: "30"
       # Safe forwarding is opt-in: the app accepts X-Forwarded-For only when
       # the direct peer also matches this explicit IP/CIDR allowlist. Do not
@@ -56,7 +84,7 @@ services:
     restart: unless-stopped
     # Resource limits (2026-09-17): recomputes transiently hold the
     # analysis corpus (bounded by the blob budget, but the ceiling still
-    # matters on shared hosts) and scrypt login bursts are 64 MiB each.
+    # matters on shared hosts) and scrypt login bursts are 128 MiB each.
     # The ceiling is generous headroom over the measured working set; an
     # OOM-kill here is a DoS against every account on the instance.
     # 2026-09-26 audit M-I3: a memory-only ceiling leaves CPU and process
@@ -64,12 +92,10 @@ services:
     # loop starves the host the same way. cpus matches the two-worker
     # reality (one analyze slot + one serving loop with headroom);
     # pids_limit 256 is far above uvicorn's real usage and contains any
-    # fork bomb inside the container's cgroup.
-    deploy:
-      resources:
-        limits:
-          memory: 1500M
-          cpus: 2.0
+    # fork bomb inside the container's cgroup. Single top-level form only
+    # (mem_limit/cpus/pids_limit — the enforced-by-compose keys); the
+    # duplicate deploy.resources blocks were removed 2026-09-26 to keep
+    # exactly one source of truth per limit.
     mem_limit: 1500M
     cpus: 2.0
     pids_limit: 256
@@ -87,13 +113,15 @@ services:
         condition: service_healthy
 
   db:
-    # Digest-pinned (multi-arch manifest list, resolved 2026-09-07 via the
-    # Docker Hub registry API): 16-alpine is a mutable tag, and the database
-    # image is the one artifact where a silent swap is worst. Dependabot has
-    # no compose-ecosystem digest updates for service images, so bump this
-    # digest deliberately when adopting a new postgres:16-alpine build
-    # (`docker buildx imagetools inspect postgres:16-alpine`).
-    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    # Digest-pinned (multi-arch manifest list, re-resolved 2026-09-26 via the
+    # Docker Hub registry API — previous pin 2026-09-07): 16-alpine is a
+    # mutable tag, and the database image is the one artifact where a silent
+    # swap is worst. Dependabot has no compose-ecosystem digest updates for
+    # service images, so bump this digest deliberately when adopting a new
+    # postgres:16-alpine build (`docker buildx imagetools inspect
+    # postgres:16-alpine`); deploy/monitoring/check-image-drift.sh gates
+    # staleness in CI.
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
 
     # 2026-09-21 audit G-7: bounded log rotation (unbounded json-file
     # logs on a busy API can fill the host disk).
@@ -102,19 +130,34 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    secrets:
+      - postgres_password
     environment:
-      # From .env — no committed credentials. Example .env:
-      #   POSTGRES_PASSWORD=$(openssl rand -hex 16)
-      # Keep it HEX (or otherwise URL-safe): the api service interpolates
-      # it raw into MINDPATTERN_DB_URL (see the note there).
+      # From the mounted secret file (native POSTGRES_PASSWORD_FILE support)
+      # — the password never appears in this container's environment. The
+      # .env copy exists only for the api service's URL interpolation.
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-mindpattern}
-    # Same hardening bar as the api service (2026-09-19 audit, L-85).
-    # Postgres needs no capabilities beyond its volume; the data directory
-    # stays on the pgdata volume, /tmp and the socket dir get tmpfs.
+    # Hardening (2026-09-19 audit, L-85) with one documented carve-out
+    # (2026-09-26 infra audit, I-3): the official entrypoint's
+    # docker_setup_env → pg_setup_hba_conf path chown's PGDATA and then
+    # `exec gosu postgres` — both need a minimal capability set to run as
+    # root before dropping privileges (docker-library/postgres#649).
+    # cap_drop ALL with NO cap_add crash-loops the container (EPERM), so
+    # the five POSIX file-ownership/identity capabilities are explicitly
+    # re-added — the minimal set the pinned entrypoint exercises; nothing
+    # beyond it (no NET_ADMIN, no SYS_*). The root filesystem stays
+    # read-only; the data directory lives on the pgdata volume, /tmp and
+    # the socket dir get tmpfs.
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -128,12 +171,7 @@ services:
     # workload is the api's, amplified by recompute bursts) but a HIGHER
     # pids ceiling — every client connection is a backend process, so
     # 512 keeps real headroom above peak connections while still
-    # containing a runaway.
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: 2.0
+    # containing a runaway. Single top-level form (see api's note).
     mem_limit: 1G
     cpus: 2.0
     pids_limit: 512
@@ -155,15 +193,16 @@ services:
     #
     # ENCRYPTION (2026-09-16 remediation, finding G1): dumps are piped
     # through `openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000` with a
-    # key from BACKUP_KEY (REQUIRED — the service refuses to start without
-    # it, so a plaintext dump can never happen by accident). `-iter` is
-    # explicit (2026-09-19 hardening) because openssl's -pbkdf2 default is
-    # only 10k iterations; 600k matches OWASP's PBKDF2-SHA-256 floor, and
-    # every decrypt side (restore example below, rehearse_restore.sh, CI)
-    # must pass the SAME count or decryption fails. The dump still contains
-    # usernames/dates/ciphertext sizes, but a stolen volume/file is now
-    # ciphertext at rest. Restore:
-    #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY \
+    # key from the mounted BACKUP_KEY secret file (REQUIRED — the service
+    # refuses to start without it, so a plaintext dump can never happen by
+    # accident). `-iter` is explicit (2026-09-19 hardening) because
+    # openssl's -pbkdf2 default is only 10k iterations; 600k matches OWASP's
+    # PBKDF2-SHA-256 floor, and every decrypt side (restore example below,
+    # rehearse_restore.sh, CI) must pass the SAME count or decryption
+    # fails. The dump still contains usernames/dates/ciphertext sizes, but
+    # a stolen volume/file is now ciphertext at rest. Restore:
+    #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+    #     -pass file:deploy/secrets/backup_key \
     #     -in mindpattern-<stamp>.dump.enc | pg_restore --clean ...
     #
     # RETENTION IS PART OF THE DELETION PROMISE. `DELETE /api/account`
@@ -186,16 +225,24 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    secrets:
+      - backup_key
+      - postgres_password
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # pg_dump reads the database password from a pgpass line the
+      # entrypoint builds on the tmpfs from the mounted secret (see the
+      # entrypoint) — no database credential in this container's
+      # environment.
+      PGPASSFILE: /tmp/pgpass
       POSTGRES_DB: ${POSTGRES_DB:-mindpattern}
       # Days to keep dumps. Must match your stated backup-expiry policy —
       # see the retention note above.
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-35}
-      # REQUIRED. Generate once, store in your secret manager / .env:
-      #   openssl rand -base64 32
-      BACKUP_KEY: ${BACKUP_KEY:?set BACKUP_KEY in .env (openssl rand -base64 32) — dumps are AES-256-CBC-encrypted and the key is mandatory}
+      # The dump-encryption key: mounted file preferred (2026-09-26 infra
+      # audit); the env form remains as the dev-overlay fallback.
+      BACKUP_KEY: ${BACKUP_KEY:-}
+      BACKUP_KEY_FILE: /run/secrets/backup_key
     volumes:
       - pgbackups:/backups
     depends_on:
@@ -249,6 +296,27 @@ services:
           echo "backup image is missing its required crypto utilities" >&2
           exit 1
         }
+        # Dump-encryption key source (2026-09-26 infra audit): the mounted
+        # secret file when present, else the env var (dev overlay).
+        if [ -s "$$BACKUP_KEY_FILE" ]; then
+          backup_pass="file:$$BACKUP_KEY_FILE"
+        elif [ -n "$$BACKUP_KEY" ]; then
+          backup_pass="env:BACKUP_KEY"
+        else
+          echo "no BACKUP_KEY file or env value — refusing to dump plaintext" >&2
+          exit 1
+        fi
+        # Database credential: build the pgpass line from the mounted
+        # postgres_password secret (raw password -> db:5432:db:user:pass)
+        # on the tmpfs, mode 600 — pg_dump then authenticates without the
+        # password ever living in this container's environment. The env
+        # fallback (PGPASSWORD via the dev overlay) stays for local builds.
+        if [ -s /run/secrets/postgres_password ]; then
+          pgpass_file="$$PGPASSFILE"
+          printf 'db:5432:%s:%s:%s\n' "$$POSTGRES_DB" "$$POSTGRES_USER" \
+            "$$(cat /run/secrets/postgres_password)" > "$$pgpass_file"
+          chmod 600 "$$pgpass_file"
+        fi
         case "$$BACKUP_RETENTION_DAYS" in
           ''|*[!0-9]*)
             echo "BACKUP_RETENTION_DAYS must be a positive whole number" >&2
@@ -276,8 +344,8 @@ services:
           tmp="$$out.tmp"
           mac="$$out.hmac"
           mac_tmp="$$mac.tmp"
-          if PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
-              | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -out "$$tmp" \
+          if pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
+              | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass "$$backup_pass" -out "$$tmp" \
               && mindpattern-backup-mac write "$$tmp" "$$mac_tmp"; then
             # Sidecar first, ciphertext last: a visible final .dump.enc is
             # therefore never left without its integrity tag if the process
@@ -302,3 +370,17 @@ volumes:
   # Only created when the backups profile is active. Contents are sensitive
   # (see the backup service comments) and must never enter version control.
   pgbackups:
+
+# File-mounted secrets (2026-09-26 infra audit): copy the examples from
+# deploy/secrets/, fill, chmod 600. The api's auth_token_secret file is
+# OPTIONAL (an empty file means "derive from token_secret" — the app's
+# documented legacy-derivation path), so the example may stay empty.
+secrets:
+  token_secret:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/token_secret
+  auth_token_secret:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/auth_token_secret
+  postgres_password:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/postgres_password
+  backup_key:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/backup_key

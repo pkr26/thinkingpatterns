@@ -16,10 +16,11 @@ describe("static-host security policy", () => {
   it.skipIf(!existsSync(nginxPath))(
     "ships CSP and privacy headers both as a page fallback and static-host config",
     async () => {
-      const [html, headers, nginx] = await Promise.all([
+      const [html, headers, nginx, viteConfig] = await Promise.all([
         readFile(resolve(portalRoot, "index.html"), "utf8"),
         readFile(resolve(portalRoot, "public/_headers"), "utf8"),
         readFile(nginxPath, "utf8"),
+        readFile(resolve(portalRoot, "vite.config.ts"), "utf8"),
       ]);
     for (const source of [html, headers]) {
       expect(source).toContain("Content-Security-Policy");
@@ -37,9 +38,23 @@ describe("static-host security policy", () => {
     // `_headers` is the production static-host contract (not Vite's local
     // HTTP dev server), so its HSTS policy must match the TLS nginx template.
     expect(headers).toContain("Strict-Transport-Security: max-age=31536000; includeSubDomains");
-    // Nginx's response CSP intersects with the portal policy. React's
-    // dynamic theme deliberately uses style attributes, so dropping this
-    // token at the edge would make a successful deploy render unstyled.
+    // 2026-09-26 CSP hardening (audit L): the portal's OWN three policy
+    // surfaces — the meta fallback, the static-host header, and Vite's
+    // preview/dev-server header — all drop style-src 'unsafe-inline'. The
+    // views' former inline style objects are portal.css classes and the
+    // print rules live in public/print.css, so no <style> tag or style=
+    // attribute ships anywhere. The trailing ';' keeps the pin exact: the
+    // old loosened form read "style-src 'self' 'unsafe-inline';".
+    for (const source of [html, headers, viteConfig]) {
+      expect(source).toContain("style-src 'self';");
+      expect(source).not.toContain("'unsafe-inline'");
+    }
+    expect(html).toContain('<link rel="stylesheet" href="/print.css" media="print" />');
+    // The deploy template lives outside the portal package and is pinned
+    // as-shipped: its page-route CSP still carries the looser style-src
+    // from before the migration. Multiple CSP sources INTERSECT, so the
+    // stricter meta policy above still governs what the page may do —
+    // tightening the edge template is a deploy-repo follow-up.
     expect(nginx).toContain("style-src 'self' 'unsafe-inline'");
     expect(nginx).toContain("connect-src 'self'");
     expect(nginx).toContain('add_header Cache-Control "no-store" always;');

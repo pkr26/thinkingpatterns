@@ -13,15 +13,55 @@
 # the same contract on every push, so a dropped or stale @sha256 half fails
 # the build, not the 3am deploy.
 #
-# Nothing here starts with a plain `up`: prometheus + grafana are gated
-# behind the `monitoring` profile, the blackbox probe behind `blackbox`
-# (same pattern as the `backups` profile in the production file), and the
-# host-metrics node_exporter behind `node`.
+# Nothing here starts with a plain `up`: prometheus + grafana + alertmanager
+# are gated behind the `monitoring` profile (same pattern as the `backups`
+# profile in the production file), and the host-metrics node_exporter behind
+# `node`. The blackbox /readyz probe is the exception — DEFAULT-ON since the
+# 2026-09-26 infra audit (the default stack must see a broken DB path, so it
+# carries no profile gate); its `tls` cert-expiry module remains OPT-IN (the
+# matching scrape job in prometheus.yml stays commented until real public
+# hostnames exist).
 #
 #   docker compose -f deploy/monitoring/docker-compose.yml \
 #     --profile monitoring up -d
 
 services:
+  # Delivery for firing alerts (2026-09-26 infra audit: alerts evaluated
+  # inside Prometheus but nothing paged anyone by default). Runs under the
+  # SAME `monitoring` profile as prometheus; its RECEIVER CONFIG follows the
+  # metrics-token fail-closed pattern: `configs:` resolves eagerly, so
+  # `up` refuses to start until alertmanager/alertmanager.yml exists —
+  # copy the committed .example next to it and fill the receiver (where
+  # S1/S2 pages land is an operator decision; the example routes by the
+  # INCIDENT_RUNBOOK severities).
+  alertmanager:
+    image: prom/alertmanager:v0.28.0@sha256:d5155cfac40a6d9250ffc97c19db2c5e190c7bc57c6b67125c94903358f8c7d8
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles: ["monitoring"]
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
+        mode: 0444
+    volumes:
+      - alertmanager_data:/alertmanager
+    networks: [internal]
+    restart: unless-stopped
+    mem_limit: 192M
+    cpus: 0.5
+    pids_limit: 128
+    # UI intentionally not published (same rule as prometheus): SSH tunnel
+    # or a temporary loopback publish to inspect silences at 127.0.0.1:9093.
+
   prometheus:
     # Pinned 2026-09-22 (audit G-7/NEW-4): repo:tag@sha256 — v3.x line.
     # Re-pin deliberately (README.md here, "Digest pinning"); verify.sh
@@ -65,15 +105,12 @@ services:
       - prometheus_data:/prometheus
     networks: [mindpattern, internal]
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 768M
-          cpus: 0.5
     mem_limit: 768M
     cpus: 0.5
     # Fork-bomb / leak containment (same posture as the production file's
     # services): a metrics TSDB must not be able to exhaust host PIDs.
+    # Single top-level limit form only (re-audit 2026-09-27: the duplicate
+    # deploy.resources block was removed — same rule as the production file).
     pids_limit: 256
     # The Prometheus UI is intentionally NOT published. To look at it, use
     # an SSH tunnel to the host and a temporary loopback publish, e.g.
@@ -127,20 +164,14 @@ services:
       - "127.0.0.1:3000:3000"
     networks: [internal]
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: 0.5
     mem_limit: 512M
     cpus: 0.5
     pids_limit: 256
 
   blackbox:
-    # OPTIONAL uptime probe of /readyz AND TLS cert-expiry probe (the
-    # `tls` module). Enable together with the matching scrape job(s) in
-    # prometheus.yml:
-    #   --profile monitoring --profile blackbox up -d
+    # Uptime probe of /readyz (default-on — see the profile note below) AND
+    # the opt-in TLS cert-expiry probe (the `tls` module; enable its scrape
+    # job in prometheus.yml together with real public hostnames).
     # Pinned 2026-09-22 (audit G-7/NEW-4): repo:tag@sha256. Re-pin
     # deliberately (README.md here, "Digest pinning"); verify.sh
     # --production (and CI's monitoring-verify job) fail a dropped digest.
@@ -166,14 +197,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    profiles: ["blackbox"]
+    # DEFAULT-ON (2026-09-26 infra audit): the /readyz probe needs no
+    # external targets and no host decisions, so it joins the default
+    # `monitoring` profile — the default stack must see a broken DB path.
+    # (The TLS module/job stays opt-in: it needs real public hostnames.)
     networks: [mindpattern]
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 96M
-          cpus: 0.5
     mem_limit: 96M
     cpus: 0.5
     pids_limit: 256
@@ -216,11 +245,6 @@ services:
     profiles: ["node"]
     networks: [internal]
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 96M
-          cpus: 0.5
     mem_limit: 96M
     cpus: 0.5
     pids_limit: 256
@@ -249,7 +273,14 @@ networks:
 configs:
   metrics_token:
     file: ./token
+  # Fail-closed receiver config (see the alertmanager service comment):
+  # copy alertmanager/alertmanager.example.yml to alertmanager.yml and fill
+  # the receiver — a missing file refuses `up`, so delivery can never be
+  # silently absent.
+  alertmanager_config:
+    file: ./alertmanager/alertmanager.yml
 
 volumes:
   prometheus_data: {}
   grafana_data: {}
+  alertmanager_data: {}

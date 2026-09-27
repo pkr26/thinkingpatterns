@@ -170,9 +170,7 @@ async def test_totp_disable_refuses_the_code_that_just_logged_in(client, monkeyp
     )
     assert enable.status_code == 200, enable.text
 
-    next_counter = _freeze_totp_clock(
-        monkeypatch, 1_800_100_000.0 + totp.STEP_SECONDS + 1
-    )
+    next_counter = _freeze_totp_clock(monkeypatch, 1_800_100_000.0 + totp.STEP_SECONDS + 1)
     login_code = totp._code_for_counter(secret, next_counter)
     login = await client.post(
         "/api/auth/login",
@@ -279,9 +277,7 @@ async def test_measure_page_fails_closed_when_the_collection_moves_mid_read(clie
     assert page.json()["code"] == "collection_changed"
 
 
-async def test_therapist_measure_mirror_fails_closed_when_the_collection_moves(
-    client, monkeypatch
-):
+async def test_therapist_measure_mirror_fails_closed_when_the_collection_moves(client, monkeypatch):
     """V11: the therapist mirror carries the same final-drift fence."""
     from app.api import therapist as therapist_api
 
@@ -309,7 +305,9 @@ async def test_therapist_measure_mirror_fails_closed_when_the_collection_moves(
     assert mirrored.json()["code"] == "collection_changed"
 
 
-async def test_therapist_measure_mirror_enforces_the_byte_budget_post_fetch(client, app, monkeypatch):
+async def test_therapist_measure_mirror_enforces_the_byte_budget_post_fetch(
+    client, app, monkeypatch
+):
     """V12: the post-fetch byte sanity is the defense against metadata and
     ORM blob sizes disagreeing (dialect drift, mid-read divergence)."""
     from app.api import therapist as therapist_api
@@ -358,7 +356,10 @@ async def test_note_revisions_read_is_therapist_scoped(client, app):
     updated = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": therapist.encrypt_note(patient, "r4pin-n1", "v2 text")},
+        json={
+            "blob": therapist.encrypt_note(patient, "r4pin-n1", "v2 text"),
+            "base_version": 1,
+        },
     )
     assert updated.status_code == 200, updated.text
 
@@ -389,11 +390,16 @@ async def test_note_revisions_arrive_newest_first(client):
     """W8: after two edits the history is [v2, v1] — the most recently
     superseded text leads the timeline."""
     therapist, patient, note = await _shared_note(client, "v1 text")
-    for text in ("v2 text", "v3 text"):
+    # Item 15: sequential edits ride the version the previous response
+    # returned (1 -> 2 -> 3).
+    for base_version, text in ((1, "v2 text"), (2, "v3 text")):
         updated = await client.patch(
             f"/api/therapist/notes/{note['id']}",
             headers=therapist.headers,
-            json={"blob": therapist.encrypt_note(patient, "r4pin-n1", text)},
+            json={
+                "blob": therapist.encrypt_note(patient, "r4pin-n1", text),
+                "base_version": base_version,
+            },
         )
         assert updated.status_code == 200, updated.text
 
@@ -459,9 +465,12 @@ def test_rekey_re_encrypts_under_the_v2_aad():
     plain = b'{"text": "rekey me"}'
 
     v2_blob = crypto.encrypt(old_key, plain, crypto.entry_aad_v2(user_id, client_entry_id, 2))
-    out = insights_api._rekey_entry_batch(
+    # 2026-09-26 audit item 11: the batch worker now returns
+    # (rows-to-rewrite, already-new-key count) for the resumable journal.
+    out, already = insights_api._rekey_entry_batch(
         old_key, new_key, [("r4-x5-row", client_entry_id, 2, v2_blob)], user_id
     )
+    assert already == 0
     fresh = out[0][1]
     crypto.decrypt(new_key, fresh, crypto.entry_aad_v2(user_id, client_entry_id, 2))
     with pytest.raises(crypto.TamperError):
@@ -469,13 +478,22 @@ def test_rekey_re_encrypts_under_the_v2_aad():
 
     # A legacy v1 input rekeys UP to v2 as well.
     v1_blob = crypto.encrypt(old_key, plain, crypto.entry_aad_v1(user_id, client_entry_id))
-    out = insights_api._rekey_entry_batch(
+    out, already = insights_api._rekey_entry_batch(
         old_key, new_key, [("r4-x5-row2", client_entry_id, 1, v1_blob)], user_id
     )
+    assert already == 0
     upgraded = out[0][1]
     crypto.decrypt(new_key, upgraded, crypto.entry_aad_v2(user_id, client_entry_id, 1))
     with pytest.raises(crypto.TamperError):
         crypto.decrypt(new_key, upgraded, crypto.entry_aad_v1(user_id, client_entry_id))
+
+    # Item 11 (resume idempotency): a row already under the NEW key
+    # authenticates there, is returned as already-done, and needs no
+    # rewrite — an interrupted rekey's retry skips it instead of failing.
+    out, already = insights_api._rekey_entry_batch(
+        old_key, new_key, [("r4-x5-row3", client_entry_id, 2, fresh)], user_id
+    )
+    assert (out, already) == ([], 1)
 
 
 # ===========================================================================
@@ -499,16 +517,34 @@ def test_temporal_narrowing_includes_the_exact_dominance_bar():
     assert cards[0].detail["time_of_day"] == "evening"
 
 
-def test_short_corpora_keep_the_english_default():
-    """Y8: under LANGUAGE_MIN_TOKENS scored tokens the language verdict is
-    the historical English default — a handful of Spanish sentences must
-    not flip the whole pipeline to 'es'."""
-    entries = [
-        JournalEntry(WORK_ES, day)
-        for day in es_consecutive(date(2026, 9, 1), 4)
-    ]
+def test_short_corpora_use_the_detection_share_rule():
+    """Y8 (recalibrated 2026-09-26, statistical-review item 9): short
+    windows no longer default to English — they apply the SAME detection
+    share rule as full windows. A genuine Spanish corpus, even four
+    sentences below the historical token floor, reads honestly as 'es'
+    (the Spanish theme lexicon is the correct engine for it); Latin-script
+    text that clears NEITHER detection floor reads 'other' and keeps the
+    historical suppressions (no English-lexicon scoring from noise)."""
+    entries = [JournalEntry(WORK_ES, day) for day in es_consecutive(date(2026, 9, 1), 4)]
     result = brain.update(brain.load_state(None), entries, date(2026, 9, 5))
-    assert result.stats["language"] == "en"
+    assert result.stats["language"] == "es"
+    # Low-share Latin text below the floor must NOT guess English: German
+    # prose with ~2-5% English-lexicon hits falls to "other" (the exact
+    # garbage-topic failure mode the language gate exists to stop).
+    german = [
+        JournalEntry(t, d)
+        for t, d in zip(
+            [
+                "Arbeitsplatz wieder schwer, der Termin war anstrengend",
+                "Sitzung endete spaet, ich bin muede und nachdenklich",
+                "Wochenende mit spaziergang am fluss, ruhig und dankbar",
+                "Buerokram erledigt, danach gekocht und eingeschlafen",
+            ],
+            es_consecutive(date(2026, 9, 1), 4),
+        )
+    ]
+    verdict = brain.update(brain.load_state(None), german, date(2026, 9, 5))
+    assert verdict.stats["language"] == "other"
 
 
 # ===========================================================================
@@ -523,17 +559,29 @@ async def test_access_log_cursor_tiebreaks_on_id_within_one_timestamp(client, ap
     await emu.register(client)
     at = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
     async with app.state.sessionmaker() as session:
-        session.add(
-            AccessLog(
-                id="r4z3rowaaa", actor_id=emu.user_id, actor_role="user",
-                user_id=emu.user_id, action="grant", at=at,
-            )
+        # 2026-09-26 audit item 16: seed through the chained append (raw
+        # AccessLog inserts can no longer satisfy the per-patient unique
+        # chain_seq). 32-hex ids keep the tie-break deterministic — a lower
+        # id first within one timestamp.
+        from app.api._audit import append_access_log
+
+        await append_access_log(
+            session,
+            actor_id=emu.user_id,
+            actor_role="user",
+            user_id=emu.user_id,
+            action="grant",
+            at=at,
+            row_id="a" * 32,
         )
-        session.add(
-            AccessLog(
-                id="r4z3rowzzz", actor_id=emu.user_id, actor_role="user",
-                user_id=emu.user_id, action="revoke", at=at,
-            )
+        await append_access_log(
+            session,
+            actor_id=emu.user_id,
+            actor_role="user",
+            user_id=emu.user_id,
+            action="revoke",
+            at=at,
+            row_id="b" * 32,
         )
         await session.commit()
 

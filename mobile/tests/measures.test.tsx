@@ -87,7 +87,22 @@ describe("PHQ-9 semantics", () => {
   });
   it("the payload contract matches the portal's parser", () => {
     const payload = JSON.parse(phq9Payload([1, 1, 1, 1, 1, 1, 1, 1, 1], "2026-09-19"));
-    expect(payload).toEqual({ v: 1, measure: "phq9", score: 9, completed_at: "2026-09-19" });
+    // 2026-09-27 clinical contract: the RAW item-9 response rides next to
+    // the score (an endorsed item 9 mandates follow-up regardless of the
+    // total), and the key ORDER is the wire contract.
+    expect(payload).toEqual({ v: 1, measure: "phq9", score: 9, item9: 1, completed_at: "2026-09-19" });
+    expect(Object.keys(payload)).toEqual(["v", "measure", "score", "item9", "completed_at"]);
+    // The item-9 field is the raw pick, clamped to the 0–3 scale, never
+    // reinterpreted; a low total with an endorsed item 9 stays endorsive.
+    const split = JSON.parse(phq9Payload([0, 0, 0, 0, 0, 0, 0, 0, 2], "2026-09-27"));
+    expect(split).toEqual({ v: 1, measure: "phq9", score: 2, item9: 2, completed_at: "2026-09-27" });
+    const clamped = JSON.parse(phq9Payload([3, 3, 3, 3, 3, 3, 3, 3, 99], "2026-09-27"));
+    expect(clamped.item9).toBe(3);
+    // An unanswered item 9 (the scorer's leniency path) omits the field —
+    // payloads without item9 remain valid on every reader.
+    expect(JSON.parse(phq9Payload([0, 0, 0, 0, 0, 0, 0, 0, null], "2026-09-27"))).toEqual({
+      v: 1, measure: "phq9", score: 0, completed_at: "2026-09-27",
+    });
   });
 });
 
@@ -141,7 +156,7 @@ describe("MeasuresScreen", () => {
     expect(clientId.startsWith("m-")).toBe(true);
     const plain = decrypt(dataKey, Buffer.from(blobB64, "base64"), buildAad("measure", USER, clientId));
     expect(JSON.parse(plain.toString("utf8"))).toEqual({
-      v: 1, measure: "phq9", score: 2, completed_at: date,
+      v: 1, measure: "phq9", score: 2, item9: 0, completed_at: date,
     });
     // Item 9 was NOT endorsed: no support dialog.
     expect(Alert.alert).not.toHaveBeenCalled();
@@ -263,11 +278,15 @@ describe("MeasuresScreen", () => {
     expect(safetyItemEndorsed("gad7", [3, 3, 3, 3, 3, 3, 3])).toBe(false);
     expect(safetyItemEndorsed("phq2", [3, 3])).toBe(false);
     expect(safetyItemEndorsed("phq9", [0, 0, 0, 0, 0, 0, 0, 0, 1])).toBe(true);
-    // The payload names its instrument (the portal groups by it).
+    // The payload names its instrument (the portal groups by it) — and only
+    // the PHQ-9 carries item9 (GAD-7/PHQ-2 have no safety item; their
+    // payloads never gain the field).
     const gad = JSON.parse(measurePayload("gad7", [1, 1, 1, 1, 1, 1, 1], "2026-09-21"));
     expect(gad).toEqual({ v: 1, measure: "gad7", score: 7, completed_at: "2026-09-21" });
+    expect("item9" in gad).toBe(false);
     const phq2 = JSON.parse(measurePayload("phq2", [2, 1], "2026-09-21"));
     expect(phq2).toEqual({ v: 1, measure: "phq2", score: 3, completed_at: "2026-09-21" });
+    expect("item9" in phq2).toBe(false);
     // History clamping is instrument-aware; unknown names skip.
     expect(maxScoreForMeasure("gad7")).toBe(21);
     expect(maxScoreForMeasure("phq2")).toBe(6);
@@ -336,5 +355,185 @@ describe("MeasuresScreen status line auto-clears (2026-09-26 audit LOW)", () => 
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// 2026-09-26 audit LOW: completed answers must survive a failed send and
+// the screen unmounting (offline submit, or the vault lock a background
+// triggers) — persisted {kind, clientMeasureId, picks, date} under the
+// data key, retried on the next mount under the SAME client_measure_id
+// (POST /measures is idempotent by that id server-side).
+describe("MeasuresScreen pending-measure persistence (2026-09-26 audit LOW)", () => {
+  /** Complete the nine PHQ-9 items with zeros and submit. */
+  async function completeAndSubmit(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+    for (let i = 0; i < PHQ9_ITEMS.length; i++) {
+      await pressOption(root, `Question ${i + 1}: Not at all`);
+    }
+    await pressLabel(root, "Record this check-in");
+    await flush();
+  }
+
+  it("offline fail → remount → restores the picks and retries under the SAME id → clears the record", async () => {
+    const { loadPendingMeasure } = await import("../src/pendingMeasure");
+    // First mount: the send fails offline.
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
+    const first = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    await completeAndSubmit(first);
+    expect(api.createMeasure).toHaveBeenCalledTimes(1);
+    const firstId = (vi.mocked(api.createMeasure).mock.calls[0] as unknown as [string])[0];
+    expect(textOf(first)).toContain("Recording needs a connection right now.");
+    // The completed record is durable, encrypted under the data key.
+    const stored = await loadPendingMeasure(dataKey, USER);
+    expect(stored).toMatchObject({ kind: "phq9", clientMeasureId: firstId, date: stored?.date });
+    expect(stored?.picks).toEqual(PHQ9_ITEMS.map(() => 0));
+    // Remount (app restart / relock after backgrounding): the mount retry
+    // restores the answers and re-sends the SAME idempotency key.
+    await act(async () => {
+      first.unmount();
+    });
+    vi.mocked(api.createMeasure).mockResolvedValue({} as never);
+    const second = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    expect(api.createMeasure).toHaveBeenCalledTimes(2);
+    expect((vi.mocked(api.createMeasure).mock.calls[1] as unknown as [string])[0]).toBe(firstId);
+    // Success clears the record and resets the answers (Record disabled
+    // again until every item is re-answered).
+    expect(await loadPendingMeasure(dataKey, USER)).toBeNull();
+    expect(touchableByLabel(second, "Record this check-in").props.disabled).toBe(true);
+    expect(textOf(second)).toContain("Recorded — encrypted, as always.");
+  });
+
+  it("a retry that answers 409 (the first send HAD landed) is 'already recorded' and clears the record too", async () => {
+    const { loadPendingMeasure } = await import("../src/pendingMeasure");
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
+    const first = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    await completeAndSubmit(first);
+    await act(async () => {
+      first.unmount();
+    });
+    // The offline failure was a timeout AFTER the server committed: the
+    // retry answers 409, which must read as recorded — not as an error,
+    // and not as a reason to keep retrying every mount.
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(
+      Object.assign(new ApiError(409, "measure already exists"), { code: "conflict" }),
+    );
+    const second = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    expect(api.createMeasure).toHaveBeenCalledTimes(2);
+    expect(textOf(second)).toContain("Already recorded — refreshing.");
+    expect(await loadPendingMeasure(dataKey, USER)).toBeNull();
+    expect(touchableByLabel(second, "Record this check-in").props.disabled).toBe(true);
+  });
+
+  it("a manual re-tap after an offline failure reuses the SAME id (idempotent retry affordance)", async () => {
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
+    const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    await completeAndSubmit(root);
+    // Connectivity returns; the same tap re-submits the same picks under
+    // the same id — a fresh id here could record the answers twice.
+    vi.mocked(api.createMeasure).mockResolvedValue({} as never);
+    await pressLabel(root, "Record this check-in");
+    await flush();
+    expect(api.createMeasure).toHaveBeenCalledTimes(2);
+    const ids = (vi.mocked(api.createMeasure).mock.calls as unknown as [string][])
+      .map((call) => call[0]);
+    expect(new Set(ids).size).toBe(1);
+    expect(textOf(root)).toContain("Recorded — encrypted, as always.");
+  });
+
+  // 2026-09-27 item9 contract: the pending record's PICKS are the single
+  // source of the payload (item9 = picks[8]) — every attempt of one
+  // questionnaire, including the mount-retry of a persisted record, must
+  // ship the SAME item9 the user picked (no drift between attempts).
+  it("a persisted pending record re-derives item9 from the SAME picks on every retry", async () => {
+    const { loadPendingMeasure } = await import("../src/pendingMeasure");
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
+    const first = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    for (let i = 0; i < PHQ9_ITEMS.length; i++) {
+      await pressOption(first, `Question ${i + 1}: ${i === 8 ? "More than half the days" : "Not at all"}`);
+    }
+    await pressLabel(first, "Record this check-in");
+    await flush();
+    const stored = await loadPendingMeasure(dataKey, USER);
+    expect(stored?.picks[8]).toBe(2);
+    // The first (failed) attempt's payload carried item9 = 2 from the picks.
+    const firstBlob = (vi.mocked(api.createMeasure).mock.calls[0] as unknown as [string, string])[1];
+    const firstPlain = JSON.parse(
+      decrypt(dataKey, Buffer.from(firstBlob, "base64"), buildAad("measure", USER, stored!.clientMeasureId)).toString("utf8"),
+    ) as { item9?: number };
+    expect(firstPlain.item9).toBe(2);
+    // Remount → the retry restores the SAME picks and ships the SAME item9.
+    await act(async () => {
+      first.unmount();
+    });
+    vi.mocked(api.createMeasure).mockResolvedValue({} as never);
+    const second = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
+    await flush();
+    expect(api.createMeasure).toHaveBeenCalledTimes(2);
+    const retryBlob = (vi.mocked(api.createMeasure).mock.calls[1] as unknown as [string, string])[1];
+    const retryPlain = JSON.parse(
+      decrypt(dataKey, Buffer.from(retryBlob, "base64"), buildAad("measure", USER, stored!.clientMeasureId)).toString("utf8"),
+    ) as { item9?: number };
+    expect(retryPlain.item9).toBe(2);
+    expect(retryPlain.item9).toBe(stored?.picks[8]);
+  });
+
+  // The storage discipline (reminders.ts idiom): everything read back from
+  // storage is validated in full — a hostile or half-written record is
+  // null, never an out-of-range pick reaching the send path.
+  describe("pendingMeasure storage discipline", () => {
+    const good = {
+      kind: "phq9",
+      clientMeasureId: "m-2026-09-26-abc",
+      picks: PHQ9_ITEMS.map(() => 2),
+      date: "2026-09-26",
+    };
+
+    function plant(raw: string): Promise<void> {
+      return storage.setItem(`@mindpattern/pending_measure_${USER}`, raw);
+    }
+
+    it("round-trips under the data key and refuses every other key", async () => {
+      const { savePendingMeasure, loadPendingMeasure } = await import("../src/pendingMeasure");
+      await savePendingMeasure(dataKey, USER, good);
+      expect(await loadPendingMeasure(dataKey, USER)).toEqual(good);
+      // A different key (account switch / rotation) never reads it…
+      expect(await loadPendingMeasure(Buffer.alloc(32, 8), USER)).toBeNull();
+      // …and tampered bytes at the slot read as absent, never as a guess.
+      await plant("AAAA");
+      expect(await loadPendingMeasure(dataKey, USER)).toBeNull();
+    });
+
+    it("corrupt/foreign records degrade to null (never a partial questionnaire)", async () => {
+      const { loadPendingMeasure } = await import("../src/pendingMeasure");
+      const seal = (value: unknown): Promise<void> =>
+        plant(
+          encrypt(dataKey, Buffer.from(JSON.stringify(value), "utf8"), buildAad("pending-measure", USER)).toString("base64"),
+        );
+      // A valid envelope with a hostile/half-written RECORD inside: each
+      // violates the instrument contract and must read as absent.
+      for (const bad of [
+        { ...good, kind: "not-an-instrument" },
+        { ...good, clientMeasureId: "" },
+        { ...good, clientMeasureId: "x".repeat(129) },
+        { ...good, picks: [0, 0] }, // wrong item count
+        { ...good, picks: PHQ9_ITEMS.map(() => 9) }, // off the 0..3 scale
+        { ...good, picks: PHQ9_ITEMS.map(() => Number.NaN) },
+        { ...good, date: "09/26/2026" }, // not ISO date-granular
+        { kind: 42, clientMeasureId: "m-1", picks: [0], date: "2026-09-26" },
+      ]) {
+        await seal(bad);
+        expect(await loadPendingMeasure(dataKey, USER)).toBeNull();
+      }
+      // And the wrong AAD context (a blob sealed for another purpose):
+      await plant(
+        encrypt(dataKey, Buffer.from(JSON.stringify(good), "utf8"), buildAad("measure", USER, good.clientMeasureId)).toString("base64"),
+      );
+      expect(await loadPendingMeasure(dataKey, USER)).toBeNull();
+    });
   });
 });

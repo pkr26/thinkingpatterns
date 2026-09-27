@@ -35,6 +35,22 @@ from ..locks import UserLocks, lifecycle_locks
 from ..models import Entry, User
 from ..schemas import CLIENT_ID_PATTERN, EntryCreate, EntryOut, EntryReplace, entry_out
 from ..security.crypto import MIN_BLOB_SIZE
+from ._paging import (
+    MAX_COLLECTION_REVISION,
+    assert_expected_revision,
+    collection_changed_error,
+    emit_page_headers,
+    parse_expected_revision,
+    select_byte_page,
+    verify_fetched_page,
+)
+
+__all__ = [
+    "MAX_COLLECTION_REVISION",
+    "assert_expected_revision",
+    "collection_changed_error",
+    "parse_expected_revision",
+]
 
 router = APIRouter(prefix="/entries", tags=["entries"])
 
@@ -50,67 +66,17 @@ BACKDATE_GRACE_DAYS = 1
 FORWARD_GRACE_DAYS = 1
 
 # A journal entry may legitimately carry about 1.1 MiB of ciphertext, but a
-# 500-row response used to turn one ordinary history request into hundreds of
-# MiB of base64 JSON.  Bound a page by *raw* ciphertext bytes; base64/JSON
+# 500-row response used to turn one ordinary history request into hundreds
+# of MiB of base64 JSON.  Bound a page by *raw* ciphertext bytes; base64/JSON
 # overhead means the wire response is larger, but still remains a deliberately
 # small, mobile-manageable unit.  The schema's single-entry ceiling is below
 # this value, so a valid entry can always fit in one page.
 ENTRY_PAGE_BLOB_BYTES = 2 * 1024 * 1024
 
-# Revision values travel in an HTTP header and optional query parameter.  Keep
-# their grammar canonical and bounded to the signed 64-bit database column:
-# this rejects parser-friendly but framing-ambiguous forms such as ``+1``,
-# ``01``, whitespace, and Unicode digits.
-MAX_COLLECTION_REVISION = 2**63 - 1
 ENTRIES_REVISION_HEADER = "X-Entries-Revision"
-_EXPECTED_REVISION_RE = re.compile(r"(?:0|[1-9][0-9]{0,18})")
 
 _user_locks = UserLocks()
 _CLIENT_ENTRY_ID_RE = re.compile(CLIENT_ID_PATTERN)
-
-
-def parse_expected_revision(value: str | None) -> int | None:
-    """Parse a client snapshot marker without accepting permissive int forms."""
-    if value is None:
-        return None
-    if not isinstance(value, str) or _EXPECTED_REVISION_RE.fullmatch(value) is None:
-        raise ApiError(
-            status_code=422,
-            detail="expected_revision must be a canonical non-negative decimal",
-            code="validation_error",
-        )
-    revision = int(value)
-    if revision > MAX_COLLECTION_REVISION:
-        raise ApiError(
-            status_code=422,
-            detail="expected_revision must be a canonical non-negative decimal",
-            code="validation_error",
-        )
-    return revision
-
-
-def collection_changed_error(
-    collection: str, header_name: str, current_revision: int | None = None
-) -> ApiError:
-    """Retryable conflict for a collection that moved between page requests."""
-    headers = {header_name: str(current_revision)} if current_revision is not None else None
-    return ApiError(
-        status_code=409,
-        detail=f"{collection} changed while paging; retry the request",
-        code="collection_changed",
-        headers=headers,
-    )
-
-
-def assert_expected_revision(
-    expected_revision: int | None,
-    current_revision: int,
-    *,
-    collection: str,
-    header_name: str,
-) -> None:
-    if expected_revision is not None and expected_revision != current_revision:
-        raise collection_changed_error(collection, header_name, current_revision)
 
 
 async def current_entries_revision(session: AsyncSession, user_id: str) -> int:
@@ -493,41 +459,16 @@ async def list_entries(
             )
             metadata = (await session.execute(metadata_query)).all()
             requested = [(str(row[0]), int(row[1])) for row in metadata[:limit]]
-            selected: list[tuple[str, int]]
 
-            if page_bytes is None:
-                selected = requested
-                if sum(size for _, size in selected) > ENTRY_PAGE_BLOB_BYTES:
-                    raise ApiError(
-                        status_code=413,
-                        detail=(
-                            "requested entry page exceeds the 2 MiB ciphertext budget; "
-                            "upgrade to a byte-paginating client"
-                        ),
-                        code="payload_too_large",
-                    )
-            else:
-                selected = []
-                total_bytes = 0
-                for entry_id, blob_bytes in requested:
-                    if blob_bytes > page_bytes:
-                        # A caller must not receive an empty, apparently
-                        # complete page when it asks for less than a single
-                        # valid entry's ciphertext.  Make that configuration
-                        # error explicit so it can retry with a real budget.
-                        if not selected:
-                            raise ApiError(
-                                status_code=413,
-                                detail="an entry exceeds the requested page byte budget",
-                                code="payload_too_large",
-                            )
-                        break
-                    if total_bytes + blob_bytes > page_bytes:
-                        break
-                    selected.append((entry_id, blob_bytes))
-                    total_bytes += blob_bytes
+            page = select_byte_page(
+                requested,
+                more_after_request=len(metadata) > limit,
+                page_bytes=page_bytes,
+                hard_budget=ENTRY_PAGE_BLOB_BYTES,
+                collection="entry",
+            )
 
-            selected_ids = [entry_id for entry_id, _ in selected]
+            selected_ids = [entry_id for entry_id, _ in page.selected]
             ordered_rows: list[Entry] = []
             if selected_ids:
                 rows = (
@@ -541,43 +482,31 @@ async def list_entries(
                     .scalars()
                     .all()
                 )
-                rows_by_id = {row.id: row for row in rows}
-                if len(rows_by_id) != len(selected_ids):
-                    # A second process changed the page between metadata and blob
-                    # fetches.  Do not fabricate a non-advancing cursor or claim
-                    # completion; the caller can retry a fresh stable page.
-                    raise ApiError(
-                        status_code=409,
-                        detail="entries changed while paging; retry the request",
-                        code="conflict",
-                    )
-                ordered_rows = [rows_by_id[entry_id] for entry_id in selected_ids]
-                # The in-process entry lock makes this check a defensive backstop
-                # for a multi-process deployment accidentally started despite the
-                # documented one-worker model.  Never serialize a page that grew
-                # after its metadata sizing pass.
-                if sum(len(bytes(row.blob)) for row in ordered_rows) > (
-                    page_bytes if page_bytes is not None else ENTRY_PAGE_BLOB_BYTES
-                ):
-                    raise ApiError(
-                        status_code=409,
-                        detail="entries changed while paging; retry the request",
-                        code="conflict",
-                    )
-            has_more = len(selected) < len(requested) or len(metadata) > limit
+                # 2026-09-26 audit item 22: the shared page verifier. The
+                # in-process entry lock makes its checks a defensive
+                # backstop for a multi-process deployment accidentally
+                # started despite the documented one-worker model; the
+                # drift answer is the canonical 409 collection_changed.
+                ordered_rows = verify_fetched_page(
+                    selected_ids,
+                    rows,
+                    byte_limit=page_bytes if page_bytes is not None else ENTRY_PAGE_BLOB_BYTES,
+                    collection="entries",
+                    header_name=ENTRIES_REVISION_HEADER,
+                    revision=revision,
+                )
             result = [entry_out(row) for row in ordered_rows]
             final_revision = await current_entries_revision(session, fresh_user.id)
             if final_revision != revision:
                 raise collection_changed_error("entries", ENTRIES_REVISION_HEADER, final_revision)
-            # Set it even for an empty or terminal page. The client stores
-            # this exact snapshot marker before deciding whether to continue.
-            response.headers[ENTRIES_REVISION_HEADER] = str(revision)
-            if has_more:
-                # A continuation is always exactly the number of rows the
-                # caller received.  This is deliberately stricter than a
-                # guessed item-size increment so clients can reject hostile
-                # or malformed continuation headers.
-                response.headers["X-Next-Offset"] = str(offset + len(result))
+            emit_page_headers(
+                response,
+                revision=revision,
+                header_name=ENTRIES_REVISION_HEADER,
+                has_more=page.has_more,
+                rows_returned=len(result),
+                offset=offset,
+            )
     return result
 
 
@@ -631,6 +560,7 @@ async def get_entry(
 )
 async def delete_entry(
     client_entry_id: str,
+    response: Response,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -649,5 +579,11 @@ async def delete_entry(
             )
             if db_rowcount(result) == 0:
                 raise ApiError(status_code=404, detail="entry not found", code="not_found")
-            await _increment_entries_revision(session, fresh_user)
+            # 2026-09-26 audit item 23: a bare 204 forced a paged-sync client
+            # that had just deleted an entry to issue an extra GET just to
+            # learn the new snapshot marker. Echo the post-delete revision
+            # exactly as the GET collection exposes it, so the client can
+            # resume paged sync from this response alone.
+            new_revision = await _increment_entries_revision(session, fresh_user)
+            response.headers[ENTRIES_REVISION_HEADER] = str(new_revision)
             await session.commit()

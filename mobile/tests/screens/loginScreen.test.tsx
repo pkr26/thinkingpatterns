@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { Alert } from "react-native";
+import { Alert, TouchableOpacity } from "react-native";
 
 vi.mock("../../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
@@ -38,11 +38,18 @@ const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { LoginScreen } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, pressLabel, typeInto, inputByPlaceholder, pressAlertButton, lastAlert } = await import("../helpers/rtr");
+const { render, flush, textOf, pressLabel, typeInto, inputByPlaceholder, pressAlertButton, lastAlert, touchableByLabel } = await import("../helpers/rtr");
 const { resetApi, SALT_B64 } = await import("../helpers/apiMock");
 
 /** The most recent keys the mocked deriveKeys produced, for zeroization asserts. */
 let lastDerived: { masterKey: Buffer; authKey: Buffer; dataKey: Buffer } | null = null;
+
+/** Check the 18+ self-declaration (2026-09-27 age gate). In register mode
+ *  the age switch is the screen's only Switch; it starts unchecked. */
+async function confirmAge18(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  const { toggleSwitch } = await import("../helpers/rtr");
+  await toggleSwitch(root, false, true);
+}
 
 beforeEach(() => {
   resetApi(api as never);
@@ -119,12 +126,76 @@ describe("LoginScreen chrome", () => {
   });
 });
 
+/** The Create-account BUTTON by its exact a11y label (the Ghost switch-link
+ *  text "New here? Create an account" contains the same substring). */
+function createAccountButton(root: Awaited<ReturnType<typeof render>>) {
+  const button = root.root
+    .findAllByType(TouchableOpacity)
+    .find((n) => n.props.accessibilityLabel === "Create account");
+  if (!button) throw new Error("no Create account button");
+  return button;
+}
+
 describe("registration", () => {
+  // 2026-09-27 age gate: registration demands the explicit 18+ declaration
+  // BEFORE anything else — the button is disabled and even a bypassed press
+  // never reaches the password policy or the network.
+  it("the 18+ declaration gates the register button and every submit path", async () => {
+    const storage = (await import("../helpers/storageMock")).default;
+    storage.__reset();
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "New here? Create an account");
+    await typeInto(root, "confirm password", "Correct horse!");
+    // The declaration row is visible, unchecked, and the button disabled.
+    expect(textOf(root)).toContain("I am 18 or older");
+    expect(createAccountButton(root).props.disabled).toBe(true);
+    await pressLabel(root, "Create account"); // a bypassed press does nothing
+    await flush();
+    expect(api.register).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled(); // not even a policy alert
+    // Nothing is stored for the declaration: no AsyncStorage key appears.
+    expect(await storage.getAllKeys()).toEqual([]);
+    // Checking it enables the button and the flow proceeds.
+    await confirmAge18(root);
+    expect(createAccountButton(root).props.disabled).toBe(false);
+    await pressLabel(root, "Create account");
+    await flush();
+    expect(api.register).toHaveBeenCalledTimes(1);
+  });
+
+  it("the age switch is never pre-ticked, and leaving register mode re-arms it", async () => {
+    const root = await render(<LoginScreen />);
+    await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
+    // Toggle away and back: the declaration must not survive the flip.
+    await pressLabel(root, "Already have an account? Sign in");
+    await pressLabel(root, "New here? Create an account");
+    expect(createAccountButton(root).props.disabled).toBe(true);
+    // Login mode renders no declaration row at all.
+    await pressLabel(root, "Already have an account? Sign in");
+    expect(textOf(root)).not.toContain("I am 18 or older");
+  });
+
+  it("the age declaration renders in Spanish under the es locale (safety copy)", async () => {
+    const { __setLocaleForTests } = await import("../../src/strings");
+    __setLocaleForTests("es");
+    try {
+      const root = await render(<LoginScreen />);
+      await pressLabel(root, "¿Primera vez aquí? Crear una cuenta");
+      expect(textOf(root)).toContain("Tengo 18 años o más");
+    } finally {
+      __setLocaleForTests("en");
+    }
+  });
+
   it("rejects passwords shorter than 12 characters before any network call", async () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "short");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await pressLabel(root, "Create account");
     expect(Alert.alert).toHaveBeenCalledWith(
       "Password too short",
@@ -138,6 +209,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "12345678");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await pressLabel(root, "Create account");
     expect(Alert.alert).toHaveBeenCalledWith(
       "Password too short",
@@ -151,6 +223,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "abcdefghijkl");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await pressLabel(root, "Create account");
     expect(Alert.alert).toHaveBeenCalledWith(
       "Password needs more variety",
@@ -164,6 +237,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "abcdEFGH1234");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "abcdEFGH1234");
     await pressLabel(root, "Create account");
     await flush();
@@ -176,6 +250,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "abcdefghijklmnop");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "abcdefghijklmnop");
     await pressLabel(root, "Create account");
     await flush();
@@ -188,12 +263,24 @@ describe("registration", () => {
     await typeInto(root, "username", " alice ");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
 
     expect(deriveKeysAsync).toHaveBeenCalledWith("Correct horse!", expect.any(Buffer));
-    expect(api.register).toHaveBeenCalledWith("alice", expect.any(String), expect.any(String));
+    // v2 registration (2026-09-26): kdf_params + wrapped_data_key ship as a
+    // PAIR (the both-or-neither contract), the params are the shipped
+    // pbkdf2-600k blob, and the wrapped random data key is exactly 60 bytes.
+    expect(api.register).toHaveBeenCalledWith(
+      "alice",
+      expect.any(String),
+      expect.any(String),
+      { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
+      expect.any(String),
+    );
+    const wrappedB64 = (vi.mocked(api.register).mock.calls[0] as unknown[])[4] as string;
+    expect(Buffer.from(wrappedB64, "base64")).toHaveLength(60);
     expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
     expect(vault.isUnlocked()).toBe(true);
     expect(markLoggedIn).toHaveBeenCalledTimes(1);
@@ -207,6 +294,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
@@ -222,6 +310,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
@@ -245,6 +334,7 @@ describe("registration", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
@@ -434,6 +524,7 @@ describe("register-mode edge cases", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Long enough pw!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Long enough pw!");
     await pressLabel(root, "Create account");
     await flush();
@@ -520,6 +611,7 @@ describe("registration honesty (audit fix)", () => {
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct HORSE!");
     // Live inline mismatch hint…
     expect(textOf(root)).toContain("Passwords don't match.");
@@ -650,6 +742,7 @@ describe("L-65: partial register failure points at sign-in, not a dead end", () 
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
@@ -670,6 +763,7 @@ describe("L-65: partial register failure points at sign-in, not a dead end", () 
     await typeInto(root, "username", "alice");
     await typeInto(root, "password", "Correct horse!");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
     await flush();
@@ -729,5 +823,182 @@ describe("M-3 server-trust dialog: dismiss-after-confirm (2026-09-26 audit q)", 
     expect(
       root.root.findAll((n) => n.props.accessibilityLabel === "Warning: server address changed")[0],
     ).toBeTruthy();
+  });
+});
+
+// --- v2 key envelope (2026-09-26) --------------------------------------------
+//
+// Registration defaults every NEW account to v2; login-mode resolves the
+// account's scheme from GET /auth/key-envelope. The envelopes below are
+// built with the REAL crypto under the mocked derivation's fixed master
+// key, so the screen runs the exact shipping keyScheme unwrap path.
+// REAL crypto module (no mock): builds envelopes that genuinely open under
+// the mocked derivation's fixed master key.
+const { envelopeKek, wrapDataKey, defaultKdfParams } = await import("../../src/crypto/keyEnvelope");
+
+describe("LoginScreen key scheme (register v2 default, login resolves scheme)", () => {
+  const PARAMS = defaultKdfParams();
+  const RANDOM_DATA_KEY = Buffer.alloc(32, 0xcd);
+
+  const v2EnvelopeFor = (master: Buffer): { key_scheme: string; salt: string; kdf_params: object; wrapped_data_key: string } => ({
+    key_scheme: "v2",
+    salt: SALT_B64,
+    kdf_params: PARAMS,
+    wrapped_data_key: wrapDataKey(RANDOM_DATA_KEY, envelopeKek(master, Buffer.from(SALT_B64, "base64")), "alice", PARAMS).toString("base64"),
+  });
+
+  it("REGISTER unlocks the vault on the fresh RANDOM data key (never the derived label)", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
+    await typeInto(root, "confirm password", "Correct horse!");
+    await pressLabel(root, "Create account");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(true);
+    // The vault's data key is a fresh RANDOM 32-byte key — equal in LENGTH
+    // to every other key, but NOT the mocked derivation's fixed dataKey.
+    const sessionKey = vault.get().dataKey;
+    expect(sessionKey).toHaveLength(32);
+    expect(sessionKey.equals(Buffer.alloc(32, 3))).toBe(false); // the mocked v1 label
+    // The v1 data label was zeroized (v2 never uses it for storage).
+    expect(lastDerived?.dataKey.every((byte) => byte === 0)).toBe(true);
+    // The local envelope cache carries the v2 record for offline unlocks.
+    expect(api.cacheKeyEnvelope).toHaveBeenCalledWith(
+      "alice",
+      expect.objectContaining({ scheme: "v2", kdfParams: PARAMS }),
+    );
+  });
+
+  it("LOGIN on a v2 account unwraps the envelope into the vault", async () => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue(v2EnvelopeFor(Buffer.alloc(32, 1)) as never);
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(api.keyEnvelope).toHaveBeenCalledTimes(1);
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(RANDOM_DATA_KEY);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("LOGIN on a v1 account stays byte-for-byte on the derived data key", async () => {
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(api.keyEnvelope).toHaveBeenCalledTimes(1); // scheme was resolved
+    expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 3)); // the mocked derivation's label
+    // The v1 marker is cached so an offline unlock knows the proof path.
+    expect(api.cacheKeyEnvelope).toHaveBeenCalledWith(
+      "alice",
+      expect.objectContaining({ scheme: "v1" }),
+    );
+  });
+
+  it("a v2 envelope that will not open fails CLOSED with the honest envelope copy", async () => {
+    // Password accepted (mock login is happy), envelope wrapped under a
+    // different master: not a wrong-password message.
+    vi.mocked(api.keyEnvelope).mockResolvedValue(v2EnvelopeFor(Buffer.alloc(32, 0x5a)) as never);
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Sign in failed",
+      "Your password was accepted, but this account's key envelope could not be unlocked on this server. Nothing was changed — try again, or contact support if it repeats.",
+    );
+  });
+
+  // Re-audit 2026-09-27 (M): the v2 account whose envelope can be neither
+  // fetched nor read from cache used to fall through to v1 semantics — the
+  // vault unlocked on the v1-DERIVED data key and entries written that
+  // session became permanently unreadable. The session is now refused.
+  it("v2 account + UNREACHABLE envelope + no cache REFUSES the session: no vault unlock, no unlock proof", async () => {
+    // The envelope endpoint fails mid-flow (login itself succeeded) and this
+    // device has never cached an envelope for the account.
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
+    const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+    await AsyncStorage.removeItem("@mindpattern/unlockproof_user-1");
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    // No proof was sealed under the WRONG (v1-derived) key — the corruption
+    // vector was the proof refresh as much as the unlock.
+    expect(await AsyncStorage.getItem("@mindpattern/unlockproof_user-1")).toBeNull();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Sign in failed",
+      "We couldn't verify your encryption key with the server. Check your connection and try again — nothing was changed.",
+    );
+  });
+
+  it("v2 account + INVALID envelope (unusable server answer) + no cache refuses with the honest update-style copy", async () => {
+    // The server ANSWERED, but with a shape no shipped client can act on —
+    // not a connection problem, so the copy never says "check your connection".
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v9" } as never);
+    const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+    await AsyncStorage.removeItem("@mindpattern/unlockproof_user-1");
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(await AsyncStorage.getItem("@mindpattern/unlockproof_user-1")).toBeNull();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Sign in failed",
+      "We couldn't verify your encryption key — the server sent a response this app doesn't understand. Nothing was changed; updating the app may help.",
+    );
+  });
+
+  it("v2 account + unreachable fetch + CACHED envelope still unlocks from the cache (the offline-first fallback)", async () => {
+    // The endpoint failed, but this device cached the account's v2 envelope
+    // at a prior login: the cached wrap opens locally under the same master.
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue({
+      scheme: "v2",
+      saltB64: SALT_B64,
+      kdfParams: PARAMS,
+      wrappedB64: v2EnvelopeFor(Buffer.alloc(32, 1)).wrapped_data_key,
+    } as never);
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(api.keyEnvelope).toHaveBeenCalledTimes(1);
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(RANDOM_DATA_KEY);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("a LEGACY server (404 envelope endpoint) + no cache keeps v1 semantics — the refusal never bites there", async () => {
+    // A pre-envelope server cannot host a v2 account: 404 → "legacy" is a
+    // proven-v1 answer, so the derived data key remains correct.
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new ApiError(404, "no such route"));
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 3)); // the mocked v1 label
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });

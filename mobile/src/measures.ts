@@ -5,9 +5,10 @@
  * adds GAD-7 (anxiety, 7 items, 0-21) and PHQ-2 (the two-item depression
  * core, 0-6) alongside it. All three are public-domain-style instruments
  * (the Kroenke/Spitzer Pfizer no-permission-required note) and all three
- * ride the EXISTING zero-knowledge measure path: the score is the only
- * payload ({"v":1,"measure":id,"score":N,"completed_at":date}), stored
- * as an encrypted blob and shared per consent — the server and portal
+ * ride the EXISTING zero-knowledge measure path: the score (plus, for the
+ * PHQ-9 only, the raw item-9 response — see measurePayload) is the whole
+ * payload ({"v":1,"measure":id,"score":N[,"item9":M],"completed_at":date}),
+ * stored as an encrypted blob and shared per consent — the server and portal
  * remain unable to interpret anything (and so does this app: no severity
  * bands, no advice; interpretation belongs to a clinician).
  *
@@ -102,19 +103,47 @@ export function safetyItemEndorsed(id: MeasureId, responses: readonly (number | 
   return typeof value === "number" && value > 0;
 }
 
+/** Item 9 in the PHQ-9 payload (clinical follow-up contract, 2026-09-27):
+ *  the RAW response to the safety item, clamped to the option scale, or
+ *  null when unanswered. An endorsed item 9 mandates clinical follow-up
+ *  regardless of the total score — a total alone can read "mild" while
+ *  item 9 says otherwise — so the portal must see it as its own field.
+ *  The app itself still never interprets it (no bands, no advice): the
+ *  field exists for the clinician, exactly like the score. */
+export function measureSafetyItemValue(
+  id: MeasureId,
+  responses: readonly (number | null)[],
+): number | null {
+  const index = instrumentOf(id).safetyItemIndex;
+  if (index === undefined) return null;
+  const value = responses[index];
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const maxOption = Math.max(...instrumentOf(id).options);
+  return Math.max(0, Math.min(maxOption, Math.round(value)));
+}
+
 /** The encrypted-payload contract (consumed by the therapist portal):
- *  {"v":1,"measure":<id>,"score":N,"completed_at":ISO-date}. */
+ *  {"v":1,"measure":<id>,"score":N,"completed_at":ISO-date} — and, for
+ *  the PHQ-9 ONLY, "item9": the raw safety-item response rides next to
+ *  the score (see measureSafetyItemValue). GAD-7/PHQ-2 payloads carry no
+ *  item9 field (they have no safety item), and older payloads without it
+ *  remain valid on every reader. */
 export function measurePayload(
   id: MeasureId,
   responses: readonly (number | null)[],
   completedAt: string,
 ): string {
-  return JSON.stringify({
+  // Key ORDER is the wire contract (the portal parses positionally in its
+  // fixture tests): v, measure, score, [item9], completed_at.
+  const payload: Record<string, unknown> = {
     v: 1,
     measure: id,
     score: measureScore(id, responses),
-    completed_at: completedAt,
-  });
+  };
+  const item9 = measureSafetyItemValue(id, responses);
+  if (item9 !== null) payload.item9 = item9;
+  payload.completed_at = completedAt;
+  return JSON.stringify(payload);
 }
 
 /** The score ceiling for a payload's measure name — used to clamp the

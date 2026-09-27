@@ -32,9 +32,7 @@ async def _mature_account(client, emu, days: int = 35) -> None:
         await emu.create_entry(client, FILLER, day, client_entry_id=f"f-{day.isoformat()}")
 
 
-def _feedback_blob(
-    emu: ClientEmulator, payload: dict | None = None, *, days_ago: int = 0
-) -> str:
+def _feedback_blob(emu: ClientEmulator, payload: dict | None = None, *, days_ago: int = 0) -> str:
     payload = payload or {"feedback": []}
     seal_day = (_utc_today() - timedelta(days=days_ago)).isoformat()
     aad = crypto.build_aad("feedback", emu.user_id or "", seal_day)

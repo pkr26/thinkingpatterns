@@ -5,6 +5,12 @@
  * gently points at the offline crisis resources AFTER the response is
  * safely saved. Scores travel encrypted under AAD "measure".
  *
+ * 2026-09-26 audit LOW (offline gap): a completed questionnaire that fails
+ * to send (offline / status 0) no longer dies with an error banner — the
+ * record persists data-key-encrypted (pendingMeasure.ts) and is restored +
+ * retried on the next mount under the SAME client_measure_id (the server
+ * is idempotent by that id; mobile MeasuresScreen parity).
+ *
  * Redesign 2026-09-26: instruments switch through a segmented control,
  * answers are aria-pressed chips (never the danger color), completion
  * shows a progress track, and the trend renders as a real SVG bar chart
@@ -14,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "../crypto/core";
 import { buildAad } from "../crypto/aad";
-import { INSTRUMENTS, MEASURE_IDS, maxScoreForMeasure, measureComplete, measurePayload, safetyItemEndorsed, type MeasureId } from "../measures";
+import { INSTRUMENTS, MEASURE_IDS, maxScoreForMeasure, measureComplete, measurePayload, optionSelected, safetyItemEndorsed, type MeasureId } from "../measures";
 import { t } from "../strings";
 
 const MEASURE_NAMES: Record<MeasureId, string> = {
@@ -23,6 +29,8 @@ const MEASURE_NAMES: Record<MeasureId, string> = {
   phq2: "PHQ-2",
 };
 import { localDateISO } from "../dates";
+import { cadenceDue, readMeasureCadence, snoozeCadence, writeMeasureCadence, type MeasureCadencePref } from "../measureCadence";
+import { loadPendingMeasure, savePendingMeasure, clearPendingMeasure, type PendingMeasure } from "../pendingMeasure";
 import { randomBytes } from "../platform";
 import { vault } from "../vault";
 import { Button, Card, Chip, ErrorBanner, Note, ProgressTrack, SegmentedControl, Skeleton } from "../ui";
@@ -44,6 +52,13 @@ interface TrendPoint {
  *  20 pages of up to 100 rows each — beyond this a hostile server feeding
  *  endless continuations must hit a terminal probe, not a silent stop. */
 const MAX_MEASURE_PAGES = 20;
+
+/** Do the on-screen answers still match a pending record's picks? (The
+ *  reuse gate that keeps ONE client_measure_id across a questionnaire's
+ *  retries — audit 2026-09-26 LOW.) */
+function samePicks(a: readonly (number | null)[], b: readonly (number | null)[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
 
 /** The patient's own trend: plain bars, dates visible, latest highlighted.
  *  No severity bands, no interpretation (charter). */
@@ -85,7 +100,20 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
   const [item9, setItem9] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The opt-in check-in cadence (clinical review 2026-09-27): the
+  // preference loads once per mount; the banner it gates on is computed
+  // LOCALLY from the history this view already decrypts. null = not yet
+  // read (no banner).
+  const [cadence, setCadence] = useState<MeasureCadencePref | null>(null);
   const generation = useRef(0);
+  // The pending-record machinery (audit 2026-09-26 LOW): the record for
+  // the questionnaire currently in flight, and a mount-once guard for the
+  // restore+retry effect below.
+  const pendingRef = useRef<PendingMeasure | null>(null);
+  const retriedRef = useRef(false);
+  // When the restore path seeds responses for a specific instrument, the
+  // [active]-reset effect must not wipe them one commit later.
+  const restoreSeedRef = useRef<MeasureId | null>(null);
 
   const instrument = INSTRUMENTS[active];
   const itemText = (index: number): string => t(`measures.${active}.item${index + 1}`);
@@ -174,6 +202,12 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
   }, []);
 
   useEffect(() => {
+    // Skip the form reset exactly once when the restore path just seeded
+    // this instrument's answers (audit 2026-09-26 LOW) — otherwise the
+    // restored questionnaire would render blank one commit later.
+    const seeded = restoreSeedRef.current === active;
+    restoreSeedRef.current = null;
+    if (seeded) return;
     setResponses(new Array(instrument.items).fill(null));
     setItem9(false);
     setSavedNote(null);
@@ -183,54 +217,146 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
     void load();
   }, [load]);
 
+  // The cadence preference is account-local non-content state (see
+  // measureCadence.ts) — read once per mount, best-effort.
+  useEffect(() => {
+    const owner = vault.ownerUserId();
+    if (!owner) return;
+    void readMeasureCadence(owner).then(setCadence).catch(() => undefined);
+  }, []);
+
+  /** "Not now": a three-day snooze, persisted in the same slot so it
+   *  survives remounts. The in-memory state hides the banner immediately;
+   *  a failed persist merely re-shows it on the next mount (fail toward
+   *  showing, like the crisis throttle). */
+  const dismissCadence = async (): Promise<void> => {
+    if (cadence === null) return;
+    const owner = vault.ownerUserId();
+    const snoozed = snoozeCadence(cadence);
+    setCadence(snoozed);
+    if (owner) await writeMeasureCadence(owner, snoozed).catch(() => undefined);
+  };
+
   const answer = (index: number, value: number): void => {
     setResponses((current) => current.map((existing, i) => (i === index ? value : existing)));
   };
 
   const answeredCount = responses.filter((value) => value !== null).length;
 
-  const save = async (): Promise<void> => {
+  /** Record the completed questionnaire. `retryOf` (the mount-retry path)
+   *  sends a specific persisted record; a plain tap reuses the pending
+   *  record when the on-screen answers still match it, so the SAME
+   *  client_measure_id rides every attempt of one questionnaire (the
+   *  server is idempotent by that id). */
+  const save = async (retryOf?: PendingMeasure): Promise<void> => {
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
       setError(t("common.sessionLocked"));
       return;
     }
-    if (!measureComplete(active, responses)) {
+    const reusable =
+      retryOf ??
+      (pendingRef.current !== null && pendingRef.current.kind === active && samePicks(pendingRef.current.picks, responses)
+        ? pendingRef.current
+        : undefined);
+    if (reusable === undefined && !measureComplete(active, responses)) {
       setError(t("measures.incomplete"));
       return;
     }
     setBusy(true);
     setError("");
+    // Hoisted for the catch paths (try and catch are separate scopes): the
+    // 409 branch must clear the very pending record this send used.
+    const record: PendingMeasure =
+      reusable ?? {
+        kind: active,
+        clientMeasureId: `m-${localDateISO()}-${toBase64(randomBytes(6)).replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`,
+        picks: responses as number[],
+        date: localDateISO(),
+      };
     try {
       const keys = vault.get();
-      const clientMeasureId = `m-${localDateISO()}-${toBase64(randomBytes(6)).replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}`;
+      // Persist BEFORE the send (a status-0 failure can be a timeout AFTER
+      // the server committed; the stable id is what makes every retry
+      // idempotent). A persistence failure never blocks the send — the
+      // answers are also still on screen.
+      pendingRef.current = record;
+      await savePendingMeasure(keys.dataKey, owner, record).catch(() => undefined);
       // measurePayload returns the canonical JSON string itself:
-      const encoded = new TextEncoder().encode(measurePayload(active, responses, new Date().toISOString()));
+      const encoded = new TextEncoder().encode(measurePayload(record.kind, record.picks, new Date().toISOString()));
       try {
-        const blob = await encrypt(keys.dataKey, encoded, buildAad("measure", owner, clientMeasureId));
-        await api.createMeasure(clientMeasureId, toBase64(blob), localDateISO());
+        const blob = await encrypt(keys.dataKey, encoded, buildAad("measure", owner, record.clientMeasureId));
+        await api.createMeasure(record.clientMeasureId, toBase64(blob), record.date);
       } finally {
         zeroize(encoded);
       }
+      await clearPendingMeasure(owner).catch(() => undefined);
+      pendingRef.current = null;
       // Item 9 (self-harm) endorsement: point at support AFTER the save.
-      if (safetyItemEndorsed(active, responses)) setItem9(true);
+      if (safetyItemEndorsed(record.kind, record.picks)) setItem9(true);
       setSavedNote(t("measures.savedNote"));
       await load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
+        // Idempotent retry of a send that already landed: the record dies
+        // here too, or every mount would retry it forever.
+        await clearPendingMeasure(owner).catch(() => undefined);
+        pendingRef.current = null;
         setSavedNote(t("measures.alreadyToday"));
-      } else {
-        setError(err instanceof Error ? err.message : t("measures.saveFailed"));
+        await load();
+        return;
       }
+      if (err instanceof ApiError && err.status === 0) {
+        // Offline submit failure: a quiet inline status, never a dead end.
+        // The picks stay selected and the pending record stays persisted —
+        // the next mount restores and retries them under the same id
+        // (audit 2026-09-26 LOW; mobile parity).
+        setSavedNote(t("measures.pendingOfflineNote"));
+        return;
+      }
+      setError(err instanceof Error ? err.message : t("measures.saveFailed"));
     } finally {
       setBusy(false);
     }
   };
 
+  // 2026-09-26 audit LOW: restore + retry a persisted pending questionnaire
+  // once per mount. The answers come back on screen (the honest restore)
+  // and the send uses the SAME client_measure_id (idempotent by contract).
+  // Offline again → the record simply stays for the next mount; the
+  // restored picks keep the flow resumable either way.
+  useEffect(() => {
+    if (retriedRef.current) return;
+    retriedRef.current = true;
+    void (async () => {
+      try {
+        const owner = vault.ownerUserId();
+        if (!owner || !vault.isUnlocked()) return;
+        const pending = await loadPendingMeasure(vault.get().dataKey, owner);
+        if (pending === null) return;
+        restoreSeedRef.current = pending.kind;
+        setActive(pending.kind);
+        setResponses(pending.picks);
+        await save(pending);
+      } catch {
+        // Locked vault / dead storage: the record stays; nothing to show.
+      }
+    })();
+    // Stryker disable next-line ArrayDeclaration: a mount-once flow guarded by retriedRef — the effect body is idempotent under a double fire
+  }, []);
+
   const trend = (id: MeasureId): TrendPoint[] | null => {
     if (!history) return null;
     return history.filter((row) => row.measureId === id).map((row) => ({ score: row.score, max: INSTRUMENTS[id].maxScore, date: row.date.slice(0, 10) }));
   };
+
+  // The cadence fact: the LAST completed measure (any instrument), taken
+  // from the already-decrypted history. undefined = history not loaded (a
+  // banner must never render over an unknown); null = none completed yet
+  // (the first check-in is available).
+  const lastCompletedDate =
+    history === null ? undefined : history.length > 0 ? history[history.length - 1]!.date.slice(0, 10) : null;
+  const showCadenceBanner = cadence !== null && !error && cadenceDue(cadence, lastCompletedDate);
 
   return (
     <>
@@ -238,6 +364,12 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         <Card title={t("measures.item9Title")} tone="sensitive">
           <Note tone="warn">{t("measures.item9Body")}</Note>
           <Button label={t("measures.getSupport")} onPress={props.onCrisis} small />
+        </Card>
+      )}
+      {showCadenceBanner && (
+        <Card title={t("measures.cadenceTitle")}>
+          <Note>{t("measures.cadenceBody")}</Note>
+          <Button label={t("common.notNow")} onPress={() => void dismissCadence()} small variant="ghost" />
         </Card>
       )}
       <Card title={t("settings.measures")}>
@@ -252,12 +384,12 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
           <div key={index} className="stack" style={{ gap: "var(--space-2)" }}>
             <Note>{itemText(index)}</Note>
             <div className="row row--wrap">
-              {instrument.options.map((option, optionIndex) => (
+              {instrument.options.map((option) => (
                 <Chip
                   key={option}
                   label={optionLabel(option)}
-                  selected={responses[index] === optionIndex}
-                  onPress={() => answer(index, optionIndex)}
+                  selected={optionSelected(responses, index, option)}
+                  onPress={() => answer(index, option)}
                 />
               ))}
             </div>

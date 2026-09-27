@@ -17,6 +17,7 @@ import pytest
 
 from app.config import Settings
 from app.services.llm import (
+    _clean_label,
     LLMAnalyzer,
     LLM_CONNECT_TIMEOUT_SECONDS,
     LLM_MAX_RESPONSE_BYTES,
@@ -727,3 +728,14 @@ def test_policy_fingerprint_ignores_url_whitespace():
     assert processing_policy_fingerprint(_settings("https://llm.example/v1/")) == (
         processing_policy_fingerprint(base)
     )
+
+
+def test_clean_label_rejects_bare_domains():
+    """Item 11 (2026-09-26 statistical review): the bare-domain guard
+    protects LABELS too, not just narratives — defense-in-depth behind
+    the corpus-grounding constraint (a prompt-injected label rides onto
+    cards and into the daily question exactly like a narrative)."""
+    assert _clean_label("helpnow.example.com") is None
+    assert _clean_label("call support at gethelp.io today") is None
+    # Ordinary labels are untouched.
+    assert _clean_label("work stress on sundays") == "work stress on sundays"

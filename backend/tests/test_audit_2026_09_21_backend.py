@@ -434,6 +434,11 @@ class _VanishingConsentSession:
     async def scalar(self, _statement):
         return None
 
+    async def flush(self):
+        # 2026-09-26 audit item 16: the chained audit append flushes its row
+        # inside the caller's transaction.
+        pass
+
     async def refresh(self, *_a, **_k):
         pass
 
@@ -488,7 +493,15 @@ async def test_revoke_maps_stale_consent_to_404(client, app):
     with pytest.raises(ApiError) as excinfo:
         await consents_module.revoke_consent(
             consent_id=granted["body"]["id"],
-            request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+            request=SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        # 2026-09-26: _require_verifier reads the configured
+                        # scrypt work factor from settings (LOW c).
+                        settings=SimpleNamespace(scrypt_n=2**17)
+                    )
+                )
+            ),
             user=user,
             session=session,
             x_account_verifier=emu.auth_key_b64,
@@ -519,7 +532,15 @@ async def test_rewrap_maps_stale_consent_to_404(client, app):
         await consents_module.rewrap_consent(
             consent_id=granted["body"]["id"],
             body=consents_module.ConsentRewrapRequest(**wrap),
-            request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+            request=SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        # 2026-09-26: _require_verifier reads the configured
+                        # scrypt work factor from settings (LOW c).
+                        settings=SimpleNamespace(scrypt_n=2**17)
+                    )
+                )
+            ),
             user=user,
             session=session,
             x_account_verifier=emu.auth_key_b64,
@@ -560,7 +581,11 @@ async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
 
     async with app.state.sessionmaker() as db:
         real_consent = (
-            (await db.execute(sa_select(ConsentModel).where(ConsentModel.id == granted["body"]["id"])))
+            (
+                await db.execute(
+                    sa_select(ConsentModel).where(ConsentModel.id == granted["body"]["id"])
+                )
+            )
             .scalars()
             .first()
         )
@@ -578,7 +603,15 @@ async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
         await consents_module.rewrap_consent(
             consent_id=granted["body"]["id"],
             body=consents_module.ConsentRewrapRequest(**wrap),
-            request=SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())),
+            request=SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        # 2026-09-26: _require_verifier reads the configured
+                        # scrypt work factor from settings (LOW c).
+                        settings=SimpleNamespace(scrypt_n=2**17)
+                    )
+                )
+            ),
             user=user,
             session=session,
             x_account_verifier=emu.auth_key_b64,
@@ -795,11 +828,7 @@ async def test_recompute_budget_below_every_entry_refuses_413(client, settings):
         app = client._transport.app  # noqa: SLF001 — test reachability into state
         async with app.state.sessionmaker() as session:
             rows = (
-                (
-                    await session.execute(
-                        select(Insight).where(Insight.user_id == emu.user_id)
-                    )
-                )
+                (await session.execute(select(Insight).where(Insight.user_id == emu.user_id)))
                 .scalars()
                 .all()
             )

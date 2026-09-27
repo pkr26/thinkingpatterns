@@ -6,6 +6,17 @@
 # login-page redirect destination.  Keep docker-compose's API port on
 # 127.0.0.1:8000; do not expose it directly to the Internet.
 #
+# DEPLOYMENT PREREQUISITES (2026-09-26 infra audit — a conf.d drop-in at the
+# wrong context level fails the reload with opaque errors):
+#   * This file is an HTTP-CONTEXT snippet: it must be INCLUDED at http{}
+#   level (include /etc/nginx/conf.d/*.conf does this; do NOT paste it
+#   inside a server{} or stream{} block).
+#   * `http2 on;` (the new-style directive used below) requires
+#   nginx >= 1.25.1 — on older nginx, use the legacy per-listen http2
+#   parameter form on each listen line instead.
+#   * limit_req_zone below is valid ONLY in the http context — one more
+#   reason this file cannot be server-scoped.
+#
 # When this proxy is enabled, set both variables on the API service:
 #   MINDPATTERN_TRUST_PROXY_HEADERS=1
 #   MINDPATTERN_TRUSTED_PROXY_IPS=<the peer IP/CIDR API sees for nginx>

@@ -47,12 +47,14 @@ services:
       # rclone remote:destination spec, e.g. s3-offsite:mindpattern/backups
       # (the remote must exist in BACKUP_OFFSITE_RCLONE_CONFIG).
       BACKUP_OFFSITE_REMOTE: ${BACKUP_OFFSITE_REMOTE:?set BACKUP_OFFSITE_REMOTE (rclone remote:destination, e.g. s3-offsite:mindpattern/backups) in the owner-only secrets file}
-      # The FULL rclone config INI (remote name + credentials), inline.
-      # Keep it in the owner-only secrets file — never in the release env
-      # asset or the checkout. Multi-line value: wrap it in double quotes.
-      # It is written to /config/rclone.conf (mode 0600) at container start
-      # and never logged.
-      BACKUP_OFFSITE_RCLONE_CONFIG: ${BACKUP_OFFSITE_RCLONE_CONFIG:?set BACKUP_OFFSITE_RCLONE_CONFIG (full rclone config INI, double-quoted multi-line value) in the owner-only secrets file}
+      # The FULL rclone config INI (remote name + credentials) — the ENV
+      # FALLBACK (docker-inspect-visible; keep it in the owner-only secrets
+      # file, never the release env asset or the checkout; multi-line value
+      # wrapped in double quotes). The PREFERRED source since the
+      # 2026-09-26 infra audit is the mounted secret file
+      # deploy/secrets/rclone_config (see `secrets:` below) — when both are
+      # set the file wins.
+      BACKUP_OFFSITE_RCLONE_CONFIG: ${BACKUP_OFFSITE_RCLONE_CONFIG:-}
       # Replication interval in seconds (default hourly; minimum 60).
       BACKUP_OFFSITE_INTERVAL_SECONDS: ${BACKUP_OFFSITE_INTERVAL_SECONDS:-3600}
       # One-shot recovery mode (docs/INCIDENT_RUNBOOK.md, Off-site
@@ -63,6 +65,8 @@ services:
       # Points both the entrypoint and the healthcheck at the config file
       # the entrypoint writes.
       RCLONE_CONFIG: /config/rclone.conf
+    secrets:
+      - rclone_config
     volumes:
       # Same named volume the `backup` service writes, mounted READ-ONLY:
       # replication must never be able to alter or delete local dumps, and
@@ -95,16 +99,13 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: 0.5
     mem_limit: 256M
     cpus: 0.5
     # 2026-09-26 audit M-I3: replication is a low-and-slow hourly loop —
     # a fractional CPU ceiling is its whole appetite; pids 256 contains
-    # a runaway rclone without touching the hourly pass.
+    # a runaway rclone without touching the hourly pass. Single top-level
+    # limit form only (re-audit 2026-09-27: the duplicate deploy.resources
+    # block was removed — same rule as the production file).
     pids_limit: 256
     healthcheck:
       # Observability only (Docker does not act on unhealthy by itself):
@@ -130,12 +131,23 @@ services:
             exit 1
             ;;
         esac
-        case "$$BACKUP_OFFSITE_RCLONE_CONFIG" in
-          '')
-            echo "BACKUP_OFFSITE_RCLONE_CONFIG is empty" >&2
-            exit 1
-            ;;
-        esac
+        # Config source (2026-09-26 infra audit): the mounted secret file
+        # wins when present; the env fallback (multi-line INI) otherwise;
+        # neither -> refuse to start (no silent no-credentials replication).
+        if [ -s /run/secrets/rclone_config ]; then
+          mkdir -p /config
+          cp /run/secrets/rclone_config /config/rclone.conf
+          chmod 600 /config/rclone.conf
+        else
+          case "$$BACKUP_OFFSITE_RCLONE_CONFIG" in
+            '')
+              echo "no rclone config: mount deploy/secrets/rclone_config or set BACKUP_OFFSITE_RCLONE_CONFIG" >&2
+              exit 1
+              ;;
+          esac
+          mkdir -p /config
+          printf '%s\n' "$$BACKUP_OFFSITE_RCLONE_CONFIG" > /config/rclone.conf
+        fi
         interval=$${BACKUP_OFFSITE_INTERVAL_SECONDS:-3600}
         case "$$interval" in
           ''|*[!0-9]*) echo "BACKUP_OFFSITE_INTERVAL_SECONDS must be a positive whole number" >&2; exit 1 ;;
@@ -144,8 +156,6 @@ services:
           echo "BACKUP_OFFSITE_INTERVAL_SECONDS must be at least 60" >&2
           exit 1
         }
-        mkdir -p /config
-        printf '%s\n' "$$BACKUP_OFFSITE_RCLONE_CONFIG" > /config/rclone.conf
         if [ "$$BACKUP_OFFSITE_MODE" = "fetch" ]; then
           # One-shot recovery: pull the remote down for a host-gone restore.
           mkdir -p "$$BACKUP_FETCH_DIR"
@@ -162,6 +172,14 @@ services:
           fi
           sleep "$$interval"
         done
+
+# The S3-credential rclone INI as a mounted secret file (2026-09-26 infra
+# audit): copy deploy/secrets/rclone_config.example to rclone_config, fill
+# the remote, chmod 600. Compose resolves `secrets: file:` eagerly, so a
+# missing file fails `up` for THIS overlay only when it is actually used.
+secrets:
+  rclone_config:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/rclone_config
 
 volumes:
   # Declared by the MAIN docker-compose.yml; re-declared here so this

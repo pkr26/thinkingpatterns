@@ -114,15 +114,26 @@ class TestWelchTest:
     def test_constant_groups_without_floor_fail_closed(self):
         assert statsig.welch_test([1.0] * 8, [0.0] * 8) == (0.0, 1.0)
 
-    def test_constant_groups_with_floor_are_perfect_separation(self):
-        # Two CONSTANT groups fabricate a t-test on variance the data never
-        # had (p ~ 1e-22 from the floor alone): forced to "no evidence" —
-        # a crafted mood-tag journal must not manufacture p=1e-22 claims.
+    def test_constant_groups_with_floor_fail_closed(self):
+        # Item 7 (2026-09-26 statistical review): EITHER side constant and
+        # the Welch test fails closed — a constant group contributes no
+        # second moment to test with, and letting the variance floor alone
+        # drive |t| manufactured p ~ 1e-22 "separation" from fabricated
+        # variance. Two constant groups AND one-sided constants both fail
+        # closed now; the floor's conservative role survives only in
+        # cohens_d's pooled DENOMINATOR (pinned in TestCohensD).
         t, p = statsig.welch_test([1.0] * 8, [0.0] * 8, variance_floor=0.05)
         assert t == 0.0 and p == 1.0
-        # One-sided constant vs genuinely noisy still measures separation.
         t, p = statsig.welch_test(
             [1.0] * 8, [-0.6, 0.8, -0.4, 0.9, -0.7, 0.8, -0.5, 0.7], variance_floor=0.05
+        )
+        assert t == 0.0 and p == 1.0, "a constant side must not measure separation"
+        # Two genuinely noisy groups still test normally; the floor only
+        # damps the standard error.
+        t, p = statsig.welch_test(
+            [1.2, 0.9, 1.1, 0.8, 1.3, 1.0, 0.95, 1.15],
+            [-0.6, 0.1, -0.4, 0.2, -0.7, 0.0, -0.5, 0.1],
+            variance_floor=0.05,
         )
         assert abs(t) > 2 and p < 0.05
 
@@ -240,7 +251,7 @@ class TestBrownForsytheUpperTailOnly2026_09_20:
         # p = 2.36e-06 through the doubling. Upper tail only: no claim.
         xs = [0.05, -0.04, 0.06, -0.05, 0.04, -0.06, 0.05, -0.05, 0.03, -0.03]
         ys = [0.04, -0.05, 0.05, -0.04, 0.05, -0.05, 0.04, -0.04, 0.04, -0.04]
-        p = statsig.brown_forsythe_two_sided_p(xs, ys)
+        p = statsig.brown_forsythe_upper_p(xs, ys)
         assert p > 0.5, p
 
     def test_epsilon_difference_cannot_reach_zero(self):
@@ -248,16 +259,16 @@ class TestBrownForsytheUpperTailOnly2026_09_20:
         # round the upper tail to exactly 1.0 and double to p = 0.0.
         xs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
         ys = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0000001]
-        assert statsig.brown_forsythe_two_sided_p(xs, ys) > 0.5
+        assert statsig.brown_forsythe_upper_p(xs, ys) > 0.5
 
     def test_genuine_threefold_spread_difference_survives(self):
         # The finding's genuine case (3x spread) measured p ~ 7.6e-12 via
         # the upper tail: the honest test still sees real instability.
         tight = [0.01, -0.01, 0.02, -0.02, 0.015, -0.015, 0.005, -0.005, 0.0, 0.02]
         wide = [0.06, -0.06, 0.05, -0.05, 0.07, -0.07, 0.04, -0.04, 0.065, -0.065]
-        assert statsig.brown_forsythe_two_sided_p(wide, tight) < 1e-4
+        assert statsig.brown_forsythe_upper_p(wide, tight) < 1e-4
 
     def test_identical_multisets_stay_at_one(self):
         xs = [0.3, -0.2, 0.1, 0.0, -0.1, 0.2, -0.3, 0.05, -0.05, 0.15]
-        assert statsig.brown_forsythe_two_sided_p(xs, list(reversed(xs))) > 0.9
-        assert statsig.brown_forsythe_two_sided_p(xs, sorted(xs)) > 0.9
+        assert statsig.brown_forsythe_upper_p(xs, list(reversed(xs))) > 0.9
+        assert statsig.brown_forsythe_upper_p(xs, sorted(xs)) > 0.9

@@ -17,7 +17,7 @@ from app.api import (
     meta as meta_api,
 )
 from app.cache import (
-    FixedWindowCounter,
+    SlidingWindowCounter,
     HitResult,
     MAX_TRACKED_KEYS,
     RateLimitCheck,
@@ -136,6 +136,14 @@ def test_settings_defaults_are_pinned(clean_env):
         "environment": "development",
         "database_url": "sqlite+aiosqlite:///./mindpattern.db",
         "token_secret": "dev-insecure-secret-change-me",
+        # 2026-09-26 purpose-split secrets: the *_explicit fields carry only
+        # operator-provided overrides; the resolved values are live
+        # properties (specific var, else the legacy token secret).
+        "auth_token_secret_explicit": "",
+        "totp_wrap_secret_explicit": "",
+        "pairing_secret_explicit": "",
+        # 2026-09-26 (LOW c): server-side scrypt work-factor default.
+        "scrypt_n": 2**17,
         "decoy_secret": "",
         "token_ttl_seconds": 86_400,
         "processing_session_ttl": 300,
@@ -153,6 +161,9 @@ def test_settings_defaults_are_pinned(clean_env):
         "read_rate_window": 60,
         "body_read_timeout_seconds": 30,
         "max_body_bytes": 2 * 1024 * 1024,
+        # 2026-09-26 audit item 9: the edge body-buffer concurrency budget
+        # (matches the Docker entrypoint's uvicorn --limit-concurrency 100).
+        "body_buffer_concurrency": 100,
         "max_entries_per_user": 10_000,
         "max_user_blob_bytes": 256 * 1024 * 1024,
         "recompute_entry_limit": 2_000,
@@ -278,12 +289,19 @@ def test_bool_env_accepts_every_spelling(monkeypatch):
     monkeypatch.delenv("MINDPATTERN_TEST_BOOL", raising=False)
     assert _bool_env("MINDPATTERN_TEST_BOOL") is False  # unset -> default False
     assert _bool_env("MINDPATTERN_TEST_BOOL", True) is True  # explicit default
-    for truthy in ("1", "true", "yes", "on"):
+    for truthy in ("1", "true", "yes", "on", "TRUE", "Yes"):
         monkeypatch.setenv("MINDPATTERN_TEST_BOOL", truthy)
         assert _bool_env("MINDPATTERN_TEST_BOOL") is True
-    for falsy in ("0", "false", "no", "off", "anything-else"):
+    for falsy in ("0", "false", "no", "off", "FALSE", "Off"):
         monkeypatch.setenv("MINDPATTERN_TEST_BOOL", falsy)
         assert _bool_env("MINDPATTERN_TEST_BOOL") is False
+    # 2026-09-26 audit item 4: unrecognized values refuse to boot — a typo
+    # like "ture" used to silently mean OFF, flipping a security-relevant
+    # flag (proxy trust) without the operator ever noticing.
+    for garbage in ("anything-else", "ture", "y", "2"):
+        monkeypatch.setenv("MINDPATTERN_TEST_BOOL", garbage)
+        with pytest.raises(ValueError, match="is not a boolean"):
+            _bool_env("MINDPATTERN_TEST_BOOL")
 
 
 def test_cors_origins_parsing(clean_env, monkeypatch):
@@ -351,6 +369,8 @@ EXPECTED_ROUTES = {
     (auth_api, "/auth/salt", "POST"): ({"auth"}, "auth-salt"),
     (auth_api, "/auth/login", "POST"): ({"auth"}, "auth-login"),
     (auth_api, "/auth/logout", "POST"): ({"auth"}, "auth-logout"),
+    # 2026-09-26 key-envelope wave: the v2 unlock material read.
+    (auth_api, "/auth/key-envelope", "GET"): ({"auth"}, "auth-envelope"),
     (entries_api, "/entries", "POST"): ({"entries"}, "entries-create"),
     (entries_api, "/entries", "GET"): ({"entries"}, "entries-read"),
     (entries_api, "/entries/{client_entry_id}", "DELETE"): ({"entries"}, "entries-delete"),
@@ -364,6 +384,10 @@ EXPECTED_ROUTES = {
     (account_api, "/account/llm-consent", "GET"): ({"account"}, "account-consent-read"),
     (account_api, "/account/llm-consent", "PUT"): ({"account"}, "account-consent"),
     (account_api, "/account", "DELETE"): ({"account"}, "account-delete"),
+    # 2026-09-26 key-envelope wave: the O(1) v2 password change and the
+    # v1->v2 self-upgrade.
+    (account_api, "/account/password", "PUT"): ({"account"}, "account-password"),
+    (account_api, "/account/key-envelope/upgrade", "POST"): ({"account"}, "account-envelope"),
 }
 
 
@@ -428,16 +452,19 @@ def test_limiter_composite_key_shape():
 
 
 def test_crypto_and_auth_constants_are_pinned():
-    assert auth_api.SCRYPT_N == 2**16
+    # 2026-09-26 remediation (LOW c): server-side scrypt raised 2^16 -> 2^17
+    # (config default MINDPATTERN_SCRYPT_N; see app/api/auth.py's latency-
+    # budget rationale). maxmem covers the doubled per-hash footprint.
+    assert auth_api.SCRYPT_N == 2**17
     assert auth_api.SCRYPT_R == 8
     assert auth_api.SCRYPT_P == 1
-    assert auth_api.SCRYPT_MAXMEM == 256 * 1024 * 1024
+    assert auth_api.SCRYPT_MAXMEM == 512 * 1024 * 1024
     assert auth_api.SALT_BYTES == 16
     assert auth_api.AUTH_KEY_SIZE == 32
     assert crypto_module.KEY_SIZE == 32
     assert crypto_module.MIN_BLOB_SIZE == 28
     assert entries_api.BACKDATE_GRACE_DAYS == 1
-    assert cache_module.MAX_TRACKED_KEYS == 10_000
+    assert cache_module.MAX_TRACKED_KEYS == 50_000  # item 3: flood headroom
     assert patterns_module.MAX_PATTERNS == 20
     assert patterns_module.MIN_THEME_OCCURRENCES == 4
     assert patterns_module.TEMPORAL_DAY_FRACTION == 0.5
@@ -469,7 +496,7 @@ def test_hitresult_is_frozen():
 
 
 def test_counter_window_boundary_semantics():
-    counter = FixedWindowCounter()
+    counter = SlidingWindowCounter()
     # Fresh window: retry_after covers the whole window (exact value pinned).
     first = counter.hit("k", window_seconds=10, now=100.0)
     assert (first.count, first.retry_after) == (1, 11)
@@ -480,27 +507,36 @@ def test_counter_window_boundary_semantics():
         counter.hit("k", window_seconds=0)
 
 
-def test_counter_evicts_at_the_exact_cap_and_by_window_start():
-    counter = FixedWindowCounter()
+def test_counter_evicts_at_the_exact_cap_by_count_then_last_activity():
+    counter = SlidingWindowCounter()
     # Fill exactly MAX keys with DIFFERENT window sizes: eviction ranks
-    # active victims by (count, window_start), not by window size.
+    # active victims by (total, last_activity) — count first, then how long
+    # the key has been idle — never by window size (audit item 3).
+    # Windows larger than the whole timeline keep every key ACTIVE (the
+    # stale sweep must reclaim nothing here — the ranking pass is under
+    # test, not idleness).
     for i in range(MAX_TRACKED_KEYS):
-        counter.hit(f"k{i}", window_seconds=10_000 + i, now=1_000.0 + i)
+        counter.hit(f"k{i}", window_seconds=100_000 + i, now=1_000.0 + i)
     assert len(counter._hits) == MAX_TRACKED_KEYS
-    counter.hit("newcomer", window_seconds=1, now=2_000.0)
+    # The newcomer's LAST ACTIVITY is the newest of all keys — an honest
+    # (non-tied) ranking position, unlike the old fixture whose timestamp
+    # tied k1000 and let survival depend on nsmallest's tie stability.
+    counter.hit("newcomer", window_seconds=90_000, now=60_000.0)
     # Eviction is batched: one pass clears down to MAX - EVICTION_BATCH so
     # the next over-cap hits do not each pay a full scan.
     assert len(counter._hits) == MAX_TRACKED_KEYS - cache_module.EVICTION_BATCH
-    # Every key ties on count=1, so the oldest window STARTS go first; k0's
-    # start is strictly the oldest so its eviction is certain, while the
-    # exact identity of the remaining tied victims is unspecified.
+    # Every key ties on count=1, so the oldest LAST ACTIVITY goes first;
+    # k0 (hit at 1_000.0) is strictly the oldest and the newcomer (60_000.0)
+    # strictly the newest, so k0's eviction and the newcomer's survival are
+    # both certain while the tied middle's exact victims are unspecified.
     assert "k0" not in counter._hits
     assert "newcomer" in counter._hits
 
 
 def test_counter_drops_exactly_expired_windows():
-    counter = FixedWindowCounter()
-    # now - start == window EXACTLY: the window is stale (>= semantics).
+    counter = SlidingWindowCounter()
+    # now - last_hit == window EXACTLY: the key is idle beyond its own
+    # window (>= semantics) — it can no longer influence any future count.
     for i in range(MAX_TRACKED_KEYS):
         counter.hit(f"k{i}", window_seconds=1_000, now=0.0)
     result = counter.hit("fresh", window_seconds=2_000, now=1_000.0)
@@ -555,7 +591,7 @@ async def test_unlimited_endpoints_create_no_rate_buckets(settings):
         # the only DB-touching endpoints with no limiter at all. The limiter
         # shape is still asserted via the counter: exactly that one bucket,
         # per-client keys, nothing else.
-        counter: FixedWindowCounter = application.state.rate_counter
+        counter: SlidingWindowCounter = application.state.rate_counter
         assert sent == [(200, 200)] * 2
         buckets = {k.split(":", 1)[0] for k in counter._hits}
         assert buckets == {"ops-health"}
@@ -576,7 +612,7 @@ async def test_keyed_limit_429_shape(settings):
     assert second.status_code == 429
     assert second.json()["detail"] == "rate limit exceeded"
     assert int(second.headers["Retry-After"]) >= 1
-    counter: FixedWindowCounter = application.state.rate_counter
+    counter: SlidingWindowCounter = application.state.rate_counter
     assert any(key.startswith("auth-salt:") for key in counter._hits)
 
 
@@ -1908,7 +1944,7 @@ async def test_keyed_limit_buckets_use_the_username_namespaced_keys(client, app)
         json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
     )
     assert response.status_code == 201
-    counter: FixedWindowCounter = app.state.rate_counter
+    counter: SlidingWindowCounter = app.state.rate_counter
     # A SUCCESSFUL register does NOT consume the per-username bucket — only
     # 409 conflicts count, so probing a free name cannot 429 its legitimate
     # first registrant.
@@ -2203,39 +2239,48 @@ CALM = "felt calm and grateful today"
 T0_R1 = date(2026, 9, 4)
 
 
-def _trivial_effect_corpus() -> tuple[list[JournalEntry], JournalEntry]:
-    """Sundays carry 'work' with a tight, low mood tag; every other day is
-    calm text with a wide, noisy tag. Result (measured, deterministic seed):
-    reported mood_delta ≈ 0.25 (clears MOOD_MIN_DELTA) while |d| ≈ 0.42
-    (under the 0.5 floor) — a statistically detectable but practically
-    trivial separation that ONLY the effect-size gate refuses."""
+def _trivial_effect_corpus() -> tuple[list[JournalEntry], list[JournalEntry]]:
+    """Every third day carries 'work' with a tight, low mood tag; every
+    other day is calm text with a wide, noisy tag. The theme placement is
+    WEEKDAY-INDEPENDENT (recalibrated 2026-09-26 item 1: the old
+    Sunday-locked corpus was absorbed whole by the within-person weekday
+    deconfounding — its entire contrast WAS the weekly cycle). Result
+    (measured, deterministic seed): reported mood_delta ≈ 0.26 (clears
+    MOOD_MIN_DELTA) while |d| ≈ 0.43 (under the 0.5 floor) — a
+    statistically detectable but practically trivial separation that ONLY
+    the effect-size gate refuses."""
     rng = random.Random(5)
     days = [T0_R1 - timedelta(days=279 - i) for i in range(280)]
 
     def mood(theme_day: bool) -> float:
-        center, width = (-0.25, 0.12) if theme_day else (0.03, 0.65)
+        center, width = (-0.29, 0.12) if theme_day else (0.03, 0.90)
         return max(-1.0, min(1.0, rng.gauss(center, width)))
 
     entries = [
         JournalEntry(
-            "anxious about work" if d.weekday() == 6 else CALM,
+            "anxious about work" if i % 3 == 0 else CALM,
             d,
-            sentiment=mood(d.weekday() == 6),
+            sentiment=mood(i % 3 == 0),
         )
-        for d in days
+        for i, d in enumerate(days)
     ]
-    extra = JournalEntry("anxious about work", T0_R1 + timedelta(days=1), sentiment=mood(True))
-    return entries, extra
+    extra1 = JournalEntry("anxious about work", T0_R1 + timedelta(days=1), sentiment=mood(True))
+    extra2 = JournalEntry("anxious about work", T0_R1 + timedelta(days=2), sentiment=mood(True))
+    return entries, [extra1, extra2]
 
 
 def _surface_after_two_qualification_days(
-    entries: list[JournalEntry], extra: JournalEntry
+    entries: list[JournalEntry], extras: list[JournalEntry]
 ) -> list[Pattern]:
+    """Two fresh evidence days (2026-09-26 item 5: a single new clustered
+    mention is not replication) and a recompute two calendar days past the
+    first qualification, so both the evidence-date and window-stat
+    replication branches are honestly satisfied."""
     first = brain.update(brain.load_state(None), entries, T0_R1)
     second = brain.update(
         brain.load_state(brain.dump_state(first.new_state)),
-        entries + [extra],
-        T0_R1 + timedelta(days=1),
+        entries + extras,
+        T0_R1 + timedelta(days=2),
     )
     return list(second.surfaced)
 
@@ -2248,18 +2293,18 @@ class TestEffectSizeFloor:
         corpus clears the delta gate with a |d| well under the floor and
         must earn no mood_correlation card, even after a second,
         independently-qualifying day."""
-        entries, extra = _trivial_effect_corpus()
-        surfaced = _surface_after_two_qualification_days(entries, extra)
+        entries, extras = _trivial_effect_corpus()
+        surfaced = _surface_after_two_qualification_days(entries, extras)
         assert all(not (p.kind == "mood_correlation" and p.label == "work") for p in surfaced)
 
     def test_trivial_effect_corpus_canary(self):
         """Same corpus with the floor relaxed to 0.0 MUST surface the card —
         this is what proves the corpus still discriminates (and what the
         A5 mutant does to production code)."""
-        entries, extra = _trivial_effect_corpus()
+        entries, extras = _trivial_effect_corpus()
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(brain, "MOOD_MIN_EFFECT", 0.0)
-            surfaced = _surface_after_two_qualification_days(entries, extra)
+            surfaced = _surface_after_two_qualification_days(entries, extras)
         work = [p for p in surfaced if p.kind == "mood_correlation" and p.label == "work"]
         assert work, "corpus lost its discriminating power — recalibrate it"
         assert work[0].detail["mood_delta"] >= brain.MOOD_MIN_DELTA
@@ -2885,7 +2930,11 @@ async def test_pairing_code_creation_only_retries_unique_violations():
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
-                settings=SimpleNamespace(token_secret="s" * 40, access_log_retention_days=730)
+                settings=SimpleNamespace(
+                    token_secret="s" * 40,
+                    pairing_secret="s" * 40,
+                    access_log_retention_days=730,
+                )
             )
         )
     )

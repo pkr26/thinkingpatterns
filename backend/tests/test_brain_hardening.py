@@ -182,34 +182,40 @@ class TestUnmappedDigitTags:
 class TestBrownForsythe:
     def test_equal_spreads_are_not_a_claim(self):
         xs = [0.1, -0.1, 0.12, -0.08, 0.05, -0.05, 0.09, -0.11, 0.02, -0.02]
-        p = statsig.brown_forsythe_two_sided_p(xs, list(reversed(xs)))
+        p = statsig.brown_forsythe_upper_p(xs, list(reversed(xs)))
         assert p > 0.9, p
 
     def test_reordering_cannot_change_the_verdict(self):
         # Same multiset, different order: identical spreads by definition.
         xs = [0.0, 0.5, 0.0, -0.5, 0.0, 0.5, 0.0, -0.5, 0.0, 0.0]
-        p = statsig.brown_forsythe_two_sided_p(xs, sorted(xs))
-        assert p == 1.0, p
+        p = statsig.brown_forsythe_upper_p(xs, sorted(xs))
+        # math.isclose, not == (2026-09-26 test-infrastructure audit,
+        # item 8): identical groups take the between-group statistic
+        # through a grand-mean computation whose last bit depends on
+        # float rounding — an exact 1.0 pin could flip on a different
+        # libm/platform. The degenerate-input pins below stay exact: they
+        # hit literal fail-closed `return 1.0` branches (discrete).
+        assert math.isclose(p, 1.0, rel_tol=1e-12, abs_tol=1e-12), p
 
     def test_clearly_different_spreads_are_a_claim(self):
         tight = [0.02, -0.01, 0.0, 0.01, -0.02, 0.015, -0.015, 0.005, -0.005, 0.0]
         wild = [0.8, -0.9, 0.7, -0.75, 0.85, -0.6, 0.9, -0.8, 0.65, -0.7]
-        p = statsig.brown_forsythe_two_sided_p(wild, tight)
+        p = statsig.brown_forsythe_upper_p(wild, tight)
         assert p < 1e-4, p
 
     def test_autocorrelation_deflation_makes_claims_harder(self):
         tight = [0.02, -0.01, 0.0, 0.01, -0.02, 0.015, -0.015, 0.005, -0.005, 0.0] * 3
         wild = [0.8, -0.9, 0.7, -0.75, 0.85, -0.6, 0.9, -0.8, 0.65, -0.7] * 3
-        p_iid = statsig.brown_forsythe_two_sided_p(wild, tight)
-        p_autocorr = statsig.brown_forsythe_two_sided_p(wild, tight, 10.0, 10.0)
+        p_iid = statsig.brown_forsythe_upper_p(wild, tight)
+        p_autocorr = statsig.brown_forsythe_upper_p(wild, tight, 10.0, 10.0)
         assert p_autocorr > p_iid, (p_iid, p_autocorr)
         assert p_iid < 1e-4
 
     def test_degenerate_inputs_fail_closed(self):
-        assert statsig.brown_forsythe_two_sided_p([], [1.0, 2.0]) == 1.0
-        assert statsig.brown_forsythe_two_sided_p([1.0], [1.0, 2.0]) == 1.0
+        assert statsig.brown_forsythe_upper_p([], [1.0, 2.0]) == 1.0
+        assert statsig.brown_forsythe_upper_p([1.0], [1.0, 2.0]) == 1.0
         # Constant-on-both-sides: zero within-group deviation spread.
-        assert statsig.brown_forsythe_two_sided_p([3.0] * 10, [7.0] * 10) == 1.0
+        assert statsig.brown_forsythe_upper_p([3.0] * 10, [7.0] * 10) == 1.0
 
 
 # ---------------------------------------------------------------------------

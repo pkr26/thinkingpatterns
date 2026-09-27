@@ -27,6 +27,37 @@ export function currentOrigin(): string {
   }
 }
 
+/** 2026-09-26 audit round (L, TOTP panel): copy the shown-once TOTP
+ *  material (pending secret / recovery codes) through the seam — the node
+ *  test runtime has no clipboard, and a browser can withhold permission.
+ *  Reports success so the panel can say so honestly. */
+export async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Same seam rule for the recovery-code download: plain DOM APIs only (an
+ *  object URL + a synthetic anchor click), inert outside a browser and
+ *  never able to break the panel when a host blocks downloads. */
+export function downloadTextFile(filename: string, text: string): void {
+  try {
+    if (typeof document === "undefined") return;
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  } catch {
+    // A blocked download must never take the security panel down with it.
+  }
+}
+
 export const localStore = {
   get(key: string): string | null {
     try {

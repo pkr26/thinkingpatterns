@@ -1,0 +1,21 @@
+# RFC 9116 security.txt — copy to /.well-known/security.txt on every
+# served origin (API host, portal, patient web app) and fill every
+# OPERATOR-FILL line before serving publicly. A placeholder contact
+# that looks monitored but is not read is worse than no file — see
+# deploy/README.md.
+# Ref: https://securitytxt.org/
+
+Contact: mailto:security@example.com        # OPERATOR-FILL: real monitored mailbox
+# PGP note: report handlers should publish a PGP public key and list it
+# here so reporters can encrypt sensitive findings (e.g. a claimed
+# plaintext-exposure proof). Uncomment and fill after publishing the key
+# (and keep the key's fingerprint discoverable from the same page):
+# Contact: https://example.com/.well-known/securitypgp.txt   # OPERATOR-FILL
+# Encryption: https://example.com/pgp-key.txt                 # OPERATOR-FILL
+
+Expires: 2027-09-26T00:00:00.000Z           # OPERATOR-FILL: refresh with releases; keep within one year
+Preferred-Languages: en, es
+Canonical: https://example.com/.well-known/security.txt   # OPERATOR-FILL
+Policy: https://example.com/security-policy               # OPERATOR-FILL: link the published SECURITY_POLICY / disclosure page
+# Optional, if you run one:
+# Hao: https://example.com/.well-known/security.txt.hale

@@ -87,7 +87,76 @@ egress. For anything else claiming "leak":
    `BACKUP_KEY` rotation requires the dual-key procedure (below).
 5. Disclosure: journal content is special-category data. Prepare the
    notification per your jurisdiction (GDPR Art. 33: 72h to the SA;
-   FTC Health Breach Notification Rule for US non-HIPAA deployments).
+   FTC Health Breach Notification Rule for US non-HIPAA deployments —
+   see "Breach-notification clocks" below).
+
+## Breach-notification clocks (GDPR Art. 33/34 + FTC HBNR)
+
+Two independent clocks can run at once. **GDPR (if EU/EEA data
+subjects):** notify the supervisory authority within **72 hours of
+becoming aware** (Art. 33); communicate to affected data subjects
+without undue delay when the risk to them is high (Art. 34) — the
+client-side encryption posture is the argument that a ciphertext-only
+breach is "unlikely to result in a high risk", and the processing-
+session window is where that argument is weakest; make the argument
+per-incident, never by default.
+
+**FTC Health Breach Notification Rule (16 CFR Part 318, as amended
+2024)** — applies to US deployments that are NOT covered by HIPAA
+(the rule explicitly reaches health apps like this one; a deployment
+whose therapists are HIPAA-covered entities follows HIPAA's own
+60-day rule and BAAs instead/alongside):
+
+- **Trigger**: a breach of unsecured identifiable health information
+  (IHI) — acquisition without authorization. Encrypted data where the
+  key was NOT compromised is generally NOT unsecured IHI; the moment a
+  compromised server could have captured keys or plaintext (the
+  processing-session window, the LLM egress path), assume the trigger.
+  **Discovery** = the first day the breach is known, or reasonably
+  would have been known with diligence — the clock starts there, not
+  at confirmation.
+- **≤60 calendar days from discovery — individual notice** (without
+  unreasonable delay; 60 days is the ceiling, not the target). Each
+  affected individual must receive, in clear language: (1) what
+  happened, including the date(s) of the breach and the number of
+  individuals affected; (2) the TYPES of unsecured IHI involved (e.g.
+  journal text, measures, metadata); (3) steps individuals should take
+  to protect themselves (e.g. password change — the product's key
+  rotation path is the concrete remedy to point at); (4) what you are
+  doing to investigate, mitigate harm, and protect against recurrence;
+  (5) contact procedures — a toll-free number, email, website, AND
+  postal address.
+- **≥500 individuals — FTC notice AND media notice, same 60-day
+  ceiling**: notify the FTC electronically (the HBNR form at
+  ftc.gov) within 60 days of discovery, AND notify prominent media
+  outlets in any state/jurisdiction where ≥500 residents are affected.
+- **<500 individuals — annual FTC notice**: report to the FTC within
+  60 days AFTER the end of the calendar year in which the breach was
+  discovered (batched on the same FTC form). Keep the running log of
+  sub-500 breaches so the annual report is not assembled from memory.
+- **Log everything** against the timeline: discovery timestamp, key/
+  plaintext exposure assessment, notification drafts and send dates.
+  The audit log's forward hash chain (`verify_access_log_chain`) is
+  evidence of what was actually accessed — run the chain verification
+  during the assessment and preserve the output.
+
+**Contact-role table (OPERATOR-FILL at deploy time — this is the one
+table the 60-day clock must never wait on):**
+
+| Role | Name / channel | Note |
+|---|---|---|
+| DPO / privacy lead (owns the 72h + 60-day clocks) | `OPERATOR-FILL` | Art. 33/34 and HBNR filings |
+| Incident commander (this runbook) | `OPERATOR-FILL` | = OPERATOR_PRIMARY above unless split |
+| Legal counsel (breach counsel, per-jurisdiction) | `OPERATOR-FILL` | determines HIPAA vs HBNR applicability |
+| Supervisory authority (EU) | `OPERATOR-FILL` | the member-state SA of the controller's establishment |
+| FTC HBNR filing owner (US) | `OPERATOR-FILL` | ftc.gov breach-report form account holder |
+| Affected-user comms channel (email/postal/notice page) | `OPERATOR-FILL` | the product has NO user email addresses — plan the in-app + website notice path; postal notice is required for 10+ unreachables |
+| Clinical advisor (safety-content incidents) | `OPERATOR-FILL` | = CLINICAL_ADVISOR above |
+
+(The product collects no email/phone by design — that is a privacy
+feature that makes individual HBNR notices harder to deliver: plan the
+substitute notice mechanism — in-app banner on next login plus a
+website notice — and say so in the filing.)
 
 ## Rotating `MINDPATTERN_TOKEN_SECRET`
 

@@ -2,7 +2,7 @@
  *  path with the documented payload/headers (the shapes P5–P7 screens and
  *  the interop harness lean on). */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, SHARING_DISCLOSURE_VERSION } from "../src/api/client";
+import { api, auth, SHARING_DISCLOSURE_VERSION } from "../src/api/client";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 
 const ORIGIN = "http://localhost:5173";
@@ -86,6 +86,71 @@ describe("endpoint surface", () => {
     await api.rotateCredential("old", "salt", "new");
     [, init] = lastCall(mock);
     expect(JSON.parse(String(init.body))).toEqual({ verifier: "old", new_salt: "salt", new_verifier: "new" });
+  });
+
+  it("key-scheme surfaces (2026-09-26): key-envelope read, v2 password change, self-upgrade", async () => {
+    const mock = stubFetch(() => jsonResponse({ key_scheme: "v2", salt: "cw==", kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 }, wrapped_data_key: "dw==" }));
+    await api.keyEnvelope();
+    let [url, init] = lastCall(mock);
+    expect(url).toBe(`${ORIGIN}/api/v1/auth/key-envelope`);
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer token-123");
+
+    mock.mockImplementation(() => new Response(null, { status: 204 }));
+    await api.changePassword({ verifierB64: "old", newSaltB64: "salt", newVerifierB64: "new", wrappedDataKeyB64: "wrap" });
+    [url, init] = lastCall(mock);
+    expect(url).toBe(`${ORIGIN}/api/v1/account/password`);
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toEqual({
+      verifier: "old",
+      new_salt: "salt",
+      new_verifier: "new",
+      wrapped_data_key: "wrap",
+    });
+    // new_kdf_params is optional and omitted entirely when absent.
+    expect(JSON.parse(String(init.body)).new_kdf_params).toBeUndefined();
+
+    await api.changePassword({ verifierB64: "old", newSaltB64: "salt", newVerifierB64: "new", wrappedDataKeyB64: "wrap", newKdfParams: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 } });
+    [, init] = lastCall(mock);
+    expect(JSON.parse(String(init.body))).toEqual({
+      verifier: "old",
+      new_salt: "salt",
+      new_verifier: "new",
+      wrapped_data_key: "wrap",
+      new_kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
+    });
+
+    await api.upgradeKeyEnvelope("wrap", { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 }, "pst", "ver");
+    [url, init] = lastCall(mock);
+    expect(url).toBe(`${ORIGIN}/api/v1/account/key-envelope/upgrade`);
+    expect(init.method).toBe("POST");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-Processing-Token"]).toBe("pst");
+    expect(headers["X-Account-Verifier"]).toBe("ver");
+    expect(JSON.parse(String(init.body))).toEqual({
+      kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
+      wrapped_data_key: "wrap",
+    });
+  });
+
+  it("register: the v2 envelope pair rides the body together, or neither does", async () => {
+    const mock = stubFetch(() => jsonResponse({ token: "t", user_id: "0123456789abcdef0123456789abcdef", expires_in: 1, role: "user" }));
+    await auth.register("alice", "salt", "ver");
+    let [, init] = lastCall(mock);
+    expect(JSON.parse(String(init.body))).toEqual({ username: "alice", salt: "salt", verifier: "ver" });
+
+    await auth.register("alice", "salt", "ver", {
+      kdfParams: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
+      wrappedDataKeyB64: "wrap",
+    });
+    [, init] = lastCall(mock);
+    expect(JSON.parse(String(init.body))).toEqual({
+      username: "alice",
+      salt: "salt",
+      verifier: "ver",
+      kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
+      wrapped_data_key: "wrap",
+    });
   });
 
   it("consents: pairing lookup, grant (disclosure version), rewrap, revoke", async () => {

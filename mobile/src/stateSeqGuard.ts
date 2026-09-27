@@ -28,8 +28,27 @@
  * with the stored copy for the duration of the session (the same idiom
  * crisisDialog.ts uses); wiping the persisted mark and killing the app
  * before the next launch remains the documented residual.
+ *
+ * 2026-09-26 (audit LOW): the persisted mark is no longer plaintext in
+ * AsyncStorage. It lives in secureStore — AES-256-GCM under the per-install
+ * Keychain/Keystore device key (secureStore.ts) — so a local attacker who
+ * LOWERS the stored bytes cannot forge a valid record: the GCM tag check
+ * (the envelope primitive's own constant-time verification; no
+ * attacker-controlled bytes are compared in the clear here) fails and the
+ * tampered record reads as ABSENT, with the in-memory mirror remaining the
+ * in-session authority and the self-heal rewrite re-pinning the true
+ * value. A v1 plaintext decimal mark migrates sealed read-through, once.
+ * Deleting the record outright is still possible and still the documented
+ * residual: the next process degrades to "no memory" until the next
+ * honest generation re-pins (M-1 then re-arms from there). The data-key
+ * lane entryVersions.ts uses was NOT chosen here: this guard's callers
+ * (InsightsScreen) hold the data key, but the mark must also survive a
+ * data-key rotation without a rebind step and stay readable by the same
+ * origin-bound key wipe in api/client.ts — the per-install device key
+ * gives both for free.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { secureStore } from "./secureStore";
 
 const STORAGE_PREFIX = "mindpattern.stateSeq.";
 
@@ -42,33 +61,61 @@ function storageKey(userId: string): string {
   return `${STORAGE_PREFIX}${userId}`;
 }
 
-async function loadHighWater(userId: string): Promise<number> {
-  const mirrored = memoryMirror.get(userId);
-  let stored = 0;
-  let storageReadable = true;
+/** Read the persisted mark (sealed lane first, one-time v1 plaintext
+ *  migration second). See the module header for the tamper-evidence
+ *  design; `readable` is false only when the secure-store seam itself is
+ *  unavailable (Keychain dead), in which case the mirror stands alone. */
+async function readPersistedMark(userId: string): Promise<{ stored: number; readable: boolean }> {
   try {
-    const raw = await AsyncStorage.getItem(storageKey(userId));
-    const parsed = raw == null ? NaN : Number(raw);
-    if (Number.isFinite(parsed)) {
-      stored = parsed;
+    const sealed = await secureStore.getItem(storageKey(userId));
+    if (sealed !== null && /^\d+$/.test(sealed)) {
+      return { stored: Number(sealed), readable: true };
     }
   } catch {
-    // Device storage unavailable: the in-memory mirror is the fallback
-    // authority; 0 means "no mark this session".
-    storageReadable = false;
+    return { stored: 0, readable: false };
   }
+  // v1 plaintext migration: adopt the old mark and rewrite it sealed. The
+  // sealed write lands in the SAME storage slot, so the plaintext copy is
+  // gone by construction (an extra remove would delete the new envelope);
+  // a failed sealed write leaves the plaintext in place for a later retry.
+  // The lane only opens when NO sealed record exists; an attacker forcing
+  // it open (delete + plant a plaintext mark) reaches exactly the deletion
+  // residual, never a forged-valid record.
+  try {
+    const raw = await AsyncStorage.getItem(storageKey(userId));
+    if (raw !== null && /^\d+$/.test(raw)) {
+      const value = Number(raw);
+      // A failed sealed write leaves the plaintext for a later retry; the
+      // value is still adopted for this check either way.
+      await secureStore.setItem(storageKey(userId), raw).catch(() => {});
+      return { stored: value, readable: true };
+    }
+  } catch {
+    // Unreadable legacy slot: nothing to migrate; the mirror stands.
+  }
+  return { stored: 0, readable: true };
+}
+
+async function persistMark(userId: string, mark: number): Promise<void> {
+  try {
+    await secureStore.setItem(storageKey(userId), String(mark));
+  } catch {
+    // best effort; the in-memory mirror holds for this session and the
+    // next load re-attempts the persist.
+  }
+}
+
+async function loadHighWater(userId: string): Promise<number> {
+  const mirrored = memoryMirror.get(userId);
+  const { stored, readable } = await readPersistedMark(userId);
   const highWater = Math.max(mirrored ?? 0, stored);
   if (highWater > 0) {
     memoryMirror.set(userId, highWater);
     // Self-heal (M-1): a persisted mark that reads BELOW the session's
     // mirror was tampered with or restored from a stale backup — rewrite
     // it so the defense survives the next process start too.
-    if (storageReadable && stored < highWater) {
-      try {
-        await AsyncStorage.setItem(storageKey(userId), String(highWater));
-      } catch {
-        // best effort; the mirror holds for this session
-      }
+    if (readable && stored < highWater) {
+      await persistMark(userId, highWater);
     }
   }
   return highWater;
@@ -100,12 +147,7 @@ export async function checkAnalysisGeneration(
   }
   if (payload > highWater) {
     memoryMirror.set(userId, payload);
-    try {
-      await AsyncStorage.setItem(storageKey(userId), String(payload));
-    } catch {
-      // best-effort pin; the in-memory mirror holds for this session and
-      // the next load re-attempts the persist.
-    }
+    await persistMark(userId, payload);
   }
 }
 
@@ -113,8 +155,16 @@ export async function checkAnalysisGeneration(
 export async function forgetAnalysisGeneration(userId: string): Promise<void> {
   memoryMirror.delete(userId);
   try {
-    await AsyncStorage.removeItem(storageKey(userId));
+    // secureStore.removeItem drops the sealed envelope AND any legacy
+    // plaintext copy: both live in AsyncStorage under the same key.
+    await secureStore.removeItem(storageKey(userId));
   } catch {
     // nothing to forget
   }
+}
+
+/** Test helper: drop every in-memory mirror (storage untouched) — the
+ *  entryVersions.ts idiom for simulating a fresh process. */
+export function resetAnalysisGenerationMirrors(): void {
+  memoryMirror.clear();
 }

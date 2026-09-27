@@ -10,10 +10,20 @@
  * and closing returns exactly where they were. SAFETY-CRITICAL invariants
  * unchanged: the copy resolves through the t() catalog (a Spanish device
  * reads Spanish support copy) and phone numbers, short codes and URLs
- * (911, 988, 741741, findahelpline.com) are NEVER translated.
+ * (911, 988, 741741, 988lifeline.org, findahelpline.com) are NEVER
+ * translated.
+ *
+ * Clinical review 2026-09-27: the action list gains the 988 LIFELINE CHAT
+ * (988lifeline.org/chat) — call and text were already there, but a person
+ * who cannot or will not use a phone deserved the same lifeline in
+ * writing — and, when the vault is unlocked, a "Make a safety plan" link
+ * to the local encrypted plan. The plan link is a supplement BELOW the
+ * static resources, never a gate in front of them: locked sessions still
+ * see every number and line above.
  */
 import { t } from "./strings";
 import { Button, Dialog, Icon, Note } from "./ui";
+import { vault } from "./vault";
 
 /** Large tappable action for a hotline (tel:/sms:) or an external site. */
 function CrisisAction(props: { href: string; label: string; detail: string; external?: boolean }): React.JSX.Element {
@@ -36,21 +46,57 @@ function CrisisAction(props: { href: string; label: string; detail: string; exte
 /** RFC 5724 wants `?body=`; only legacy iOS Safari honors `&body=` (the
  *  same split the mobile app makes in CrisisScreen.tsx). Getting this
  *  wrong on Android silently DROPS the "HOME" keyword that routes the
- *  Crisis Text Line conversation — audit 2026-09-26, fix 2026-09-26 (ii). */
-export function crisisSmsLink(): string {
-  const legacyIos = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  return `sms:741741${legacyIos ? "&" : "?"}body=HOME`;
+ *  Crisis Text Line conversation — audit 2026-09-26, fix 2026-09-26 (ii).
+ *
+ *  Detection is a feature probe now, not a userAgent regex (audit
+ *  2026-09-26 LOW): construct the URL and ask the platform's own query
+ *  parsing whether the body parameter survived. `?body=` first (the
+ *  standard every modern browser implements); anything whose parser
+ *  cannot see it falls back to the legacy `&body=` shape. Either way the
+ *  HOME keyword stays addressable on both iOS shapes. */
+export function smsBodySeparator(bodyIsQueryable: (candidate: string) => boolean): "?" | "&" {
+  return bodyIsQueryable("sms:741741?body=HOME") ? "?" : "&";
 }
 
-export function CrisisCard(props: { onClose: () => void }): React.JSX.Element {
+export function crisisSmsLink(): string {
+  const bodyIsQueryable = (candidate: string): boolean => {
+    try {
+      return new URL(candidate).searchParams.get("body") !== null;
+    } catch {
+      return false;
+    }
+  };
+  return `sms:741741${smsBodySeparator(bodyIsQueryable)}body=HOME`;
+}
+
+/** The 988 chat action's destination — the Lifeline's own web chat. The
+ *  URL is SAFETY-CRITICAL copy (never translated, never rewritten): a
+ *  person who cannot or will not use a phone needs the same lifeline,
+ *  in writing. */
+export const CRISIS_CHAT_URL = "https://988lifeline.org/chat";
+
+export function CrisisCard(props: { onClose: () => void; onMakeSafetyPlan?: () => void }): React.JSX.Element {
+  // The safety-plan link is a SUPPLEMENT, never a gate: it renders only
+  // when the vault is unlocked (the plan is data-key-encrypted, so a
+  // locked session has nothing to open) and always BELOW the static
+  // crisis resources — the numbers and lines above must stay first,
+  // complete, and reachable in every state.
+  const canOpenPlan = vault.isUnlocked() && props.onMakeSafetyPlan !== undefined;
   return (
     <Dialog title={t("crisis.webTitle")} onClose={props.onClose}>
       <Note tone="danger">{t("crisis.webImmediate")}</Note>
       <div className="stack" style={{ gap: "var(--space-2)" }}>
         <CrisisAction href="tel:988" label={t("crisis.call988")} detail={t("crisis.call988.detail")} />
         <CrisisAction href={crisisSmsLink()} label={t("crisis.text741741")} detail={t("crisis.text741741.detail")} />
+        <CrisisAction href={CRISIS_CHAT_URL} label={t("crisis.chat")} detail={t("crisis.chat.detail")} external />
         <CrisisAction href="https://findahelpline.com" label={t("crisis.findhelpline")} detail={t("crisis.webOutsideUS")} external />
       </div>
+      {canOpenPlan && (
+        <div className="stack" style={{ gap: "var(--space-2)" }}>
+          <Button label={t("crisis.makePlan")} onPress={props.onMakeSafetyPlan!} small variant="ghost" icon="heart" />
+          <Note tone="muted">{t("crisis.makePlanNote")}</Note>
+        </div>
+      )}
       <Note tone="muted">{t("crisis.webSafeMessaging")}</Note>
       <Note tone="muted">{t("crisis.webYouDeserve")}</Note>
       <div className="dialog__actions">

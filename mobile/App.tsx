@@ -5,6 +5,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { SessionProvider } from "./src/store";
 import { AppNavigator } from "./src/navigation";
 import { ThemeProvider, useTheme } from "./src/theme";
+import { startNotificationPressRouting } from "./src/nativeFeatures";
 
 /**
  * Privacy shield: while the app is backgrounded, the iOS app-switcher
@@ -32,6 +33,14 @@ function ThemedApp(): React.JSX.Element {
       setShielded(state !== "active");
     });
     return () => sub.remove();
+  }, []);
+
+  // Notification-tap routing (2026-09-27): a tap on the measure check-in
+  // nudge queues its destination; the navigator opens the Measures screen
+  // when the main flow is entered. Quiet no-op while the notification
+  // module is unlinked in this build (the seam's own guarantee).
+  useEffect(() => {
+    void startNotificationPressRouting().catch(() => {});
   }, []);
 
   return (

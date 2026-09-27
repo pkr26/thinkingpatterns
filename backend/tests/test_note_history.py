@@ -46,9 +46,13 @@ async def test_update_preserves_the_superseded_text(client):
     updated = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": therapist.encrypt_note(patient, "nh-1", REVISED_TEXT)},
+        json={
+            "blob": therapist.encrypt_note(patient, "nh-1", REVISED_TEXT),
+            "base_version": 1,  # item 15: the create response's version
+        },
     )
     assert updated.status_code == 200, updated.text
+    assert updated.json()["version"] == 2, "a changing edit advances the version"
 
     revisions = await client.get(
         f"/api/therapist/notes/{note['id']}/revisions", headers=therapist.headers
@@ -58,16 +62,16 @@ async def test_update_preserves_the_superseded_text(client):
     assert len(rows) == 1
     # The revision decrypts with the SAME AAD to the ORIGINAL text.
     aad = crypto.build_aad("note", therapist.user_id or "", patient.user_id or "", "nh-1")
-    plain = crypto.decrypt(
-        therapist.notes_key, base64.b64decode(rows[0]["blob"]), aad
-    )
+    plain = crypto.decrypt(therapist.notes_key, base64.b64decode(rows[0]["blob"]), aad)
     assert json.loads(plain.decode("utf-8"))["text"] == TODAY_TEXT
     # The live note carries the new text.
     notes = await client.get(
         f"/api/therapist/patients/{patient.user_id}/notes", headers=therapist.headers
     )
     live = base64.b64decode(notes.json()[0]["blob"])
-    assert json.loads(crypto.decrypt(therapist.notes_key, live, aad).decode())["text"] == REVISED_TEXT
+    assert (
+        json.loads(crypto.decrypt(therapist.notes_key, live, aad).decode())["text"] == REVISED_TEXT
+    )
 
 
 async def test_no_change_no_revision(client):
@@ -78,9 +82,10 @@ async def test_no_change_no_revision(client):
     same = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": note["blob"]},
+        json={"blob": note["blob"], "base_version": 1},
     )
     assert same.status_code == 200
+    assert same.json()["version"] == 1, "a byte-identical retry keeps the version"
     revisions = await client.get(
         f"/api/therapist/notes/{note['id']}/revisions", headers=therapist.headers
     )
@@ -109,15 +114,15 @@ async def test_idempotent_retry_with_new_text_preserves_the_superseded_text(clie
     rows = revisions.json()
     assert len(rows) == 1
     aad = crypto.build_aad("note", therapist.user_id or "", patient.user_id or "", "nh-1")
-    plain = crypto.decrypt(
-        therapist.notes_key, base64.b64decode(rows[0]["blob"]), aad
-    )
+    plain = crypto.decrypt(therapist.notes_key, base64.b64decode(rows[0]["blob"]), aad)
     assert json.loads(plain.decode("utf-8"))["text"] == TODAY_TEXT
     notes = await client.get(
         f"/api/therapist/patients/{patient.user_id}/notes", headers=therapist.headers
     )
     live = base64.b64decode(notes.json()[0]["blob"])
-    assert json.loads(crypto.decrypt(therapist.notes_key, live, aad).decode())["text"] == REVISED_TEXT
+    assert (
+        json.loads(crypto.decrypt(therapist.notes_key, live, aad).decode())["text"] == REVISED_TEXT
+    )
     # A byte-identical retry (the genuine offline-queue replay) still
     # writes NO revision.
     replay = await client.post(
@@ -154,13 +159,17 @@ async def test_deleting_a_note_cascades_its_revisions(client, app):
     updated = await client.patch(
         f"/api/therapist/notes/{note['id']}",
         headers=therapist.headers,
-        json={"blob": therapist.encrypt_note(patient, "nh-1", REVISED_TEXT)},
+        json={
+            "blob": therapist.encrypt_note(patient, "nh-1", REVISED_TEXT),
+            "base_version": 1,
+        },
     )
     assert updated.status_code == 200
     deleted = await client.delete(f"/api/therapist/notes/{note['id']}", headers=therapist.headers)
     assert deleted.status_code == 204
+    # Item 23: the delete echoes the post-delete snapshot marker so a paged
+    # client can resume without an extra GET.
+    assert "X-Notes-Revision" in deleted.headers
     async with app.state.sessionmaker() as session:
-        remaining = (
-            await session.execute(select(TherapistNoteRevision.id))
-        ).scalars().all()
+        remaining = (await session.execute(select(TherapistNoteRevision.id))).scalars().all()
     assert remaining == []

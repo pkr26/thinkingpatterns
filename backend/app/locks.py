@@ -9,14 +9,32 @@ private name across module boundaries. This module is the shared home.
 from __future__ import annotations
 
 import asyncio
+import zlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class _LockEntry:
     lock: asyncio.Lock
+    refs: int = 0
+
+
+# 2026-09-26 audit item 7: overflow fallback locks are SHARDED. When every
+# per-key entry is live, new keys used to serialize on ONE global overflow
+# lock — an adversarial unique-key flood past the registry cap stalled every
+# unrelated overflow user behind one queue. 16 shards keyed by a stable hash
+# of the key preserve the semantics exactly (a given key ALWAYS maps to the
+# same shard, so all of that key's overflow holders still serialize with
+# each other) while removing the global cliff: a flood only congests the
+# shard(s) its keys land in, and ordinary keys in other shards proceed.
+OVERFLOW_SHARDS = 16
+
+
+@dataclass
+class _OverflowShard:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     refs: int = 0
 
 
@@ -45,23 +63,39 @@ class UserLocks:
         self._locks: dict[str, _LockEntry] = {}
         self._max_keys = max_keys
         # When every per-key entry is live we cannot evict one without
-        # splitting a key's critical section. New keys share this fallback
-        # lock until its users drain; that preserves correctness AND the hard
-        # registry cap, at the cost of temporary serialization under an
-        # adversarial unique-key flood.
-        self._overflow_lock = asyncio.Lock()
-        self._overflow_refs = 0
+        # splitting a key's critical section. New keys fall back to their
+        # SHARD's lock until that shard's users drain; that preserves
+        # correctness AND the hard registry cap, at the cost of temporary
+        # serialization within one shard under an adversarial unique-key
+        # flood (see OVERFLOW_SHARDS).
+        self._overflow_shards = tuple(_OverflowShard() for _ in range(OVERFLOW_SHARDS))
+
+    def _shard_for(self, key: str) -> _OverflowShard:
+        # crc32: a stable, process-independent mapping (str hash() is
+        # per-process randomized); stability only matters WITHIN the process
+        # lifetime of this registry, but determinism also keeps the mapping
+        # observable in tests.
+        return self._overflow_shards[zlib.crc32(key.encode("utf-8")) % OVERFLOW_SHARDS]
+
+    def total_overflow_refs(self) -> int:
+        """Live fallback holders across all shards (observability/tests)."""
+        return sum(shard.refs for shard in self._overflow_shards)
 
     @asynccontextmanager
     async def hold(self, key: str) -> AsyncIterator[asyncio.Lock]:
         entry = self._locks.get(key)
         use_overflow = False
+        shard: _OverflowShard | None = None
         if entry is None:
-            # Once any fallback user is live, keep ALL absent keys on that
-            # same lock until it drains. Otherwise an overflow key could gain
-            # a fresh dedicated lock while a prior holder still uses the
-            # fallback, violating serialization for that key.
-            if self._overflow_refs:
+            shard = self._shard_for(key)
+            # Once a key's shard has a live fallback user, keep that key on
+            # the SAME shard lock until it drains. Otherwise the key could
+            # gain a fresh dedicated lock while a prior holder still uses the
+            # shard fallback, violating serialization for that key. Distinct
+            # keys never share a fallback unless they hash to the same shard
+            # (which is still correct — the fallback is a real exclusion
+            # lock — just briefly coarser).
+            if shard.refs:
                 use_overflow = True
             elif len(self._locks) >= self._max_keys:
                 for stale in [k for k, v in self._locks.items() if v.refs == 0][
@@ -74,12 +108,13 @@ class UserLocks:
                 entry = _LockEntry(asyncio.Lock())
                 self._locks[key] = entry
         if use_overflow:
-            self._overflow_refs += 1
+            assert shard is not None
+            shard.refs += 1
             try:
-                async with self._overflow_lock:
-                    yield self._overflow_lock
+                async with shard.lock:
+                    yield shard.lock
             finally:
-                self._overflow_refs -= 1
+                shard.refs -= 1
             return
         # `entry` is non-None here: an absent key either became a dedicated
         # entry above or returned through the overflow branch.

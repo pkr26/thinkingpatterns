@@ -296,15 +296,19 @@ class TestMuteAcrossRecomputeJourney:
                 client_entry_id=f"mj-{day.isoformat()}",
             )
 
-        # First qualification day (candidate; nothing surfaces yet).
+        # First qualification day (candidate; nothing surfaces yet), run two
+        # days back so the fixture can then add >= 2 fresh REAL-DAY work
+        # entries (item 5, 2026-09-26) on whatever weekdays TODAY-1/TODAY
+        # are — weekday-independent by construction.
+        monkeypatch.setattr("app.api.insights._utc_today", lambda: date.today() - timedelta(days=2))
         await emu.recompute(client)
-        # Independent second observation: a fresh work entry on a new,
-        # non-Sunday day, recomputed on a NEW server day (the clock seam
-        # the existing pipeline test uses — same-day recomputes correctly
-        # never satisfy the replication gate).
+        # Independent second observation: two fresh work entries on new
+        # days, recomputed on a NEW server day (the clock seam the existing
+        # pipeline test uses — same-day recomputes correctly never satisfy
+        # the replication gate).
         monkeypatch.setattr("app.api.insights._utc_today", lambda: date.today() + timedelta(days=1))
-        fresh_day = TODAY if TODAY.weekday() != 6 else TODAY - timedelta(days=1)
-        await emu.create_entry(client, WORK_ANXIOUS, fresh_day, "mj-fresh")
+        await emu.create_entry(client, WORK_ANXIOUS, TODAY - timedelta(days=1), "mj-fresh-1")
+        await emu.create_entry(client, WORK_ANXIOUS, TODAY, "mj-fresh-2")
         await emu.recompute(client)
         payload = await emu.decrypt_insights(client)
         patterns = payload["stats"]["patterns"]

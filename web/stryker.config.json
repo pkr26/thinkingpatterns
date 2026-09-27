@@ -9,6 +9,7 @@
     "src/**/*.ts",
     "src/**/*.tsx"
   ],
+  "disableTypeChecks": "{src,tests}/**/*.{ts,tsx}",
   "coverageAnalysis": "off",
   "reporters": [
     "clear-text",
@@ -16,7 +17,7 @@
     "json"
   ],
   "thresholds": {
-    "break": 0
+    "break": 55
   },
   "timeoutMS": 45000,
   "concurrency": 2,

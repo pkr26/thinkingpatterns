@@ -37,6 +37,12 @@ CALM = "felt calm and grateful today"
 WORK_TEXT = "worked on the deck quiet day"
 
 
+def _jitter(i: int) -> float:
+    """Deterministic +-0.05 wobble (item 7: exactly constant groups now
+    fail the Welch test closed)."""
+    return 0.05 if i % 2 == 0 else -0.05
+
+
 def consecutive(start: date, count: int) -> list[date]:
     return [start + timedelta(days=i) for i in range(count)]
 
@@ -151,80 +157,65 @@ print(hashlib.sha256(json.dumps([p.to_dict() for p in first.surfaced], sort_keys
 
 
 class TestJustAboveThresholdCorpus:
-    def _corpus(self, sunday_sentiment: float) -> list[JournalEntry]:
+    """Recalibrated 2026-09-26 (items 1+5): the work days spread across
+    every weekday (a one-weekday pattern is a weekly cycle the engine now
+    absorbs), and replication gets >= 2 fresh work days."""
+
+    def _corpus(self, work_sentiment: float) -> list[JournalEntry]:
         days = consecutive(T0 - timedelta(days=69), 70)
         return [
             JournalEntry(
-                WORK_TEXT if d.weekday() == 6 else "ordinary day notes",
+                WORK_TEXT if i % 3 == 0 else "ordinary day notes",
                 d,
-                sentiment=sunday_sentiment if d.weekday() == 6 else 0.0,
+                sentiment=work_sentiment if i % 3 == 0 else 0.0,
             )
-            for d in days
+            for i, d in enumerate(days)
         ]
 
     def _recomputed(self, corpus: list[JournalEntry]):
         first = brain.update(brain.load_state(None), corpus, T0)
         grown = corpus + [
-            JournalEntry(WORK_TEXT, T0 + timedelta(days=1), sentiment=corpus_sunday(corpus))
+            JournalEntry(WORK_TEXT, T0 + timedelta(days=1), sentiment=corpus_work(corpus)),
+            JournalEntry(WORK_TEXT, T0 + timedelta(days=2), sentiment=corpus_work(corpus)),
         ]
         return brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
         )
 
     def test_just_above_the_delta_floor_surfaces(self):
-        # Calibrated 2026-09-23: raw Sunday sentiment −0.20 lands at residual
-        # mood_delta = 0.2020 — two thousandths above MOOD_MIN_DELTA (0.2).
+        # Calibrated: work-day sentiment -0.20 lands at the weekday-
+        # deconfounded residual mood_delta = 0.2090 — nine thousandths
+        # above MOOD_MIN_DELTA (0.2) after replication.
         result = self._recomputed(self._corpus(-0.20))
         surfaced = [
             p for p in result.surfaced if p.kind == "mood_correlation" and p.label == "work"
         ]
         assert surfaced, "0.002 above the floor must surface"
         detail = surfaced[0].detail
-        assert detail["mood_delta"] == pytest.approx(0.2020, abs=0.0005)
+        assert detail["mood_delta"] == pytest.approx(0.2090, abs=0.0005)
         assert abs(detail["cohens_d"]) > brain.MOOD_MIN_EFFECT
 
     def test_just_below_the_delta_floor_stores_nothing(self):
-        # Its twin, 0.003 below the floor: not surfaced, not even stored.
-        result = self._recomputed(self._corpus(-0.195))
+        # Its twin, below the floor: not surfaced, not even stored.
+        result = self._recomputed(self._corpus(-0.17))
         surfaced = [p for p in result.surfaced if p.kind == "mood_correlation"]
         stored = [s for s in result.new_state["patterns"] if s.startswith("mood_correlation:")]
         assert surfaced == []
         assert stored == []
 
-    def test_noise_inflation_trips_the_delta_gate_before_the_d_floor_binds(self):
-        # Calibrated defense-in-depth finding: adding within-person noise
-        # (k=0.45 → k=0.50 around the same means) deflates the RESIDUAL
-        # delta below its floor long before Cohen's d approaches 0.5 —
-        # the two gates are conjunctive and the delta gate binds first,
-        # so "just above d but below delta" corpora cannot fire at all.
-        noise = [1.0, -0.6, 0.3, -0.9, 0.7, -0.2, 0.5, -0.8]
-
-        def corpus(k: float) -> list[JournalEntry]:
-            days = consecutive(T0 - timedelta(days=69), 70)
-            return [
-                JournalEntry(
-                    WORK_TEXT if d.weekday() == 6 else "ordinary day notes",
-                    d,
-                    sentiment=(-0.45 + k * noise[i % 8]) if d.weekday() == 6 else k * noise[i % 8],
-                )
-                for i, d in enumerate(days)
-            ]
-
-        louder = self._recomputed_raw(corpus(0.45))
-        assert any(p.kind == "mood_correlation" and p.label == "work" for p in louder.surfaced)
-        blocked = self._recomputed_raw(corpus(0.50))
+    def test_mean_inflation_trips_the_delta_gate_before_the_d_floor_binds(self):
+        # Calibrated defense-in-depth finding: lifting the work days' mean
+        # (-0.20 -> -0.17) deflates the RESIDUAL delta below its floor
+        # long before Cohen's d approaches 0.5 — the two gates are
+        # conjunctive and the delta gate binds first, so "far above d but
+        # below delta" corpora cannot fire at all.
+        quieter = self._recomputed(self._corpus(-0.20))
+        assert any(p.kind == "mood_correlation" and p.label == "work" for p in quieter.surfaced)
+        blocked = self._recomputed(self._corpus(-0.17))
         assert not any(p.kind == "mood_correlation" for p in blocked.surfaced)
 
-    @staticmethod
-    def _recomputed_raw(corpus: list[JournalEntry]):
-        first = brain.update(brain.load_state(None), corpus, T0)
-        grown = corpus + [JournalEntry(WORK_TEXT, T0 + timedelta(days=1), sentiment=-0.45)]
-        return brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
-        )
 
-
-def corpus_sunday(corpus: list[JournalEntry]) -> float:
+def corpus_work(corpus: list[JournalEntry]) -> float:
     return next(e.sentiment for e in corpus if e.text == WORK_TEXT and e.sentiment)
 
 
@@ -256,17 +247,19 @@ class TestMinimumNBoundaries:
     def test_mood_correlation_at_seven_per_side_never_qualifies_at_eight_it_does(self):
         assert brain.MOOD_MIN_PER_SIDE == 8
 
-        def corpus(theme_sundays: int) -> list[JournalEntry]:
+        # Work days spread across every weekday (item 1): the first N
+        # of every third day.
+        def corpus(theme_days: int) -> list[JournalEntry]:
             days = consecutive(T0 - timedelta(days=69), 70)
-            sundays = [d for d in days if d.weekday() == 6]
-            chosen = set(sundays[:theme_sundays])
+            work_idx = {i for i in range(70) if i % 3 == 0}
+            chosen_days = {days[i] for i in sorted(work_idx)[:theme_days]}
             return [
                 JournalEntry(
-                    "anxious about work" if d in chosen else CALM,
+                    "anxious about work" if d in chosen_days else CALM,
                     d,
-                    sentiment=-0.5 if d in chosen else 0.3,
+                    sentiment=(-0.5 if d in chosen_days else 0.3) + _jitter(i),
                 )
-                for d in days
+                for i, d in enumerate(days)
             ]
 
         below = brain.update(brain.load_state(None), corpus(7), T0)

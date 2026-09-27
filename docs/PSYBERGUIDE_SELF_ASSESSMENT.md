@@ -14,9 +14,12 @@ submission-ready self-assessment; every claim is testable in this repo.
   the word "should" is banned from the pool; crisis content never
   surfaces as prompts).
 - **Methods cited**: every detector maps to literature in RESEARCH.md
-  (within-person centering per Bolger & Laurenceau; sleep→affect per
-  Konjarski 2018; EWMA charts per Smit/Schat/Ceulemans 2023; rumination
-  clustering per Ehring & Watkins 2008...).
+  (within-person centering per Bolger & Laurenceau 2013 with per-weekday
+  deconfounding; sleep→affect per Bourke et al. 2026 meta-analysis and
+  Konjarski et al. 2018 systematic review; EWMA charts per Snippe et
+  al. 2023 with the Smit/Schat/Ceulemans 2023 methods tutorial, control
+  limit Monte-Carlo-calibrated to a ≤5% false-alarm probability;
+  rumination clustering per Ehring & Watkins 2008...).
 - **Honest statistics**: Benjamini–Hochberg correction across every
   simultaneous claim, replication gating, effect-size floors, and a
   ground-truth probe (9/9) — all CI-gated. A 60-day noise-control
@@ -29,7 +32,8 @@ submission-ready self-assessment; every claim is testable in this repo.
 ## User experience
 
 - Calm-tone design: no streak-shaming, no loss-framed notifications
-  (reminders land only when the native module ships, opt-in, local-only),
+  (opt-in local-only daily reminders, shipped — a stable notification
+  id so a refreshed reminder replaces rather than stacks), 
   lapse-tolerant framing, crisis help one tap from every screen.
 - Transparency UX: "Why am I seeing this?" panels; the 30-day threshold
   explained at the moment of waiting; consent flows that say what the
@@ -40,11 +44,16 @@ submission-ready self-assessment; every claim is testable in this repo.
 ## Data security
 
 - Client-side AES-256-GCM with AAD binding; keys derived on device
-  (PBKDF2 600k); server stores scrypt(verifier) only.
-- Zero-knowledge therapist sharing (ECDH→HKDF wrap); read-only by
-  endpoint absence; full access audit log.
-- Cross-platform crypto pinned byte-for-byte (backend ⇄ mobile ⇄ portal,
-  incl. edge-case AAD vectors in CI).
+  (PBKDF2 600k; v2 accounts hold a random data key in a
+  password-wrapped envelope); server stores scrypt(verifier) only
+  (N=2¹⁷).
+- Zero-knowledge therapist sharing (ECDH→HKDF wrap, out-of-band SAS
+  verification of the pairing); read-only by endpoint absence; full
+  access audit log with a per-patient forward hash chain.
+- Cross-platform crypto pinned byte-for-byte FOUR ways (backend ⇄
+  mobile ⇄ portal ⇄ web, incl. edge-case AAD vectors and
+  cross-client interop fixtures, both in CI: the
+  `web-contract-vectors` and `contract-gates` jobs).
 - Known, documented residuals: plaintext during the processing window;
   metadata visibility. (The former AsyncStorage device-key residual is
   remediated: the session-token key is held only by iOS Keychain /
@@ -53,8 +62,19 @@ submission-ready self-assessment; every claim is testable in this repo.
 
 ## Submission checklist
 
-- [ ] Privacy policy URL (the in-app offline copy is the source)
+Re-verified against the current tree in the 2026-09-26 documentation
+pass; submission itself remains an operator step, so the boxes stay
+open until the operator completes them.
+
+- [ ] Privacy policy URL (a plain-language template mapped to the actual
+      data flows ships at `docs/PRIVACY_POLICY_TEMPLATE.md` — complete
+      its LEGAL-REVIEW placeholders and publish; the in-app offline copy
+      is the source)
 - [ ] App store privacy nutrition labels (data: journal text, entered by
       user, encrypted; no tracking, no third-party SDKs)
-- [ ] Research summary = RESEARCH.md
+- [x] Research summary = RESEARCH.md *(exists; citations re-verified
+      2026-09-26 and cross-checked against the shipped engine constants
+      in `backend/app/services/brain.py`)*
 - [ ] Point of contact for the expert review
+      (`docs/security.txt.example` carries the contact placeholder
+      operators must fill)

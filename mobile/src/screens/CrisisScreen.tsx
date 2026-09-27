@@ -18,6 +18,7 @@ import React from "react";
 import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTheme } from "../theme";
 import { t as tr } from "../strings";
+import { vault } from "../vault";
 
 /** Texting a crisis line uses a different query separator per platform:
  *  Android's "?body=" is silently dropped by iOS (which wants "&body="),
@@ -84,8 +85,16 @@ function ActionButton({
 }
 
 /** `region` is injectable for tests; production callers leave it to the
- *  device locale. */
-export function CrisisScreen({ region }: { region?: string }): React.JSX.Element {
+ *  device locale. `navigation` is optional because this screen renders in
+ *  EVERY navigator state (booting, logged-out, locked) where some callers
+ *  mount it bare. */
+export function CrisisScreen({
+  region,
+  navigation,
+}: {
+  region?: string;
+  navigation?: { navigate: (screen: string) => void };
+}): React.JSX.Element {
   const t = useTheme();
   const effectiveRegion = region ?? deviceRegion();
   // null (unknown) keeps the US-first layout — the services are US-based,
@@ -157,6 +166,27 @@ export function CrisisScreen({ region }: { region?: string }): React.JSX.Element
         </>
       )}
 
+      {/* The local safety plan (2026-09-27) — strictly AFTER the static
+          resources, and only where it exists: the plan lives under the
+          vault's data key, so while the vault is locked (or no session
+          exists) the link is absent and every resource above stays exactly
+          as reachable as before. The plan is a supplement, never a gate. */}
+      {vault.isUnlocked() && navigation && (
+        <TouchableOpacity
+          style={[styles.planLink, { backgroundColor: t.colors.helpBg, borderRadius: t.radius.md, minHeight: t.minTouch }]}
+          onPress={() => navigation.navigate("SafetyPlan")}
+          accessibilityRole="button"
+          accessibilityLabel={tr("crisis.makePlanA11y")}
+        >
+          <Text style={{ color: t.colors.text, fontSize: 14, fontWeight: "700" }}>
+            {tr("common.makeSafetyPlan")}
+          </Text>
+          <Text style={{ color: t.colors.muted, fontSize: 12, lineHeight: 17, marginTop: 3 }}>
+            {tr("crisis.makePlanNote")}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <View style={[styles.divider, { backgroundColor: t.colors.border }]} />
       <Text style={[styles.note, { color: t.colors.muted }]}>{tr("crisis.disclaimer")}</Text>
     </ScrollView>
@@ -178,6 +208,7 @@ const styles = StyleSheet.create({
   actionGo: { fontSize: 14, fontWeight: "700" },
   link: { padding: 4 },
   linkText: { fontSize: 15, fontWeight: "600" },
+  planLink: { padding: 16 },
   divider: { height: 1, marginTop: 6 },
   note: { fontSize: 12, lineHeight: 18 },
 });

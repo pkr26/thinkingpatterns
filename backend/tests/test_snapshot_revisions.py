@@ -234,6 +234,7 @@ async def test_notes_snapshot_revision_tracks_create_update_delete_and_noop_retr
         headers=therapist.headers,
         json={
             "blob": therapist.encrypt_note(patient, "revision-note-1", "updated note"),
+            "base_version": 1,  # item 15
         },
     )
     assert updated.status_code == 200, updated.text
@@ -252,7 +253,7 @@ async def test_notes_snapshot_revision_tracks_create_update_delete_and_noop_retr
     unchanged = await client.patch(
         f"/api/therapist/notes/{created['revision-note-1']['id']}",
         headers=therapist.headers,
-        json={"blob": updated.json()["blob"]},
+        json={"blob": updated.json()["blob"], "base_version": 2},
     )
     assert unchanged.status_code == 200
     # POST retries are also idempotent when every persisted note field is

@@ -5,11 +5,12 @@
  * adds GAD-7 (anxiety, 7 items, 0-21) and PHQ-2 (the two-item depression
  * core, 0-6) alongside it. All three are public-domain-style instruments
  * (the Kroenke/Spitzer Pfizer no-permission-required note) and all three
- * ride the EXISTING zero-knowledge measure path: the score is the only
- * payload ({"v":1,"measure":id,"score":N,"completed_at":date}), stored
+ * ride the EXISTING zero-knowledge measure path: the payload
+ * ({"v":1,"measure":id,"score":N,["item9":R],"completed_at":date} —
+ * item9 rides phq9 only, the clinical review 2026-09-27) is stored
  * as an encrypted blob and shared per consent — the server and portal
- * remain unable to interpret anything (and so does this app: no severity
- * bands, no advice; interpretation belongs to a clinician).
+ * remain unable to interpret anything beyond it (and so does this app:
+ * no severity bands, no advice; interpretation belongs to a clinician).
  *
  * STRUCTURE vs COPY (audit M-16 discipline): this module owns structure
  * only — item counts, option values, score ceilings, the one safety
@@ -92,27 +93,64 @@ export function measureComplete(id: MeasureId, responses: readonly (number | nul
   return responses.length === instrument.items && responses.every((r) => typeof r === "number");
 }
 
+/** The chip-selection contract (audit 2026-09-26 LOW): a stored response
+ *  is the option's VALUE and selection compares VALUES — correct for any
+ *  response scale, contiguous or not. The shipped scale is [0,1,2,3],
+ *  where value and index coincide, which is exactly why the index-based
+ *  comparison went unnoticed; a hypothetical [0,2,4] scale must never
+ *  silently regress to index semantics (the second chip records 2, not 1,
+ *  and a stored 1 selects nothing). */
+export function optionSelected(
+  responses: readonly (number | null)[],
+  itemIndex: number,
+  optionValue: number,
+): boolean {
+  return responses[itemIndex] === optionValue;
+}
+
 /** True when the instrument's safety item (if any) was endorsed at any
  *  level — powers the post-save support pointer. The score itself is
  *  never interpreted. */
 export function safetyItemEndorsed(id: MeasureId, responses: readonly (number | null)[]): boolean {
-  const index = instrumentOf(id).safetyItemIndex;
-  if (index === undefined) return false;
+  return (safetyItemValue(id, responses) ?? 0) > 0;
+}
+
+/** The RAW response to the instrument's safety item (if any), clamped to
+ *  the option scale exactly like the scorer — or null when the instrument
+ *  has no safety item or the response is not a number. This is the value
+ *  the payload's item9 field carries: the clinician's follow-up rule
+ *  fires on the ITEM response regardless of the total, so it is stored
+ *  verbatim, never folded into the score. */
+export function safetyItemValue(id: MeasureId, responses: readonly (number | null)[]): number | null {
+  const instrument = instrumentOf(id);
+  const index = instrument.safetyItemIndex;
+  if (index === undefined) return null;
   const value = responses[index];
-  return typeof value === "number" && value > 0;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(Math.max(...instrument.options), Math.round(value)));
 }
 
 /** The encrypted-payload contract (consumed by the therapist portal):
- *  {"v":1,"measure":<id>,"score":N,"completed_at":ISO-date}. */
+ *  {"v":1,"measure":<id>,"score":N,"item9":R,"completed_at":ISO-date}.
+ *
+ *  item9 (clinical review 2026-09-27) rides ONLY phq9 payloads — the RAW
+ *  0-3 response to item 9 — because an endorsed PHQ-9 item 9 mandates
+ *  clinical follow-up REGARDLESS of the total score, and the total alone
+ *  hid it. gad7/phq2 never carry the field, and payloads written before
+ *  the field existed remain exactly as valid (the portal renders nothing
+ *  extra for them). The score is byte-identical to the pre-field
+ *  contract. */
 export function measurePayload(
   id: MeasureId,
   responses: readonly (number | null)[],
   completedAt: string,
 ): string {
+  const item9 = safetyItemValue(id, responses);
   return JSON.stringify({
     v: 1,
     measure: id,
     score: measureScore(id, responses),
+    ...(id === "phq9" && item9 !== null ? { item9 } : {}),
     completed_at: completedAt,
   });
 }

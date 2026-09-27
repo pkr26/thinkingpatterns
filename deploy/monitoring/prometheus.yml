@@ -41,6 +41,16 @@ global:
 rule_files:
   - alerts.yml
 
+# Delivery (2026-09-26 infra audit): alerts now leave the process by default.
+# The alertmanager service is part of the default stack (same fail-closed
+# file-mount contract as the metrics token: `configs:` resolves eagerly, so
+# `up` refuses to start until deploy/monitoring/alertmanager/alertmanager.yml
+# exists — copy the committed .example and fill the receiver).
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: mindpattern-api
     # GET http://api:8000/metrics with `Authorization: Bearer <token>`.
@@ -57,26 +67,26 @@ scrape_configs:
     static_configs:
       - targets: ["api:8000"]
 
-  # OPTIONAL synthetic probe (enable together with `--profile blackbox` in
-  # the monitoring docker-compose.yml, then uncomment this job AND the
-  # MindPatternReadyzProbeFailing alert in alerts.yml). Unlike the scrape
-  # above — which proves the API process serves /metrics — this proves
-  # /readyz returns 200, i.e. DB connectivity at the exact schema head.
-  #
-  # - job_name: mindpattern-blackbox
-  #   metrics_path: /probe
-  #   params:
-  #     module: [http_2xx]
-  #   static_configs:
-  #     - targets:
-  #         - http://api:8000/readyz
-  #   relabel_configs:
-  #     - source_labels: [__address__]
-  #       target_label: __param_target
-  #     - source_labels: [__param_target]
-  #       target_label: instance
-  #     - target_label: __address__
-  #       replacement: blackbox:9115
+  # DEFAULT-ON (2026-09-26 infra audit): the /readyz synthetic probe needs no
+  # external targets, so the default stack must detect a broken DB path —
+  # previously this was a three-file opt-in and the default stack could not
+  # see DB-path failure at all. The blackbox exporter service is likewise
+  # default-on in the monitoring compose (the tls/node jobs below stay
+  # opt-in: they need real hostnames and host-mount decisions).
+  - job_name: mindpattern-blackbox
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://api:8000/readyz
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
 
   # OPTIONAL host metrics (enable together with `--profile node` in the
   # monitoring docker-compose.yml, then uncomment this job AND the

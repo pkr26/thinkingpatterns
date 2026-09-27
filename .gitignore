@@ -84,3 +84,12 @@ mobile/android/keystore.properties
 
 # Stryker sandbox (in-place temp; only present if a run is killed mid-flight)
 stryker-tmp/
+
+# Compose file-mounted secrets (2026-09-26 infra audit): only the .example
+# templates are committed; every filled copy is a live credential.
+deploy/secrets/*
+!deploy/secrets/*.example
+
+# Alertmanager receiver config (fail-closed mount): only the example ships.
+deploy/monitoring/alertmanager/alertmanager.yml
+deploy/secrets/rclone_config

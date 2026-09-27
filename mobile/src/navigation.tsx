@@ -15,7 +15,9 @@ import { TherapistShareScreen } from "./screens/TherapistShareScreen";
 import { MeasuresScreen } from "./screens/MeasuresScreen";
 import { PrivacyScreen } from "./screens/PrivacyScreen";
 import { CrisisScreen } from "./screens/CrisisScreen";
+import { SafetyPlanScreen } from "./screens/SafetyPlanScreen";
 import { takePendingOnboarding, hasSeenOnboarding, onboardingSeenCached } from "./onboarding";
+import { takePendingNotificationRoute } from "./notificationRoute";
 import { api } from "./api/client";
 import { t as tr } from "./strings";
 import { MainShell, NavDestination } from "./components/BottomNav";
@@ -54,6 +56,7 @@ export type RootStackParamList = {
   Measures: undefined;
   Privacy: undefined;
   Crisis: undefined;
+  SafetyPlan: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -103,6 +106,16 @@ export function AppNavigator(): React.JSX.Element {
   const wasInMain = useRef(false);
   // Stryker disable next-line BooleanLiteral: showOnboarding is read only inside the main branch, and the first main render always flips wasInMain (it starts false) and overwrites the state — the initial value never reaches the tree
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // The measure nudge's tapped destination (2026-09-27), consumed ONCE at
+  // main-flow entry — the takePendingOnboarding idiom. When a nudge tap
+  // queued "Measures", the Measures screen is declared FIRST in the main
+  // branch so it is the INITIAL screen (deep links land on their target);
+  // a normal cold start queues nothing and Entry leads, as always.
+  const [notificationScreen, setNotificationScreen] = useState<string | null>(null);
+  const measuresLeads = notificationScreen === "Measures";
+  const measuresScreen = (
+    <Stack.Screen name="Measures" component={MeasuresScreen} options={{ title: tr("nav.measures") }} />
+  );
   // M-18 (2026-09-20 audit): backgrounding mid-onboarding locks the vault
   // (inMain flips false) and CONSUMES the one-shot pending flag — the old
   // gate re-entered main on the journal with the privacy/13+ panels never
@@ -123,6 +136,7 @@ export function AppNavigator(): React.JSX.Element {
         ? takePendingOnboarding() || (accountRef.current !== null && onboardingSeenCached(accountRef.current) === false)
         : false,
     );
+    setNotificationScreen(inMain ? takePendingNotificationRoute() : null);
   }
 
   // Prime the persisted-flag mirror for the signed-in account (and record
@@ -202,13 +216,21 @@ export function AppNavigator(): React.JSX.Element {
               at render time (the locale is startup-fixed, so per-render
               lookup is stable) — they were hardcoded English while nav.*
               keys existed in both catalogs. */}
+          {/* A tapped measure nudge (2026-09-27): Measures is the initial
+              screen of this main-flow entry — declared before Entry, the
+              same initial-route idiom as onboarding above. */}
+          {measuresLeads && measuresScreen}
           <Stack.Screen name="Entry" component={EntryScreen} options={{ title: tr("nav.today") }} />
           <Stack.Screen name="History" component={HistoryWithShell} options={{ title: tr("nav.history") }} />
           <Stack.Screen name="Insights" component={InsightsWithShell} options={{ title: tr("nav.patterns") }} />
           <Stack.Screen name="Question" component={QuestionWithShell} options={{ title: tr("nav.questionTitle") }} />
           <Stack.Screen name="Settings" component={SettingsWithShell} options={{ title: tr("nav.settings") }} />
           <Stack.Screen name="TherapistShare" component={TherapistShareScreen} options={{ title: tr("nav.therapist") }} />
-          <Stack.Screen name="Measures" component={MeasuresScreen} options={{ title: tr("nav.measures") }} />
+          {!measuresLeads && measuresScreen}
+          {/* The local safety plan (2026-09-27): a main-flow screen — it
+              reads and writes under the vault's data key, so it exists only
+              where the vault is unlocked. */}
+          <Stack.Screen name="SafetyPlan" component={SafetyPlanScreen} options={{ title: tr("safetyplan.navTitle") }} />
           {/* The privacy policy is static, offline content (like Crisis). */}
           <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: tr("nav.privacy") }} />
           {/* Crisis help: one navigation hop from every screen (offline,

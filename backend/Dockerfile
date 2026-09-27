@@ -1,4 +1,4 @@
-# Pinned by digest (multi-arch manifest list, resolved 2026-09-07 via the
+# Pinned by digest (multi-arch manifest list, re-resolved 2026-09-26 via the
 # Docker Hub registry API — Docker was unavailable locally, so this was
 # verified against the registry, not a local cache). 3.14-slim is a mutable
 # tag; the digest fixes the runtime base-image input.  It does NOT make the
@@ -6,7 +6,7 @@
 # build still uses the builder image's apt repository and PEP-517 build
 # dependencies. Dependabot (docker ecosystem, .github/dependabot.yml) will
 # propose digest bumps as new 3.14-slim images publish.
-FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS wheels
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS wheels
 
 WORKDIR /wheels
 
@@ -21,7 +21,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
 
 WORKDIR /srv
 

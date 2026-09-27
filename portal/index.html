@@ -5,13 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
     <!-- A header is also shipped in public/_headers for static hosts. The
-         meta policy is a defense-in-depth fallback when a host is mis-set. -->
+         meta policy is a defense-in-depth fallback when a host is mis-set.
+         2026-09-26 CSP hardening: style-src no longer allows inline styles —
+         every former inline style object moved to portal.css classes and the
+         print rules moved to /print.css (loaded for print only), so the
+         portal ships no <style> tags and no style= attributes. SVG stroke
+         and fill are ATTRIBUTES, which style-src does not govern. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'"
+      content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'"
     />
     <title>MindPattern — Therapist Portal</title>
     <link rel="stylesheet" href="/portal.css" />
+    <link rel="stylesheet" href="/print.css" media="print" />
   </head>
   <body>
     <div id="root"></div>

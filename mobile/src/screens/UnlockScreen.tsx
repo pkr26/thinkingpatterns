@@ -40,7 +40,8 @@ import qcrypto from "react-native-quick-crypto"; // registers the Buffer global 
 import { api, ApiError } from "../api/client";
 import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
-import { zeroize } from "../crypto/kdf";
+import { KDF_ITERATIONS, zeroize } from "../crypto/kdf";
+import { cachedEnvelope, cacheEnvelope, fetchEnvelope, unwrapSessionDataKey, type EnvelopeInfo } from "../keyScheme";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { storeUnlockProof, verifyUnlockProof } from "../unlockProof";
@@ -150,6 +151,9 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     setBusy(true);
     let derived: Keys | null = null;
     let username: string | null = null;
+    // v2 sessions: the envelope's random data key, held until the vault
+    // takes ownership (the catch zeroizes it on a mid-flow failure).
+    let sessionDataKey: Buffer | null = null;
     try {
       username = await api.getUsername();
       if (!username) throw new Error(tr("unlock.noAccount"));
@@ -172,41 +176,122 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       // Async derivation: no 100–400ms JS-thread freeze mid-flow.
       derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
       const keys = derived;
+      // TS narrowing: the null check above proved `username` non-null, but
+      // the unwrapFor closure below would otherwise still see string|null.
+      const accountName: string = username;
+      // v2 KEY ENVELOPE (2026-09-26): when set, the session's data key is
+      // the envelope's RANDOM key (unwrapped below), and keys.dataKey — the
+      // unused v1 data label — is zeroized before the vault unlock.
+      /** Unwrap a v2 envelope, reusing the master key just derived when it
+       *  was derived under this envelope's own salt and cost parameters.
+       *  The GCM authentication is the password proof (offline) and a
+       *  consistency check (online); a structural failure is a calm local
+       *  error, never "wrong password". */
+      const unwrapFor = async (envelope: EnvelopeInfo): Promise<Buffer> => {
+        const res = await unwrapSessionDataKey({
+          password,
+          username: accountName,
+          envelope,
+          derivedMaster: { key: keys.masterKey, saltB64, iterations: KDF_ITERATIONS },
+        });
+        if (res.ok) return res.dataKey;
+        if (res.reason === "tamper") {
+          // S-5: the envelope did not open under this password — the same
+          // funnel as the sealed proof's "wrong" (401 → escalating pause).
+          // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
+          throw new ApiError(401, tr("common.wrongPassword"));
+        }
+        throw new Error(tr("unlock.envelopeFailed"));
+      };
       let verifiedOnline = false;
+      // Re-audit 2026-09-27 (M): the online v2 account whose envelope can be
+      // NEITHER fetched ("invalid" — the server answered with a shape this
+      // client refuses; "unreachable" — the endpoint failed) NOR read from
+      // this device's cache used to fall through to v1 semantics: the vault
+      // unlocked on the v1-DERIVED data key, the sealed proof was refreshed
+      // under it, and every entry written that session became permanently
+      // unreadable. The session is now REFUSED — the copy is set here and
+      // thrown BELOW the try, because this try's catch deliberately swallows
+      // non-401 failures to reach the offline path, and the refusal must
+      // bypass that fall-through. ("legacy" — a 404 from a pre-envelope
+      // server — cannot host a v2 account and keeps v1 semantics.)
+      let envelopeRefusal: string | null = null;
       if (!offline) {
         try {
           const body = await api.login(username, keys.authKey.toString("base64"));
           await api.setSession(body.token, body.user_id, username);
-          // Verified against the server: refresh the sealed proof so the
-          // next offline unlock checks against this very key.
-          await storeUnlockProof(keys.dataKey, body.user_id);
+          // KEY SCHEME: the fresh bearer fetches the envelope; v2 unwraps
+          // locally, v1 refreshes the sealed proof exactly as before. A
+          // failed fetch (network died mid-flow) falls back to the CACHED
+          // envelope, then to the sealed proof below.
+          const fetched = await fetchEnvelope();
+          const envelope = fetched.status === "ok" ? fetched.envelope : await cachedEnvelope(username);
+          if (envelope === null && (fetched.status === "invalid" || fetched.status === "unreachable")) {
+            envelopeRefusal = tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "login.envelopeUnavailable");
+          } else if (envelope !== null && envelope.scheme === "v2") {
+            const dataKey = await unwrapFor(envelope);
+            // Verified online AND by the envelope's own authentication:
+            // refresh the sealed proof so a future offline unlock (and the
+            // biometric path) checks against this very key.
+            await storeUnlockProof(dataKey, body.user_id);
+            await cacheEnvelope(username, envelope).catch(() => {});
+            sessionDataKey = dataKey;
+          } else {
+            // Verified against the server: refresh the sealed proof so the
+            // next offline unlock checks against this very key.
+            await storeUnlockProof(keys.dataKey, body.user_id);
+            if (envelope !== null) await cacheEnvelope(username, envelope).catch(() => {});
+          }
           verifiedOnline = true;
         } catch (loginErr) {
           // A definitive wrong-password rejection is never an offline case.
           if (loginErr instanceof ApiError && loginErr.status === 401) throw loginErr;
           // Otherwise (network died mid-flow): fall through to the sealed
-          // proof below — it verifies the password without the server.
+          // proof / cached envelope below — it verifies the password
+          // without the server.
         }
+      }
+      if (envelopeRefusal !== null) {
+        // The password was accepted online but the account's real data key
+        // could not be verified — unlocking on the v1-derived label would
+        // silently corrupt everything written this session. Honest refusal:
+        // our own Error text passes through requestFailureCopy verbatim.
+        throw new Error(envelopeRefusal);
       }
       if (!verifiedOnline) {
-        // OFFLINE PATH — must be VERIFIED, never assumed. The sealed
-        // marker only opens under the correct data key.
-        const userId = await api.getUserId();
-        if (!userId) throw new Error(tr("unlock.noAccount"));
-        const proof = await verifyUnlockProof(keys.dataKey, userId);
-        if (proof === "absent") {
-          throw new Error(tr("unlock.offlineNotEnabled"));
-        }
-        if (proof === "wrong") {
-          // S-5 (2026-09-26 pentest): wrong-proof and online-401 both funnel
-          // into the catch's single escalating record+pause — one failure,
-          // one increment, one delay. First failure pays the historical
-          // 500 ms exactly; subsequent ones double up to 30 s, durably.
-          // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
-          throw new ApiError(401, tr("common.wrongPassword"));
+        // OFFLINE PATH — must be VERIFIED, never assumed. v2 accounts open
+        // the CACHED envelope: the wrong password fails its GCM
+        // authentication, exactly like the sealed marker does for v1.
+        const cached = await cachedEnvelope(username);
+        if (cached !== null && cached.scheme === "v2") {
+          sessionDataKey = await unwrapFor(cached);
+        } else {
+          const userId = await api.getUserId();
+          if (!userId) throw new Error(tr("unlock.noAccount"));
+          const proof = await verifyUnlockProof(keys.dataKey, userId);
+          if (proof === "absent") {
+            throw new Error(tr("unlock.offlineNotEnabled"));
+          }
+          if (proof === "wrong") {
+            // S-5 (2026-09-26 pentest): wrong-proof and online-401 both funnel
+            // into the catch's single escalating record+pause — one failure,
+            // one increment, one delay. First failure pays the historical
+            // 500 ms exactly; subsequent ones double up to 30 s, durably.
+            // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
+            throw new ApiError(401, tr("common.wrongPassword"));
+          }
         }
       }
-      vault.unlock(derived, (await api.getUserId()) ?? undefined); // vault takes ownership and zeroizes the master key
+      if (sessionDataKey !== null) {
+        vault.unlock(
+          { masterKey: keys.masterKey, authKey: keys.authKey, dataKey: sessionDataKey },
+          (await api.getUserId()) ?? undefined,
+        );
+        zeroize(keys.dataKey); // the v1 data label never protects v2 storage
+      } else {
+        vault.unlock(derived, (await api.getUserId()) ?? undefined); // vault takes ownership and zeroizes the master key
+      }
+      sessionDataKey = null; // the vault owns it now
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
       setBiometricError(false); // the promised password path worked — retract the biometric nudge
@@ -214,6 +299,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       if (username) await clearUnlockFailures(username).catch(() => {});
       await refreshActiveDays();
     } catch (err) {
+      if (sessionDataKey) zeroize(sessionDataKey);
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
       vault.lock(); // a failed unlock must never leave stale keys live
       // 401 = wrong password (our own sealed proof throws the same). Other

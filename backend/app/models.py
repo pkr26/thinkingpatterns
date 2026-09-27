@@ -153,6 +153,30 @@ class User(Base):
     totp_secret: Mapped[str | None] = mapped_column(String(256), nullable=True)
     totp_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     totp_last_counter: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # --- v2 key scheme (2026-09-26 crypto-architecture remediation) ----------
+    #
+    # key_scheme: "v1" = the data key is HKDF-derived directly from the
+    # password (every pre-2026-09-26 account; unchanged behavior, still the
+    # default for legacy clients). "v2" = the data key is a RANDOM 32-byte
+    # key the client wraps under a password-derived KEK
+    # (security/envelope.py); the server stores the wrapped blob OPAQUELY —
+    # the KEK input never leaves the client, so nothing here is decryptable
+    # by the server. A v2 account changes its password in O(1): the client
+    # unwraps locally, re-wraps under the new salt/kdf_params, and the
+    # corpus (still encrypted under the SAME random data key) is untouched.
+    key_scheme: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="v1", server_default=text("'v1'")
+    )
+    # b64 AES-256-GCM envelope of the random data key, exactly as uploaded
+    # (nonce||ct||tag, 60 bytes decoded). NULL on v1 accounts; NULL on a v2
+    # account is a hard data-loss state the endpoints refuse to create.
+    wrapped_data_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Canonical JSON of the client's kdf_params blob (see security.kdf) —
+    # which KDF produced the keys, at what cost. Echoed back to
+    # authenticated clients (GET /auth/key-envelope) and embedded in the
+    # client's envelope AAD. NULL for v1 accounts (the v1 contract's
+    # implicit pbkdf2-sha256-600k).
+    kdf_params: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
 
 class TotpBackupCode(Base):
@@ -174,9 +198,7 @@ class TotpBackupCode(Base):
     __tablename__ = "totp_backup_codes"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     digest: Mapped[str] = mapped_column(String(64))
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -406,6 +428,15 @@ class TherapistNote(Base):
     blob: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # 2026-09-26 audit item 15: optimistic-concurrency version for clinical
+    # notes. 1 on create, +1 on every changing PATCH. Clients echo the
+    # version they based their edit on (base_version); a mismatch is a 409
+    # version_conflict, never a silent last-write-wins overwrite. The
+    # server_default keeps a fresh create_all schema and an upgraded schema
+    # defining the same column (the L-33 parity rule).
+    version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=1, server_default=text("1")
+    )
 
 
 class TherapistNoteRevision(Base):
@@ -417,14 +448,10 @@ class TherapistNoteRevision(Base):
     with their note (CASCADE) and with the therapist's account."""
 
     __tablename__ = "therapist_note_revisions"
-    __table_args__ = (
-        Index("ix_note_revisions_note_created", "note_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_note_revisions_note_created", "note_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    note_id: Mapped[str] = mapped_column(
-        ForeignKey("therapist_notes.id", ondelete="CASCADE")
-    )
+    note_id: Mapped[str] = mapped_column(ForeignKey("therapist_notes.id", ondelete="CASCADE"))
     therapist_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     blob: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -436,7 +463,28 @@ class AccessLog(Base):
     invisible to the server. actor_id/user_id are plain strings, NOT FKs —
     the audit trail must outlive the account rows it describes (a patient
     deleting their account does not erase the fact that a therapist read
-    their patterns last week)."""
+    their patterns last week).
+
+    2026-09-26 audit item 16: forward hash chain for tamper evidence. The
+    chain scope is ONE PATIENT (user_id): each new row's prev_hash is the
+    entry_hash of that patient's previous row and entry_hash = SHA-256 over
+    (prev_hash, actor_id, user_id, action, occurred_at) in a canonical
+    encoding — see app/api/_audit.py for the one implementation both
+    writers and verification use. Scope rationale: the patient's access
+    trail is the compliance artifact that must survive every other row's
+    deletion (accounts cascade away; audit rows deliberately do not), and a
+    per-patient chain keeps verification a single patient-scoped walk — an
+    actor deleting THEIR account can never break a patient's chain, and a
+    compromised database cannot rewrite one patient's history without
+    recomputing every later hash in that same chain. chain_seq is the
+    per-patient insertion order assigned by the append helper; a retention
+    sweep may prune the OLDEST rows (a pruned prefix is accepted by
+    verification, which anchors on the oldest surviving row).
+
+    New rows are appended exclusively through security.audit_chain
+    .append_access_log (every historical insert site routes through it);
+    the columns below are otherwise write-once.
+    """
 
     __tablename__ = "access_log"
     __table_args__ = (
@@ -445,6 +493,14 @@ class AccessLog(Base):
         # Retention sweeps are time-leading DELETEs; actor/user-leading
         # indexes cannot efficiently find the oldest rows globally.
         Index("ix_access_log_at", "at"),
+        # Chain traversal: one patient's rows in insertion order, UNIQUE per
+        # patient — the database-side backstop that makes concurrent seq
+        # assignment fail loudly instead of forking the chain (the in-process
+        # per-patient lock in app/api/_audit.py is the primary serializer).
+        # Declared as a unique INDEX, not a UniqueConstraint: the chain lands
+        # via ALTER on existing databases, and SQLite cannot add constraints
+        # post-hoc — a unique index enforces identically on both engines.
+        Index("uq_access_log_user_chain_seq", "user_id", "chain_seq", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -454,6 +510,54 @@ class AccessLog(Base):
     user_id: Mapped[str] = mapped_column(String(32))  # the patient whose data it concerns
     # "grant" | "revoke" | "read_insights" | "read_entries" | "read_notes" |
     # "write_note" | "update_note" | "delete_note" | "read_measures" |
-    # "list_patients" (one row per listed patient, audit fix H-14)
+    # "delete_measure" | "list_patients" (one row per listed patient, audit
+    # fix H-14) | self-lifecycle actions (wrap_key_rotate,
+    # credential_rotated, account_deleted, totp_*, ...)
     action: Mapped[str] = mapped_column(String(32))
     at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    # Forward chain (item 16). prev_hash is the previous row's entry_hash
+    # for the same patient (NULL on a genesis row). entry_hash is the row's
+    # own seal. Pre-existing rows are backfilled deterministically by the
+    # c3e9f2a6b8d4 migration (documented genesis backfill).
+    chain_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
+    prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class RekeyJournal(Base):
+    """Resumable progress record for POST /processing/rekey (2026-09-26
+    audit item 11).
+
+    The rekey used to hold ONE transaction across every batch's CPU work;
+    it now commits each batch in a short transaction and journals the
+    cursor here, atomically with the batch's blob rewrites. A rekey that
+    dies mid-way (process crash, DB failure) leaves a partially rotated
+    account plus this row; the client's retry resumes from the cursor
+    instead of re-walking the corpus, and rows already under the NEW key
+    are authenticated with it and skipped (the loop's idempotency rule).
+    The row is deleted in the same transaction that bumps the collection
+    revisions at completion, so its presence always means "an interrupted
+    rotation is resumable".
+    """
+
+    __tablename__ = "rekey_journal"
+    __table_args__ = (Index("ix_rekey_journal_user", "user_id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(32))
+    # "entries" | "insights" | "measures" | "done" — the stage whose INPUT
+    # cursor is stored; a resumed run continues from it.
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="entries")
+    entry_cursor: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    measure_cursor: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    entries_done: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    insights_done: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    measures_done: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)

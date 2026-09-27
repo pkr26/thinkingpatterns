@@ -35,10 +35,12 @@ vi.mock("../src/api", async (importOriginal) => {
       })),
       patientEntries: vi.fn(async () => ({ entries: [], nextOffset: null })),
       notes: vi.fn(async () => ({ notes: [], nextOffset: null })),
+      noteRevisions: vi.fn(async () => []),
       createNote: vi.fn(async () => ({})),
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
+      pairingSas: vi.fn(async () => ({ sas: "482 913", wrap_key_fingerprint: "a1b2c3d4e5f60718", expires_in: 900 })),
       patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
     },
   };
@@ -91,7 +93,7 @@ const { auth, api, ApiError } = await import("../src/api");
 const mockedAuth = vi.mocked(auth);
 const mockedApi = vi.mocked(api);
 const { LoginView, passwordPolicyError } = await import("../src/views/LoginView");
-const { PatientsView } = await import("../src/views/PatientsView");
+const { PatientsView, resetScanConfirmation } = await import("../src/views/PatientsView");
 const { PatientView } = await import("../src/views/PatientView");
 const mockedCrypto = vi.mocked(await import("../src/crypto"));
 const rtr = await import("./helpers/rtr");
@@ -130,6 +132,10 @@ beforeEach(() => {
   // L-75 (2026-09-20): delta anchors now live in per-tab sessionStorage
   // (the shim provides it), so tests that pin anchor behavior seed it there.
   window.sessionStorage.clear();
+  // 2026-09-26 audit round (M, UX copy): the scan confirmation's
+  // "don't ask again" latch is module state — every test starts un-asked,
+  // exactly like a fresh page load.
+  resetScanConfirmation();
 });
 
 describe("LoginView", () => {
@@ -322,6 +328,46 @@ describe("PatientsView", () => {
     expect(textOf(root)).toContain("7X2KQM4N");
   });
 
+  it("E (2026-09-26): entering the patient's id pulls the SAS beside the code, with compare-out-of-band copy", async () => {
+    const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush();
+    await press(root, "Generate pairing code");
+    await flush();
+    expect(textOf(root)).toContain("7X2KQM4N");
+    // The SAS block (and its field) appear only once a live code exists;
+    // the button stays disabled until the patient-supplied id is typed.
+    expect(buttonByLabel(root, "Show verification code")).toBe(true);
+    await typeInto(root, "Patient's account id (shown in their app)", "0123456789abcdef0123456789abcdef");
+    await press(root, "Show verification code");
+    await flush();
+    expect(mockedApi.pairingSas).toHaveBeenCalledWith("0123456789abcdef0123456789abcdef", "7X2KQM4N");
+    expect(textOf(root)).toContain("482 913");
+    expect(textOf(root)).toContain("a1b2c3d4e5f60718");
+    // The honest comparison instruction, including the stop-on-mismatch.
+    expect(textOf(root)).toContain("matches EXACTLY");
+    expect(textOf(root)).toContain("generate a new code and do not proceed");
+  });
+
+  it("E: a flat 404 on the SAS read explains the dead/unknown code; a fresh code retires the comparison", async () => {
+    mockedApi.pairingSas.mockRejectedValueOnce(new ApiError(404, "pairing code not found", "not_found"));
+    const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush();
+    await press(root, "Generate pairing code");
+    await flush();
+    await typeInto(root, "Patient's account id (shown in their app)", "0123456789abcdef0123456789abcdef");
+    await press(root, "Show verification code");
+    await flush();
+    expect(textOf(root)).toContain("pairing code not found or expired");
+    expect(textOf(root)).not.toContain("482 913");
+    // A new code is a NEW pairing session — the stale comparison (and its
+    // error) must not survive into it.
+    mockedApi.newPairingCode.mockResolvedValueOnce({ code: "ZZ99ZZ99", expires_in: 900 });
+    await press(root, "Generate pairing code");
+    await flush();
+    expect(textOf(root)).not.toContain("pairing code not found or expired");
+    expect(textOf(root)).not.toContain("482 913");
+  });
+
   it("lists active and stopped patients; open hands the patient up", async () => {
     const onOpen = vi.fn();
     mockedApi.patients.mockResolvedValueOnce([
@@ -389,13 +435,22 @@ describe("PatientsView", () => {
       <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session} />,
     );
     await flush();
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(6);
 
     expect([...firstKey]).toEqual(new Array(32).fill(0));
     expect([...secondKey]).toEqual(new Array(32).fill(0));
   });
 });
+
+/** 2026-09-26 audit round (M, UX copy): every scan begins with the one-time
+ *  confirmation naming the access footprint; this helper arms and confirms
+ *  it in one step (the confirmation's own copy/cancel/don't-ask behavior is
+ *  pinned in its own describe below). */
+async function startScan(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  await press(root, "Scan caseload for triage");
+  await press(root, "Start the triage scan");
+}
 
 /** 2026-09-17: cards render in REVIEW ORDER (sensitive/down-shifts lead),
  *  so tests open a specific card by title fragment instead of position. */
@@ -1062,6 +1117,92 @@ describe("PatientView recorded measures (MBC, 2026-09-19)", () => {
   });
 });
 
+/** Item 9 (clinical review 2026-09-27): an endorsed PHQ-9 item 9 mandates
+ *  clinical follow-up regardless of the total — the raw response rides
+ *  the payload now, and the measures card (plus the printed summary)
+ *  surfaces it as a bordered fact row. No score interpretation, no
+ *  diagnosis language; item9=0/absent and gad7 render nothing extra. */
+describe("PatientView item-9 surfacing (2026-09-27)", () => {
+  const insightsOk = (): void => {
+    mockedApi.patientInsights.mockResolvedValueOnce({
+      phase: "insight",
+      active_days: 45,
+      streak: 3,
+      days_remaining: 0,
+      blob: "BLOB==",
+      state_seq: 7,
+    } as never);
+  };
+  const oneMeasure = (reading: Record<string, unknown>): void => {
+    mockedApi.patientMeasures.mockResolvedValueOnce({
+      measures: [
+        { id: "1", client_measure_id: "m-1", blob: "B1==", measure_date: "2026-09-11", received_at: "x" },
+      ],
+      nextOffset: null,
+    } as never);
+    vi.mocked(mockedCrypto.decryptMeasure).mockResolvedValueOnce(reading as never);
+  };
+  const flagNodes = (root: Awaited<ReturnType<typeof rtr.render>>, type: "div" | "p", cls: string): number =>
+    root.root.findAllByType(type).filter((n) => String(n.props.className ?? "").split(/\s+/).includes(cls)).length;
+
+  it("an endorsed item 9 renders the bordered safety row on screen AND in the printed summary", async () => {
+    insightsOk();
+    oneMeasure({ measure: "phq9", score: 6, item9: 2, completedAt: "2026-09-11", measureDate: "2026-09-11" });
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    const text = rtr.textOf(root);
+    expect(text).toContain("Recorded measures (1)");
+    expect(text).toContain("2026-09-11: PHQ-9 item 9 endorsed (self-harm question)");
+    expect(text).toContain("follow your clinical protocol");
+    expect(text).toContain("C-SSRS follow-up recommended");
+    // Exactly one bordered row on screen and one in the print-only block.
+    expect(flagNodes(root, "div", "measure-flag")).toBe(1);
+    expect(flagNodes(root, "p", "print-flag")).toBe(1);
+    // A LOW total (6) next to the flag is the entire point: the item, not
+    // the score, drives follow-up — and no interpretation rides along.
+    expect(text).toContain("2026-09-11: 6");
+    expect(text).not.toMatch(/severe|moderate|mild depression/i);
+  });
+
+  it("item9 = 0 (explicitly unendorsed) renders nothing extra — the row is the fact, not the field", async () => {
+    insightsOk();
+    oneMeasure({ measure: "phq9", score: 20, item9: 0, completedAt: "2026-09-11", measureDate: "2026-09-11" });
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    expect(rtr.textOf(root)).not.toContain("item 9 endorsed");
+    expect(flagNodes(root, "div", "measure-flag")).toBe(0);
+    expect(flagNodes(root, "p", "print-flag")).toBe(0);
+  });
+
+  it("a legacy payload (item9 absent) renders exactly as before", async () => {
+    insightsOk();
+    oneMeasure({ measure: "phq9", score: 14, completedAt: "2026-09-11", measureDate: "2026-09-11" });
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    expect(rtr.textOf(root)).toContain("Recorded measures (1)");
+    expect(rtr.textOf(root)).not.toContain("item 9 endorsed");
+    expect(flagNodes(root, "div", "measure-flag")).toBe(0);
+  });
+
+  it("gad7 never shows the notice, even if the field somehow rides the reading", async () => {
+    insightsOk();
+    oneMeasure({ measure: "gad7", score: 5, item9: 2, completedAt: "2026-09-11", measureDate: "2026-09-11" });
+    const root = await rtr.render(
+      <PatientView patient={patient} session={session as never} onBack={vi.fn()} />,
+    );
+    await rtr.flush();
+    expect(rtr.textOf(root)).toContain("GAD-7 (anxiety): 2026-09-11: 5");
+    expect(rtr.textOf(root)).not.toContain("item 9 endorsed");
+    expect(flagNodes(root, "div", "measure-flag")).toBe(0);
+  });
+});
+
 /** Audit-fix regressions (2026-09-20): H-13, M-21, M-22, M-23, L-76,
  *  L-77, L-78, L-79, L-81, L-82. */
 describe("audit fixes 2026-09-20", () => {
@@ -1152,7 +1293,7 @@ describe("audit fixes 2026-09-20", () => {
       <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
     );
     await flush();
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(8);
     // The scan just decrypted the live payloads (6 patterns in the mock);
     // the stale summary's count must not shadow it, and its undated "4
@@ -1379,6 +1520,27 @@ describe("audit fixes 2026-09-20", () => {
     expect(textOf(root)).toContain("read ? on days 'family' appears");
     expect(textOf(root)).not.toContain("read higher on days 'family' appears");
   });
+
+  it("L-82 (2026-09-26 round): link and mood_shift without a direction render the honest unknown too", async () => {
+    // The already-fixed mood_correlation arm had two neighbors still
+    // fabricating a clinical direction: `?? "lower"` invented a down-shift
+    // for an undefined direction. Both must read "?" like mood_correlation.
+    vi.mocked(mockedCrypto.decryptInsights).mockResolvedValueOnce({
+      state_seq: 7,
+      stats: {
+        patterns: [
+          { kind: "link", label: "sleep", occurrences: 5, confidence: 0.6, detail: { lag_days: 2, pattern_pid: "link:sleep", evidence_dates: [] } },
+          { kind: "mood_shift", label: "", occurrences: 1, confidence: 0.3, detail: { pattern_pid: "mood_shift:none", evidence_dates: [] } },
+        ],
+      },
+    } as never);
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    expect(textOf(root)).toContain("About 2 day(s) after 'sleep' comes up, entries read ?");
+    expect(textOf(root)).not.toContain("entries read lower");
+    expect(textOf(root)).toContain("Entries have read ? than the patient's own baseline");
+    expect(textOf(root)).not.toContain("read lower than the patient's own baseline");
+  });
 });
 
 // --- Audit round 2 (2026-09-21): F-8 banner fold + F-11 unpinned fixes --------
@@ -1422,7 +1584,7 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
       second,
     ]);
     expect(textOf(root)).toContain("1 of your patients has a sensitive card");
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(8);
     // The target's scan failed (patterns -1): the banner must keep counting
     // the server summary's flag, exactly like the per-row display does.
@@ -1441,7 +1603,7 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
       second,
     ]);
     expect(textOf(root)).not.toContain("sensitive card");
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(8);
     expect(textOf(root)).toContain("1 of your patients has a sensitive card");
   });
@@ -1457,7 +1619,7 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
       second,
     ]);
     expect(textOf(root)).toContain("1 of your patients has a sensitive card");
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(8);
     expect(textOf(root)).not.toContain("of your patients");
   });
@@ -1482,14 +1644,14 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
         .mockResolvedValueOnce({ state_seq: 3, stats: sensitiveScan.stats } as never)
         .mockResolvedValueOnce({ state_seq: 7, stats: calmScan.stats } as never);
       const root = await view([{ ...patient }, second]);
-      await press(root, "Scan caseload for triage");
+      await startScan(root);
       await flush(8);
       // First scan at generation 5 lands the quiet pattern count.
       expect(textOf(root)).toContain("1 pattern");
       // A server replaying generation 3 (below the session's high-water
       // mark) must NOT feed its sensitive flag into the sort/banner — the
       // row degrades to the honest could-not-scan blank instead.
-      await press(root, "Scan caseload for triage");
+      await startScan(root);
       await flush(8);
       expect(textOf(root)).not.toContain("sensitive card");
       // Two patients scanned twice: four insight fetches total.
@@ -1505,7 +1667,7 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
       .mockResolvedValueOnce(calmScan as never);
     const root = await view([{ ...patient }, second]);
     expect(textOf(root)).not.toContain("sensitive card");
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(8);
     // No summary ever decrypted; the scan row is the only evidence.
     expect(textOf(root)).toContain("1 of your patients has a sensitive card");
@@ -1561,7 +1723,7 @@ describe("PatientsView caseload ordering (audit round 2, 2026-09-21, F-11)", () 
     // No scan yet: triage falls back to newest-share order.
     expect(namesInOrder(root)).toEqual(["patienta", "patientc", "patientb"]);
 
-    await press(root, "Scan caseload for triage");
+    await startScan(root);
     await flush(8);
     // With the scan: sensitive b first, then c (6 unreviewed) over a (2) —
     // a different order than every branch above, so the sort truly fired.
@@ -1590,5 +1752,225 @@ describe("PatientView per-context note drafts (audit round 2, 2026-09-21, F-11)"
 
     await openCard(root, "temporal — work");
     expect(draftValue(root, "Note about this pattern…")).toBe("pattern draft");
+  });
+});
+
+// --- 2026-09-26 audit round (portal): scan footprint confirmation, dead-view
+// cancellation, honest history failure, idempotent note creation --------------
+
+describe("PatientsView triage-scan confirmation (2026-09-26 audit round, M/UX)", () => {
+  const second = { ...patient, user_id: "user-2", username: "patientb" };
+  const view = async (pts: unknown[]) => {
+    mockedApi.patients.mockResolvedValueOnce(pts as never);
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    return root;
+  };
+
+  it("the first press asks instead of scanning, naming the access footprint in plain language", async () => {
+    const root = await view([{ ...patient }, second]);
+    await press(root, "Scan caseload for triage");
+    await flush();
+    // Nothing was fetched yet — no audit rows exist.
+    expect(mockedApi.patientInsights).not.toHaveBeenCalled();
+    // The footprint is named: full pattern data, one audit entry per patient.
+    expect(textOf(root)).toContain("downloads and decrypts every active patient's pattern data");
+    expect(textOf(root)).toContain("one request and one audit entry per patient");
+    expect(buttonByLabel(root, "Start the triage scan")).toBe(true);
+    expect(buttonByLabel(root, "Cancel")).toBe(true);
+  });
+
+  it("Cancel disarms the confirmation without scanning", async () => {
+    const root = await view([{ ...patient }, second]);
+    await press(root, "Scan caseload for triage");
+    await press(root, "Cancel");
+    await flush();
+    expect(mockedApi.patientInsights).not.toHaveBeenCalled();
+    expect(textOf(root)).not.toContain("one audit entry per patient");
+    // And the button re-arms the confirmation, not the scan.
+    await press(root, "Scan caseload for triage");
+    expect(mockedApi.patientInsights).not.toHaveBeenCalled();
+    expect(buttonByLabel(root, "Start the triage scan")).toBe(true);
+  });
+
+  it("'don't ask again' lasts for the browser session only (module state, never storage)", async () => {
+    const root = await view([{ ...patient }, second]);
+    await press(root, "Scan caseload for triage");
+    // Tick the session-scoped latch, then start.
+    const box = root.root.findAllByType("input").find((n) => n.props["aria-label"] === "Do not ask again in this browser session");
+    expect(box).toBeTruthy();
+    await act(async () => { box!.props.onChange({ target: { checked: true } }); });
+    await press(root, "Start the triage scan");
+    await flush(8);
+    expect(mockedApi.patientInsights).toHaveBeenCalledTimes(2);
+
+    // A fresh mount in the SAME session skips the question…
+    const root2 = await view([{ ...patient }, second]);
+    await press(root2, "Scan caseload for triage");
+    await flush(8);
+    expect(buttonByLabel(root2, "Start the triage scan")).toBe(false);
+    expect(mockedApi.patientInsights).toHaveBeenCalledTimes(4);
+    // …and nothing was persisted to any storage.
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+});
+
+describe("PatientsView dead-view cancellation (2026-09-26 audit round, M)", () => {
+  const second = { ...patient, user_id: "user-2", username: "patientb" };
+
+  it("unmounting mid-scan stops the per-patient fetch/decrypt loop", async () => {
+    let resolveFirst!: (value: unknown) => void;
+    mockedApi.patients.mockResolvedValueOnce([{ ...patient }, second] as never);
+    mockedApi.patientInsights.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFirst = resolve; }) as never,
+    );
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    await press(root, "Scan caseload for triage");
+    await press(root, "Start the triage scan");
+    await flush();
+    expect(mockedApi.patientInsights).toHaveBeenCalledTimes(1);
+
+    // Navigate away while the first patient's insights fetch is parked.
+    await act(async () => { root.unmount(); });
+    resolveFirst({ phase: "insight", active_days: 1, streak: 1, days_remaining: 0, blob: "B==", state_seq: 7 });
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    // The stale loop bailed before the SECOND patient: no further fetch
+    // (each one would write a server audit row), and no decrypt ran.
+    expect(mockedApi.patientInsights).toHaveBeenCalledTimes(1);
+    expect(mockedCrypto.decryptInsights).not.toHaveBeenCalled();
+  });
+
+  it("unmounting mid-summary-decrypt stops the decrypt loop before the next patient", async () => {
+    let resolveFirst!: (value: unknown) => void;
+    mockedApi.patients.mockResolvedValueOnce([
+      { ...patient, summary_blob: "SB==", summary_eph_pub: "SE==" },
+      { ...patient, user_id: "user-2", username: "patientb", summary_blob: "SB2==", summary_eph_pub: "SE2==" },
+    ] as never);
+    mockedCrypto.decryptCaseloadSummary.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveFirst = resolve; }) as never,
+    );
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} session={session as never} />,
+    );
+    await flush();
+    expect(mockedCrypto.decryptCaseloadSummary).toHaveBeenCalledTimes(1);
+
+    await act(async () => { root.unmount(); });
+    resolveFirst(null);
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => { await Promise.resolve(); });
+    }
+    // The cancelled effect never decrypts the second patient's summary.
+    expect(mockedCrypto.decryptCaseloadSummary).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PatientView note history decrypt failure (2026-09-26 audit round, L)", () => {
+  it("a revision blob that fails to decrypt is NOT rendered as 'no earlier text recorded'", async () => {
+    // One edited note; the live blob decrypts, the revision blob does not
+    // (the cross-key/corrupt-history case the audit found).
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-12T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    mockedApi.noteRevisions.mockResolvedValueOnce([
+      { id: "r1", blob: "CORRUPT", created_at: "2026-09-11T00:00:00Z" },
+    ]);
+    mockedCrypto.decryptNote
+      .mockResolvedValueOnce("live note text")
+      .mockRejectedValueOnce(new Error("blob failed authentication"));
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush(6);
+
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await press(root, "View history");
+      await flush(8);
+      expect(textOf(root)).toContain("(earlier versions could not be decrypted)");
+      expect(textOf(root)).not.toContain("no earlier text recorded");
+      // And the failure is logged, not silently swallowed.
+      expect(warned).toHaveBeenCalledWith("note history failed to decrypt", expect.objectContaining({ noteId: "n0" }));
+      // The print-only summary is equally honest about the failure.
+      const printOnly = root.root.findAllByType("div").find((n) => n.props.className === "print-only");
+      expect(rtr.textOfNode(printOnly!)).toContain("(earlier versions could not be decrypted)");
+    } finally {
+      warned.mockRestore();
+    }
+  });
+});
+
+describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () => {
+  it("a failed save retries with the SAME client_note_id; success produces exactly one note; the next note mints a fresh id", async () => {
+    const noteRow = (id: string, clientNoteId: string) => ({
+      id, client_note_id: clientNoteId, pattern_pid: null, blob: "b",
+      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
+    });
+    // First attempt: timeout-shaped failure. Retry: the backend's
+    // idempotent-retry answer (the existing row).
+    mockedApi.createNote
+      .mockRejectedValueOnce(new Error("request timed out"))
+      .mockResolvedValueOnce(noteRow("n1", "captured-at-send"))
+      .mockResolvedValueOnce(noteRow("n2", "captured-at-send-2"));
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+
+    await typeTextarea(root, "Note about this patient…", "Session note text.");
+    await press(root, "Save note");
+    await flush();
+    expect(textOf(root)).toContain("request timed out");
+    // The draft survives a failed save; the user presses Save again.
+    await press(root, "Save note");
+    await flush();
+    expect(textOf(root)).toContain("Session note text.");
+
+    const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls[0]![1].client_note_id).toBe(calls[1]![1].client_note_id);
+    // Exactly one note rendered in the interactive notes card — the retry
+    // rewrote nothing. (The print-only summary mirrors the note too; scope
+    // the count to the interactive card's .note paragraphs.)
+    const onScreenNotes = root.root.findAllByType("p").filter(
+      (n) => String(n.props.className ?? "").split(" ").includes("note")
+        && rtr.textOfNode(n).includes("Session note text."),
+    );
+    expect(onScreenNotes.length).toBe(1);
+
+    // A NEW note after a successful save mints a fresh id.
+    await typeTextarea(root, "Note about this patient…", "Second session note.");
+    await press(root, "Save note");
+    await flush();
+    const third = (mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][])[2]!;
+    expect(third![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+  });
+
+  it("a 409 conflict burns the id — the next attempt mints a fresh one", async () => {
+    mockedApi.createNote
+      .mockRejectedValueOnce(new ApiError(409, "note id already used for another patient", "conflict"))
+      .mockResolvedValueOnce({
+        id: "n1", client_note_id: "fresh", pattern_pid: null, blob: "b",
+        created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
+      });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await typeTextarea(root, "Note about this patient…", "Conflict then retry.");
+    await press(root, "Save note");
+    await flush();
+    expect(textOf(root)).toContain("note id already used for another patient");
+    // The conflicted id is burned: the retry mints a fresh one and lands.
+    await press(root, "Save note");
+    await flush();
+    const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
+    expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+    expect(textOf(root)).toContain("Conflict then retry.");
   });
 });

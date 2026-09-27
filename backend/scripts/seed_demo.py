@@ -124,8 +124,15 @@ NEGATIVE = [
 ]
 
 
-def build_corpus(end: date, days: int, seed: int) -> list[dict]:
-    """A deterministic journal with realistic planted structure."""
+def build_corpus(end: date, days: int, seed: int, long_mode: bool = False) -> list[dict]:
+    """A deterministic journal with realistic planted structure.
+
+    ``long_mode`` (--long, 2026-09-26 statistical review item 18): seeds a
+    220-day corpus so the 180-day analysis window genuinely ROTATES (the
+    first ~40 days slide out from under the recompute), and plants an
+    EARLY-ONLY worry phrase plus early activity tags whose patterns age
+    out of the window and ride the full lifecycle (fading -> archived ->
+    dropped) — the eviction paths a 30/84-day demo never exercises."""
     rng = random.Random(seed)
     start = end - timedelta(days=days - 1)
 
@@ -166,6 +173,16 @@ def build_corpus(end: date, days: int, seed: int) -> list[dict]:
         worry_days.add(day)
         day += timedelta(days=6 + rng.randrange(2))
 
+    # --long: a worry that only exists in the corpus's FIRST month — by the
+    # final recompute it has rotated out of the 180-day window entirely,
+    # exercising the fading/archived/dropped eviction ladder.
+    early_worry_days: set[date] = set()
+    if long_mode:
+        day = start + timedelta(days=3)
+        while day <= start + timedelta(days=28):
+            early_worry_days.add(day)
+            day += timedelta(days=5 + rng.randrange(2))
+
     # Rising topic schedule: a tiny early base, ~11 mentions in the last
     # six weeks (every other day, skipping Wednesdays).
     guitar_days = set()
@@ -188,6 +205,7 @@ def build_corpus(end: date, days: int, seed: int) -> list[dict]:
             or day in worry_days
             or day in guitar_days
             or day in guitar_early
+            or day in early_worry_days
         )
         # Planted days always write (the demo's structure must not be
         # gambled away by the skip draw); filler days skip like a real user.
@@ -208,6 +226,16 @@ def build_corpus(end: date, days: int, seed: int) -> list[dict]:
                 text += ". visited the family, mom and dad were there"
             if day in worry_days:
                 text += ". " + rng.choice(SLEEP_WORRY)
+            if day in early_worry_days:
+                # --long: the rotating-out worry (varied so it clusters as
+                # one recurring thought across its month).
+                text += ". " + rng.choice(
+                    [
+                        "the move is stressing me out, so many boxes left",
+                        "the move stresses me out, boxes everywhere still",
+                        "stressed about the move, the boxes never end",
+                    ]
+                )
             if day in guitar_early:
                 text += ". messed around on the guitar for a bit"
             if day in guitar_days:
@@ -218,7 +246,13 @@ def build_corpus(end: date, days: int, seed: int) -> list[dict]:
                 text += ". " + rng.choice(POSITIVE)
             elif m < -0.35:
                 text += ". " + rng.choice(NEGATIVE)
-            entries.append({"text": text, "date": day.isoformat(), "sentiment": round(m, 3)})
+            item = {"text": text, "date": day.isoformat(), "sentiment": round(m, 3)}
+            # --long: early-phase activity tags that stop once the phase
+            # passes — their activity-diversity evidence ages with the
+            # window rotation.
+            if long_mode and start <= day <= start + timedelta(days=35):
+                item["tags"] = [rng.choice(("renovation", "painting", "declutter"))]
+            entries.append(item)
         day += timedelta(days=1)
     return entries
 
@@ -238,11 +272,23 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=84)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument(
+        "--long",
+        action="store_true",
+        help=(
+            "seed a 220-day corpus instead: the 180-day analysis window "
+            "rotates (early days slide out), and an early-only worry plus "
+            "early activity tags exercise the fading -> archived -> dropped "
+            "eviction ladder (2026-09-26 statistical review, item 18)"
+        ),
+    )
+    parser.add_argument(
         "--db-url",
         default=None,
         help="SQLAlchemy URL of the API database — needed once to backdate the demo account's created_at (see below)",
     )
     args = parser.parse_args()
+    if args.long:
+        args.days = 220
     if args.password is None:
         args.password = getpass.getpass(f"password for demo account {args.username!r}: ")
     if not args.password:
@@ -321,14 +367,17 @@ def main() -> int:
     corpus = build_corpus(date.today(), args.days, args.seed)
     print(f"seeding {len(corpus)} encrypted entries over {args.days} days…")
     for item in corpus:
-        payload = json.dumps(
-            {
-                "v": 1,
-                "text": item["text"],
-                "sentiment": item["sentiment"],
-                "created_at": item["date"],
-            }
-        ).encode()
+        entry_payload: dict = {
+            "v": 1,
+            "text": item["text"],
+            "sentiment": item["sentiment"],
+            "created_at": item["date"],
+        }
+        if item.get("tags"):
+            # --long: the early-phase activity tags (the structured channel
+            # the mobile app sends; the parser reads it from any payload).
+            entry_payload["tags"] = list(item["tags"])
+        payload = json.dumps(entry_payload).encode()
         blob = crypto.encrypt(
             data_key,
             payload,

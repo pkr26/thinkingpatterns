@@ -1,13 +1,16 @@
 /**
  * Therapist sharing (WEB_PLAN P7.2): the patient side of the zero-knowledge
- * consent. Pairing shows the therapist's NAME and their key FINGERPRINT —
- * the out-of-band check (read it back to each other; a matching fingerprint
- * is the human proof the key was not substituted). Granting requires BOTH
- * attestations — an explicit "fingerprints matched" confirmation (mobile
- * C-7 parity, fix W-4, audit 2026-09-25) and the disclosure terms — then
- * wraps the data key to the therapist's public key (ECDH→HKDF→AES-GCM)
- * with the password-derived verifier: a stolen token cannot share. Revoke
- * is verifier-gated too and says plainly what revocation can and cannot do.
+ * consent. Pairing shows the therapist's NAME, their key FINGERPRINT, and
+ * — since the 2026-09-26 wave — the pairing session's SAS ("123 456") plus
+ * the server's wrap-key fingerprint: the out-of-band checks the two humans
+ * read to each other (a matching SAS is the human proof the key was not
+ * substituted; the therapist's portal derives the identical string for the
+ * same live pairing session). Granting requires BOTH attestations — an
+ * explicit "fingerprints matched" confirmation (mobile C-7 parity, fix
+ * W-4, audit 2026-09-25) and the disclosure terms — then wraps the data
+ * key to the therapist's public key (ECDH→HKDF→AES-GCM) with the
+ * password-derived verifier: a stolen token cannot share. Revoke is
+ * verifier-gated too and says plainly what revocation can and cannot do.
  *
  * Redesign 2026-09-26: styled checkboxes, the fingerprint in a mono block
  * with a copy affordance, grants as cards with initials avatars, and a
@@ -24,7 +27,17 @@ import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Icon, Note, PillNot
 export function ShareView(): React.JSX.Element {
   const [consents, setConsents] = useState<ListedConsent[] | null>(null);
   const [code, setCode] = useState("");
-  const [lookup, setLookup] = useState<{ name: string; fingerprint: string; therapistId: string; wrapPubKey: string } | null>(null);
+  const [lookup, setLookup] = useState<{
+    name: string;
+    fingerprint: string;
+    therapistId: string;
+    wrapPubKey: string;
+    /** SAS verification (2026-09-26): both null on a backend predating
+     *  the wave — the block simply hides (the local fingerprint check,
+     *  computed below, stays either way). */
+    sas: string | null;
+    serverFingerprint: string | null;
+  } | null>(null);
   const [disclosureAccepted, setDisclosureAccepted] = useState(false);
   const [fingerprintVerified, setFingerprintVerified] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -74,6 +87,10 @@ export function ShareView(): React.JSX.Element {
         therapistId: found.therapist_id,
         wrapPubKey: found.wrap_pub_key,
         fingerprint: await keyFingerprint(found.wrap_pub_key),
+        // Server-provided comparison strings (optional fields): strings or
+        // nothing — anything else degrades to hidden, never a broken render.
+        sas: typeof found.sas === "string" ? found.sas : null,
+        serverFingerprint: typeof found.wrap_key_fingerprint === "string" ? found.wrap_key_fingerprint : null,
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) setError(t("share.webCodeExpired"));
@@ -149,6 +166,26 @@ export function ShareView(): React.JSX.Element {
         {lookup && (
           <>
             <Note role="status">{t("share.webTherapist", { name: lookup.name })}</Note>
+            {/* SAS out-of-band verification (2026-09-26): the therapist's
+                portal derives the SAME "123 456" for this live pairing
+                session and shows it beside their own code entry. The two
+                humans compare by voice; a mismatch means the key was
+                substituted — do not continue. The patient's own account id
+                rides along: it is the input the therapist's portal needs to
+                pull up the same SAS (an opaque random id, safe to read
+                aloud). */}
+            {lookup.sas && (
+              <div className="stack" style={{ gap: "var(--space-1)" }}>
+                <span className="fingerprint">{lookup.sas}</span>
+                {lookup.serverFingerprint && (
+                  <Note tone="muted">{t("share.webSasKeyLabel", { fingerprint: lookup.serverFingerprint })}</Note>
+                )}
+                {vault.ownerUserId() && (
+                  <Note tone="muted">{t("share.webSasOwnId", { id: vault.ownerUserId()! })}</Note>
+                )}
+                <Note tone="warn">{t("share.webSasCompareNote")}</Note>
+              </div>
+            )}
             <div className="stack" style={{ gap: "var(--space-1)" }}>
               <span className="fingerprint">{lookup.fingerprint}</span>
               <span className="row" style={{ gap: 8 }}>

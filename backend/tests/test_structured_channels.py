@@ -20,6 +20,12 @@ from app.services.patterns import JournalEntry
 T0 = date(2026, 9, 17)
 
 
+def _wobble(i: int) -> float:
+    """Deterministic +-0.05 jitter (item 7, 2026-09-26: exactly constant
+    groups now fail the Welch test closed — planted moods need spread)."""
+    return 0.05 if i % 2 == 0 else -0.05
+
+
 def _run_twice(
     corpus: list[JournalEntry], today: date, extra: list[JournalEntry] | None = None
 ) -> brain.BrainUpdate:
@@ -54,32 +60,38 @@ class TestSleepChannel:
             )
             # The MOOD lives in the entry of the FOLLOWING day: planted via
             # the client sentiment field the way the real app plants it.
-        # second pass: set mood on the day AFTER each poor night
+        # second pass: set the mood of EVERY day: low (-0.45 +- wobble)
+        # on the day after a poor night, ordinary (0.1 +- wobble) on the
+        # rest. The wobble keeps both groups non-constant (item 7).
         by_date = {e.entry_date: e for e in entries}
         for ago in range(days, 0, -1):
             day = T0 - timedelta(days=ago)
-            poor = ago % 3 == 0
-            if poor:
-                nxt = by_date.get(day + timedelta(days=1))
-                if nxt is not None:
-                    nxt_sentiment = -0.45
-                    by_date[day + timedelta(days=1)] = JournalEntry(
-                        text=nxt.text,
-                        entry_date=nxt.entry_date,
-                        sentiment=nxt_sentiment,
-                        sleep_quality=nxt.sleep_quality,
-                        tags=nxt.tags,
-                        energy=nxt.energy,
-                    )
+            poor = ago % 3 == 2  # the PREVIOUS night (ago % 3 == 0) was poor
+            sentiment = (-0.45 if poor else 0.1) + _wobble(ago)
+            e = by_date[day]
+            by_date[day] = JournalEntry(
+                text=e.text,
+                entry_date=e.entry_date,
+                sentiment=sentiment,
+                sleep_quality=e.sleep_quality,
+                tags=e.tags,
+                energy=e.energy,
+            )
         return sorted(by_date.values(), key=lambda e: e.entry_date)
 
     def test_poor_sleep_next_day_link_surfaces(self):
         corpus = self._planted()
         extra = [
             JournalEntry(
-                "fresh night one", T0 + timedelta(days=1), sentiment=None, sleep_quality=2
+                "fresh night one", T0 + timedelta(days=1), sentiment=-0.5, sleep_quality=2
             ),
-            JournalEntry("low day after", T0 + timedelta(days=2), sentiment=-0.5, sleep_quality=4),
+            JournalEntry("low day after", T0 + timedelta(days=2), sentiment=-0.45, sleep_quality=4),
+            JournalEntry(
+                "fresh night two", T0 + timedelta(days=3), sentiment=-0.5, sleep_quality=2
+            ),
+            JournalEntry(
+                "second low day", T0 + timedelta(days=4), sentiment=-0.55, sleep_quality=4
+            ),
         ]
         result = _run_twice(corpus, T0, extra=extra)
         links = [
@@ -96,9 +108,15 @@ class TestSleepChannel:
         corpus = self._planted()
         extra = [
             JournalEntry(
-                "fresh night one", T0 + timedelta(days=1), sentiment=None, sleep_quality=2
+                "fresh night one", T0 + timedelta(days=1), sentiment=-0.5, sleep_quality=2
             ),
-            JournalEntry("low day after", T0 + timedelta(days=2), sentiment=-0.5, sleep_quality=4),
+            JournalEntry("low day after", T0 + timedelta(days=2), sentiment=-0.45, sleep_quality=4),
+            JournalEntry(
+                "fresh night two", T0 + timedelta(days=3), sentiment=-0.5, sleep_quality=2
+            ),
+            JournalEntry(
+                "second low day", T0 + timedelta(days=4), sentiment=-0.55, sleep_quality=4
+            ),
         ]
         result = _run_twice(corpus, T0, extra=extra)
         links = [p for p in result.surfaced if p.detail.get("channel") == "sleep_quality"]
@@ -142,7 +160,7 @@ class TestTagChannel:
                 JournalEntry(
                     text="ordinary day with plain words about tea",
                     entry_date=day,
-                    sentiment=(-0.5 if family else 0.25),
+                    sentiment=((-0.5 if family else 0.25) + _wobble(ago)),
                     tags=("family",) if family else (),
                 )
             )
@@ -154,6 +172,10 @@ class TestTagChannel:
                 "fresh family day", T0 + timedelta(days=1), sentiment=-0.5, tags=("family",)
             ),
             JournalEntry("fresh ordinary day", T0 + timedelta(days=2), sentiment=0.25),
+            JournalEntry(
+                "another family day", T0 + timedelta(days=3), sentiment=-0.55, tags=("family",)
+            ),
+            JournalEntry("another ordinary day", T0 + timedelta(days=4), sentiment=0.2),
         ]
         result = _run_twice(self._planted(), T0, extra=extra)
         tagged = [
@@ -241,6 +263,8 @@ class TestAvoidance:
         extra = [
             JournalEntry("conflict at dinner again", T0 + timedelta(days=1)),
             JournalEntry("quiet day", T0 + timedelta(days=4)),
+            JournalEntry("conflict at dinner once more", T0 + timedelta(days=5)),
+            JournalEntry("quiet day again", T0 + timedelta(days=8)),
         ]
         result = _run_twice(corpus, T0, extra=extra)
         cards = [p for p in result.surfaced if p.kind == "avoidance"]
@@ -363,7 +387,9 @@ class TestPersonAnchoring:
                 if with_maria
                 else "quiet errands and a long walk by the water"
             )
-            entries.append(JournalEntry(text, day, sentiment=(-0.5 if with_maria else 0.3)))
+            entries.append(
+                JournalEntry(text, day, sentiment=(-0.5 if with_maria else 0.3) + _wobble(ago))
+            )
         return entries, "maria"
 
     def test_recurring_name_becomes_a_theme_with_mood_ties(self):
@@ -371,6 +397,8 @@ class TestPersonAnchoring:
         extra = [
             JournalEntry("dinner with Maria tonight", T0 + timedelta(days=1), sentiment=-0.5),
             JournalEntry("plain tuesday", T0 + timedelta(days=2), sentiment=0.3),
+            JournalEntry("coffee with Maria again", T0 + timedelta(days=3), sentiment=-0.55),
+            JournalEntry("plain wednesday", T0 + timedelta(days=4), sentiment=0.25),
         ]
         result = _run_twice(corpus, T0, extra=extra)
         cards = [p for p in result.surfaced if p.label == name]
@@ -402,12 +430,16 @@ class TestQuestionFeedbackLoop:
                 "fresh family day", T0 + timedelta(days=1), sentiment=-0.5, tags=("family",)
             ),
             JournalEntry("fresh ordinary day", T0 + timedelta(days=2), sentiment=0.25),
+            JournalEntry(
+                "another family day", T0 + timedelta(days=3), sentiment=-0.55, tags=("family",)
+            ),
+            JournalEntry("another ordinary day", T0 + timedelta(days=4), sentiment=0.2),
         ]
         first = brain.update(brain.load_state(None), corpus, T0)
         result = brain.update(
             brain.load_state(brain.dump_state(first.new_state)),
             corpus + extra,
-            T0 + timedelta(days=2),
+            T0 + timedelta(days=4),
         )
         assert any(p.kind == "mood_correlation" and p.label == "family" for p in result.surfaced)
         return corpus + extra, result

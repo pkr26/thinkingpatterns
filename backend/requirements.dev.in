@@ -2,6 +2,7 @@
 # development install artifact; it is hash-checked just like production.
 -r requirements.in
 
+hypothesis==6.168.2
 mypy==2.3.1
 mutmut==2.4.4
 pip-audit==2.10.1

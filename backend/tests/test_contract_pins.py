@@ -108,16 +108,37 @@ def test_crypto_error_messages_are_part_of_the_contract():
 
 
 def test_token_body_is_compact_sorted_json():
+    """The wire format stays compact sorted JSON with a FIXED field set
+    (2026-09-26: jti/purpose/ksv joined ep/exp/iat/uid). The jti is random
+    per token, so the pin checks the exact key set and every deterministic
+    field, plus the jti's pinned 32-lowercase-hex shape, instead of raw
+    bytes."""
+    import re
+
     token = tokens.issue_token("u1", "secret", 60, now=1000.0)
     body, _ = token.split(".")
     padded = body + "=" * (-len(body) % 4)
     decoded = base64.urlsafe_b64decode(padded)
-    # "ep" is the revocation epoch — logout bumps it account-wide.
-    assert decoded == b'{"ep":1,"exp":1060,"iat":1000,"uid":"u1"}'
+    assert decoded.startswith(b'{"ep":1,"exp":1060,"iat":1000,"jti":"')
+    payload = json.loads(decoded)
+    # "ep" is the revocation epoch — the GLOBAL kill switch (credential
+    # rotation, deletion); logout itself is per-token via "jti" now.
+    assert payload["ep"] == 1
+    assert payload["exp"] == 1060
+    assert payload["iat"] == 1000
+    assert payload["uid"] == "u1"
+    assert payload["purpose"] == "patient"
+    assert payload["ksv"] == 1
+    assert re.fullmatch(r"[0-9a-f]{32}", payload["jti"])
+    assert set(payload) == {"ep", "exp", "iat", "uid", "jti", "purpose", "ksv"}
+    # Compact separators, sorted keys, no padding drift: re-encoding the
+    # payload must reproduce the body byte-for-byte.
+    recanonical = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    assert decoded == recanonical
     token_ep5 = tokens.issue_token("u1", "secret", 60, now=1000.0, epoch=5)
     body5 = token_ep5.split(".")[0]
     decoded5 = base64.urlsafe_b64decode(body5 + "=" * (-len(body5) % 4))
-    assert decoded5 == b'{"ep":5,"exp":1060,"iat":1000,"uid":"u1"}'
+    assert json.loads(decoded5)["ep"] == 5
 
 
 def test_issue_token_rejects_non_positive_ttl():

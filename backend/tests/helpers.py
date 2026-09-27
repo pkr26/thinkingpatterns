@@ -142,6 +142,13 @@ class ClientEmulator:
         self.token = body["token"]
         return body
 
+    async def fetch_envelope(self, client: AsyncClient) -> dict:
+        """GET /auth/key-envelope — the account's key-scheme material (the
+        v2 unlock inputs; v1 answers nulls, see test_key_envelope_v2.py)."""
+        response = await client.get("/api/auth/key-envelope", headers=self.headers)
+        assert response.status_code == 200, response.text
+        return response.json()
+
     async def backdate_account(self, client: AsyncClient, days: int) -> None:
         """Move this account's created_at back *days* days.
 
@@ -592,6 +599,142 @@ def patient_wrap_for(patient: ClientEmulator, therapist_pub_b64: str, therapist_
 
 
 # ---------------------------------------------------------------------------
+# v2 key scheme (2026-09-26 crypto-architecture wave): a faithful mirror of
+# the v2 client — a RANDOM 32-byte data key wrapped under a KEK derived from
+# the password (security/envelope.py), registered through the v2 fields and
+# unwrapped after every login via GET /auth/key-envelope.
+# ---------------------------------------------------------------------------
+
+from app.security import envelope as envelope_crypto  # noqa: E402
+
+
+class EnvelopeClientEmulator(ClientEmulator):
+    """The v2 flow: register/login/unwrap/re-wrap, with the data key RANDOM
+    (never derived from the password) and the envelope re-wrapped on every
+    password change — the O(1) credential rotation this scheme exists for."""
+
+    def __init__(self, username: str, password: str, salt: bytes | None = None):
+        super().__init__(username, password, salt)
+        # The whole point: the data key is random and NEVER re-derived.
+        self.data_key = os.urandom(32)
+        self.kdf_params: dict[str, int | str] = dict(kdf.KDF_PARAMS_DEFAULT)
+
+    # ---- envelope construction (identical contract to the v2 client) ---------
+
+    def kek_for(self, password: str, salt: bytes) -> bytes:
+        master = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, FAST_ITERATIONS)
+        return envelope_crypto.envelope_kek(master, salt)
+
+    def wrap_for(self, password: str, salt: bytes) -> str:
+        """Wrap self.data_key under (password, salt) + the canonical params."""
+        blob = envelope_crypto.wrap_data_key(
+            self.data_key,
+            kek=self.kek_for(password, salt),
+            username=self.username,
+            kdf_params=self.kdf_params,
+            nonce=os.urandom(12),
+        )
+        return base64.b64encode(blob).decode("ascii")
+
+    def unwrap(self, wrapped_b64: str, password: str, salt: bytes) -> bytes:
+        return envelope_crypto.unwrap_data_key(
+            base64.b64decode(wrapped_b64),
+            kek=self.kek_for(password, salt),
+            username=self.username,
+            kdf_params=self.kdf_params,
+        )
+
+    # ---- API flows --------------------------------------------------------------
+
+    async def register(self, client: AsyncClient) -> dict:  # type: ignore[override]
+        response = await client.post(
+            "/api/auth/register",
+            json={
+                "username": self.username,
+                "salt": self.salt_b64,
+                "verifier": self.auth_key_b64,
+                "kdf_params": self.kdf_params,
+                "wrapped_data_key": self.wrap_for(self.password, self.salt),
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        self.user_id = body["user_id"]
+        self.token = body["token"]
+        return body
+
+    async def unlock(self, client: AsyncClient) -> bytes:
+        """Login -> fetch envelope -> unwrap locally (the full v2 unlock)."""
+        await self.login(client)
+        env = await self.fetch_envelope(client)
+        assert env["key_scheme"] == "v2"
+        data_key = self.unwrap(env["wrapped_data_key"], self.password, self.salt)
+        assert data_key == self.data_key  # the random key survived the round trip
+        return data_key
+
+    def rederive(self, password: str, salt: bytes | None = None) -> None:
+        """A v2 password change: NEW salt + master/auth keys, SAME data key."""
+        self.password = password
+        self.salt = salt or os.urandom(16)
+        self.master_key = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), self.salt, FAST_ITERATIONS
+        )
+        self.auth_key = kdf.derive_auth_key(self.master_key)
+        # data_key deliberately untouched — no rekey, no consent re-wrap.
+
+    async def change_password(self, client: AsyncClient, new_password: str) -> int:
+        """PUT /account/password — the O(1) v2 credential+envelope swap."""
+        old_auth_b64 = self.auth_key_b64
+        new_salt = os.urandom(16)
+        # Wrap FIRST with the OLD password still current is impossible server-
+        # side (the server cannot wrap); the client wraps under the NEW
+        # password locally before sending, exactly like the real client.
+        self.rederive(new_password, new_salt)
+        wrapped = self.wrap_for(new_password, new_salt)
+        response = await client.put(
+            "/api/account/password",
+            headers=self.headers,
+            json={
+                "verifier": old_auth_b64,
+                "new_salt": base64.b64encode(new_salt).decode("ascii"),
+                "new_verifier": self.auth_key_b64,
+                "wrapped_data_key": wrapped,
+            },
+        )
+        return response.status_code
+
+    async def upgrade_to_v2(
+        self, client: AsyncClient, verifier: str | None = None, key: bytes | None = None
+    ) -> int:
+        """POST /account/key-envelope/upgrade: open a processing session with
+        the account's CURRENT data key (possession proof), wrap it, upload.
+        ``key`` defaults to self.data_key — the v1-migration tests pass the
+        v1 emulator's password-DERIVED key explicitly."""
+        wrapped_key = key if key is not None else self.data_key
+        token = await self.open_processing_session_for(client, wrapped_key)
+        blob = envelope_crypto.wrap_data_key(
+            wrapped_key,
+            kek=self.kek_for(self.password, self.salt),
+            username=self.username,
+            kdf_params=self.kdf_params,
+            nonce=os.urandom(12),
+        )
+        response = await client.post(
+            "/api/account/key-envelope/upgrade",
+            headers={
+                **self.headers,
+                "X-Processing-Token": token,
+                "X-Account-Verifier": verifier or self.auth_key_b64,
+            },
+            json={
+                "kdf_params": self.kdf_params,
+                "wrapped_data_key": base64.b64encode(blob).decode("ascii"),
+            },
+        )
+        return response.status_code
+
+
+# ---------------------------------------------------------------------------
 # Added 2026-09-07 (additive only): the preferred verifier transport for
 # DELETE /account is the X-Account-Verifier header; the JSON body remains as
 # a deprecated fallback and keeps its coverage through delete_account() above.
@@ -606,3 +749,66 @@ async def delete_account_via_header(client: AsyncClient, emu: ClientEmulator) ->
         headers={**emu.headers, "X-Account-Verifier": emu.auth_key_b64},
     )
     return response.status_code
+
+
+# ---------------------------------------------------------------------------
+# Deterministic TOTP clock (2026-09-26 test-infrastructure audit, item 1)
+# ---------------------------------------------------------------------------
+
+
+class TotpClock:
+    """Controllable replacement for ``app.security.totp``'s wall clock.
+
+    ``verify_code`` reads the clock through its module-global ``time``
+    (stdlib) only when the injectable ``at`` argument is None — which is
+    exactly what the API paths (login, enable, disable) do. Installing a
+    TotpClock over that ONE module attribute (never the real time module,
+    never any other module's import) makes every 30-second timestep
+    boundary a test-controlled ``advance_to_next_timestep()`` instead of
+    a real ``time.sleep()``: the former suite burned minutes of wall time
+    waiting for boundaries, and a boundary crossing mid-request made the
+    tests flaky. The rate limiters and everything else in the app keep
+    the real clock — only TOTP timestep math is frozen.
+    """
+
+    def __init__(self, start: float | None = None):
+        import time as _time
+
+        self._now = _time.time() if start is None else float(start)
+
+    # The seam: totp.py calls ``time.time()`` on whatever object its
+    # module-global ``time`` name holds.
+    def time(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+    def advance_to_next_timestep(self, pad: float = 0.05) -> None:
+        """Cross the next timestep boundary (the old ``_next_timestep``
+        sleep, now deterministic and instant)."""
+        from app.security import totp as _totp
+
+        step = _totp.STEP_SECONDS
+        self._now += (step - (self._now % step)) + pad
+
+    @property
+    def counter(self) -> int:
+        from app.security import totp as _totp
+
+        return int(self._now // _totp.STEP_SECONDS)
+
+    def current_code(self, secret: bytes) -> str:
+        """The code an authenticator shows RIGHT NOW on this clock."""
+        from app.security import totp as _totp
+
+        return _totp._code_for_counter(secret, self.counter)
+
+
+def install_totp_clock(monkeypatch, start: float | None = None) -> TotpClock:
+    """Point app.security.totp's clock at a fresh TotpClock and return it."""
+    from app.security import totp as _totp
+
+    clock = TotpClock(start)
+    monkeypatch.setattr(_totp, "time", clock)
+    return clock

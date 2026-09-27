@@ -1,0 +1,53 @@
+/* ============================================================================
+   MindPattern Therapist Portal — print stylesheet (2026-09-26 CSP
+   hardening). Loaded via <link rel="stylesheet" media="print"> in
+   index.html, so these rules apply ONLY under print; portal.css keeps the
+   .print-only session summary hidden on screen.
+
+   This file replaces the <style> tag the chart used to render: an inline
+   <style> element requires CSP `style-src 'unsafe-inline'`, and a hashed
+   <style> cannot survive React's re-render ordering guarantees — a real
+   stylesheet is the clean way to drop the token entirely.
+
+   Audit fix 15 (2026-09-21), preserved verbatim in spirit: under print,
+   ONLY the .print-only session summary may render. The old rule (as an
+   inline tag) hid two header rows and let every card print light-on-dark —
+   including the evidence drill-down's full decrypted journal text, exactly
+   what this block exists to exclude. The child-selector rule hides every
+   other direct section of the chart; .no-print additionally excludes the
+   interactive sections that carry raw text (evidence drill-down, note
+   composer, controls) even if the DOM later gains wrapper elements between
+   them and <main>. `!important` stays on every rule: it must beat any
+   author-origin display declaration the screens' classes carry, and
+   .print-only's `display: none` from portal.css is what keeps the summary
+   hidden on screen. The color rule forces dark text on white paper.
+   ============================================================================ */
+
+@media print {
+  main > *:not(.print-only) { display: none !important; }
+  .no-print, .no-print * { display: none !important; }
+  .print-only { display: block !important; }
+  body, main { background: #fff !important; color: #000 !important; }
+
+  /* ------------------------------------------------ summary typography --
+     The exact declarations the removed inline style objects carried. */
+  .print-only h1 { font-size: 18px; }
+  .print-meta { font-size: 12px; }
+  .print-h2 { font-size: 14px; margin-top: 10px; }
+  .print-line { font-size: 12px; margin: 2px 0; }
+  /* Item-9 safety row (2026-09-27): the paper twin of .measure-flag —
+     dark on white (the color rule above must not carry portal.css's dark
+     tones onto paper), but still bordered and bold so the flagged fact is
+     as visible on paper as on screen. */
+  .print-flag { font-weight: 700; border: 1.5px solid #000; padding: 3px 6px; margin: 3px 0; }
+  .print-item { border-top: 1px solid #999; padding-top: 6px; margin-top: 6px; }
+  .print-item strong { font-size: 13px; }
+  .print-evidence { font-size: 11px; color: #333; }
+  .print-note { font-size: 12px; border-top: 1px solid #999; padding-top: 4px; }
+  .print-note-p { margin: 0; white-space: pre-wrap; }
+  .print-edited { margin-left: 8px; font-size: 11px; color: #555; }
+  .print-prior { margin: 4px 0 0 12px; color: #666; }
+  .print-prior p { margin: 0; white-space: pre-wrap; }
+  .print-prior-line { margin: 2px 0 0 12px; color: #666; }
+  .print-footer { font-size: 10px; color: #555; margin-top: 10px; }
+}

@@ -22,10 +22,17 @@ import { describe, expect, it } from "vitest";
 
 import { deriveMasterKey, deriveAuthKey, deriveDataKey } from "../src/crypto/kdf";
 import { buildAad, decrypt, encrypt, encryptWithFixedNonce } from "../src/crypto/envelope";
+import {
+  envelopeAad,
+  envelopeKek,
+  unwrapDataKey,
+  wrapDataKeyWithFixedNonce,
+} from "../src/crypto/keyEnvelope";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "vectors.json");
-const { vectors, encrypt_vectors: encryptVectors } = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const parsed = JSON.parse(readFileSync(vectorsPath, "utf8"));
+const { vectors, encrypt_vectors: encryptVectors, envelope_vectors: envelopeVectors } = parsed;
 
 describe("shared/vectors.json against the real TS crypto stack", () => {
   it("has vectors to check", () => {
@@ -137,5 +144,96 @@ describe("AAD edge-case vectors (promoted 2026-09-17 from redteam/a_crypto.py A6
     const raw = buildAad(...(lone!.parts)).toString("utf8");
     expect(raw).toContain("\\u");
     expect(raw).toBe(Buffer.from(lone!.aad_b64, "base64").toString("utf8"));
+  });
+});
+
+// --- v2 key-envelope vectors (2026-09-26) ------------------------------------
+//
+// Four entries: the version-bound v2 entry AAD (positive + tamper), and the
+// password-wrapped random data key (positive + tamper) — the exact wrap the
+// v2 registration/upgrade/password-change paths emit. All replayed through
+// the REAL shipping modules, like every family above.
+describe("shared/vectors.json envelope_vectors against the real v2 key-envelope stack", () => {
+  it("has the 4-entry corpus including both tamper negatives", () => {
+    expect(envelopeVectors.length).toBeGreaterThanOrEqual(4);
+    expect(envelopeVectors.filter((v: { expect?: string }) => v.expect === "tamper").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("has both families (version-bound entry AAD + key-envelope wrap)", () => {
+    expect(envelopeVectors.some((v: { kind: string }) => v.kind === "entry-aad-v2")).toBe(true);
+    expect(envelopeVectors.some((v: { kind: string }) => v.kind === "key-envelope-wrap")).toBe(true);
+  });
+
+  for (const [i, v] of envelopeVectors.entries()) {
+    if (v.kind === "entry-aad-v2" || v.kind === "entry-aad-v2-tampered") {
+      it(`envelope vector ${i} (${v.kind}): v2-bound entry AAD decrypts / fails as pinned`, () => {
+        const salt = Buffer.from(v.salt, "base64");
+        const dataKey = deriveDataKey(deriveMasterKey(v.password, salt, v.iterations));
+        const aad = buildAad(...v.aad_parts);
+        const blob = Buffer.from(v.blob, "base64");
+        if (v.expect === "tamper") {
+          expect(() => decrypt(dataKey, blob, aad)).toThrow();
+        } else {
+          expect(decrypt(dataKey, blob, aad).toString("base64")).toBe(v.plaintext);
+          // The 4-part builder reproduces the pinned blob byte-for-byte at
+          // the pinned nonce (the mobile -> backend direction).
+          expect(
+            encryptWithFixedNonce(dataKey, Buffer.from(v.plaintext, "base64"), aad, Buffer.from(v.nonce, "base64")).toString("base64"),
+          ).toBe(v.blob);
+        }
+      });
+    } else if (v.kind === "key-envelope-wrap" || v.kind === "key-envelope-wrap-tampered") {
+      it(`envelope vector ${i} (${v.kind}): KEK + AAD + wrap agree with the backend`, () => {
+        // The KEK input is the PBKDF2 master key the client already derives;
+        // derive it from the vector's own password/salt to prove the whole
+        // chain, and separately confirm the pinned master_key matches.
+        const salt = Buffer.from(v.salt, "base64");
+        const master = deriveMasterKey(v.password, salt, v.iterations);
+        expect(master.toString("base64")).toBe(v.master_key);
+        const kek = envelopeKek(master, salt);
+        expect(kek.toString("base64")).toBe(v.kek);
+        // AAD: canonical OBJECT form — {context, kdf_params (canonical order:
+        // algorithm, version, iterations), username}, compact, ensure_ascii.
+        expect(envelopeAad(v.username, v.kdf_params).toString("base64")).toBe(v.aad);
+        const wrapped = Buffer.from(v.wrapped, "base64");
+        if (v.expect === "tamper") {
+          expect(() => unwrapDataKey(wrapped, kek, v.username, v.kdf_params)).toThrow();
+        } else {
+          // Exactly 60 bytes on the wire: nonce(12) || ct(32) || tag(16).
+          expect(wrapped).toHaveLength(60);
+          expect(unwrapDataKey(wrapped, kek, v.username, v.kdf_params).toString("base64")).toBe(v.data_key);
+          // The mobile -> backend direction reproduces the pinned wrap at
+          // the pinned nonce (the fixed-nonce seam is vector-only).
+          expect(
+            wrapDataKeyWithFixedNonce(
+              Buffer.from(v.data_key, "base64"),
+              kek,
+              v.username,
+              v.kdf_params,
+              Buffer.from(v.nonce, "base64"),
+            ).toString("base64"),
+          ).toBe(v.wrapped);
+        }
+      });
+    }
+  }
+
+  it("a wrong password fails the wrap's GCM authentication (TamperError, not garbage)", () => {
+    const v = envelopeVectors.find((x: { kind: string }) => x.kind === "key-envelope-wrap");
+    expect(v).toBeDefined();
+    const salt = Buffer.from(v.salt, "base64");
+    const wrongMaster = deriveMasterKey("not-the-password", salt, v.iterations);
+    const kek = envelopeKek(wrongMaster, salt);
+    expect(() => unwrapDataKey(Buffer.from(v.wrapped, "base64"), kek, v.username, v.kdf_params)).toThrow(
+      expect.objectContaining({ name: "TamperError" }),
+    );
+  });
+
+  it("the AAD binds the username: another account's name fails authentication", () => {
+    const v = envelopeVectors.find((x: { kind: string }) => x.kind === "key-envelope-wrap");
+    expect(v).toBeDefined();
+    const salt = Buffer.from(v.salt, "base64");
+    const kek = envelopeKek(deriveMasterKey(v.password, salt, v.iterations), salt);
+    expect(() => unwrapDataKey(Buffer.from(v.wrapped, "base64"), kek, "other-user", v.kdf_params)).toThrow();
   });
 });

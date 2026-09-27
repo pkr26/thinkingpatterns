@@ -82,6 +82,40 @@ _PAIRING_DIGEST_INFO = b"mindpattern/pairing-digest/v1"
 # attacker nothing about the other (2026-09-26 pentest S-3).
 _BACKUP_DIGEST_INFO = b"mindpattern/totp-backup-digest/v1"
 
+# --- SAS out-of-band pairing verification (2026-09-26 remediation) -------------
+#
+# The server relays the therapist's wrap public key during pairing, so an
+# actively dishonest server could substitute its OWN key and silently read
+# the grant (the documented v1 residual). The SAS closes the human side of
+# that hole: both screens display a short authentication string derived
+# from the EXACT key bytes the server handed out, and the two humans
+# compare it out of band (in the room, on the phone) before the patient
+# confirms the grant. A substituted key changes the SAS; a substituted
+# SAS is impossible without also colliding the HMAC (2^-50-ish per
+# comparison for a 6-digit code, and each retry needs a fresh live
+# pairing session the patient must again mistype).
+#
+# Construction (pinned by shared/vectors.json via scripts/generate_vectors):
+#     SAS = "123 456" — first six decimal digits of
+#           HMAC-SHA256(key  = the 8-char pairing code (normalized),
+#                        data = therapist_wrap_pub_spki_der || patient_user_id)
+#     value = int.from_bytes(digest, "big") mod 10^6  (uniform: 2^256 mod
+#             10^6 leaves a bias below 2^-245 — negligible even by the
+#             standards of a 20-bit SAS)
+#     fingerprint = first 16 hex chars of SHA-256(therapist_wrap_pub_spki_der)
+#             — the coarse, non-secret key identity both screens also show,
+#               matching the fingerprint format the portal already renders.
+#
+# The PAIRING CODE is the HMAC key (not a server secret): it is the one
+# value both humans already share out of band — the therapist's screen
+# displayed it and the patient typed it — so a server that does not know
+# a live code cannot precompute the SAS for a substituted key, and any
+# code rotation (single-use burn, expiry, re-issue) inherently rotates
+# the SAS with it.
+SAS_DIGITS = 6
+SAS_FORMAT = "{0} {1}"  # "123 456"
+WRAP_KEY_FINGERPRINT_HEX_CHARS = 16
+
 
 class SharingError(ValueError):
     """Malformed key material (never raised for mere authentication failure
@@ -328,3 +362,30 @@ def normalize_pairing_code(code: str) -> str:
     if any(char not in PAIRING_ALPHABET for char in normalized):
         return ""
     return normalized
+
+
+def pairing_sas(code: str, therapist_wrap_pub_der: bytes, patient_user_id: str) -> str:
+    """The 6-digit ("123 456") out-of-band pairing verification string.
+
+    Both call sites (patient lookup response, therapist SAS read) feed the
+    SAME inputs for the SAME live pairing session: the normalized pairing
+    code, the wrap key DER the server would hand the patient, and the
+    patient's account id. ``code`` MUST already be normalized
+    (normalize_pairing_code); a non-code ("" from failed normalization)
+    still derives a harmless value so this function never raises on the
+    API path.
+    """
+    digest = hmac.new(
+        code.encode("ascii"),
+        therapist_wrap_pub_der + patient_user_id.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    value = int.from_bytes(digest, "big") % (10**SAS_DIGITS)
+    digits = f"{value:0{SAS_DIGITS}d}"
+    return SAS_FORMAT.format(digits[:3], digits[3:])
+
+
+def wrap_key_fingerprint(therapist_wrap_pub_der: bytes) -> str:
+    """First 16 hex chars of SHA-256 of the wrap key DER — the coarse,
+    non-secret identity both pairing screens render next to the SAS."""
+    return hashlib.sha256(therapist_wrap_pub_der).hexdigest()[:WRAP_KEY_FINGERPRINT_HEX_CHARS]

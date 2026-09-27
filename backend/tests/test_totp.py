@@ -11,19 +11,18 @@ database, and re-running setup retires the previous secret.
 from __future__ import annotations
 
 import base64
-
-import anyio
 import time
 
+import pytest
 from sqlalchemy import select
 
 from app.models import AccessLog, User
 from app.security import totp
-from tests.helpers import ClientEmulator, TherapistEmulator
+from tests.helpers import ClientEmulator, TherapistEmulator, TotpClock, install_totp_clock
 
 
-def _current_code(secret: bytes) -> str:
-    return totp._code_for_counter(secret, int(time.time() // totp.STEP_SECONDS))
+def _current_code(secret: bytes, clock: TotpClock) -> str:
+    return clock.current_code(secret)
 
 
 def _b32_decode(secret_b32: str) -> bytes:
@@ -31,13 +30,21 @@ def _b32_decode(secret_b32: str) -> bytes:
     return base64.b32decode(padded)
 
 
-async def _next_timestep() -> None:
+async def _next_timestep(clock: TotpClock) -> None:
     """Codes are consumed once per 30s timestep; cross a boundary so the
-    next presentation is genuinely fresh (worst-case wait ~30s, the price
-    of pinning the replay fence end-to-end)."""
-    await anyio.to_thread.run_sync(
-        lambda: time.sleep(max(0.0, totp.STEP_SECONDS - (time.time() % totp.STEP_SECONDS)) + 0.05)
-    )
+    next presentation is genuinely fresh. The boundary lives on the FAKE
+    totp clock (see helpers.TotpClock), so this is a deterministic
+    advance — the old real-sleep version cost up to ~30s per call."""
+    clock.advance_to_next_timestep()
+
+
+@pytest.fixture
+def totp_clock(monkeypatch):
+    """Freeze app.security.totp's wall clock (2026-09-26 test-infrastructure
+    audit, item 1): the endpoint ladder reads the clock through the totp
+    module's ``time`` attribute when verify_code's injectable ``at`` is
+    None, so timestep crossings become instant deterministic advances."""
+    return install_totp_clock(monkeypatch)
 
 
 # --- unit contract -------------------------------------------------------------------
@@ -49,10 +56,14 @@ async def test_totp_helper_accepts_current_and_drift_rejects_other():
     assert _b32_decode(b32) == raw
     now = time.time()
     current = int(now // totp.STEP_SECONDS)
-    # current, previous, and next timestep all verify (clock skew)
-    for counter in (current - 1, current, current + 1):
+    # 2026-09-26 remediation (LOW e): the drift window is PAST-ONLY
+    # (-1..0). The previous and current timestep verify (honest authenticator
+    # clock skew); a FUTURE timestep no longer does — the replay fence
+    # (totp_last_counter) compensates for the lost forward slack.
+    for counter in (current - 1, current):
         assert totp.verify_code(raw, totp._code_for_counter(raw, counter), at=now) == counter
-    # a code from outside the drift window does not
+    # a code from outside the drift window does not — future included
+    assert totp.verify_code(raw, totp._code_for_counter(raw, current + 1), at=now) is None
     assert totp.verify_code(raw, totp._code_for_counter(raw, current - 5), at=now) is None
     # malformed input never verifies
     for bad in ("", "12345", "1234567", "abcdef", "12345x"):
@@ -72,6 +83,25 @@ async def test_totp_secret_is_wrapped_at_rest():
         assert totp.unwrap_secret(bad, "server-secret-material-for-tests") is None
 
 
+async def test_totp_default_at_reads_the_real_wall_clock_smoke():
+    """The ONE real-clock test left in the suite (2026-09-26 test-infrastructure
+    audit, item 1): every other TOTP test drives the module through the
+    injectable ``at`` or the faked module clock, so something must pin that
+    the production default — ``at=None`` reading ``time.time()`` — still
+    works after monkeypatch-based tests restore the attribute. Generous
+    bound by construction: the code is minted and verified in adjacent
+    statements, and the drift window covers the current AND previous
+    timestep, so only a >60s stall between the two statements could flip
+    the verdict."""
+    raw, _b32 = totp.generate_secret()
+    before = int(time.time() // totp.STEP_SECONDS)
+    code = totp._code_for_counter(raw, before)
+    matched = totp.verify_code(raw, code)  # no ``at``: the real wall clock
+    after = int(time.time() // totp.STEP_SECONDS)
+    assert matched is not None
+    assert after - before <= 1  # the generous real-time ceiling
+
+
 # --- endpoint ladder ------------------------------------------------------------------
 
 
@@ -81,14 +111,10 @@ async def _ther_headers(th: TherapistEmulator) -> dict:
 
 async def _db_user(app, user_id: str) -> User:
     async with app.state.sessionmaker() as session:
-        return (
-            (await session.execute(select(User).where(User.id == user_id)))
-            .scalars()
-            .one()
-        )
+        return (await session.execute(select(User).where(User.id == user_id))).scalars().one()
 
 
-async def test_totp_full_lifecycle(client, app):
+async def test_totp_full_lifecycle(client, app, totp_clock):
     th = TherapistEmulator("totp-dr", "a-deep-therapist-password")
     await th.register(client)
 
@@ -119,19 +145,22 @@ async def test_totp_full_lifecycle(client, app):
     # Enable with a wrong code answers 403 and leaves login unarmed.
     wrong = await client.post(
         "/api/account/totp/enable",
-        json={"verifier": th.auth_key_b64, "code": "000000" if _current_code(secret) != "000000" else "111111"},
+        json={
+            "verifier": th.auth_key_b64,
+            "code": "000000" if _current_code(secret, totp_clock) != "000000" else "111111",
+        },
         headers=await _ther_headers(th),
     )
     assert wrong.status_code == 403, wrong.text
     assert wrong.json()["code"] == "totp_code_invalid"
 
     # Enable with the right code arms the login check. Confirming consumes
-    # the timestep (the code was presented to the server once), so wait for
+    # the timestep (the code was presented to the server once), so move to
     # a fresh one before the login attempts.
-    await _next_timestep()
+    await _next_timestep(totp_clock)
     good = await client.post(
         "/api/account/totp/enable",
-        json={"verifier": th.auth_key_b64, "code": _current_code(secret)},
+        json={"verifier": th.auth_key_b64, "code": _current_code(secret, totp_clock)},
         headers=await _ther_headers(th),
     )
     assert good.status_code == 200, good.text
@@ -158,24 +187,36 @@ async def test_totp_full_lifecycle(client, app):
     # A wrong PASSWORD never reaches the TOTP check at all.
     bad_password = await client.post(
         "/api/auth/login",
-        json={"username": th.username, "verifier": base64.b64encode(b"\x00" * 32).decode(), "totp_code": _current_code(secret)},
+        json={
+            "username": th.username,
+            "verifier": base64.b64encode(b"\x00" * 32).decode(),
+            "totp_code": _current_code(secret, totp_clock),
+        },
     )
     assert bad_password.status_code == 401
     assert bad_password.json()["code"] == "invalid_credentials"
 
     # Login with the right code succeeds (fresh timestep; enable consumed
     # the previous one)…
-    await _next_timestep()
+    await _next_timestep(totp_clock)
     ok_login = await client.post(
         "/api/auth/login",
-        json={"username": th.username, "verifier": th.auth_key_b64, "totp_code": _current_code(secret)},
+        json={
+            "username": th.username,
+            "verifier": th.auth_key_b64,
+            "totp_code": _current_code(secret, totp_clock),
+        },
     )
     assert ok_login.status_code == 200, ok_login.text
 
     # …and the SAME code is refused afterwards (replay fence).
     replay = await client.post(
         "/api/auth/login",
-        json={"username": th.username, "verifier": th.auth_key_b64, "totp_code": _current_code(secret)},
+        json={
+            "username": th.username,
+            "verifier": th.auth_key_b64,
+            "totp_code": _current_code(secret, totp_clock),
+        },
     )
     assert replay.status_code == 401
     assert replay.json()["code"] == "totp_code_invalid"
@@ -199,10 +240,10 @@ async def test_totp_full_lifecycle(client, app):
     assert bad_disable.status_code == 403, bad_disable.text
     # …verifier + a FRESH code (the login consumed this timestep)
     # clears the enrollment.
-    await _next_timestep()
+    await _next_timestep(totp_clock)
     disable = await client.post(
         "/api/account/totp/disable",
-        json={"verifier": th.auth_key_b64, "code": _current_code(secret)},
+        json={"verifier": th.auth_key_b64, "code": _current_code(secret, totp_clock)},
         headers=await _ther_headers(th),
     )
     assert disable.status_code == 204, disable.text
@@ -219,7 +260,7 @@ async def test_totp_full_lifecycle(client, app):
     assert plain.status_code == 200, plain.text
 
 
-async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client):
+async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client, totp_clock):
     th = TherapistEmulator("totp-swap-dr", "another-deep-password")
     await th.register(client)
     first = (
@@ -232,7 +273,7 @@ async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client):
     secret_a = _b32_decode(first["secret_base32"])
     enable = await client.post(
         "/api/account/totp/enable",
-        json={"verifier": th.auth_key_b64, "code": _current_code(secret_a)},
+        json={"verifier": th.auth_key_b64, "code": _current_code(secret_a, totp_clock)},
         headers=await _ther_headers(th),
     )
     assert enable.status_code == 200
@@ -278,14 +319,20 @@ async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client):
     # The FIRST pending secret's code cannot enable enrollment…
     stale_enable = await client.post(
         "/api/account/totp/enable",
-        json={"verifier": th2.auth_key_b64, "code": _current_code(_b32_decode(p1["secret_base32"]))},
+        json={
+            "verifier": th2.auth_key_b64,
+            "code": _current_code(_b32_decode(p1["secret_base32"]), totp_clock),
+        },
         headers=await _ther_headers(th2),
     )
     assert stale_enable.status_code == 403, stale_enable.text
     # …but the newest one can.
     confirm = await client.post(
         "/api/account/totp/enable",
-        json={"verifier": th2.auth_key_b64, "code": _current_code(_b32_decode(p2["secret_base32"]))},
+        json={
+            "verifier": th2.auth_key_b64,
+            "code": _current_code(_b32_decode(p2["secret_base32"]), totp_clock),
+        },
         headers=await _ther_headers(th2),
     )
     assert confirm.status_code == 200, confirm.text

@@ -9,7 +9,7 @@ import { observeEntryVersions, resetEntryVersionMirrors } from "../src/entryVers
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { flush, press, render, settle, textOf, typeArea, typeInto } from "./helpers/rtr";
+import { flush, press, render, settle, textOf, textOfNode, typeArea, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(9);
@@ -234,5 +234,58 @@ describe("HistoryView: terminal load failures never wedge on Loading (audit 2026
     await settle(40, 3);
     expect(textOf(root)).toContain("Your session locked");
     expect(textOf(root)).not.toContain("Loading…");
+  });
+});
+
+describe("HistoryView windowed rendering + Map mapping (audit 2026-09-26 LOW)", () => {
+  it("renders a first window of entries with a Show-more sentinel, and the sentinel reveals the rest in order", async () => {
+    // 35 entries: the first window (30) renders, the last 5 wait behind
+    // the sentinel — and the back-mapping to full entries must stay
+    // correct (the Map<id, entry> replaced per-hit entries.find).
+    const total = 35;
+    const rows: Record<string, unknown>[] = [];
+    for (let n = 1; n <= total; n += 1) {
+      rows.push(await encryptedRow({ id: `e-${n}`, date: `2026-09-${String(n).padStart(2, "0")}`, text: `windowed entry number ${n}`, sentiment: 0, version: 1 }));
+    }
+    stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
+    const root = await render(<HistoryView />);
+    // 35 decrypts with periodic yields to the host: give the loop room.
+    await settle(30, 12);
+    const cards = () => root.root.findAllByType("article");
+    expect(cards().length).toBe(30);
+    // The FIRST thirty in order — the rest are off-DOM.
+    expect(cards()[0]!.props.children).toBeDefined();
+    expect(textOf(root)).toContain("windowed entry number 1");
+    expect(textOf(root)).toContain("windowed entry number 30");
+    for (const hidden of [31, 32, 33, 34, 35]) {
+      expect(textOf(root)).not.toContain(`windowed entry number ${hidden}`);
+    }
+    // The sentinel reveals the next window (all 35 now, sentinel gone).
+    await press(root, "Show more");
+    await settle(20, 2);
+    expect(root.root.findAllByType("article").length).toBe(35);
+    expect(textOf(root)).toContain("windowed entry number 35");
+    expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Show more")).toBe(false);
+  });
+
+  it("a fresh search resets the window (the sentinel is per filter source)", async () => {
+    const rows: Record<string, unknown>[] = [];
+    for (let n = 1; n <= 32; n += 1) {
+      rows.push(await encryptedRow({ id: `e-s-${n}`, date: "2026-09-25", text: `searchable needle ${n}`, sentiment: 0, version: 1 }));
+    }
+    stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
+    const root = await render(<HistoryView />);
+    await settle(30, 12);
+    expect(root.root.findAllByType("article").length).toBe(30);
+    await press(root, "Show more");
+    await settle(20, 2);
+    expect(root.root.findAllByType("article").length).toBe(32);
+    // Typing a query starts a fresh window: only the matches render.
+    await typeInto(root, "Search", "needle 3");
+    await settle(20, 3);
+    const matches = root.root.findAllByType("article").length;
+    expect(matches).toBeGreaterThan(0);
+    expect(matches).toBeLessThanOrEqual(30);
+    expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Show more")).toBe(false);
   });
 });

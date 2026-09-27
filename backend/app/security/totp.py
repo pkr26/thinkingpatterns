@@ -8,15 +8,18 @@ digits is the authenticator-app contract (Google Authenticator, Aegis,
 population a second factor is for.
 
 The shared secret is stored WRAPPED at rest (AES-256-GCM under an HKDF
-subkey of the server's ``token_secret``): a stolen database dump must not
-turn the second factor into a field in a SELECT. The wrap is domain-
-separated from token signing and from the decoy-salt subkey. Rotation of
-``token_secret`` would invalidate wrapped secrets — the same documented
-caveat as the decoy salts (see SECURITY_RESIDUALS.md); if that rotation is
-ever exercised, operators must also clear ``users.totp_*`` AND the
-``totp_backup_codes`` table (recovery-code digests key off the same
-secret; a lost-authenticator clear must drop both, which POST
-/account/totp/disable already does in-transaction).
+subkey of the server's TOTP-wrap secret — ``Settings.totp_wrap_secret``
+since the 2026-09-26 purpose split: explicit MINDPATTERN_TOTP_WRAP_SECRET,
+else the legacy token secret, so existing wrapped blobs stay valid): a
+stolen database dump must not turn the second factor into a field in a
+SELECT. The wrap is domain-separated from token signing and from the
+decoy-salt subkey. Rotation of the wrap secret would invalidate wrapped
+secrets — the same documented caveat as the decoy salts (see
+SECURITY_RESIDUALS.md); if that rotation is ever exercised, operators
+must also clear ``users.totp_*`` AND the ``totp_backup_codes`` table
+(recovery-code digests key off the same secret; a lost-authenticator
+clear must drop both, which POST /account/totp/disable already does
+in-transaction).
 """
 
 from __future__ import annotations
@@ -37,8 +40,16 @@ from .kdf import hkdf_sha256
 STEP_SECONDS = 30
 DIGITS = 6
 SECRET_BYTES = 20  # 160 bits, the RFC-recommended size
-#: Accept codes from the previous, current, and next timestep: one
-#: authenticator clock skews freely; more drift than that is a wrong code.
+#: 2026-09-26 remediation (LOW e): the accepted drift window is now the
+#: previous timestep and the current one (-1..0) — a FUTURE code is no
+#: longer accepted. Rationale: accepting +1 let a code live up to 90
+#: seconds and, more importantly, made an attacker's observed code usable
+#: BEFORE the user's own clock reaches it; the strictly-monotonic replay
+#: fence (totp_last_counter, the atomic conditional UPDATE at login)
+#: already compensates for the loss — the previous timestep stays
+#: accepted, so an honest authenticator with modest clock skew still
+#: logs in first try. ``drift`` therefore means "steps INTO THE PAST
+#: accepted"; the verify window is [current - drift, current].
 ALLOWED_DRIFT = 1
 
 WRAP_INFO = b"mindpattern/totp-at-rest/v1"
@@ -101,7 +112,9 @@ def verify_code(
     if len(normalized) != DIGITS or not normalized.isdigit():
         return None
     current = int(at // STEP_SECONDS)
-    for candidate in range(current - drift, current + drift + 1):
+    # Past-and-current only (see ALLOWED_DRIFT): the upper bound is the
+    # CURRENT timestep, never current + drift.
+    for candidate in range(current - drift, current + 1):
         expected = _code_for_counter(secret, candidate)
         if hmac.compare_digest(normalized, expected):
             return candidate

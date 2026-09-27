@@ -42,7 +42,12 @@ remote rotation → actionable lockout, never a loop.
 **Offline queue.** Ciphertext only, origin+account scoped, byte+count
 capped, quarantine for corrupt/foreign records, lying-409 verification
 before any drop (M-5), generation fence at sign-out, Web-Locks-serialized
-across tabs.
+across tabs. Offline-safety additions since the first write: an
+in-progress measure survives a lock/offline gap as a ciphertext
+pending-measure record (`web/src/pendingMeasure.ts`), and the active
+journal draft survives lock-time unmounts as ciphertext at rest —
+never plaintext (`web/src/entryDraft.ts`; a 2026-09-26 audit fix — the
+draft used to be lost on lock).
 
 **Render pipeline.** Decrypted journal text renders exclusively through
 React's escaped text nodes. Sensitive pattern cards never place their
@@ -53,20 +58,36 @@ tier runs PRE-encryption on typed text.
 verifier-collection vector stays closed). Hardened fetch: credentials
 omitted, redirects refused, no-store, no-referrer, 15 s deadline,
 post-fetch origin recheck, one-shot session-abort. CSP/HSTS/COOP/CORP
-shipped in three aligned places, pinned by test.
+shipped in three aligned places, pinned by test — CSP carries
+`style-src 'self'` with zero `'unsafe-inline'` anywhere (the
+2026-09-26 hardening pass moved the shell stylesheet to a same-origin
+file; React's CSSOM inline styles are outside style-src). A token-expiry
+guard funnels an expired session to re-auth instead of retrying queued
+writes against a dead bearer.
 
 ## Accepted residuals (web-specific)
 
+Re-swept 2026-09-26 against the current tree — items fixed since the
+2026-09-25 first write (English-only chrome, plaintext-at-lock draft
+loss, measures lost on a mid-flow lock, queue double-flush races) are
+removed; what remains:
+
 1. **Open-tab offline only (D-6):** without a service worker, offline
    works while a tab lives; a cold load offline fails. Accepted for v1.
-2. **Web chrome copy is English v1** (catalog-backed surfaces localize) —
-   safety content (crisis card) included in the follow-up sweep.
-3. **In-memory plaintext window:** between decrypt and lock, a live tab
+2. **In-memory plaintext window:** between decrypt and lock, a live tab
    holds plaintext; the OS/user owns that window (same as any webmail).
-4. **Memory-hygiene limits:** WebCrypto zeroizes what it owns; GC-owned
+   The 5-minute idle, bfcache, and hidden-tab locks bound it; the draft
+   no longer widens it (it parks as ciphertext at lock).
+3. **Memory-hygiene limits:** WebCrypto zeroizes what it owns; GC-owned
    strings follow the platform (same honesty as the mobile README).
-5. **Single-tab assumption for drafts:** a draft is per-tab memory; no
-   cross-tab draft merge (two tabs' drafts are independent by design).
-6. **First Stryker floor:** the campaign is wired (workflow + config); the
+4. **Single draft slot:** one encrypted draft slot per account; there is
+   no cross-tab draft merge (two tabs' concurrent drafts do not
+   combine — the slot is last-writer's, at lock time).
+5. **First Stryker floor:** the campaign is wired (workflow + config); the
    measured floor lands with the first scheduled run — not claimed before
    it exists.
+6. **The server-side analysis window (inherited, unchanged):** the
+   explicit recompute still ships the data key to the single-use
+   processing session — the v1 trade the on-device port (WEB_PLAN /
+   `mobile/src/brain/PORT.md`) is the path to removing. Not a web
+   regression; listed so the web threat model is complete.

@@ -707,4 +707,84 @@ describe("decryptMeasure", () => {
       expect(reading).toBeNull();
     }
   });
+
+  /** Item 9 (clinical review 2026-09-27): the RAW 0-3 item-9 response
+   *  rides phq9 payloads only; the portal sanitizes it like every
+   *  decrypted field — wrong shapes degrade the FIELD, never the row. */
+  it("item9 (2026-09-27): a phq9 payload's raw item-9 response comes through verbatim", async () => {
+    const { decryptMeasure, encrypt, toBase64 } = await import("../src/crypto");
+    const { buildAad } = await import("../src/aad");
+    for (const item9 of [0, 1, 2, 3]) {
+      const blob = toBase64(
+        await encrypt(
+          KEY,
+          new TextEncoder().encode(JSON.stringify({ v: 1, measure: "phq9", score: 6, item9, completed_at: "2026-09-27T10:00:00Z" })),
+          buildAad("measure", "user-42", `m-item9-${item9}`),
+        ),
+      );
+      const reading = await decryptMeasure(KEY, "user-42", {
+        client_measure_id: `m-item9-${item9}`,
+        blob,
+        measure_date: "2026-09-27",
+      });
+      expect(reading).not.toBeNull();
+      expect(reading!.item9).toBe(item9);
+    }
+  });
+
+  it("item9: a pre-field phq9 payload (no item9) reads as absent — old payloads render exactly as before", async () => {
+    const { decryptMeasure, encrypt, toBase64 } = await import("../src/crypto");
+    const { buildAad } = await import("../src/aad");
+    const blob = toBase64(
+      await encrypt(
+        KEY,
+        new TextEncoder().encode(JSON.stringify({ v: 1, measure: "phq9", score: 14, completed_at: "2026-09-18T10:00:00Z" })),
+        buildAad("measure", "user-42", "m-legacy"),
+      ),
+    );
+    const reading = await decryptMeasure(KEY, "user-42", {
+      client_measure_id: "m-legacy",
+      blob,
+      measure_date: "2026-09-18",
+    });
+    expect(reading).not.toBeNull();
+    expect(reading!.item9).toBeNull();
+  });
+
+  it("item9: gad7 never carries it, and out-of-range values degrade the field, never the row", async () => {
+    const { decryptMeasure, encrypt, toBase64 } = await import("../src/crypto");
+    const { buildAad } = await import("../src/aad");
+    // A gad7 payload with the field (hostile or never-happens shape): the
+    // field names a PHQ-9 question, so it reads as absent.
+    const gadBlob = toBase64(
+      await encrypt(
+        KEY,
+        new TextEncoder().encode(JSON.stringify({ v: 1, measure: "gad7", score: 5, item9: 2 })),
+        buildAad("measure", "user-42", "m-gad-item9"),
+      ),
+    );
+    const gad = await decryptMeasure(KEY, "user-42", { client_measure_id: "m-gad-item9", blob: gadBlob, measure_date: "2026-09-27" });
+    expect(gad).not.toBeNull();
+    expect(gad!.measure).toBe("gad7");
+    expect(gad!.item9).toBeNull();
+    // Out-of-range / non-integer item9 on a phq9: the reading survives,
+    // the field does not.
+    for (const item9 of [7, -1, 1.5]) {
+      const blob = toBase64(
+        await encrypt(
+          KEY,
+          new TextEncoder().encode(JSON.stringify({ v: 1, measure: "phq9", score: 6, item9 })),
+          buildAad("measure", "user-42", `m-item9-bad-${item9}`),
+        ),
+      );
+      const reading = await decryptMeasure(KEY, "user-42", {
+        client_measure_id: `m-item9-bad-${item9}`,
+        blob,
+        measure_date: "2026-09-27",
+      });
+      expect(reading).not.toBeNull();
+      expect(reading!.score).toBe(6);
+      expect(reading!.item9).toBeNull();
+    }
+  });
 });

@@ -901,10 +901,14 @@ class TestNotes:
         updated = await client.patch(
             f"/api/therapist/notes/{note['id']}",
             headers=th.headers,
-            json={"blob": th.encrypt_note(patient, "note-1", "Updated impression.")},
+            json={
+                "blob": th.encrypt_note(patient, "note-1", "Updated impression."),
+                "base_version": 1,  # item 15: version-bound clinical edit
+            },
         )
         assert updated.status_code == 200
         assert updated.json()["updated_at"] >= note["updated_at"]
+        assert updated.json()["version"] == 2
         # Same client_note_id AAD still decrypts the updated blob.
         assert (
             th.decrypt_note(patient, "note-1", updated.json()["blob"])["text"]
@@ -938,7 +942,10 @@ class TestNotes:
             client.patch(
                 f"/api/therapist/notes/{note_id}",
                 headers=th.headers,
-                json={"blob": th.encrypt_note(patient, "race-note", "concurrent update")},
+                json={
+                    "blob": th.encrypt_note(patient, "race-note", "concurrent update"),
+                    "base_version": 1,
+                },
             ),
             client.delete(f"/api/therapist/notes/{note_id}", headers=th.headers),
         )
@@ -976,7 +983,10 @@ class TestNotes:
         updated = await client.patch(
             f"/api/therapist/notes/{created.json()['id']}",
             headers=th.headers,
-            json={"blob": th.encrypt_note(patient, "response-fence", "second")},
+            json={
+                "blob": th.encrypt_note(patient, "response-fence", "second"),
+                "base_version": 1,
+            },
         )
         assert updated.status_code == 200
         assert observed_locked == [True, True]
@@ -1114,7 +1124,10 @@ class TestNotes:
             await client.patch(
                 f"/api/therapist/notes/{note_id}",
                 headers=th2.headers,
-                json={"blob": base64.b64encode(b"x" * 40).decode()},
+                json={
+                    "blob": base64.b64encode(b"x" * 40).decode(),
+                    "base_version": 1,
+                },
             )
         ).status_code == 404
         assert (

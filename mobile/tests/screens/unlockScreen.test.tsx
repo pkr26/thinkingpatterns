@@ -635,3 +635,196 @@ describe("UnlockScreen biometric unlock (offered only when a wrap exists)", () =
     expect(vault.isUnlocked()).toBe(true);
   });
 });
+
+// --- v2 key envelope (2026-09-26) --------------------------------------------
+//
+// The mocked deriveKeysAsync returns FIXED keys (masterKey alloc(32,1)); the
+// v2 envelope below is built with the REAL crypto modules under that same
+// mocked master + the mock salt, so the screen's unwrap path runs the exact
+// shipping keyScheme code against a wrap that genuinely opens.
+// REAL crypto module (no mock): builds envelopes that genuinely open under
+// the mocked derivation's fixed master key.
+const { envelopeKek, wrapDataKey, defaultKdfParams } = await import("../../src/crypto/keyEnvelope");
+
+describe("UnlockScreen v2 key envelope", () => {
+  const PARAMS = defaultKdfParams();
+  const RANDOM_DATA_KEY = Buffer.alloc(32, 0xab);
+
+  /** A v2 envelope wrapped under the MOCKED master key + mock salt. */
+  const v2EnvelopeFor = (master: Buffer): { key_scheme: string; salt: string; kdf_params: object; wrapped_data_key: string } => ({
+    key_scheme: "v2",
+    salt: SALT_B64,
+    kdf_params: PARAMS,
+    wrapped_data_key: wrapDataKey(RANDOM_DATA_KEY, envelopeKek(master, Buffer.from(SALT_B64, "base64")), "alice", PARAMS).toString("base64"),
+  });
+
+  it("fetches the envelope after login and unlocks the vault on the RANDOM data key", async () => {
+    const mockedMaster = Buffer.alloc(32, 1); // what the deriveKeysAsync mock returns
+    vi.mocked(api.keyEnvelope).mockResolvedValue(v2EnvelopeFor(mockedMaster) as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(api.keyEnvelope).toHaveBeenCalledTimes(1);
+    expect(vault.isUnlocked()).toBe(true);
+    // The vault holds the envelope's RANDOM key, not the v1-derived label…
+    expect(vault.get().dataKey).toEqual(RANDOM_DATA_KEY);
+    // …and the sealed proof is refreshed under THAT key (the biometric path
+    // checks against it too).
+    expect(storeUnlockProof).toHaveBeenCalledWith(RANDOM_DATA_KEY, "user-1");
+    // The unused v1 data label was zeroized before the vault took over.
+    expect(lastDerived?.dataKey.every((byte) => byte === 0)).toBe(true);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("an envelope that fails authentication funnels into the wrong-password path (S-5)", async () => {
+    // Wrapped under a DIFFERENT master: the password is right (login
+    // succeeded) but the envelope will not open — the GCM tag is the oracle.
+    vi.mocked(api.keyEnvelope).mockResolvedValue(v2EnvelopeFor(Buffer.alloc(32, 0x5a)) as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(recordUnlockFailure).toHaveBeenCalledWith("alice");
+    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Wrong password.");
+  });
+
+  it("unlocks OFFLINE from the CACHED envelope — the GCM authentication is the proof", async () => {
+    vi.mocked(api.saltFor).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.getCachedSalt).mockResolvedValue(SALT_B64);
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue({
+      scheme: "v2",
+      saltB64: SALT_B64,
+      kdfParams: PARAMS,
+      wrappedB64: wrapDataKey(
+        RANDOM_DATA_KEY,
+        envelopeKek(Buffer.alloc(32, 1), Buffer.from(SALT_B64, "base64")),
+        "alice",
+        PARAMS,
+      ).toString("base64"),
+    } as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    // No network at all: the cached wrap opened locally.
+    expect(api.login).not.toHaveBeenCalled();
+    expect(api.keyEnvelope).not.toHaveBeenCalled();
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(RANDOM_DATA_KEY);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("offline with NO cached envelope keeps the sealed-proof fallback (fail-closed for v2)", async () => {
+    vi.mocked(api.saltFor).mockRejectedValue(new ApiError(0, "server unreachable"));
+    vi.mocked(api.getCachedSalt).mockResolvedValue(SALT_B64);
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue(null);
+    // A v2 account's proof is sealed under the RANDOM key — the derived v1
+    // label cannot open it, so the honest "not enabled" answer surfaces.
+    vi.mocked(verifyUnlockProof).mockResolvedValue("absent");
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Unlock failed",
+      "offline unlock is not enabled on this device yet — sign in once while online to enable it",
+    );
+  });
+
+  // Re-audit 2026-09-27 (M): ONLINE, the v2 account whose envelope can be
+  // neither fetched nor read from cache used to fall through to v1
+  // semantics — the vault unlocked on the v1-DERIVED data key, the sealed
+  // proof was refreshed under it, and entries written that session became
+  // permanently unreadable. The session is now refused.
+  it("ONLINE login + UNREACHABLE envelope + no cache REFUSES the session: no unlock, no proof refresh", async () => {
+    // The password was accepted (login succeeded), the envelope endpoint
+    // failed, and this device has never cached an envelope.
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue(null);
+    // This file's beforeEach does not clear the backoff spies (earlier tests
+    // accumulate); clear it HERE so the not-called assertion below is mine.
+    recordUnlockFailure.mockClear();
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(api.login).toHaveBeenCalledTimes(1); // the password was verified…
+    expect(vault.isUnlocked()).toBe(false); // …but the key was never proven
+    // The corruption vector was the proof refresh under the WRONG key —
+    // none may exist after the refusal.
+    expect(storeUnlockProof).not.toHaveBeenCalled();
+    // Not a 401: no wrong-password backoff may fire on an honest refusal.
+    expect(recordUnlockFailure).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Unlock failed",
+      "We couldn't verify your encryption key with the server. Check your connection and try again — nothing was changed.",
+    );
+  });
+
+  it("ONLINE login + INVALID envelope (unusable server answer) + no cache refuses with the update-style copy", async () => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v9" } as never);
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue(null);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(storeUnlockProof).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Unlock failed",
+      "We couldn't verify your encryption key — the server sent a response this app doesn't understand. Nothing was changed; updating the app may help.",
+    );
+  });
+
+  it("ONLINE login + unreachable fetch + CACHED envelope still unlocks from the cache", async () => {
+    // The endpoint failed mid-flow, but the account's v2 envelope was
+    // cached at a prior login: the cached wrap opens locally (the existing
+    // fallback, preserved).
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue({
+      scheme: "v2",
+      saltB64: SALT_B64,
+      kdfParams: PARAMS,
+      wrappedB64: v2EnvelopeFor(Buffer.alloc(32, 1)).wrapped_data_key,
+    } as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(api.keyEnvelope).toHaveBeenCalledTimes(1);
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(RANDOM_DATA_KEY);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("ONLINE login + unreachable fetch + cached v1 MARKER keeps the v1 sealed-proof path (v1 unaffected)", async () => {
+    // A v1 account's cache holds a scheme marker, not a wrap: the online
+    // refresh of the sealed proof under the derived key proceeds unchanged.
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue({
+      scheme: "v1",
+      saltB64: SALT_B64,
+      kdfParams: null,
+      wrappedB64: null,
+    } as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 3)); // the v1 label
+    expect(storeUnlockProof).toHaveBeenCalledWith(Buffer.alloc(32, 3), "user-1");
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+});

@@ -575,3 +575,86 @@ describe("L-66: a failed consents load is unknown status, not 'not sharing'", ()
     expect(textOf(root2)).toContain("You are not sharing with anyone");
   });
 });
+
+// --- SAS (2026-09-26) ---------------------------------------------------------
+//
+// The pairing-lookup answer now carries the server-computed match code
+// ("123 456") and the wrap-key fingerprint. The match code renders beside
+// the pairing flow with compare-out-of-band copy; malformed or absent
+// values NEVER render (an older server predates the fields).
+describe("SAS display (out-of-band pairing verification)", () => {
+  const FINGERPRINT = "0123456789abcdef";
+
+  it("renders the SAS and the compare-out-of-band copy beside the pairing-code input", async () => {
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    // The expectation rides with the code input, BEFORE any lookup.
+    expect(textOf(root)).toContain("this app shows a match code and a key fingerprint");
+  });
+
+  it("shows the server's match code on the lookup card and in the grant confirmation", async () => {
+    vi.mocked(api.pairingLookup).mockResolvedValue({
+      therapist_id: THERAPIST_ID,
+      display_name: "Dr. Real",
+      wrap_pub_key: THERAPIST_PUB,
+      sas: "123 456",
+      wrap_key_fingerprint: FINGERPRINT,
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).toContain("Match code: 123 456");
+    expect(textOf(root)).toContain("Read it back to your therapist");
+
+    // The confirmation repeats BOTH out-of-band values (the C-7 discipline).
+    await pressLabel(root, "Share with Dr. Real");
+    await flush();
+    expect(lastAlert()[1]).toContain("Match code: 123 456");
+    expect(lastAlert()[1]).toContain("Key fingerprint:");
+  });
+
+  it("an absent SAS (older server) hides the line instead of guessing", async () => {
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).toContain("Dr. Real");
+    expect(textOf(root)).not.toContain("Match code:");
+  });
+
+  it("a malformed SAS or fingerprint never renders (server-controlled text on a security screen)", async () => {
+    vi.mocked(api.pairingLookup).mockResolvedValue({
+      therapist_id: THERAPIST_ID,
+      display_name: "Dr. Real",
+      wrap_pub_key: THERAPIST_PUB,
+      sas: "<script>12 345</script>",
+      wrap_key_fingerprint: "not-hex-at-all-32chars",
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).not.toContain("Match code:");
+    expect(textOf(root)).not.toContain("not-hex-at-all");
+  });
+
+  it("a server fingerprint that DISAGREES with the key it served is surfaced, never ignored", async () => {
+    vi.mocked(api.pairingLookup).mockResolvedValue({
+      therapist_id: THERAPIST_ID,
+      display_name: "Dr. Real",
+      wrap_pub_key: THERAPIST_PUB,
+      sas: "123 456",
+      wrap_key_fingerprint: "ffffffffffffffff", // 16 hex — valid shape, wrong key
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).toContain("Do not continue");
+  });
+});

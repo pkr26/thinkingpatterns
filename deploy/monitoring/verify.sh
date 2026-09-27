@@ -63,7 +63,7 @@ if [ "$PRODUCTION" -eq 1 ]; then
           fail "--production: $compose_file serves a mutable image ref: $image_ref (pin its digest; see the file's pinning notes)"
           ;;
       esac
-    done < <(grep -E '^\s*image:' "$compose_file" || true)
+    done < <(grep -E '^[[:space:]]*image:' "$compose_file" || true)
   done
   if [ "$status" -eq 0 ]; then
     note "--production digest assertion: OK"
@@ -217,6 +217,38 @@ if isinstance(prom, dict):
     rules = prom.get("rule_files")
     if not isinstance(rules, list) or "alerts.yml" not in rules:
         errors.append("prometheus.yml: rule_files must include alerts.yml")
+    # 2026-09-26 infra audit: the default stack must DETECT a broken DB path
+    # (the /readyz synthetic probe is default-on) and DELIVER alerts
+    # (alertmanager is wired) — both were three-file opt-ins before, and the
+    # default deployment could see neither.
+    if not any(j.get("job_name") == "mindpattern-blackbox" for j in jobs if isinstance(j, dict)):
+        errors.append(
+            "prometheus.yml: the mindpattern-blackbox /readyz job must be "
+            "default-on (2026-09-26 infra audit)"
+        )
+    else:
+        bb_job = next(j for j in jobs if j.get("job_name") == "mindpattern-blackbox")
+        bb_targets = [
+            t
+            for sc in bb_job.get("static_configs", [])
+            for t in (sc.get("targets") or [])
+        ]
+        if not any(str(t).endswith("/readyz") for t in bb_targets):
+            errors.append(
+                "prometheus.yml: mindpattern-blackbox must probe http://api:8000/readyz"
+            )
+    alerting = prom.get("alerting")
+    am_targets = []
+    if isinstance(alerting, dict):
+        for am in alerting.get("alertmanagers", []) or []:
+            for sc in am.get("static_configs", []) or []:
+                am_targets += sc.get("targets") or []
+    if not any(str(t).startswith("alertmanager:") for t in am_targets):
+        errors.append(
+            "prometheus.yml: the alerting block must target the alertmanager "
+            "service (2026-09-26 infra audit: alerts evaluated but never "
+            "delivered was the finding)"
+        )
 
 alerts = load("alerts.yml")
 if isinstance(alerts, dict):
@@ -260,6 +292,12 @@ if isinstance(alerts, dict):
                 else:
                     print(f"verify: alert {name} [{severity}] grounded in: {', '.join(grounded)}")
     print(f"verify: alerts.yml: {n_alerts} alert rule(s) across {len(groups)} group(s)")
+    # 2026-09-26 infra audit: the /readyz alert is default-on with its probe.
+    if "MindPatternReadyzProbeFailing" not in seen_names:
+        errors.append(
+            "alerts.yml: MindPatternReadyzProbeFailing must be an ACTIVE rule "
+            "(the blackbox probe is part of the default stack)"
+        )
 else:
     errors.append("alerts.yml: not a rule-file mapping (expected groups:)")
 
@@ -363,6 +401,49 @@ for rel in [
         for svc_name, svc in doc["services"].items():
             if not (svc or {}).get("image"):
                 errors.append(f"{rel}: service {svc_name} has no image")
+        # 2026-09-26 infra audit: alertmanager ships in the default stack,
+        # digest-pinned like every other image, with its receiver config on
+        # the fail-closed configs: mount (a missing alertmanager.yml must
+        # refuse `up`, not silently page nobody).
+        if "alertmanager" in doc["services"] and rel == "docker-compose.yml":
+            am = doc["services"]["alertmanager"]
+            if "@sha256:" not in str(am.get("image", "")):
+                errors.append("docker-compose.yml: alertmanager image must be digest-pinned")
+            mounted = {c.get("source") for c in am.get("configs", []) or []}
+            if "alertmanager_config" not in mounted:
+                errors.append(
+                    "docker-compose.yml: alertmanager must mount alertmanager_config "
+                    "(fail-closed receiver wiring)"
+                )
+            declared = {c for c in (doc.get("configs") or {})}
+            if "alertmanager_config" not in declared:
+                errors.append("docker-compose.yml: configs: must declare alertmanager_config")
+        # 2026-09-27 re-audit (single-form limits sweep): BOTH overlays must
+        # keep exactly ONE resource-limit form per service — the compose v2
+        # top-level mem_limit/cpus/pids_limit keys, like the production
+        # file. A deploy.resources block alongside them is a duplicate
+        # source of truth (the two forms can disagree, and which one wins
+        # is a non-obvious merge detail); every service must also carry a
+        # memory ceiling at all.
+        if rel in ("docker-compose.yml", "../backup-offsite/docker-compose.yml"):
+            bad_deploy = sorted(
+                name for name, svc in doc["services"].items() if "deploy" in (svc or {})
+            )
+            if bad_deploy:
+                errors.append(
+                    f"{rel}: service(s) {', '.join(bad_deploy)} define deploy.resources — "
+                    "remove the deploy block and keep top-level mem_limit/cpus/pids_limit only"
+                )
+            no_mem = sorted(
+                name for name, svc in doc["services"].items() if "mem_limit" not in (svc or {})
+            )
+            if no_mem:
+                errors.append(
+                    f"{rel}: service(s) {', '.join(no_mem)} define no mem_limit — "
+                    "every overlay service needs a top-level memory ceiling"
+                )
+            if not (bad_deploy or no_mem):
+                print(f"verify: {rel}: single-form limits OK (no deploy.resources, mem_limit everywhere)")
 
 if errors:
     for e in errors:

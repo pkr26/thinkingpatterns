@@ -570,11 +570,17 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       await api.deleteEntry(entry.clientEntryId);
       // M-2: the row is gone; forget its version mark so a later recreate
       // of the same id (legitimately version 1 again) does not false-alarm.
-      await forgetEntryVersion(
-        (await api.getUserId()) ?? "",
-        vault.get().dataKey,
-        entry.clientEntryId,
-      ).catch(() => {});
+      // 2026-09-26 audit LOW: the mark store is keyed BY USER — an
+      // unreadable account id must SKIP the hygiene call (the same guard
+      // as the sibling forgetLocalMoodDay below) instead of passing "" and
+      // silently reading/writing the wrong scope key. Quietly, like every
+      // other hygiene path in this app: nothing is ever logged (a journal
+      // app logs nothing), and the cost of a skip is one false alarm on a
+      // future recreate of the same id — never corrupted state.
+      const deleteUserId = await api.getUserId().catch(() => null);
+      if (deleteUserId) {
+        await forgetEntryVersion(deleteUserId, vault.get().dataKey, entry.clientEntryId).catch(() => {});
+      }
       // L-67: this device just moved the collection revision; the walk's
       // token must be re-acquired or the next "Load older" 409-restarts
       // and wipes the filters.
@@ -714,7 +720,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           if (!flagged) {
             await recordCrisisDialogShown(userId, today).catch(() => {});
             Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
+              // Resources first; the safety plan (2026-09-27) rides beside.
               { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
+              { text: tr("common.makeSafetyPlan"), onPress: () => navigation.navigate("SafetyPlan") },
               { text: tr("common.notNow"), style: "cancel" },
             ]);
           }

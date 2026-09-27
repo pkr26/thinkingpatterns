@@ -24,13 +24,19 @@ CALM = "Long walk by the river, felt calm and grateful. Cooked, ate well, slept 
 
 
 async def seed_corpus(client, emu, days: int) -> None:
-    """Seed alternating calm days and Sunday work-anxiety days."""
+    """Calm days with work-anxiety on every Sunday PLUS a weekday-
+    independent scatter (every 5th day) of work days. 2026-09-26 item 1:
+    the within-person weekday deconfounding absorbs a Sunday-ONLY contrast
+    (the whole effect WAS the weekly cycle), so mood_correlation needs
+    same-weekday contrast — the scattered work days provide it on every
+    weekday — while Sunday stays the dominant concentration for the
+    temporal card (10/10 Sundays vs a ~1-in-5 weekday base rate)."""
     # Age the account to match the corpus: the server (correctly) refuses
     # entries that predate the account, so a synthetic N-day history needs
     # an N-day-old account.
     await emu.backdate_account(client, days=days + 2)
-    for day in daterange(days, TODAY):
-        if day.weekday() == 6:  # Sunday
+    for i, day in enumerate(daterange(days, TODAY)):
+        if day.weekday() == 6 or i % 5 == 0:  # Sunday, or scattered weekday
             await emu.create_entry(
                 client, WORK_ANXIOUS, day, client_entry_id=f"w-{day.isoformat()}"
             )
@@ -41,10 +47,19 @@ async def seed_corpus(client, emu, days: int) -> None:
 async def test_full_pipeline_unlocks_at_threshold(client, monkeypatch):
     emu = ClientEmulator("longterm", "deep-password")
     await emu.register(client)
-    # 70 days = 10 Sundays: enough mentions (≥8) for the base-rate-corrected
-    # temporal test.
+    # 70 days = 10 Sundays + ~12 scattered weekday work days: enough
+    # mentions (≥8) for the base-rate-corrected temporal test and
+    # within-weekday contrast for mood_correlation.
     await seed_corpus(client, emu, days=70)
 
+    # The first recompute runs two days back (2026-09-20 L-1: the calendar
+    # is the shared UTC anchor — patch _utc_today itself) so the fixture
+    # can then add >= 2 fresh REAL-DAY work entries (2026-09-26 item 5: a
+    # single new evidence day is a clustered mention, not replication).
+    # Working two days back also makes the fixture weekday-independent:
+    # the fresh days TODAY-1/TODAY always postdate the first
+    # qualification, whatever weekday TODAY is.
+    monkeypatch.setattr("app.api.insights._utc_today", lambda: date.today() - timedelta(days=2))
     session_token = await emu.open_processing_session(client)
     recompute = await client.post(
         "/api/insights/recompute",
@@ -55,21 +70,18 @@ async def test_full_pipeline_unlocks_at_threshold(client, monkeypatch):
     assert body["phase"] == "insight"
     assert body["active_days"] == 70
     assert body["analyzer"] == "brain"
-    # Replication gate: statistical kinds (temporal, mood_correlation) qualify
-    # as candidates on the first recompute day and surface only after an
-    # INDEPENDENT second observation — a second recompute day that adds new
-    # evidence. A next-day recompute of the UNCHANGED corpus no longer
-    # promotes: consecutive recomputes share ~179/180 window days, so that
-    # was the same data scored twice.
+    # Replication gate: statistical kinds (temporal, mood_correlation)
+    # qualify as candidates on the first recompute day and surface only
+    # after an INDEPENDENT second observation — a second recompute day
+    # that adds new evidence. A next-day recompute of the UNCHANGED
+    # corpus no longer promotes: consecutive recomputes share ~179/180
+    # window days, so that was the same data scored twice.
 
-    # 2026-09-20 (L-1): the recompute day moved from date_type.today()
-    # (host-local) to the shared UTC anchor, so the "next day" seam moved
-    # with it — patch _utc_today itself.
     monkeypatch.setattr("app.api.insights._utc_today", lambda: date.today() + timedelta(days=1))
-    # The fresh evidence: a work entry on a day the fixture wrote CALM text
-    # for (never a Sunday, so the day is new work evidence every run).
-    fresh_day = TODAY if TODAY.weekday() != 6 else TODAY - timedelta(days=1)
-    await emu.create_entry(client, WORK_ANXIOUS, fresh_day, client_entry_id="fresh-work")
+    # The fresh evidence: work entries on two days postdating the first
+    # qualification, whatever weekday TODAY is.
+    await emu.create_entry(client, WORK_ANXIOUS, TODAY - timedelta(days=1), client_entry_id="fw-1")
+    await emu.create_entry(client, WORK_ANXIOUS, TODAY, client_entry_id="fw-2")
     second = await emu.recompute(client)
     assert second["phase"] == "insight"
     assert second["patterns_stored"] >= 2  # temporal + mood_correlation at minimum

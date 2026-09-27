@@ -1,13 +1,27 @@
 /** The i18n seam and the small pure modules that ride it: locale
  *  switching, the catalog fallback, date formatting, the prompt chips, the
- *  deterministic question rotation, and the mood label helpers. */
-import { afterEach, describe, expect, it } from "vitest";
-import { __setLocaleForTests, dateLocaleTag, getLocale, setLocale, t, enCatalog, esCatalog } from "../src/strings";
+ *  deterministic question rotation, the mood label helpers, and the
+ *  Language preference (auto/en/es, persisted + live — audit 2026-09-26). */
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  __setLocaleForTests,
+  applyLanguagePref,
+  dateLocaleTag,
+  getLanguagePref,
+  getLocale,
+  LANGUAGE_STORAGE_KEY,
+  setLocale,
+  subscribeLanguage,
+  t,
+  enCatalog,
+  esCatalog,
+} from "../src/strings";
 import { genericQuestionForDate, GENERIC_QUESTIONS, GENERIC_QUESTIONS_ES } from "../src/genericQuestions";
 import { promptChipsFor, PROMPT_CHIPS, PROMPT_CHIPS_ES } from "../src/promptChips";
 import { moodLabel, localSentiment, ACTIVITY_TAGS, activityTagLabel } from "../src/mood";
 
 afterEach(() => {
+  applyLanguagePref("auto");
   __setLocaleForTests("en");
 });
 
@@ -51,6 +65,57 @@ describe("catalog parity (P8.2)", () => {
         expect(catalog[key]?.length).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("language preference (audit 2026-09-26 LOW: the override seam)", () => {
+  /** The setup shim's window.localStorage — the storage the platform seam
+   *  actually reads under the node runtime. */
+  const shimStorage = (): Storage => {
+    const win = (globalThis as { window?: { localStorage?: Storage } }).window;
+    if (!win?.localStorage) throw new Error("no window shim in this runtime");
+    return win.localStorage;
+  };
+
+  it("defaults to auto and resolves from the device locale", () => {
+    expect(getLanguagePref()).toBe("auto");
+    expect(getLocale()).toBe("en"); // this runtime's device locale
+  });
+
+  it("an explicit override applies LIVE: the catalog, the date tag, and the persisted key all move together", () => {
+    const storage = shimStorage();
+    const heard: string[] = [];
+    const off = subscribeLanguage(() => heard.push(getLocale()));
+    const english = t("mood.option.good");
+    applyLanguagePref("es");
+    expect(getLanguagePref()).toBe("es");
+    expect(getLocale()).toBe("es");
+    expect(dateLocaleTag()).toBe("es-ES");
+    expect(t("mood.option.good")).not.toBe(english);
+    expect(storage.getItem(LANGUAGE_STORAGE_KEY)).toBe("es");
+    expect(heard).toEqual(["es"]); // the live-apply notification (App re-renders)
+    off();
+    applyLanguagePref("en");
+    expect(heard).toEqual(["es"]); // unsubscribed: no further notice
+  });
+
+  it("auto follows the device again after the override lifts", () => {
+    applyLanguagePref("es");
+    expect(getLocale()).toBe("es");
+    applyLanguagePref("auto");
+    expect(getLanguagePref()).toBe("auto");
+    expect(getLocale()).toBe("en"); // back to the detected device locale
+  });
+
+  it("a hostile stored value resolves as auto at load (never a crash, never a wrong catalog)", async () => {
+    const storage = shimStorage();
+    storage.setItem(LANGUAGE_STORAGE_KEY, "fr");
+    // Re-evaluate the module against the seeded storage — the startup path
+    // a reload would take.
+    vi.resetModules();
+    const fresh = await import("../src/strings");
+    expect(fresh.getLanguagePref()).toBe("auto");
+    expect(fresh.getLocale()).toBe("en");
   });
 });
 

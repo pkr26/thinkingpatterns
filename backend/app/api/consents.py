@@ -41,7 +41,6 @@ from ..locks import (
 )
 from ..models import (
     ROLE_THERAPIST,
-    AccessLog,
     Consent,
     PairingCode,
     User,
@@ -56,6 +55,7 @@ from ..schemas import (
 )
 from ..security import sharing
 from ..security.crypto import MIN_BLOB_SIZE
+from ._audit import append_access_log
 from .account import _require_verifier
 
 router = APIRouter(
@@ -165,16 +165,28 @@ async def lookup_pairing(
     session: AsyncSession = Depends(get_session),
 ):
     code = sharing.normalize_pairing_code(body.code)
-    code_row = await _live_code(session, code, request.app.state.settings.token_secret)
+    code_row = await _live_code(session, code, request.app.state.settings.pairing_secret)
     if code_row is None:
         raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
     therapist = await _therapist_for_code(session, code_row)
     if therapist is None:
         raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
+    # SAS out-of-band verification (2026-09-26): computed SERVER-side here
+    # because this request holds every input at once — the code the patient
+    # just typed (the HMAC key), the wrap-key DER the server is about to
+    # hand out, and the authenticated patient id. The therapist's portal
+    # derives the identical string for the same live pairing session
+    # (GET /therapist/pairing/sas); the two humans compare it (and the key
+    # fingerprint) out of band before the grant is confirmed, so a
+    # malicious server that substituted its own wrap key changes both
+    # values and the mismatch is HUMAN-visible.
+    wrap_pub_der = base64.b64decode(therapist.wrap_pub_key or "", validate=True)
     return PairingLookupResponse(
         therapist_id=therapist.id,
         display_name=therapist.display_name or therapist.username,
         wrap_pub_key=therapist.wrap_pub_key or "",
+        sas=sharing.pairing_sas(code, wrap_pub_der, user.id),
+        wrap_key_fingerprint=sharing.wrap_key_fingerprint(wrap_pub_der),
     )
 
 
@@ -301,7 +313,7 @@ async def grant_consent(
         )
 
     code = sharing.normalize_pairing_code(body.code)
-    code_row = await _live_code(session, code, request.app.state.settings.token_secret)
+    code_row = await _live_code(session, code, request.app.state.settings.pairing_secret)
     if code_row is None:
         raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
     therapist = await _therapist_for_code(session, code_row)
@@ -317,7 +329,7 @@ async def grant_consent(
     # entered, all state that authorizes this new share is freshly read.
     async with sharing_locks.hold(sharing_therapist_lock_key(therapist_id)):
         async with sharing_locks.hold(sharing_patient_lock_key(user.id)):
-            code_row = await _live_code(session, code, request.app.state.settings.token_secret)
+            code_row = await _live_code(session, code, request.app.state.settings.pairing_secret)
             if code_row is None:
                 raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
             therapist = await _therapist_for_code(session, code_row)
@@ -434,13 +446,12 @@ async def grant_consent(
                     disclosure=SHARING_DISCLOSURE_VERSION,
                 )
                 session.add(consent)
-            session.add(
-                AccessLog(
-                    actor_id=fresh_user.id,
-                    actor_role=fresh_user.role,
-                    user_id=fresh_user.id,
-                    action="grant",
-                )
+            await append_access_log(
+                session,
+                actor_id=fresh_user.id,
+                actor_role=fresh_user.role,
+                user_id=fresh_user.id,
+                action="grant",
             )
             try:
                 await session.commit()
@@ -533,13 +544,12 @@ async def rewrap_consent(
             raise ApiError(status_code=404, detail="consent not found", code="not_found")
         consent.ephemeral_pub = body.ephemeral_pub
         consent.wrapped_key = wrapped
-        session.add(
-            AccessLog(
-                actor_id=fresh_user.id,
-                actor_role=fresh_user.role,
-                user_id=fresh_user.id,
-                action="rewrap",
-            )
+        await append_access_log(
+            session,
+            actor_id=fresh_user.id,
+            actor_role=fresh_user.role,
+            user_id=fresh_user.id,
+            action="rewrap",
         )
         try:
             await session.commit()
@@ -623,13 +633,12 @@ async def revoke_consent(
             consent.summary_blob = None
             consent.summary_eph_pub = None
             consent.summary_updated_at = None
-            session.add(
-                AccessLog(
-                    actor_id=fresh_user.id,
-                    actor_role=fresh_user.role,
-                    user_id=fresh_user.id,
-                    action="revoke",
-                )
+            await append_access_log(
+                session,
+                actor_id=fresh_user.id,
+                actor_role=fresh_user.role,
+                user_id=fresh_user.id,
+                action="revoke",
             )
             try:
                 await session.commit()

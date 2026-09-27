@@ -13,6 +13,12 @@
  * a month entry count, and tap-a-day filtering; entries render as cards
  * with a mood rail; delete is a two-step arm/confirm (matching the portal's
  * pattern) instead of a single unconfirmed press.
+ *
+ * Audit 2026-09-26 LOW: search maps hits back through a Map<id, entry>
+ * built once per source (was entries.find per hit, O(n²)), the list
+ * renders through a growing window with a "Show more" sentinel, and the
+ * decrypt loop yields to the host periodically — the mood calendar's
+ * sourcing is untouched.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
@@ -45,6 +51,30 @@ function weekdayLabels(): string[] {
   });
 }
 
+/** How many entry cards render before the "Show more" sentinel (audit
+ *  2026-09-26 LOW): a whole decrypted journal must not hit the DOM at
+ *  once — a plain growing slice, the Settings access-log idiom, not a
+ *  virtualization dependency. */
+const HISTORY_WINDOW = 30;
+
+/** Coarse UI yield while decrypting (same audit item): decrypt-every-row
+ *  stays sequential by design (WebCrypto has no batch API), but the loop
+ *  hands the host a beat every so often — requestIdleCallback where the
+ *  platform has it, a macrotask otherwise — so a long account does not
+ *  freeze painting. */
+const DECRYPT_YIELD_EVERY = 25;
+
+function yieldToHost(): Promise<void> {
+  return new Promise((resolve) => {
+    const idle = (globalThis as { requestIdleCallback?: (callback: () => void) => number }).requestIdleCallback;
+    if (typeof idle === "function") {
+      idle(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
 export function HistoryView(): React.JSX.Element {
   const [entries, setEntries] = useState<DecodedEntry[] | null>(null);
   const [rolledBack, setRolledBack] = useState<string[]>([]);
@@ -60,6 +90,9 @@ export function HistoryView(): React.JSX.Element {
   const [conflict, setConflict] = useState<{ theirs: DecodedEntry; mine: string } | null>(null);
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The windowed-render count (audit 2026-09-26 LOW): how many of the
+  // filtered entries are actually on screen.
+  const [shownCount, setShownCount] = useState(HISTORY_WINDOW);
   // The device-local mood log's day values — the calendar's fallback source
   // (H-5: payload pick first, log value second), like mobile's logMoods.
   const [logMoods, setLogMoods] = useState<Record<string, number>>({});
@@ -68,7 +101,6 @@ export function HistoryView(): React.JSX.Element {
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
     generation.current = run;
-    const keys = vault.get();
     const owner = vault.ownerUserId();
     if (!owner) {
       setError(t("common.sessionLocked"));
@@ -77,11 +109,21 @@ export function HistoryView(): React.JSX.Element {
     setEntries(null);
     setError("");
     try {
+      // Immediate re-check inside the try (audit 2026-09-26 LOW, the
+      // Patterns guard pattern): a lock landing between the owner check
+      // and the key fetch — or between any two awaits below — must be a
+      // quiet no-op, never vault.get()'s throw as an unhandled rejection.
+      if (!vault.isUnlocked()) return;
+      const keys = vault.get();
       const listed = await listEntriesWalk();
       if (generation.current !== run) return;
       const decoded: DecodedEntry[] = [];
       const tampered: string[] = [];
       for (const row of listed) {
+        if (decoded.length > 0 && decoded.length % DECRYPT_YIELD_EVERY === 0) {
+          await yieldToHost();
+          if (generation.current !== run) return;
+        }
         try {
           const payload = await decryptEntry(keys.dataKey, owner, row.client_entry_id, row.blob, row.content_version ?? undefined);
           decoded.push({
@@ -137,13 +179,22 @@ export function HistoryView(): React.JSX.Element {
 
   const visible = useMemo(() => {
     if (!entries) return null;
+    // Map<id, entry> built ONCE per source (audit 2026-09-26 LOW): mapping
+    // the search hits back used entries.find per hit — O(n²) over the whole
+    // decrypted journal on every keystroke.
+    const byId = new Map(entries.map((entry) => [entry.clientEntryId, entry]));
     let pool = entries;
     if (selectedDay) pool = pool.filter((entry) => entry.entryDate === selectedDay);
     return filterEntries(
       pool.map((entry) => ({ clientEntryId: entry.clientEntryId, entryDate: entry.entryDate, text: entry.payload.text })),
       query,
-    ).map((hit) => entries.find((entry) => entry.clientEntryId === hit.clientEntryId)!);
+    ).map((hit) => byId.get(hit.clientEntryId)!);
   }, [entries, query, selectedDay]);
+
+  // A new filter source starts the window over (the sentinel grows it).
+  useEffect(() => {
+    setShownCount(HISTORY_WINDOW);
+  }, [query, selectedDay]);
 
   const calendar = useMemo(() => {
     if (!entries) return null;
@@ -174,9 +225,11 @@ export function HistoryView(): React.JSX.Element {
   const submitEdit = async (theirsOverride?: DecodedEntry): Promise<void> => {
     const target = theirsOverride ?? editing;
     if (!target) return;
-    const keys = vault.get();
     const owner = vault.ownerUserId();
-    if (!owner) return;
+    // Guarded like load() (audit 2026-09-26 LOW): a lock that raced the
+    // press is a quiet no-op, never vault.get()'s throw.
+    if (!owner || !vault.isUnlocked()) return;
+    const keys = vault.get();
     setBusy(true);
     try {
       const nextVersion = target.contentVersion + 1;
@@ -242,11 +295,11 @@ export function HistoryView(): React.JSX.Element {
   };
 
   const remove = async (entry: DecodedEntry): Promise<void> => {
-    const keys = vault.get();
     const owner = vault.ownerUserId();
-    if (!owner) return;
+    if (!owner || !vault.isUnlocked()) return; // guarded like submitEdit
     setBusy(true);
     try {
+      const keys = vault.get();
       await api.deleteEntry(entry.clientEntryId);
       await forgetEntryVersion(owner, keys.dataKey, entry.clientEntryId);
       await removeMoodDay(keys.dataKey, owner, entry.entryDate).catch(() => undefined);
@@ -352,7 +405,7 @@ export function HistoryView(): React.JSX.Element {
           </>
         )}
         {visible?.length === 0 && <Note>{query ? t("history.noMatch") : t("history.empty")}</Note>}
-        {visible?.map((entry) => (
+        {visible?.slice(0, shownCount).map((entry) => (
           <article key={entry.clientEntryId} className="entry-card">
             <div className="entry-card__head">
               <span className="row" style={{ gap: 8 }}>
@@ -378,6 +431,17 @@ export function HistoryView(): React.JSX.Element {
             </div>
           </article>
         ))}
+        {/* The windowed-render sentinel (audit 2026-09-26 LOW): one more
+            window per press, the Settings access-log idiom — the rest of
+            the journal stays off-DOM until asked for. */}
+        {visible !== null && visible.length > shownCount && (
+          <Button
+            label={t("settings.showMore")}
+            onPress={() => setShownCount((count) => count + HISTORY_WINDOW)}
+            small
+            variant="ghost"
+          />
+        )}
       </Card>
 
       {editing && (

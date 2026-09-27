@@ -232,14 +232,23 @@ export async function unwrapPatientDataKey(
 export interface MeasureReading {
   measure: string;
   score: number;
+  /** The RAW 0-3 response to the PHQ-9's item 9 (self-harm), when the
+   *  payload carries one — clinical review 2026-09-27. Absent (undefined
+   *  or null) for gad7/phq2 and for pre-field phq9 payloads, which render
+   *  exactly as before; NEVER interpreted here beyond range validation. */
+  item9?: number | null;
   completedAt: string | null;
   measureDate: string;
 }
 
 /** Decrypt one patient-recorded measure blob. The payload is the patient's
- *  client contract: {"v":1,"measure":"phq9","score":N,"completed_at":ISO}.
- *  Sanitized like every decrypted payload — wrong shapes degrade to null,
- *  never render. The portal DISPLAYS scores; it never interprets them. */
+ *  client contract: {"v":1,"measure":"phq9","score":N,"item9":R,
+ *  "completed_at":ISO} — item9 rides phq9 only (an endorsed PHQ-9 item 9
+ *  mandates clinical follow-up regardless of the total, so the raw item
+ *  response travels beside the score; older payloads without it stay
+ *  valid). Sanitized like every decrypted payload — wrong shapes degrade
+ *  to null, never render. The portal DISPLAYS scores and surfaces the
+ *  item-9 fact; it never interprets either. */
 export async function decryptMeasure(
   dataKey: Bytes,
   userId: string,
@@ -263,9 +272,25 @@ export async function decryptMeasure(
     if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 100) {
       return null;
     }
+    const measureName = typeof payload.measure === "string" ? payload.measure.slice(0, 24) : "measure";
+    // item9 (2026-09-27): parsed ONLY for phq9, and only as an integer
+    // 0-3 — anything else (a gad7 carrying the field, a 7, a string, a
+    // negative) is not a fact this portal may render, so it reads as
+    // absent. The READING is not dropped: a hostile item9 degrades the
+    // field, never the whole row.
+    const rawItem9 = payload.item9;
+    const item9 =
+      measureName === "phq9"
+        && typeof rawItem9 === "number"
+        && Number.isInteger(rawItem9)
+        && rawItem9 >= 0
+        && rawItem9 <= 3
+        ? rawItem9
+        : null;
     return {
-      measure: typeof payload.measure === "string" ? payload.measure.slice(0, 24) : "measure",
+      measure: measureName,
       score: Math.round(score),
+      item9,
       completedAt:
         typeof payload.completed_at === "string" ? payload.completed_at.slice(0, 10) : null,
       measureDate: measure.measure_date.slice(0, 10),

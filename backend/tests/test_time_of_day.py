@@ -35,21 +35,19 @@ def _corpus(tods: list[str | None]) -> list[JournalEntry]:
 
 def _surfaced(tods: list[str | None]) -> list:
     """Two-phase update: temporal is a STATISTICAL kind, so the card only
-    surfaces after independent replication (a fresh evidence Sunday on the
-    second run) — the same discipline the D-1 tests use."""
+    surfaces after independent replication (>= 2 fresh evidence Sundays
+    after the first qualification — item 5, 2026-09-26), the same
+    discipline the D-1 tests use. The fresh Sundays carry NO tod (a v1
+    payload write), so the dominance mix the card is pinned against is
+    exactly the one the caller planted in the corpus."""
     today = T0 + timedelta(weeks=len(tods))
     first = brain.update(brain.load_state(None), _corpus(tods), today)
-    # The fresh Sunday is one week PAST run 1's today — a genuinely new
-    # evidence day, which is what satisfies the replication gate (the
-    # last corpus Sunday is a week before today; adding one more week
-    # here keeps it from colliding with run 1's date).
-    fresh_sunday = today + timedelta(weeks=1)
-    grown = _corpus(tods) + [
-        JournalEntry("another busy work day", fresh_sunday, tod=tods[-1] if tods else None)
-    ]
-    second = brain.update(
-        brain.load_state(brain.dump_state(first.new_state)), grown, fresh_sunday
-    )
+    # The fresh Sundays are one and two weeks PAST run 1's today —
+    # genuinely new evidence days, which is what satisfies the
+    # replication gate.
+    fresh = [today + timedelta(weeks=w) for w in (1, 2)]
+    grown = _corpus(tods) + [JournalEntry("another busy work day", d) for d in fresh]
+    second = brain.update(brain.load_state(brain.dump_state(first.new_state)), grown, fresh[-1])
     return [p for p in second.surfaced if p.kind == "temporal" and p.label == "work"]
 
 
@@ -60,7 +58,19 @@ class TestTemporalTimeOfDay:
         assert cards[0].detail["time_of_day"] == "evening"
 
     def test_mixed_windows_do_not_narrow_the_claim(self):
-        cards = _surfaced(["evening", "morning", "evening", "night", "morning", "afternoon", "evening", "night", "morning"])
+        cards = _surfaced(
+            [
+                "evening",
+                "morning",
+                "evening",
+                "night",
+                "morning",
+                "afternoon",
+                "evening",
+                "night",
+                "morning",
+            ]
+        )
         assert cards
         assert "time_of_day" not in cards[0].detail
 
@@ -84,7 +94,9 @@ async def _mature_account(client, emu, days=32):
 
     await emu.backdate_account(client, days=days + 2)
     for day in daterange(days, date.today()):
-        await emu.create_entry(client, "quiet day some reading", day, client_entry_id=f"t-{day.isoformat()}")
+        await emu.create_entry(
+            client, "quiet day some reading", day, client_entry_id=f"t-{day.isoformat()}"
+        )
 
 
 async def test_recompute_accepts_the_tod_channel(client):

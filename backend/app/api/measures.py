@@ -29,8 +29,8 @@ import base64
 import binascii
 from datetime import date as date_type, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query, Request, Response
-from sqlalchemy import func, select, update
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,13 +39,17 @@ from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
 from ..models import Measure, User
-from ..schemas import MeasureCreate, MeasureOut
+from ..schemas import MeasureCreate, MeasureDeleteResponse, MeasureOut
 from ..security.crypto import MIN_BLOB_SIZE
-from .entries import (
+from ._audit import append_access_log
+from ._paging import (
     MAX_COLLECTION_REVISION,
     assert_expected_revision,
     collection_changed_error,
+    emit_page_headers,
     parse_expected_revision,
+    select_byte_page,
+    verify_fetched_page,
 )
 
 router = APIRouter(prefix="/measures", tags=["measures"])
@@ -342,40 +346,16 @@ async def list_measures(
             )
         ).all()
         requested = [(str(row[0]), int(row[1])) for row in metadata[:limit]]
-        selected: list[tuple[str, int]]
 
-        if page_bytes is None:
-            selected = requested
-            if sum(size for _, size in selected) > MEASURE_PAGE_BLOB_BYTES:
-                raise ApiError(
-                    status_code=413,
-                    detail=(
-                        "requested measure page exceeds the 2 MiB ciphertext budget; "
-                        "upgrade to a byte-paginating client"
-                    ),
-                    code="payload_too_large",
-                )
-        else:
-            selected = []
-            total_bytes = 0
-            for measure_id, blob_bytes in requested:
-                if blob_bytes > page_bytes:
-                    # Never hand back an empty, apparently complete page
-                    # when the caller asked for less than one measure's
-                    # ciphertext.
-                    if not selected:
-                        raise ApiError(
-                            status_code=413,
-                            detail="a measure exceeds the requested page byte budget",
-                            code="payload_too_large",
-                        )
-                    break
-                if total_bytes + blob_bytes > page_bytes:
-                    break
-                selected.append((measure_id, blob_bytes))
-                total_bytes += blob_bytes
+        page = select_byte_page(
+            requested,
+            more_after_request=len(metadata) > limit,
+            page_bytes=page_bytes,
+            hard_budget=MEASURE_PAGE_BLOB_BYTES,
+            collection="measure",
+        )
 
-        selected_ids = [measure_id for measure_id, _ in selected]
+        selected_ids = [measure_id for measure_id, _ in page.selected]
         ordered_rows: list[Measure] = []
         if selected_ids:
             rows = (
@@ -389,29 +369,94 @@ async def list_measures(
                 .scalars()
                 .all()
             )
-            rows_by_id = {row.id: row for row in rows}
-            if len(rows_by_id) != len(selected_ids):
-                # The collection moved between the metadata and blob
-                # fetches; do not fabricate a non-advancing cursor.
-                raise collection_changed_error("measures", MEASURES_REVISION_HEADER, revision)
-            ordered_rows = [rows_by_id[measure_id] for measure_id in selected_ids]
+            ordered_rows = verify_fetched_page(
+                selected_ids,
+                rows,
+                byte_limit=page_bytes if page_bytes is not None else MEASURE_PAGE_BLOB_BYTES,
+                collection="measures",
+                header_name=MEASURES_REVISION_HEADER,
+                revision=revision,
+            )
 
-        has_more = len(selected) < len(requested) or len(metadata) > limit
         result = [_measure_out(row) for row in ordered_rows]
         final_revision = await current_measures_revision(session, user.id)
         if final_revision != revision:
             raise collection_changed_error("measures", MEASURES_REVISION_HEADER, final_revision)
-        # Set it even for an empty or terminal page: the client stores this
-        # exact snapshot marker before deciding whether to continue.
-        response.headers[MEASURES_REVISION_HEADER] = str(revision)
-        if has_more and result:
-            # A continuation is always exactly the number of rows the
-            # caller received — clients can reject malformed continuations.
-            # The `and result` guard mirrors the therapist entries/notes
-            # reads (final verification 2026-09-22): an absent header is the
-            # sole end-of-results signal, so an empty page must never
-            # advertise a non-advancing continuation. Unreachable today —
-            # a concurrent delete bumps the revision and the fence above
-            # turns the page into 409 collection_changed first.
-            response.headers["X-Next-Offset"] = str(offset + len(result))
+        emit_page_headers(
+            response,
+            revision=revision,
+            header_name=MEASURES_REVISION_HEADER,
+            has_more=page.has_more,
+            rows_returned=len(result),
+            offset=offset,
+        )
     return result
+
+
+@router.delete(
+    "/{client_measure_id}",
+    response_model=MeasureDeleteResponse,
+    # 2026-09-26 audit item 21: a wrongly-recorded measure previously had NO
+    # correction path — the patient's only recourse was deleting the whole
+    # account. Deletes hit the database like any other write and join the
+    # same bucket family the entry delete uses.
+    dependencies=[
+        Depends(make_rate_limiter("measures-delete", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def delete_measure(
+    client_measure_id: str,
+    request: Request,
+    response: Response,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Hard-delete one recorded measure (verifier-gated correction path).
+
+    2026-09-26 audit item 21. A measure is patient-authored content; a
+    mis-recorded questionnaire row is the patient's error to correct, but
+    the correction is DESTRUCTIVE and re-authenticated with the password
+    verifier exactly like every other destructive action (account deletion,
+    credential rotation, rekey): a stolen bearer must not be able to erase
+    a wellbeing history. The same lifecycle/epoch fence as every measure
+    mutation applies, the delete and the measures_revision advance commit
+    atomically (a paged client sees collection_changed instead of silent
+    offset drift), and the deletion is audit-logged through the chained
+    append (action ``delete_measure``) so the trail records the correction.
+    """
+    # Deferred import: account.py imports this module's helpers at module
+    # level, so a module-level back-import would cycle.
+    from .account import _require_verifier
+
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        async with _user_locks.hold(f"measures:{user.id}"):
+            fresh_user = await _fresh_active_measure_user(session, user.id, expected_epoch)
+            result = await session.execute(
+                delete(Measure).where(
+                    Measure.user_id == fresh_user.id,
+                    Measure.client_measure_id == client_measure_id,
+                )
+            )
+            if db_rowcount(result) == 0:
+                raise ApiError(status_code=404, detail="measure not found", code="not_found")
+            await append_access_log(
+                session,
+                actor_id=fresh_user.id,
+                actor_role=fresh_user.role,
+                user_id=fresh_user.id,
+                action="delete_measure",
+            )
+            new_revision = await _increment_measures_revision(session, fresh_user)
+            response.headers[MEASURES_REVISION_HEADER] = str(new_revision)
+            await session.commit()
+            return MeasureDeleteResponse(measures_revision=new_revision)

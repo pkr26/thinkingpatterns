@@ -70,13 +70,17 @@ class TestReplicationCapEviction:
         assert record.state == "candidate"
 
     def test_genuinely_new_evidence_still_satisfies_replication(self):
-        # Positive control for the same corpus: one FRESH work day is real
-        # new evidence and must still promote the candidate.
+        # Positive control for the same corpus: >= 2 FRESH work days are
+        # real new evidence and must still promote the candidate (item 5,
+        # 2026-09-26: a single clustered mention no longer counts).
         entries = self._corpus()
         first = brain.update(brain.load_state(None), entries, T0)
-        grown = entries + [JournalEntry(ANXIOUS_WORK, T0 + timedelta(days=1))]
+        grown = entries + [
+            JournalEntry(ANXIOUS_WORK, T0 + timedelta(days=1)),
+            JournalEntry(ANXIOUS_WORK, T0 + timedelta(days=2)),
+        ]
         result = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
         )
         assert any(p.kind == "mood_correlation" and p.label == "work" for p in result.surfaced)
 
@@ -344,18 +348,23 @@ class TestPersonLanguageGate:
 
     def test_english_person_still_anchored(self):
         # Positive control: English keeps person anchoring — a recurring
-        # capitalized mid-sentence token ("Morgana") mentioned only on the
-        # anxious days, so the mood_correlation carries the person origin.
+        # capitalized mid-sentence token ("Morgana") mentioned on the
+        # anxious days (spread across every weekday — item 1's weekday
+        # deconfounding absorbs a one-weekday pattern, correctly), so the
+        # mood_correlation carries the person origin.
         entries = []
         for i, day in enumerate(consecutive(T0 - timedelta(days=69), 70)):
-            if day.weekday() == 6:
+            if i % 3 == 0:
                 entries.append(JournalEntry(f"argued with Morgana again {i}", day))
             else:
                 entries.append(JournalEntry(CALM, day))
         first = brain.update(brain.load_state(None), entries, T0)
-        grown = entries + [JournalEntry("argued with Morgana again 70", T0 + timedelta(days=1))]
+        grown = entries + [
+            JournalEntry("argued with Morgana again 70", T0 + timedelta(days=1)),
+            JournalEntry("argued with Morgana again 71", T0 + timedelta(days=2)),
+        ]
         result = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=1)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
         )
         assert any(
             p.detail.get("source") == "person" and p.label == "morgana" for p in result.surfaced
@@ -375,7 +384,9 @@ class TestConfirmClockRestart:
         # read the 22-day-old first_qualified and confirmed the pattern in
         # the same run; the first card the user ever saw was "confirmed".
         days = consecutive(T0 - timedelta(days=69), 70)
-        entries = [JournalEntry(ANXIOUS_WORK if d.weekday() == 6 else CALM, d) for d in days]
+        entries = [
+            JournalEntry(ANXIOUS_WORK if i % 3 == 0 else CALM, d) for i, d in enumerate(days)
+        ]
         first = brain.update(brain.load_state(None), entries, T0)
         record = first.new_state["patterns"]["mood_correlation:work"]
         assert record.state == "candidate"
@@ -391,8 +402,11 @@ class TestConfirmClockRestart:
             record = state["patterns"]["mood_correlation:work"]
             assert record.state == "candidate"  # never promoted without new evidence
 
-        corpus = corpus + [JournalEntry(ANXIOUS_WORK, T0 + timedelta(days=23))]
-        final_day = T0 + timedelta(days=23)
+        corpus = corpus + [
+            JournalEntry(ANXIOUS_WORK, T0 + timedelta(days=23)),
+            JournalEntry(ANXIOUS_WORK, T0 + timedelta(days=24)),
+        ]
+        final_day = T0 + timedelta(days=24)
         result = brain.update(brain.load_state(brain.dump_state(state)), corpus, final_day)
         cards = [p for p in result.surfaced if p.kind == "mood_correlation" and p.label == "work"]
         assert cards, "fresh evidence must finally promote the candidate"
@@ -419,8 +433,7 @@ class TestPhraseAnchorRotation:
 
     def _phase_one(self, early):
         return [JournalEntry(self.EARLY_VARIANT, early)] + [
-            JournalEntry(self.LATE_VARIANT, early + timedelta(days=d))
-            for d in (0, 4, 9, 15, 22)
+            JournalEntry(self.LATE_VARIANT, early + timedelta(days=d)) for d in (0, 4, 9, 15, 22)
         ]
 
     @staticmethod
@@ -444,8 +457,7 @@ class TestPhraseAnchorRotation:
         # 370 days later: the anchor sentence is long outside the window,
         # but the thought still recurs (later variant only).
         phase_two = [
-            JournalEntry(self.LATE_VARIANT, early + timedelta(days=d))
-            for d in (330, 350, 370)
+            JournalEntry(self.LATE_VARIANT, early + timedelta(days=d)) for d in (330, 350, 370)
         ]
         second = brain.update(
             brain.load_state(brain.dump_state(first.new_state)),
@@ -474,8 +486,7 @@ class TestPhraseAnchorRotation:
         beach_records = {
             pid: record
             for pid, record in second.new_state["patterns"].items()
-            if record.kind in ("rumination", "recurring_phrase")
-            and "beach" in record.label
+            if record.kind in ("rumination", "recurring_phrase") and "beach" in record.label
         }
         assert beach_records, "the unrelated recurring phrase must still surface"
         assert all(pid != sleep_pid for pid in beach_records), (

@@ -8,6 +8,7 @@ import {
   auth,
   clearSession,
   detailToMessage,
+  hasSession,
   listEntriesWalk,
   normalizeApiBaseUrl,
   parseRetryAfter,
@@ -60,6 +61,67 @@ describe("session lifecycle", () => {
 
   it("an authenticated call without a session fails closed", async () => {
     await expect(api.meta()).rejects.toThrow("not signed in");
+  });
+});
+
+describe("proactive token-expiry guard (audit 2026-09-26 LOW)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fires the session-expiry funnel 60s BEFORE expires_in and kills the session", async () => {
+    const handler = vi.fn();
+    setSessionExpiredHandler(handler);
+    setSession("tok", "user-9", "alice", 3600);
+    await vi.advanceTimersByTimeAsync(3600_000 - 60_000 - 1);
+    expect(handler).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(handler).toHaveBeenCalledTimes(1);
+    // The notice rides the same shape a real 401 would (App maps it to the
+    // "expired" lockDown copy), and the session itself is gone.
+    expect(handler.mock.calls[0]![0]).toBeInstanceOf(ApiError);
+    expect(handler.mock.calls[0]![0].status).toBe(401);
+    expect(hasSession()).toBe(false);
+    setSessionExpiredHandler(null);
+  });
+
+  it("a replacement token cancels and reschedules the guard; clearSession disarms it", async () => {
+    const handler = vi.fn();
+    setSessionExpiredHandler(handler);
+    // First token: short. Second token replaces it BEFORE the first
+    // deadline — the old timer must never fire.
+    setSession("tok-1", "user-9", "alice", 600);
+    setSession("tok-2", "user-9", "alice", 7200);
+    await vi.advanceTimersByTimeAsync(600_000 + 1000);
+    expect(handler).not.toHaveBeenCalled();
+    expect(hasSession()).toBe(true);
+    // The rescheduled guard fires at the NEW token's deadline minus margin.
+    await vi.advanceTimersByTimeAsync(7200_000 - 60_000 - 600_000 - 1000 + 2);
+    expect(handler).toHaveBeenCalledTimes(1);
+    // clearSession (sign-out) leaves no timer behind: no fire, no re-arm.
+    setSession("tok-3", "user-9", "alice", 300);
+    clearSession();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(handler).toHaveBeenCalledTimes(1);
+    setSessionExpiredHandler(null);
+  });
+
+  it("no guard is armed without a usable expires_in", async () => {
+    const handler = vi.fn();
+    setSessionExpiredHandler(handler);
+    setSession("tok", "user-9", "alice");
+    await vi.advanceTimersByTimeAsync(10 ** 7);
+    setSession("tok", "user-9", "alice", Number.NaN);
+    await vi.advanceTimersByTimeAsync(10 ** 7);
+    setSession("tok", "user-9", "alice", -5);
+    await vi.advanceTimersByTimeAsync(10 ** 7);
+    expect(handler).not.toHaveBeenCalled();
+    expect(hasSession()).toBe(true);
+    clearSession();
+    setSessionExpiredHandler(null);
   });
 });
 

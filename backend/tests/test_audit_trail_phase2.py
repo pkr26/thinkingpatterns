@@ -89,15 +89,18 @@ async def test_access_log_cursor_pagination_is_complete_and_unduplicated(client,
     await patient.register(client)
     base = utcnow()
     async with app.state.sessionmaker() as session:
+        # 2026-09-26 audit item 16: seed through the chained append — every
+        # writer (tests included) must satisfy the per-patient chain_seq.
+        from app.api._audit import append_access_log
+
         for i in range(7):
-            session.add(
-                AccessLog(
-                    actor_id=patient.user_id,
-                    actor_role="user",
-                    user_id=patient.user_id,
-                    action="grant",
-                    at=base - timedelta(seconds=10 - i),
-                )
+            await append_access_log(
+                session,
+                actor_id=patient.user_id,
+                actor_role="user",
+                user_id=patient.user_id,
+                action="grant",
+                at=base - timedelta(seconds=10 - i),
             )
         await session.commit()
 

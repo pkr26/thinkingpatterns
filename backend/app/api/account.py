@@ -46,9 +46,11 @@ from ..schemas import (
     CredentialRotateRequest,
     ExportBundle,
     InsightOut,
+    KeyEnvelopeUpgradeRequest,
     LlmConsentRequest,
     LlmConsentResponse,
     PatientAccessLogOut,
+    PasswordChangeRequest,
     ShareRecord,
     TotpConfirmRequest,
     TotpEnableResponse,
@@ -56,12 +58,21 @@ from ..schemas import (
     TotpSetupResponse,
     entry_out,
 )
+from ._audit import append_access_log, parse_access_log_cursor
 from .auth import (
     AUTH_KEY_SIZE,
     SALT_BYTES,
     _auth_limiter,
     auth_work_slot,
     hash_verifier_off_loop,
+)
+from ..security import crypto, envelope, kdf
+from ..security.enclave import zeroize
+from ..security.kdf import (
+    KdfParamsError,
+    canonical_kdf_params_json,
+    parse_kdf_params_json,
+    validate_kdf_params,
 )
 from ..security.sharing import backup_code_digest
 from ..security.totp import (
@@ -164,7 +175,10 @@ async def _require_verifier(
         ) from None
     async with auth_work_slot(request):
         candidate = await hash_verifier_off_loop(
-            verifier_bytes, target.scrypt_salt, limiter=_auth_limiter(request)
+            verifier_bytes,
+            target.scrypt_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
         )
     if not hmac.compare_digest(candidate, bytes(target.verifier)):
         raise ApiError(status_code=403, detail="invalid credentials", code="verification_failed")
@@ -299,6 +313,17 @@ async def export_account(
             exported_at=cutoff,
             user_id=fresh.id,
             salt=fresh.salt,
+            # v2 key scheme (2026-09-26): the envelope travels with the
+            # user's own document — export-then-delete on a v2 account
+            # without it would destroy the only copy of the data key's
+            # locker (the salt alone re-derives nothing under v2).
+            key_scheme=fresh.key_scheme or "v1",
+            wrapped_data_key=(
+                base64.b64encode(bytes(fresh.wrapped_data_key)).decode("ascii")
+                if fresh.key_scheme == "v2" and fresh.wrapped_data_key is not None
+                else None
+            ),
+            kdf_params=parse_kdf_params_json(fresh.kdf_params),
             llm_consent=bool(fresh.llm_consent),
             llm_consent_at=fresh.llm_consent_at,
             llm_consent_disclosure=fresh.llm_consent_disclosure,
@@ -671,12 +696,28 @@ async def rotate_credential(
 
     Ordering contract with POST /processing/rekey: a client changing its
     password rekeys the stored blobs FIRST (both keys still derivable),
-    THEN rotates the credential here. This endpoint alone never touches the
-    data key or any stored ciphertext. A THERAPIST additionally re-wraps
+    THEN rotates the credential here. This endpoint alone never touches
+    the data key or any stored ciphertext. A THERAPIST additionally re-wraps
     the wrap-key blob under the new password-derived KEK FIRST via
     PUT /therapist/wrap-key (same both-keys-derivable window), then
     rotates here.
+
+    2026-09-26 v2 key scheme: a v2 account answers 409 key_scheme_conflict
+    here — swapping the salt WITHOUT re-wrapping the data-key envelope
+    would strand the random data key behind a locker whose KEK no longer
+    exists (unrecoverable data loss, not a degraded state). v2 clients use
+    PUT /account/password, which swaps the credential and the envelope in
+    one atomically-committed operation.
     """
+    if user.key_scheme == "v2":
+        raise ApiError(
+            status_code=409,
+            detail=(
+                "this account uses the v2 key envelope; change the password via "
+                "PUT /account/password (which re-swaps the envelope atomically)"
+            ),
+            code="key_scheme_conflict",
+        )
     # Old-password proof first: nothing else may run on a bearer alone.
     # M-B1 (2026-09-26): the proof runs against the freshly re-read row.
     # The epoch MUST be captured BEFORE the proof: _require_verifier's
@@ -712,7 +753,10 @@ async def rotate_credential(
     scrypt_server_salt = os.urandom(16)
     async with auth_work_slot(request):
         new_verifier_hash = await hash_verifier_off_loop(
-            new_verifier_bytes, scrypt_server_salt, limiter=_auth_limiter(request)
+            new_verifier_bytes,
+            scrypt_server_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
         )
 
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
@@ -743,14 +787,14 @@ async def rotate_credential(
         # The row lands in the same transaction as the swap so the trail
         # cannot be split from it; a locked-out victim (or an operator
         # recovering the account) can then see exactly WHEN the standing
-        # credential changed.
-        session.add(
-            AccessLog(
-                actor_id=user.id,
-                actor_role=user.role,
-                user_id=user.id,
-                action="credential_rotated",
-            )
+        # credential changed. 2026-09-26 audit item 16: routed through the
+        # chained append like every audit write.
+        await append_access_log(
+            session,
+            actor_id=user.id,
+            actor_role=user.role,
+            user_id=user.id,
+            action="credential_rotated",
         )
         await session.commit()
         # The credential every live bearer authenticated under is gone: kill
@@ -759,12 +803,439 @@ async def rotate_credential(
         request.app.state.key_store.destroy_all_for_owner(fresh.id)
 
 
+@router.put(
+    "/password",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-password", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def change_password(
+    body: PasswordChangeRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_processing_token: str | None = Header(default=None),
+):
+    """Change the password WITHOUT re-encrypting anything (v2, 2026-09-26).
+
+    The client unwraps its random data key locally with the OLD password,
+    derives a fresh salt (and optionally fresh kdf_params) from the NEW
+    password, re-wraps the SAME data key, and uploads one payload; this
+    endpoint swaps salt + scrypt verifier + envelope in ONE transaction.
+    NO rekey of the corpus happens and none is needed — every stored blob
+    and every therapist consent wrap keeps opening under the same random
+    data key, which is the entire point of the v2 envelope (a v1 password
+    change is O(corpus): rekey first, then PUT /account/credential).
+
+    Same guards as the credential rotation it supersedes for v2 accounts:
+    old-password verifier proof (a stolen bearer must not lock the real
+    user out), the lifecycle fence with an in-fence epoch re-read (M-B1),
+    a token-epoch bump on success (every bearer dies — the LOGIN
+    credential changed), and a processing-key purge.
+
+    v1→v2 migration via this endpoint (re-audit, 2026-09-27): the uploaded
+    envelope MUST wrap the account's CURRENT data key, and the server
+    cannot tell that from any 32 bytes — a buggy client uploading an
+    envelope over the wrong key would brick every future unlock. The v1
+    account therefore MUST send X-Processing-Token (a live owner-bound
+    processing session opened with the current password-derived data key)
+    and the popped key must AUTHENTICATE stored ciphertext — the same
+    possession probe as /account/key-envelope/upgrade — before the swap.
+    Wrong key: 403 envelope_key_mismatch, and the account stays v1. An
+    empty corpus proves nothing by decrypting, so possession is vacuous
+    and the migration proceeds (the client is migrating before its first
+    write; it still holds the same key it will use). A v2→v2 change is
+    deliberately EXEMPT from the token: it re-wraps the SAME key the
+    client just proved it holds by unwrapping under the old password
+    (the verifier proof), and the O(1) v2 flow carries no processing
+    session to probe with — demanding one would force a corpus-sized
+    rekey path back onto the endpoint this scheme exists to avoid.
+    """
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, body.verifier, request, session)
+    try:
+        new_salt_bytes = base64.b64decode(body.new_salt, validate=True)
+        new_verifier_bytes = base64.b64decode(body.new_verifier, validate=True)
+        wrapped_key_bytes = base64.b64decode(body.wrapped_data_key, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(
+            status_code=422,
+            detail="new_salt, new_verifier and wrapped_data_key must be base64",
+            code="validation_error",
+        ) from None
+    if len(new_salt_bytes) != SALT_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"new_salt must be exactly {SALT_BYTES} bytes",
+            code="validation_error",
+        )
+    if len(new_verifier_bytes) != AUTH_KEY_SIZE:
+        raise ApiError(
+            status_code=422,
+            detail=f"new_verifier must be {AUTH_KEY_SIZE} bytes",
+            code="validation_error",
+        )
+    if len(wrapped_key_bytes) != envelope.WRAPPED_DATA_KEY_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrapped_data_key must be exactly {envelope.WRAPPED_DATA_KEY_BYTES} bytes",
+            code="validation_error",
+        )
+    # kdf_params: explicit blob (validated + canonicalized) or keep the
+    # account's current one. A v1 account upgrading here without a blob
+    # gets the documented default (the v1 contract's pbkdf2-600k).
+    if body.new_kdf_params is not None:
+        try:
+            canonical_params = validate_kdf_params(body.new_kdf_params)
+        except KdfParamsError as exc:
+            raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
+        params_json = canonical_kdf_params_json(canonical_params)
+    elif user.kdf_params:
+        params_json = user.kdf_params
+    else:
+        params_json = canonical_kdf_params_json(kdf.KDF_PARAMS_DEFAULT)
+
+    scrypt_server_salt = os.urandom(16)
+    async with auth_work_slot(request):
+        new_verifier_hash = await hash_verifier_off_loop(
+            new_verifier_bytes,
+            scrypt_server_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
+        )
+
+    # The v1→v2 migration consumes the client's session key ONLY after the
+    # verifier proof passed — a failed proof must not burn it (the rekey
+    # endpoint's discipline). pop (not peek): single-use, like every
+    # processing-token consumer.
+    migrating_from_v1 = user.key_scheme != "v2"
+    candidate_key: bytearray | None = None
+    if migrating_from_v1:
+        if not x_processing_token:
+            raise ApiError(
+                status_code=422,
+                detail="processing session token required (X-Processing-Token)",
+                code="processing_session_required",
+            )
+        from .insights import KeyNotFound
+
+        try:
+            candidate_key = request.app.state.key_store.pop(x_processing_token, owner=user.id)
+        except KeyNotFound:
+            raise ApiError(
+                status_code=403,
+                detail="processing session missing or expired",
+                code="processing_session_invalid",
+            ) from None
+    try:
+        async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+            fresh = (
+                (
+                    await session.execute(
+                        select(User)
+                        .where(User.id == user.id)
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            if candidate_key is not None:
+                # Possession probe, identical to /key-envelope/upgrade's: one
+                # stored blob must authenticate under the popped key (inside
+                # the fence — entry writes and recomputes hold the same lock,
+                # so the sampled row cannot be re-keyed mid-probe). Run off
+                # the loop: AES-GCM is CPU work sized by the blob cap.
+                entry_row = (
+                    await session.execute(
+                        select(Entry.client_entry_id, Entry.content_version, Entry.blob)
+                        .where(Entry.user_id == fresh.id)
+                        .order_by(Entry.received_at.desc(), Entry.id.desc())
+                        .limit(1)
+                    )
+                ).first()
+                proved = False
+                if entry_row is not None:
+                    aad = crypto.entry_aad_candidates(fresh.id, entry_row[0], int(entry_row[1]))
+                    proved = await anyio.to_thread.run_sync(
+                        _authenticate_blob_only, candidate_key, bytes(entry_row[2]), aad
+                    )
+                else:
+                    insight_row = (
+                        await session.execute(
+                            select(Insight.kind, Insight.for_date, Insight.blob)
+                            .where(Insight.user_id == fresh.id)
+                            .limit(1)
+                        )
+                    ).first()
+                    if insight_row is not None:
+                        kind, for_date, blob = insight_row
+                        insight_aad = (
+                            crypto.build_aad("question", fresh.id, for_date.isoformat())
+                            if kind == "question" and for_date is not None
+                            else crypto.build_aad("insights", fresh.id, kind)
+                        )
+                        proved = await anyio.to_thread.run_sync(
+                            _authenticate_blob_only, candidate_key, bytes(blob), insight_aad
+                        )
+                    else:
+                        # Empty corpus: nothing exists to authenticate against
+                        # — possession is vacuous, and the client is migrating
+                        # before its first write (documented in the docstring).
+                        proved = True
+                if not proved:
+                    raise ApiError(
+                        status_code=403,
+                        detail=(
+                            "the processing session's key did not authenticate stored "
+                            "ciphertext; open a session with the account's current data key"
+                        ),
+                        code="envelope_key_mismatch",
+                    )
+            await session.execute(
+                update(User)
+                .where(User.id == fresh.id)
+                .values(
+                    salt=body.new_salt,
+                    verifier=new_verifier_hash,
+                    scrypt_salt=scrypt_server_salt,
+                    token_epoch=User.token_epoch + 1,
+                    key_scheme="v2",
+                    wrapped_data_key=wrapped_key_bytes,
+                    kdf_params=params_json,
+                )
+            )
+            await append_access_log(
+                session,
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="credential_rotated",
+            )
+            await session.commit()
+            # The credential every live bearer authenticated under is gone: kill
+            # the sessions and any resident processing keys in the same lifecycle
+            # event, exactly like the v1 credential rotation.
+            request.app.state.key_store.destroy_all_for_owner(fresh.id)
+    finally:
+        if candidate_key is not None:
+            zeroize(candidate_key)
+
+
+def _authenticate_blob_only(key: bytearray, blob: bytes, aad) -> bool:
+    """Does this key open this blob? GCM-authenticate WITHOUT keeping the
+    plaintext: the decrypted bytes are discarded into a zeroized buffer the
+    moment the authentication answer exists. The possession proof for the
+    envelope upgrade needs the YES/NO, never the content. (The transient
+    immutable ``bytes`` AESGCM returns is the same documented GC residual
+    every decrypt in this package carries; the owned buffer is scrubbed.)
+
+    ``aad`` may be a single binding or the ordered candidate tuple the
+    entry ladder uses (v2 AAD first, v1 legacy fallback) — mirrored from
+    the rekey path's decrypt helper, which lives behind a deferred import
+    (module-level would cycle)."""
+    from ..security.enclave import SecureBuffer
+
+    candidates = aad if isinstance(aad, tuple) else (aad,)
+    for candidate in candidates:
+        try:
+            buf = SecureBuffer(crypto.decrypt(key, blob, candidate))
+        except crypto.TamperError:
+            continue
+        buf.zeroize()
+        return True
+    return False
+
+
+@router.post(
+    "/key-envelope/upgrade",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-envelope", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def upgrade_key_envelope(
+    body: KeyEnvelopeUpgradeRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_processing_token: str | None = Header(default=None),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Migrate a v1 account to the v2 key envelope (self-service, 2026-09-26).
+
+    After unlocking locally, a v1 client — which by definition holds the
+    account's password-derived data key — wraps THAT key under the
+    password-derived KEK and uploads the envelope. The account flips to
+    key_scheme="v2" and future password changes become O(1); the corpus
+    keeps decrypting under the same key (now random-or-derived behind an
+    envelope, transparent to every read path).
+
+    Two independent proofs, both required:
+      * password re-authentication (X-Account-Verifier) — the same gate as
+        every credential-adjacent lifecycle action;
+      * possession of the CURRENT data key (X-Processing-Token): a live,
+        owner-bound processing session whose key AUTHENTICATES stored
+        ciphertext. The server otherwise cannot tell the real data key
+        from any 32 bytes, and storing an envelope over the wrong key
+        would brick every future unlock. An account with no stored
+        ciphertext yet proves nothing by decrypting — possession is
+        vacuous and the upgrade proceeds (the client is migrating before
+        its first write; it still holds the same key it will use).
+
+    Already-v2 accounts may re-upload (an envelope refresh, e.g. after a
+    kdf_params change) under the same two proofs.
+    """
+    from .insights import KeyNotFound
+
+    verifier = _account_verifier_from_header(x_account_verifier)
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
+    try:
+        wrapped_key_bytes = base64.b64decode(body.wrapped_data_key, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(
+            status_code=422, detail="wrapped_data_key must be base64", code="validation_error"
+        ) from None
+    if len(wrapped_key_bytes) != envelope.WRAPPED_DATA_KEY_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrapped_data_key must be exactly {envelope.WRAPPED_DATA_KEY_BYTES} bytes",
+            code="validation_error",
+        )
+    if body.kdf_params is not None:
+        try:
+            canonical_params = validate_kdf_params(body.kdf_params)
+        except KdfParamsError as exc:
+            raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
+        params_json = canonical_kdf_params_json(canonical_params)
+    elif user.kdf_params:
+        params_json = user.kdf_params
+    else:
+        params_json = canonical_kdf_params_json(kdf.KDF_PARAMS_DEFAULT)
+
+    if not x_processing_token:
+        raise ApiError(
+            status_code=422,
+            detail="processing session token required (X-Processing-Token)",
+            code="processing_session_required",
+        )
+    # Verifier proof PASSED before consuming the client's uploaded key —
+    # a failed proof must not burn it (the rekey endpoint's discipline).
+    try:
+        candidate_key = request.app.state.key_store.pop(x_processing_token, owner=user.id)
+    except KeyNotFound:
+        raise ApiError(
+            status_code=403,
+            detail="processing session missing or expired",
+            code="processing_session_invalid",
+        ) from None
+    try:
+        async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+            fresh = (
+                (
+                    await session.execute(
+                        select(User)
+                        .where(User.id == user.id)
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if fresh is None or not fresh.is_active:
+                raise ApiError(status_code=404, detail="account not found", code="not_found")
+            if _epoch_fence_failed(fresh, expected_epoch):
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            # Possession probe: one stored blob must authenticate under the
+            # popped key (inside the fence — entry writes and recomputes hold
+            # the same lock, so the sampled row cannot be re-keyed mid-probe).
+            entry_row = (
+                await session.execute(
+                    select(Entry.client_entry_id, Entry.content_version, Entry.blob)
+                    .where(Entry.user_id == fresh.id)
+                    .order_by(Entry.received_at.desc(), Entry.id.desc())
+                    .limit(1)
+                )
+            ).first()
+            proved = False
+            if entry_row is not None:
+                aad = crypto.entry_aad_candidates(fresh.id, entry_row[0], int(entry_row[1]))
+                proved = await anyio.to_thread.run_sync(
+                    _authenticate_blob_only, candidate_key, bytes(entry_row[2]), aad
+                )
+            else:
+                insight_row = (
+                    await session.execute(
+                        select(Insight.kind, Insight.for_date, Insight.blob)
+                        .where(Insight.user_id == fresh.id)
+                        .limit(1)
+                    )
+                ).first()
+                if insight_row is not None:
+                    kind, for_date, blob = insight_row
+                    insight_aad = (
+                        crypto.build_aad("question", fresh.id, for_date.isoformat())
+                        if kind == "question" and for_date is not None
+                        else crypto.build_aad("insights", fresh.id, kind)
+                    )
+                    proved = await anyio.to_thread.run_sync(
+                        _authenticate_blob_only, candidate_key, bytes(blob), insight_aad
+                    )
+                else:
+                    # Empty corpus: nothing exists to authenticate against —
+                    # possession is vacuous, and the client is migrating
+                    # before its first write (documented above).
+                    proved = True
+            if not proved:
+                raise ApiError(
+                    status_code=403,
+                    detail=(
+                        "the processing session's key did not authenticate stored "
+                        "ciphertext; open a session with the account's current data key"
+                    ),
+                    code="envelope_key_mismatch",
+                )
+            await session.execute(
+                update(User)
+                .where(User.id == fresh.id)
+                .values(key_scheme="v2", wrapped_data_key=wrapped_key_bytes, kdf_params=params_json)
+            )
+            await append_access_log(
+                session,
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="key_envelope_upgrade",
+            )
+            await session.commit()
+    finally:
+        zeroize(candidate_key)
+
+
+def _account_verifier_from_header(header_value: str | None) -> str:
+    """X-Account-Verifier extraction with the same transport rules as the
+    other verifier-gated routes (isinstance, not ``is not None``: direct
+    test calls pass the Header() sentinel, not a string)."""
+    verifier = header_value if isinstance(header_value, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    return verifier
+
+
 @router.get(
     "/llm-consent",
     response_model=LlmConsentResponse,
     dependencies=[
         Depends(make_rate_limiter("account-consent-read", "read_rate_limit", "read_rate_window"))
-    ]
+    ],
 )
 async def get_llm_consent(
     request: Request,
@@ -805,8 +1276,6 @@ async def read_own_access_log(
     Cursor-paginated (append-only DESC list): each response carries
     X-Next-Cursor while older rows remain.
     """
-    from datetime import datetime as _dt
-
     from sqlalchemy import or_
 
     query = (
@@ -816,26 +1285,21 @@ async def read_own_access_log(
         .order_by(AccessLog.at.desc(), AccessLog.id.desc())
     )
     if cursor:
-        parts = cursor.split("|", 1)
-        if len(parts) != 2:
-            raise ApiError(
-                status_code=422, detail="malformed cursor", code="validation_error"
-            )
-        try:
-            cursor_at = _dt.fromisoformat(parts[0])
-        except ValueError:
-            raise ApiError(
-                status_code=422, detail="malformed cursor", code="validation_error"
-            ) from None
+        # 2026-09-26 audit item 18: tz-aware ISO-8601 + 32-hex id, or 422 —
+        # a naive/date-only instant silently compared as host-local time
+        # and shifted the continuation page by the host's UTC offset.
+        cursor_at, cursor_id = parse_access_log_cursor(cursor)
         query = query.where(
             or_(
                 AccessLog.at < cursor_at,
-                (AccessLog.at == cursor_at) & (AccessLog.id < parts[1]),
+                (AccessLog.at == cursor_at) & (AccessLog.id < cursor_id),
             )
         )
     rows = (await session.execute(query.limit(limit + 1))).all()
     if len(rows) > limit:
-        response.headers["X-Next-Cursor"] = f"{rows[limit - 1][0].at.isoformat()}|{rows[limit - 1][0].id}"
+        response.headers["X-Next-Cursor"] = (
+            f"{rows[limit - 1][0].at.isoformat()}|{rows[limit - 1][0].id}"
+        )
         rows = rows[:limit]
     return [
         PatientAccessLogOut(
@@ -974,7 +1438,9 @@ async def delete_account(
             fresh = (
                 (
                     await session.execute(
-                        select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                        select(User)
+                        .where(User.id == user.id)
+                        .execution_options(populate_existing=True)
                     )
                 )
                 .scalars()
@@ -985,6 +1451,22 @@ async def delete_account(
             if _epoch_fence_failed(fresh, expected_epoch):
                 raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
             request.app.state.key_store.destroy_all_for_owner(user.id)
+            # 2026-09-26 audit item 17: a terminal audit row INSIDE the
+            # deletion transaction. actor_id/user_id are deliberately
+            # non-FK on AccessLog, so the row survives the cascade that
+            # removes everything else — without it, hard deletion left NO
+            # record that the patient (the data subject of every other row
+            # in their chain) exercised the right to erasure, and the
+            # retained trail ended ambiguously at the last therapist read.
+            # Chained (item 16) like every audit append: it becomes the
+            # patient's chain head forever after.
+            await append_access_log(
+                session,
+                actor_id=user.id,
+                actor_role=user.role,
+                user_id=user.id,
+                action="account_deleted",
+            )
             await session.execute(delete(Insight).where(Insight.user_id == user.id))
             await session.execute(delete(Entry).where(Entry.user_id == user.id))
             await session.execute(delete(User).where(User.id == user.id))
@@ -1040,7 +1522,7 @@ async def totp_setup(
     expected_epoch = user.token_epoch
     await _require_verifier(user, body.verifier, request, session)
     raw_secret, secret_b32 = generate_secret()
-    wrapped = wrap_secret(raw_secret, request.app.state.settings.token_secret)
+    wrapped = wrap_secret(raw_secret, request.app.state.settings.totp_wrap_secret)
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         # M-B1 (2026-09-26): re-read inside the fence; a session retired by
         # logout/rotation while this request queued must not arm a factor.
@@ -1064,13 +1546,12 @@ async def totp_setup(
             .where(User.id == user.id)
             .values(totp_secret=wrapped, totp_enabled=None, totp_last_counter=None)
         )
-        session.add(
-            AccessLog(
-                actor_id=user.id,
-                actor_role=user.role,
-                user_id=user.id,
-                action="totp_setup",
-            )
+        await append_access_log(
+            session,
+            actor_id=user.id,
+            actor_role=user.role,
+            user_id=user.id,
+            action="totp_setup",
         )
         await session.commit()
     return TotpSetupResponse(
@@ -1108,12 +1589,10 @@ async def totp_enable(
     expected_epoch = user.token_epoch
     await _require_verifier(user, body.verifier, request, session)
     settings = request.app.state.settings
-    secret = unwrap_secret(user.totp_secret, settings.token_secret)
+    secret = unwrap_secret(user.totp_secret, settings.totp_wrap_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
     if matched is None:
-        raise ApiError(
-            status_code=403, detail="invalid totp code", code="totp_code_invalid"
-        )
+        raise ApiError(status_code=403, detail="invalid totp code", code="totp_code_invalid")
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         # M-B1 (2026-09-26): liveness+epoch on a freshly re-read row inside
         # the fence before the guarded arm below.
@@ -1154,23 +1633,20 @@ async def totp_enable(
         # disable→re-enable cycle already purges, this is belt-and-braces
         # against operator-restored snapshots) die before the insert.
         backup_codes = [generate_backup_code() for _ in range(BACKUP_CODE_COUNT)]
-        await session.execute(
-            delete(TotpBackupCode).where(TotpBackupCode.user_id == user.id)
-        )
+        await session.execute(delete(TotpBackupCode).where(TotpBackupCode.user_id == user.id))
         for code in backup_codes:
             session.add(
                 TotpBackupCode(
                     user_id=user.id,
-                    digest=backup_code_digest(code, settings.token_secret),
+                    digest=backup_code_digest(code, settings.totp_wrap_secret),
                 )
             )
-        session.add(
-            AccessLog(
-                actor_id=user.id,
-                actor_role=user.role,
-                user_id=user.id,
-                action="totp_enable",
-            )
+        await append_access_log(
+            session,
+            actor_id=user.id,
+            actor_role=user.role,
+            user_id=user.id,
+            action="totp_enable",
         )
         await session.commit()
     return TotpEnableResponse(backup_codes=backup_codes)
@@ -1198,9 +1674,7 @@ async def totp_disable(
     account recovery by design, and the registration screen says so.
     """
     if not user.totp_enabled:
-        raise ApiError(
-            status_code=404, detail="totp not enabled", code="not_found"
-        )
+        raise ApiError(status_code=404, detail="totp not enabled", code="not_found")
     # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2):
     # _require_verifier's populate_existing re-read refreshes this same ORM
     # object in place, so capturing afterwards would compare the
@@ -1208,7 +1682,7 @@ async def totp_disable(
     expected_epoch = user.token_epoch
     await _require_verifier(user, body.verifier, request, session)
     settings = request.app.state.settings
-    secret = unwrap_secret(user.totp_secret, settings.token_secret)
+    secret = unwrap_secret(user.totp_secret, settings.totp_wrap_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
     replayed = (
         user.totp_last_counter is not None
@@ -1216,9 +1690,7 @@ async def totp_disable(
         and matched <= user.totp_last_counter
     )
     if matched is None or replayed:
-        raise ApiError(
-            status_code=403, detail="invalid totp code", code="totp_code_invalid"
-        )
+        raise ApiError(status_code=403, detail="invalid totp code", code="totp_code_invalid")
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         # M-B1 (2026-09-26): liveness+epoch on a freshly re-read row inside
         # the fence before the factor is stripped below.
@@ -1243,15 +1715,12 @@ async def totp_disable(
         # The recovery-code set dies with the factor (2026-09-26 pentest
         # S-3): leaving live single-use codes behind a disabled factor
         # would make re-enrollment's fresh set ambiguous. Same transaction.
-        await session.execute(
-            delete(TotpBackupCode).where(TotpBackupCode.user_id == user.id)
-        )
-        session.add(
-            AccessLog(
-                actor_id=user.id,
-                actor_role=user.role,
-                user_id=user.id,
-                action="totp_disable",
-            )
+        await session.execute(delete(TotpBackupCode).where(TotpBackupCode.user_id == user.id))
+        await append_access_log(
+            session,
+            actor_id=user.id,
+            actor_role=user.role,
+            user_id=user.id,
+            action="totp_disable",
         )
         await session.commit()

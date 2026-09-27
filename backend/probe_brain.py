@@ -7,18 +7,27 @@ while the TEXT carries only themes and phrases. This decouples mood from
 vocabulary so false-positive checks are meaningful (v2 failed here: five
 false mood correlations at p <= 1e-6, driven purely by a mood trend).
 
+Uniform standard (2026-09-26 statistical review, item 13): EVERY check
+asserts SURFACING — store membership is not a verdict, a candidate that
+never earned a card must not pass ground truth. F and G run on their own
+MIXED corpora (realistic filler text, several themes, no isolated
+sentiment-only series): the main corpus's planted dips (A/E) and decline
+(C) cap the measured carryover/spread there, so each dynamic gets a clean
+but realistic journal of its own.
+
 Ground truth:
-  A. 'work' text on Sundays, stream forced low      → temporal + mood_correlation(lower)
-  B. "can't sleep, my mind won't stop" on 10 days   → rumination
-  C. stream decline in the final 3 weeks            → mood_shift(lower)
-  D. 'guitar' phrased differently, RISING late     → topic (only discovery can catch it)
-  E. family-visit days → stream forced low next day → link(family, lower)
-  F. stream carryover (AR coefficient) rises late → inertia (asserted on
-     an isolated corpus below — the mixed stream's planted dips cap the
-     measured carryover under honest full-family testing)
-  G. stream swing amplitude rises late (verified in unit tests — the A/E
-     dips swamp this contrast in the mixed corpus)
-  H. NO other theme-mood association exists         → no other mood_correlation/link
+  A. 'work' text on Sundays (temporal) + scattered weekday work days
+     whose mood dips WITHIN their weekday -> temporal + mood_correlation
+     (lower). The scattered dips are the honest mood tie: under the
+     weekly-cycle deconfounding (item 1) a Sunday-only dip is a calendar
+     fact, not a work association, and is correctly absorbed.
+  B. "can't sleep, my mind won't stop" on 10 days   -> rumination
+  C. stream decline in the final 3 weeks            -> mood_shift(lower)
+  D. 'guitar' phrased differently, RISING late     -> topic (only discovery can catch it)
+  E. family-visit days -> stream forced low next day -> link(family, lower)
+  F. mixed corpus: stream carryover (AR coefficient) rises late -> inertia
+  G. mixed corpus: stream swing amplitude rises late -> instability
+  H. NO other theme-mood association exists         -> no other mood_correlation/link
 """
 
 from __future__ import annotations
@@ -26,7 +35,7 @@ from __future__ import annotations
 import random
 from datetime import date, timedelta
 
-from app.services.brain import update, load_state
+from app.services.brain import load_state, update
 from app.services.patterns import JournalEntry
 
 rng = random.Random(42)
@@ -147,8 +156,8 @@ while day <= end:
         phi, amplitude = 0.05, 0.15
     carry = phi * carry + (1 - phi) * rng.uniform(-amplitude, amplitude)
     value = 0.05 + carry
-    if day >= date(2026, 8, 15):  # C: sustained decline
-        value -= 0.55
+    if day >= date(2026, 8, 15):  # C: sustained decline (deepened 2026-09-26 so the
+        value -= 0.75  # excursion clears the recalibrated ±3.1-sigma limits cleanly)
     mood[day] = max(-1.0, min(1.0, value))
     day += timedelta(days=1)
 
@@ -156,9 +165,31 @@ for d in FAMILY_DAYS:  # E: day after a family visit reads low
     for k in (1, 2):
         if d + timedelta(days=k) in mood:
             mood[d + timedelta(days=k)] = min(mood[d + timedelta(days=k)], -0.55)
-for d in mood:  # A: Sundays read low (work dread)
+for d in mood:  # A: Sundays read low (work dread) — the calendar fact
     if d.weekday() == 6:
         mood[d] = min(mood[d], -0.45)
+
+# A's honest mood tie (item 1): 'work' on 10 scattered NON-Sunday days
+# (never Wednesday — the skip day — and never colliding with family or
+# sleep-phrase plantings), each dipping hard WITHIN its weekday. The
+# Sunday-only dip is absorbed by the weekly-cycle deconfounding (as it
+# must be); these within-weekday dips are what a real work-mood tie
+# looks like. Two of the scattered days postdate the first recompute
+# (Aug 15) so the claim replicates on >= 2 new evidence days (item 5).
+SCATTERED_WORK_DAYS: set[date] = {
+    date(2026, 6, 22),
+    date(2026, 6, 30),
+    date(2026, 7, 9),
+    date(2026, 7, 17),
+    date(2026, 7, 25),
+    date(2026, 7, 30),
+    date(2026, 8, 4),
+    date(2026, 8, 13),
+    date(2026, 8, 22),
+    date(2026, 8, 31),
+}
+for _d in SCATTERED_WORK_DAYS:
+    mood[_d] = min(mood[_d], -0.7)
 
 # --- entries ----------------------------------------------------------------------
 guitar_late_days: set[date] = set()
@@ -184,6 +215,8 @@ while day <= end:
         text = FILLERS[choice]
         if wd == 6:
             text = "big deadline pressure at work again, boss emailed twice about monday"
+        if day in SCATTERED_WORK_DAYS:
+            text = "hard shift at work, another late meeting and a heavy workload"
         if day in FAMILY_DAYS:
             text += ". visited the family, mom and dad were there"
         if day in SLEEP_PHRASE_DAYS:
@@ -216,17 +249,17 @@ for extra_day in (end + timedelta(days=1), end + timedelta(days=2)):
     if any(p.kind == "mood_shift" for p in result.surfaced):
         break
 surfaced = result.surfaced if result is not None else []
+pats = state["patterns"]
 
 print(f"\n=== STORED PATTERNS (final run {end}) ===")
-for p in sorted(state["patterns"].values(), key=lambda r: r.pid):
+for p in sorted(pats.values(), key=lambda r: r.pid):
     surf = "SURFACED" if p.state != "candidate" else "hidden  "
     extra = ""
     if p.kind in ("mood_correlation", "link"):
         extra = f" {p.detail.get('direction')} delta={p.detail.get('mood_delta')} p={p.detail.get('p_value')}"
     print(f"  [{surf}] {p.state:9} {p.kind:18} {p.label[:46]!r:48} occ={p.occurrences}{extra}")
 
-pats = state["patterns"]
-print("\n=== VERDICT vs ground truth ===")
+print("\n=== VERDICT vs ground truth (surfaced-only, item 13) ===")
 
 
 PROBE_FAILURES: list[str] = []
@@ -238,11 +271,20 @@ def check(name: str, ok: bool) -> None:
         PROBE_FAILURES.append(name)
 
 
-check("A temporal:work (Sundays)", "temporal:work" in pats)
+def surfaced_kinds(kind: str) -> list:
+    return [p for p in surfaced if p.kind == kind]
+
+
 check(
-    "A mood_correlation:work lower",
-    pats.get("mood_correlation:work", None) is not None
-    and pats["mood_correlation:work"].detail.get("direction") == "lower",
+    "A temporal:work (Sundays, surfaced)",
+    any(p.kind == "temporal" and p.label == "work" for p in surfaced),
+)
+check(
+    "A mood_correlation:work lower (within-weekday, surfaced)",
+    any(
+        p.kind == "mood_correlation" and p.label == "work" and p.detail.get("direction") == "lower"
+        for p in surfaced
+    ),
 )
 # B pins the SLEEP cluster specifically (audit H-20): the old check
 # accepted ANY rumination and passed via the work cluster while the sleep
@@ -257,56 +299,64 @@ check(
     any(p.kind == "mood_shift" and p.detail.get("direction") == "lower" for p in surfaced),
 )
 check(
-    "D topic:guitar (rising, varied phrasing)",
-    "topic:guitar" in pats and pats["topic:guitar"].detail.get("trend") == "rising",
+    "D topic:guitar (rising, varied phrasing, surfaced)",
+    any(
+        p.kind == "topic" and p.label == "guitar" and p.detail.get("trend") == "rising"
+        for p in surfaced
+    ),
 )
 check(
-    "E link:family lower",
-    pats.get("link:family", None) is not None
-    and pats["link:family"].detail.get("direction") == "lower",
+    "E link:family lower (surfaced)",
+    any(
+        p.kind == "link" and p.label == "family" and p.detail.get("direction") == "lower"
+        for p in surfaced
+    ),
 )
-# F (inertia) is asserted HERE on an isolated corpus (same convention as
-# G below): the main corpus's planted dips (A Sundays, E family days) and
-# the C decline cap the measured carryover at r ≈ 0.5, and under the
-# honest full-family Benjamini-Hochberg + Fisher-z difference test that
-# is suggestive (p ≈ 0.04), not significant — the pre-fix probe passed
-# only because correlation_p tested the wrong null (r ≠ 0, not "more
-# than usual") in a cherry-picked post-gate family. The ground truth
-# being probed is unchanged: RISING carryover must be detected. Clean
-# two-regime series: quiet iid, then AR(1) carryover.
-_f_rng = random.Random(7)
-_f_days = [end - timedelta(days=69 - i) for i in range(70)]
-_f_entries = []
-_f_carry = 0.0
-for i, d in enumerate(_f_days):
-    if i >= 40:
-        _f_carry = 0.65 * _f_carry + 0.35 * _f_rng.uniform(-0.6, 0.6)
-        m = _f_carry
-    else:
-        m = _f_rng.uniform(-0.15, 0.15)
-    _f_entries.append(JournalEntry(text="ordinary day notes", entry_date=d, sentiment=m))
+
+
+# F and G run on their own MIXED corpora (item 13): realistic varied
+# filler text — several themes, no isolated sentiment-only series — with
+# ONE planted dynamic each, so the ground truth is measured under the
+# same full-family Benjamini-Hochberg discipline the main corpus faces.
+def _mixed_corpora() -> tuple[list[JournalEntry], list[JournalEntry]]:
+    f_rng = random.Random(7)
+    days = [end - timedelta(days=69 - i) for i in range(70)]
+    f_entries: list[JournalEntry] = []
+    g_entries: list[JournalEntry] = []
+    f_carry = 0.0
+    for i, d in enumerate(days):
+        filler = FILLERS[(i * 3) % len(FILLERS)]
+        # F: wide iid noise early, then AR(1) carryover from day 40 on with
+        # the SAME marginal spread (the marginal sd is held flat so the
+        # EWMA level chart stays quiet — this corpus plants CARRYOVER, not
+        # a level shift).
+        if i >= 40:
+            f_carry = 0.75 * f_carry + 0.25 * f_rng.uniform(-0.55, 0.55)
+            f_mood = f_carry
+        else:
+            f_mood = f_rng.uniform(-0.4, 0.4)
+        f_entries.append(JournalEntry(text=filler, entry_date=d, sentiment=f_mood))
+        # G: small alternation early, wide swings from day 45 on.
+        if i >= 45:
+            g_mood = 0.05 + (0.5 if i % 2 == 0 else -0.5) + (0.05 if i % 3 == 0 else -0.05)
+        else:
+            g_mood = 0.05 + (0.03 if i % 2 == 0 else -0.03) + (0.01 if i % 3 == 0 else -0.01)
+        g_entries.append(JournalEntry(text=filler, entry_date=d, sentiment=g_mood))
+    return f_entries, g_entries
+
+
+_f_entries, _g_entries = _mixed_corpora()
+# Surfaced-only (audit L-39 + item 13): store membership is not surfacing —
+# a candidate that never earned a card must not pass the ground truth.
+# Both kinds are WINDOW-STAT: their qualification days must span >= 2
+# calendar days, so the retries run two days on (a next-day recompute
+# re-scores the same sliding window).
 _f_state = update(load_state(None), _f_entries, end)
-# Surfaced-only (audit L-39): store membership is not surfacing — a
-# candidate that never earned a card must not pass the ground truth.
-# inertia is a WINDOW-STAT kind: its qualification days must span >= 2
-# calendar days, so the retry is TWO days on (a next-day recompute
-# re-scores the same sliding window — same rule as G's retry below).
 _f_ok = any(p.kind == "inertia" for p in _f_state.surfaced)
 if not _f_ok:  # a marginal day can miss the gates; the next recompute lands it
     _f_state = update(_f_state.new_state, _f_entries, end + timedelta(days=2))
     _f_ok = any(p.kind == "inertia" for p in _f_state.surfaced)
-check("F inertia (asserted on isolated corpus)", _f_ok)
-# G (instability) is asserted HERE on an isolated corpus: the main corpus's
-# planted dips (A/E) swamp the contrast, so the check runs on a clean
-# two-regime series.
-_g_days = [end - timedelta(days=69 - i) for i in range(70)]
-_g_entries = []
-for i, d in enumerate(_g_days):
-    if i >= 45:
-        m = 0.05 + (0.5 if i % 2 == 0 else -0.5)
-    else:
-        m = 0.05 + (0.03 if i % 2 == 0 else -0.03)
-    _g_entries.append(JournalEntry(text="ordinary day notes", entry_date=d, sentiment=m))
+check("F inertia (mixed corpus, surfaced)", _f_ok)
 _g_state = update(load_state(None), _g_entries, end)
 _g_ok = any(p.kind == "instability" for p in _g_state.surfaced)
 if not _g_ok:  # candidate on first qualification; a later recompute surfaces it
@@ -318,7 +368,7 @@ if not _g_ok:  # candidate on first qualification; a later recompute surfaces it
     # re-scores the same sliding window.)
     _g_state = update(_g_state.new_state, _g_entries, end + timedelta(days=2))
     _g_ok = any(p.kind == "instability" for p in _g_state.surfaced)
-check("G instability (asserted on isolated corpus)", _g_ok)
+check("G instability (mixed corpus, surfaced)", _g_ok)
 false_pos = [
     p
     for p in pats.values()

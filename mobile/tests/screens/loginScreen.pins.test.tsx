@@ -52,8 +52,14 @@ const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { LoginScreen, passwordStrength } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, allText, pressLabel, typeInto, inputByPlaceholder } = await import("../helpers/rtr");
+const { render, flush, textOf, allText, pressLabel, typeInto, inputByPlaceholder, toggleSwitch } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
+
+/** Check the 18+ self-declaration (2026-09-27 age gate) — register mode's
+ *  only switch, starting unchecked. */
+async function confirmAge18(root) {
+  await toggleSwitch(root, false, true);
+}
 
 /** Flatten a Text node's children (they may be arrays) to its exact string. */
 const flat = (children: unknown): string => {
@@ -170,6 +176,7 @@ describe("LoginScreen pins: confirm-field lifecycle", () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "password", "Correct horse!");
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");
@@ -193,6 +200,7 @@ describe("LoginScreen pins: vault account binding", () => {
     const root = await render(<LoginScreen />);
     await typeInto(root, "username", "alice");
     await pressLabel(root, "New here? Create an account");
+    await confirmAge18(root);
     await typeInto(root, "password", "Correct horse!");
     await typeInto(root, "confirm password", "Correct horse!");
     await pressLabel(root, "Create account");

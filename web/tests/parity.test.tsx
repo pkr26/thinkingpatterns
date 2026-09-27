@@ -170,6 +170,54 @@ describe("ShareView", () => {
     expect(textOf(root)).toContain("codes expire after 15 minutes");
   });
 
+  it("SAS display (2026-09-26): the lookup's sas + wrap-key fingerprint render with compare-out-of-band copy and the patient's own pairing id", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/consents/pairing/lookup")) {
+        return jsonResponse({
+          therapist_id: "t-1",
+          display_name: "Dr. River",
+          wrap_pub_key: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcokO" + "B".repeat(60),
+          sas: "482 913",
+          wrap_key_fingerprint: "a1b2c3d4e5f60718",
+        });
+      }
+      if (url.endsWith("/consents")) return jsonResponse([]);
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<ShareView />);
+    await settle(40, 3);
+    await typeInto(root, "Pairing code", "AB12CD34");
+    await press(root, "Look up");
+    await settle(40, 3);
+    // The SAS itself, the server-side key fingerprint, the patient's own
+    // pairing id (the input the therapist's portal needs), and the honest
+    // compare-by-voice instruction — including the STOP on mismatch.
+    expect(textOf(root)).toContain("482 913");
+    expect(textOf(root)).toContain("a1b2c3d4e5f60718");
+    expect(textOf(root)).toContain(USER);
+    expect(textOf(root)).toContain("Read this verification code to your therapist");
+    expect(textOf(root)).toContain("shows exactly the same");
+  });
+
+  it("a backend predating the SAS fields hides the comparison block (the local fingerprint check stays)", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/consents/pairing/lookup")) {
+        return jsonResponse({ therapist_id: "t-1", display_name: "Dr. Old", wrap_pub_key: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEcokO" + "B".repeat(60) });
+      }
+      if (url.endsWith("/consents")) return jsonResponse([]);
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<ShareView />);
+    await settle(40, 3);
+    await typeInto(root, "Pairing code", "AB12CD34");
+    await press(root, "Look up");
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Dr. Old");
+    expect(textOf(root)).not.toContain("Read this verification code");
+    // The pre-wave out-of-band check still renders.
+    expect(textOf(root)).toContain("fingerprint");
+  });
+
   it("revoke is verifier-gated and says what it honestly does", async () => {
     const consent = {
       id: "a".repeat(32),
@@ -216,7 +264,8 @@ describe("SettingsView", () => {
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
     expect(textOf(root)).toContain("off");
-    await pressSwitch(root);
+    // 2026-09-27: Settings renders TWO switches now — press the LLM one.
+    await pressSwitch(root, "LLM");
     await settle(40, 3);
     expect(textOf(root)).toContain("ENABLED for your account");
   });

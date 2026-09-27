@@ -362,4 +362,4 @@ def test_mutation_runner_still_deselects_slow_tests():
     runner = (Path(__file__).resolve().parents[1] / "scripts" / "mutmut_runner.sh").read_text(
         encoding="utf-8"
     )
-    assert "-m 'not slow'" in runner or "-m \"not slow\"" in runner
+    assert "-m 'not slow'" in runner or '-m "not slow"' in runner

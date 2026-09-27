@@ -125,26 +125,24 @@ groups:
           summary: "More than 25% of LLM calls failing for 15m"
           runbook: "docs/INCIDENT_RUNBOOK.md — S3 (provider degraded); the S1 LLM path is about exposure, not failure ratio"
 
-  # --------------------------------------------------------------------
-  # OPTIONAL: blackbox /readyz probe. Uncomment ONLY if you enabled the
-  # `blackbox` profile and the mindpattern-blackbox scrape job — without
-  # the exporter running this would reference a series that never exists
-  # (harmless, but dishonest on the targets page).
-  # --------------------------------------------------------------------
-  # - name: mindpattern-blackbox
-  #   rules:
-  #     # S2 — /readyz failing means DB unreachable at the required schema
-  #     # head; the app is fail-closed and serves nothing. Distinct from
-  #     # MindPatternAPIDown: the API process may be perfectly alive.
-  #     - alert: MindPatternReadyzProbeFailing
-  #       expr: |
-  #         probe_success{job="mindpattern-blackbox"} == 0
-  #       for: 5m
-  #       labels:
-  #         severity: S2
-  #       annotations:
-  #         summary: "Blackbox probe of /readyz failing for 5m (DB path broken)"
-  #         runbook: "docs/INCIDENT_RUNBOOK.md — S2: API down, step 1 (/readyz 503 -> database)"
+  # DEFAULT-ON (2026-09-26 infra audit): the /readyz probe alert ships
+  # enabled — the blackbox exporter is part of the default stack now
+  # (prometheus.yml + the monitoring compose), so the default monitoring
+  # deployment detects a broken DB path, not just a dead process.
+  - name: mindpattern-blackbox
+    rules:
+      # S2 — /readyz failing means DB unreachable at the required schema
+      # head; the app is fail-closed and serves nothing. Distinct from
+      # MindPatternAPIDown: the API process may be perfectly alive.
+      - alert: MindPatternReadyzProbeFailing
+        expr: |
+          probe_success{job="mindpattern-blackbox"} == 0
+        for: 5m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Blackbox probe of /readyz failing for 5m (DB path broken)"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S2: API down, step 1 (/readyz 503 -> database)"
 
   # --------------------------------------------------------------------
   # OPTIONAL: backup freshness via node_exporter's textfile collector.
