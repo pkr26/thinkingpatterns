@@ -837,20 +837,27 @@ async def change_password(
     v1→v2 migration via this endpoint (re-audit, 2026-09-27): the uploaded
     envelope MUST wrap the account's CURRENT data key, and the server
     cannot tell that from any 32 bytes — a buggy client uploading an
-    envelope over the wrong key would brick every future unlock. The v1
-    account therefore MUST send X-Processing-Token (a live owner-bound
-    processing session opened with the current password-derived data key)
-    and the popped key must AUTHENTICATE stored ciphertext — the same
-    possession probe as /account/key-envelope/upgrade — before the swap.
-    Wrong key: 403 envelope_key_mismatch, and the account stays v1. An
-    empty corpus proves nothing by decrypting, so possession is vacuous
-    and the migration proceeds (the client is migrating before its first
-    write; it still holds the same key it will use). A v2→v2 change is
-    deliberately EXEMPT from the token: it re-wraps the SAME key the
-    client just proved it holds by unwrapping under the old password
-    (the verifier proof), and the O(1) v2 flow carries no processing
-    session to probe with — demanding one would force a corpus-sized
-    rekey path back onto the endpoint this scheme exists to avoid.
+    envelope over the wrong key would brick every future unlock. Every
+    caller therefore MUST send X-Processing-Token (a live owner-bound
+    processing session opened with the current data key) and the popped
+    key must AUTHENTICATE stored ciphertext — the same possession probe
+    as /account/key-envelope/upgrade — before the swap. Wrong key: 403
+    envelope_key_mismatch, and the account keeps its previous envelope.
+    An empty corpus proves nothing by decrypting, so possession is vacuous
+    and the change proceeds (the client holds the only key that will ever
+    have wrapped anything).
+
+    2026-09-28 audit (M-1): the probe is required for v2→v2 changes too.
+    The old exemption argued the client "proved it holds the key by
+    unwrapping under the old password" — but the unwrap is client-side
+    and invisible to the server; the verifier proves the AUTH credential,
+    not the data key. That is exactly why /key-envelope/upgrade demands
+    the probe on every envelope replacement, and why this channel must
+    not disagree: with only a stolen bearer + phished verifier, an
+    attacker could PUT a random 60-byte blob and permanently destroy the
+    only copy of the data key's locker. The client already holds the
+    unwrapped key (it just opened it to re-wrap), so the honest flow pays
+    one extra POST /processing/sessions — no corpus walk is implied.
     """
     expected_epoch = user.token_epoch
     await _require_verifier(user, body.verifier, request, session)
@@ -917,29 +924,29 @@ async def change_password(
             n=request.app.state.settings.scrypt_n,
         )
 
-    # The v1→v2 migration consumes the client's session key ONLY after the
-    # verifier proof passed — a failed proof must not burn it (the rekey
-    # endpoint's discipline). pop (not peek): single-use, like every
-    # processing-token consumer.
-    migrating_from_v1 = user.key_scheme != "v2"
+    # The client's session key is consumed ONLY after the verifier proof
+    # passed — a failed proof must not burn it (the rekey endpoint's
+    # discipline). pop (not peek): single-use, like every
+    # processing-token consumer. Required from EVERY caller (2026-09-28
+    # audit M-1): the probe below is what authorizes replacing
+    # wrapped_data_key, v2→v2 included.
     candidate_key: bytearray | None = None
-    if migrating_from_v1:
-        if not x_processing_token:
-            raise ApiError(
-                status_code=422,
-                detail="processing session token required (X-Processing-Token)",
-                code="processing_session_required",
-            )
-        from .insights import KeyNotFound
+    if not x_processing_token:
+        raise ApiError(
+            status_code=422,
+            detail="processing session token required (X-Processing-Token)",
+            code="processing_session_required",
+        )
+    from .insights import KeyNotFound
 
-        try:
-            candidate_key = request.app.state.key_store.pop(x_processing_token, owner=user.id)
-        except KeyNotFound:
-            raise ApiError(
-                status_code=403,
-                detail="processing session missing or expired",
-                code="processing_session_invalid",
-            ) from None
+    try:
+        candidate_key = request.app.state.key_store.pop(x_processing_token, owner=user.id)
+    except KeyNotFound:
+        raise ApiError(
+            status_code=403,
+            detail="processing session missing or expired",
+            code="processing_session_invalid",
+        ) from None
     try:
         async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
             fresh = (

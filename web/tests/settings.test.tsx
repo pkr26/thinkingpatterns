@@ -485,6 +485,12 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
           : jsonResponse({ key_scheme: "v1", salt: UPGRADE_SALT_B64, kdf_params: null, wrapped_data_key: null });
       }
       if (url.endsWith("/auth/salt")) return jsonResponse({ salt: UPGRADE_SALT_B64 });
+      // M-1 (2026-09-28 audit): the v2 password change opens its possession
+      // probe session before the PUT. Scoped to the password flow only —
+      // the upgrade test brings its own session stub ("pst").
+      if (extra.password && url.endsWith("/processing/sessions") && init.method === "POST") {
+        return jsonResponse({ session_token: "proc-tok-1", expires_in: 900 });
+      }
       if (extra.upgrade && url.endsWith("/account/key-envelope/upgrade")) return extra.upgrade(url, init);
       if (extra.password && url.endsWith("/account/password")) return extra.password(url, init);
       if (extra.consents && url.endsWith("/consents")) return jsonResponse(extra.consents);
@@ -530,15 +536,57 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     const newMaster = await deriveMasterKey(V2_NEW_PASSWORD, fromBase64(body.new_salt!));
     const reopened = await unwrapEnvelope(newMaster, fromBase64(body.new_salt!), "tester", body.wrapped_data_key!, KDF_PARAMS);
     expect(toBase64(reopened)).toBe(vaultKeyB64);
+    // The possession probe (M-1, 2026-09-28): exactly ONE processing
+    // session was opened, and its token rode the PUT.
+    const sessions = calls.filter(
+      ([url, init]) => url.endsWith("/processing/sessions") && init.method === "POST",
+    );
+    expect(sessions).toHaveLength(1);
+    expect((put![1].headers as Record<string, string>)["X-Processing-Token"]).toBe("proc-tok-1");
     // And nothing else ran: no rekey, no credential rotation, no consent
-    // re-wrap (the data key never rotated), no processing session at all.
+    // re-wrap (the data key never rotated).
     expect(calls.some(([url]) => url.endsWith("/processing/rekey"))).toBe(false);
     expect(calls.some(([url]) => url.endsWith("/account/credential"))).toBe(false);
-    expect(calls.some(([url]) => url.endsWith("/processing/sessions"))).toBe(false);
     expect(calls.some(([url, init]) => url.includes("/rewrap") && init.method === "PUT")).toBe(false);
     // Success killed every session (epoch bump) — honest lockdown copy.
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("no re-encryption was needed");
+  });
+
+  it("M-4 (2026-09-28): the v2 rotation broadcasts the cross-tab lockdown BEFORE any server call", async () => {
+    let broadcastCount = 0;
+    const tabMod = await import("../src/tabLockdown");
+    const broadcastSpy = vi
+      .spyOn(tabMod, "broadcastTabLockdown")
+      .mockImplementation(() => {
+        broadcastCount += 1;
+      });
+    // The FIRST server step of the v2 rotation is the possession-probe
+    // session open: record, at that moment, whether the broadcast had
+    // already fired (and answer with a stub token so the flow completes).
+    const sessionOpenedBeforeBroadcast = { value: false };
+    const apiMod = await import("../src/api/client");
+    const sessionSpy = vi.spyOn(apiMod.api, "openProcessingSession").mockImplementation(
+      async () => {
+        sessionOpenedBeforeBroadcast.value = broadcastCount === 0;
+        return { session_token: "probe-tok", expires_in: 900 };
+      },
+    );
+    const mock = schemeStubs("v2", { password: () => new Response(null, { status: 204 }) });
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    await typeInto(root, "New password", V2_NEW_PASSWORD);
+    await typeInto(root, "Confirm new password", V2_NEW_PASSWORD);
+    await press(root, "Change password");
+    await settle(120, 6);
+    expect(broadcastSpy).toHaveBeenCalledWith("rotation");
+    expect(sessionOpenedBeforeBroadcast.value).toBe(false);
+    const calls = mock.mock.calls as [string, RequestInit][];
+    const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
+    expect(put).toBeTruthy();
+    expect((put![1].headers as Record<string, string>)["X-Processing-Token"]).toBe("probe-tok");
+    broadcastSpy.mockRestore();
+    sessionSpy.mockRestore();
   });
 
   it("a v1 account sees the upgrade action; the upgrade proves possession + password and flips the card to v2", async () => {

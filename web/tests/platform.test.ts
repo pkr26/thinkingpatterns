@@ -191,3 +191,63 @@ describe("connectivity + event seams", () => {
     }
   });
 });
+
+/** L-7 (2026-09-28 audit): browsers without navigator.locks (Safari < 15.2)
+ *  used to run every "locked" section UNLOCKED — the cross-tab
+ *  last-write-wins the lock exists to prevent silently returned. The
+ *  localStorage bakery restores real serialization. The test shim's
+ *  window.localStorage plays the coherent same-origin store. */
+describe("withLock bakery fallback (audit 2026-09-28 L-7)", () => {
+  it("serializes concurrent sections on one lock name — never overlapping", async () => {
+    vi.stubGlobal("navigator", {});
+    try {
+      let active = 0;
+      let maxActive = 0;
+      const section = async (label: string): Promise<string> =>
+        withLock("queue-flush", async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 5 + Math.random() * 5));
+          active -= 1;
+          return label;
+        });
+      const results = await Promise.all(["a", "b", "c"].map(section));
+      expect(results.sort()).toEqual(["a", "b", "c"]);
+      expect(maxActive).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a crashed holder's stale vote is swept — the lock cannot deadlock", async () => {
+    vi.stubGlobal("navigator", {});
+    try {
+      const storage = (globalThis as { window?: { localStorage?: Storage } }).window?.localStorage;
+      expect(storage).toBeTruthy();
+      // A vote stamped LONG ago: the tab that wrote it is long dead.
+      storage!.setItem("mindpattern.lockvote.queue-flush.deadbeef", JSON.stringify({ ts: Date.now() - 60_000 }));
+      const started = Date.now();
+      await withLock("queue-flush", async () => "ok");
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(storage!.getItem("mindpattern.lockvote.queue-flush.deadbeef")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("releases the vote on completion — the store carries no residue", async () => {
+    vi.stubGlobal("navigator", {});
+    try {
+      await withLock("one-shot", async () => 1);
+      const storage = (globalThis as { window?: { localStorage?: Storage } }).window?.localStorage;
+      const residue = [] as string[];
+      for (let index = 0; index < storage!.length; index += 1) {
+        const key = storage!.key(index);
+        if (key?.startsWith("mindpattern.lockvote.")) residue.push(key);
+      }
+      expect(residue).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

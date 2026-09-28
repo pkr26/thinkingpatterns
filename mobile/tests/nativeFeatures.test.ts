@@ -373,3 +373,98 @@ describe("fallback cancel-all restores the SIBLING reminder (P3, 2026-09-27)", (
     }
   });
 });
+
+// --- L-9 (2026-09-28): the ONE-TIME orphaned random-id sweep -----------------
+// A device upgraded from the pre-stable-id build carries random-id daily
+// notifications that no stable-id cancel can ever reach; the FIRST resync on
+// this version clears EVERYTHING once (the cancel-all fallback) and rebuilds
+// both reminders from stored prefs under their stable ids. The whole resync
+// path runs here (real reminderSync + real nativeFeatures seam + the
+// notifee/storage stubs above) — exactly the boot of an upgraded device.
+const { syncReminderSchedule } = await import("../src/reminderSync");
+
+describe("one-time orphan-id migration (L-9, 2026-09-28)", () => {
+  beforeEach(() => {
+    storageForSiblings.__reset();
+  });
+
+  it("first resync on an upgraded device clears ALL notifications once and reschedules BOTH reminders from prefs", async () => {
+    await setReminderEnabled("user-1", true);
+    await setReminderTime("user-1", 20, 30);
+    await setMeasureReminderEnabled("user-1", true);
+    // The measure cadence is DUE: the last completion is 5 weeks old (the
+    // stamp is forward-only, so the encrypted slot is seeded directly —
+    // the same lane recordMeasureCompleted writes).
+    const { secureStore } = await import("../src/secureStore");
+    const fiveWeeksAgo = new Date(Date.now() - 35 * 86_400_000).toISOString().slice(0, 10);
+    await secureStore.setItem("@mindpattern/last_measure_user-1", fiveWeeksAgo);
+    createTriggerNotification.mockClear();
+    cancelAllNotifications.mockClear();
+
+    expect(await syncReminderSchedule("user-1")).toBe(true);
+    // The sweep ran EXACTLY once and cleared the app's WHOLE notification
+    // set — the orphaned random ids from the pre-fix build included.
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    // …and rebuilt BOTH reminders under their STABLE ids from stored prefs
+    // (the migration's own reschedule, then the sync's daily reconcile).
+    const ids = (createTriggerNotification.mock.calls as unknown as [{ id: string }, unknown][])
+      .map((call) => call[0].id);
+    expect(new Set(ids)).toEqual(new Set(["mindpattern-daily-reminder", "mindpattern-measure-reminder"]));
+    // The flag is committed only AFTER the reschedule completed.
+    expect(await storageForSiblings.getItem("@mindpattern/reminder.migration.v2.done")).toBe("1");
+  });
+
+  it("the SECOND boot does not sweep again — the reconcile is the plain stable-id path", async () => {
+    await setReminderEnabled("user-1", true);
+    await setReminderTime("user-1", 9, 15);
+    createTriggerNotification.mockClear();
+    cancelAllNotifications.mockClear();
+
+    expect(await syncReminderSchedule("user-1")).toBe(true);
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1); // first boot swept
+    cancelAllNotifications.mockClear();
+    createTriggerNotification.mockClear();
+
+    expect(await syncReminderSchedule("user-1")).toBe(true);
+    expect(cancelAllNotifications).not.toHaveBeenCalled(); // idempotent: skipped
+    expect(createTriggerNotification).toHaveBeenCalledTimes(1); // just the reconcile
+    const [notification] = createTriggerNotification.mock.calls[0] as [{ id: string }, unknown];
+    expect(notification.id).toBe("mindpattern-daily-reminder");
+  });
+
+  it("DISABLED prefs still sweep the orphans once — and schedule NOTHING afterwards", async () => {
+    createTriggerNotification.mockClear();
+    cancelAllNotifications.mockClear();
+
+    expect(await syncReminderSchedule("user-1")).toBe(true);
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1); // orphans die too
+    expect(createTriggerNotification).not.toHaveBeenCalled();
+    expect(await storageForSiblings.getItem("@mindpattern/reminder.migration.v2.done")).toBe("1");
+  });
+
+  it("a build without the notification module commits the flag — nothing to sweep, never re-probed", async () => {
+    const notifee = (await import("@notifee/react-native")) as unknown as {
+      default: Record<string, unknown>;
+    };
+    const original = notifee.default.requestPermission;
+    delete notifee.default.requestPermission;
+    try {
+      await syncReminderSchedule("user-1");
+      expect(cancelAllNotifications).not.toHaveBeenCalled();
+      expect(await storageForSiblings.getItem("@mindpattern/reminder.migration.v2.done")).toBe("1");
+    } finally {
+      notifee.default.requestPermission = original;
+    }
+  });
+
+  it("a sweep that fails mid-way leaves the flag UNSET — the next resync retries it", async () => {
+    cancelAllNotifications.mockRejectedValueOnce(new Error("native exploded"));
+    await syncReminderSchedule("user-1");
+    expect(await storageForSiblings.getItem("@mindpattern/reminder.migration.v2.done")).toBeNull();
+
+    cancelAllNotifications.mockClear();
+    await syncReminderSchedule("user-1");
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1); // retried, and…
+    expect(await storageForSiblings.getItem("@mindpattern/reminder.migration.v2.done")).toBe("1");
+  });
+});

@@ -29,12 +29,19 @@ import {
 import {
   cancelDailyReminder,
   cancelMeasureReminder,
+  migrateOrphanedReminderNotifications,
   scheduleDailyReminder,
   scheduleMeasureReminder,
 } from "./nativeFeatures";
 
 export async function syncReminderSchedule(userId: string): Promise<boolean> {
   try {
+    // L-9 (2026-09-28): the first resync on this version sweeps the
+    // pre-stable-id era's orphaned random-id notifications (cancel-all +
+    // reschedule from prefs), guarded by a persisted device flag so later
+    // boots skip it. Idempotent, never throws, runs before the reconcile
+    // below re-establishes the preference's own schedule.
+    await migrateOrphanedReminderNotifications(userId);
     const prefs = await getReminderPrefs(userId);
     // independent audit 2026-09-27 (P3): the userId rides the cancel so a
     // fallback cancel-all can re-schedule the surviving measure nudge.

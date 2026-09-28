@@ -344,6 +344,55 @@ async def test_v2_password_change_requires_old_verifier_and_shapes(client: Async
     del no_verifier
 
 
+async def test_v2_password_change_requires_the_possession_probe(client: AsyncClient):
+    """2026-09-28 audit M-1: the v2→v2 exemption let a stolen bearer +
+    phished verifier overwrite wrapped_data_key with arbitrary bytes —
+    permanent destruction of the only data-key locker. The probe is now
+    required from EVERY caller, exactly like /key-envelope/upgrade."""
+    emu = EnvelopeClientEmulator("v2probe", "pw-v2-probe-1")
+    await emu.register(client)
+    await emu.create_entry(client, "probe corpus", TODAY, client_entry_id="v2-p1")
+    env_before = await emu.fetch_envelope(client)
+
+    # The attacker's payload: valid shapes, verifier honest (phished), and
+    # an envelope over 60 random bytes they will never be able to open.
+    garbage = base64.b64encode(os.urandom(60)).decode("ascii")
+
+    # No processing session at all -> 422 before anything is consumed.
+    response = await client.put(
+        "/api/account/password",
+        headers=emu.headers,
+        json={
+            "verifier": emu.auth_key_b64,
+            "new_salt": base64.b64encode(os.urandom(16)).decode(),
+            "new_verifier": emu.auth_key_b64,
+            "wrapped_data_key": garbage,
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "processing_session_required"
+
+    # A session over the WRONG key fails the stored-ciphertext probe and
+    # the envelope survives untouched.
+    wrong_token = await emu.open_processing_session_for(client, crypto.generate_key())
+    response = await client.put(
+        "/api/account/password",
+        headers={**emu.headers, "X-Processing-Token": wrong_token},
+        json={
+            "verifier": emu.auth_key_b64,
+            "new_salt": base64.b64encode(os.urandom(16)).decode(),
+            "new_verifier": emu.auth_key_b64,
+            "wrapped_data_key": garbage,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "envelope_key_mismatch"
+    env_after = await emu.fetch_envelope(client)
+    assert env_after["wrapped_data_key"] == env_before["wrapped_data_key"]
+    # The account still unlocks with the original password + envelope.
+    assert await emu.unlock(client) == emu.data_key
+
+
 async def test_credential_rotation_endpoint_refuses_v2_accounts(client: AsyncClient):
     """PUT /account/credential swaps the salt WITHOUT the envelope; for a
     v2 account that is unrecoverable data loss, so it answers 409 and the

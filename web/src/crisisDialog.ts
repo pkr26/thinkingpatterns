@@ -35,6 +35,16 @@ function sweepLegacyStampOnce(): void {
   localStore.removePrefix(LEGACY_PREFIX);
 }
 
+/** L-8 (2026-09-28 audit): run the legacy-plaintext sweep at App mount.
+ *  The module-scoped trigger only fired when a crisis-flagged save first
+ *  consulted it — a user who never triggered one kept the pre-fix
+ *  plaintext date on disk indefinitely (locks deliberately preserve
+ *  mindpattern.* keys). Called once from the App shell so the sweep runs
+ *  for EVERY visitor, crisis-flagged or not. */
+export function sweepLegacyCrisisStamps(): void {
+  sweepLegacyStampOnce();
+}
+
 /** True when the support prompt already ran for this account on `todayISO`. */
 export async function crisisDialogShownOn(userId: string, todayISO: string): Promise<boolean> {
   sweepLegacyStampOnce();

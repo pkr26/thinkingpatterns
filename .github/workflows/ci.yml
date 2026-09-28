@@ -290,6 +290,16 @@ jobs:
           chmod 600 .env deploy/secrets/postgres_password \
             deploy/secrets/token_secret deploy/secrets/auth_token_secret \
             deploy/secrets/backup_key deploy/secrets/metrics_token
+          # 2026-09-28 audit L-4: the monitoring stack reads its COPY of the
+          # same token from deploy/monitoring/token (prometheus
+          # bearer_token_file). ONE value into BOTH sinks, then the
+          # equality assertion the compose header promises — divergence
+          # would 401 every scrape with nothing to catch it.
+          mkdir -p deploy/monitoring
+          cp deploy/secrets/metrics_token deploy/monitoring/token
+          chmod 600 deploy/monitoring/token
+          cmp -s deploy/secrets/metrics_token deploy/monitoring/token \
+            || { echo '::error::metrics token sinks diverged' >&2; exit 1; }
       - name: Assert the db password is ONE value across .env and the secret file
         # Fail-fast re-audit assertion (2026-09-27): the api authenticates
         # with the password interpolated from .env into MINDPATTERN_DB_URL,

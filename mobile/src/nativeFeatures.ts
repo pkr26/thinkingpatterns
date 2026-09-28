@@ -24,6 +24,7 @@
  *    biometricUnlock.ts over react-native-keychain (already a dependency).
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getReminderPrefs, nextReminderFireTime } from "./reminders";
 import {
   getMeasureReminderPrefs,
@@ -350,6 +351,53 @@ export async function cancelDailyReminder(userId?: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** L-9 (2026-09-28): the persisted "orphaned random-id notifications were
+ *  cleared" mark. Notifications are device-local (not per-account), so the
+ *  flag is device-wide in this module's prefs namespace — it says THIS
+ *  build's one-time sweep ran, and nothing else. */
+const REMINDER_MIGRATION_V2_KEY = "@mindpattern/reminder.migration.v2.done";
+
+/**
+ * L-9 (2026-09-28): ONE-TIME sweep of the pre-stable-id era's orphaned
+ * notifications. Before the stable-id fix (2026-09-26 audit MEDIUM) notifee
+ * minted a RANDOM id per create and every reschedule stacked a new daily
+ * trigger; the fix made NEW schedules replace-by-id, but a device upgraded
+ * from a pre-fix build keeps every orphaned random-id notification firing
+ * forever — no stable id exists to cancel them by. The only tool that
+ * reaches them is the cancel-all fallback, so the FIRST reminder resync on
+ * this version:
+ *
+ *   1. cancelAllNotifications() — clears EVERY scheduled notification,
+ *      orphaned random ids included (reminders are the only notifications
+ *      this app schedules, and disabled prefs lose nothing by the sweep —
+ *      orphans SHOULD be cleared even then);
+ *   2. immediately reschedules BOTH reminders from stored prefs via the
+ *      existing stable-id resync paths (daily reminder; measure-cadence
+ *      nudge when its preference AND cadence say one should exist);
+ *   3. only then sets the flag, so the sweep is idempotent — every later
+ *      boot skips it. A mid-migration failure leaves the flag unset and the
+ *      next resync retries the whole sweep (harmless: the reschedule is the
+ *      same reconciliation the sync performs anyway).
+ *
+ * Called from reminderSync.syncReminderSchedule (the resync every session
+ * start runs). Never throws; a build without the notification module has
+ * nothing to sweep and simply marks the migration done.
+ */
+export async function migrateOrphanedReminderNotifications(userId: string): Promise<void> {
+  try {
+    if ((await AsyncStorage.getItem(REMINDER_MIGRATION_V2_KEY)) !== null) return; // already swept
+    const api = notifeeFrom(await probeAsync("@notifee/react-native"));
+    if (api !== null) {
+      await api.cancelAllNotifications();
+      await rescheduleDailyReminderSibling(userId);
+      await rescheduleMeasureReminderSibling(userId);
+    }
+    await AsyncStorage.setItem(REMINDER_MIGRATION_V2_KEY, "1");
+  } catch {
+    // Nothing committed: the flag stays unset and the next resync retries.
   }
 }
 

@@ -257,15 +257,68 @@ async function rotatePasswordV2(input: {
       zeroize(newKek);
     }
 
-    // --- v2.3. one transaction: credential + envelope -----------------------
+    // --- v2.3. possession probe + one transaction: credential + envelope ---
+    // M-1 client side (2026-09-28 wire change): the PUT now demands POSSESSION
+    // of the current data key on EVERY call — the verifier proves the old
+    // password, but only a live owner-bound processing session opened with
+    // the UNWRAPPED data key proves this device holds the key whose envelope
+    // it is about to replace (the same probe the v1→v2 migration path ships;
+    // single-use, consumed by the swap). Nothing below ever falls back to a
+    // tokenless call: a refusal means the server did not accept the swap,
+    // and both sides are still untouched.
+    let processingToken: string;
+    try {
+      processingToken = String(
+        (await api.openProcessingSession(dataKey.toString("base64"))).session_token,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "processing_session_invalid") {
+        // The unwrapped key did not authenticate stored ciphertext: this
+        // device's envelope view is stale relative to the account. Retrying
+        // with the same key cannot fix that — same honest-retry copy as the
+        // PUT-side refusal below.
+        return {
+          ok: false,
+          stage: "credential",
+          reason: "server",
+          detail:
+            "the server could not verify this device's encryption key session — unlock again and retry the password change",
+        };
+      }
+      return {
+        ok: false,
+        stage: "credential",
+        reason: err instanceof ApiError ? "server" : "offline",
+        detail: err instanceof ApiError ? err.message : undefined,
+      };
+    }
     try {
       await api.changePassword(
         oldVerifierB64,
         newSalt.toString("base64"),
         newKeys.authKey.toString("base64"),
         wrappedB64,
+        processingToken,
       );
     } catch (err) {
+      if (
+        err instanceof ApiError &&
+        (err.code === "processing_session_required" ||
+          (err.status === 403 && err.code === "processing_session_invalid"))
+      ) {
+        // The possession probe was refused (422 = the token never arrived,
+        // 403 = it did not authenticate). The swap is one transaction, so
+        // nothing moved server-side; the honest next step is a fresh attempt
+        // after an unlock — never a tokenless retry that would smuggle the
+        // new envelope past the probe.
+        return {
+          ok: false,
+          stage: "credential",
+          reason: "server",
+          detail:
+            "the server could not verify this device's encryption key session — unlock again and retry the password change",
+        };
+      }
       if (err instanceof ApiError && err.status === 403) {
         // The typed old-password proof was rejected server-side.
         return { ok: false, stage: "credential", reason: "wrong-password", detail: err.message };

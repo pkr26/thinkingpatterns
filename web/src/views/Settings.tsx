@@ -28,6 +28,7 @@ import { CADENCE_INTERVALS, clearMeasureCadence, readMeasureCadence, writeMeasur
 import { clearSafetyPlan, rewrapSafetyPlan } from "../safetyPlan";
 import { passwordPolicyError } from "./LoginView";
 import { drainPendingQueueForRotation, requeueRejected, rejectedEntries, queueLength, clearQueue, rewrapQueue } from "../offlineQueue";
+import { broadcastTabLockdown } from "../tabLockdown";
 import { downloadTextFile, localStore, randomBytes } from "../platform";
 import { clearMoodLog, rewrapMoodLog } from "../moodLog";
 import { clearFeedback, rewrapFeedback } from "../questionFeedback";
@@ -315,6 +316,11 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // in production. A fresh draw per attempt (the first cut) could
       // never verify, dead-ending the user on "repeat the password change
       // to finish it" — an instruction that always failed.
+      // M-4 (2026-09-28 audit): every OTHER signed-in tab still holds the
+      // OLD data key and a live bearer — lock them down NOW, before any
+      // server step, so their direct saves and reconnect flushes cannot
+      // upload old-key blobs to a rekeyed corpus.
+      broadcastTabLockdown("rotation");
       const pendingB64 = localStore.get(pendingSaltKey(owner));
       const newSalt = pendingB64 ? fromBase64(pendingB64) : randomBytes(16);
       const newSaltB64 = toBase64(newSalt);
@@ -469,6 +475,24 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     let newKeys: PatientKeys | null = null;
     let newSalt: Bytes | null = null;
     try {
+      // M-4 (2026-09-28 audit): lock every other signed-in tab down before
+      // the credential swap kills its bearer mid-write (the v2 corpus key
+      // never rotates, but a mid-flight save under a dying session is its
+      // own honest-loss window).
+      broadcastTabLockdown("rotation");
+      // M-1 (2026-09-28 audit): open a processing session with the CURRENT
+      // data key FIRST — the server's possession probe authorizes the
+      // envelope swap on every v2 password change (the verifier alone
+      // proves the credential, not the key). Failure here surfaces the
+      // honest retry error; there is no tokenless fallback.
+      const dataKeyCopy = new Uint8Array(new ArrayBuffer(old.dataKey.length));
+      dataKeyCopy.set(old.dataKey);
+      let processingToken: string;
+      try {
+        processingToken = (await api.openProcessingSession(toBase64(dataKeyCopy))).session_token;
+      } finally {
+        zeroize(dataKeyCopy);
+      }
       newSalt = randomBytes(16);
       newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt));
       const wrappedDataKeyB64 = await rewrapDataKey(old.dataKey, newKeys.masterKey, newSalt, username);
@@ -477,6 +501,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         newSaltB64: toBase64(newSalt),
         newVerifierB64: toBase64(newKeys.authKey),
         wrappedDataKeyB64,
+        processingToken,
       });
       // No local rewrap of anything: the data key did not change. The
       // epoch bump killed this token too — lockdown, honestly.

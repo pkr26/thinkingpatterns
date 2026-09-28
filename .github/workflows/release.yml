@@ -21,12 +21,15 @@ on:
 # jobs that ship artifacts (image -> GHCR, release-notes -> GitHub
 # release) declare their own broader grants below.
 concurrency:
-  # Independent audit 2026-09-27: two near-simultaneous tag pushes (or a
-  # dispatch + a tag) used to run release pipelines concurrently — two
-  # production-integration runs, two GitHub Releases for one repo state.
-  # Latest tag wins; the superseded run cancels.
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  # 2026-09-28 audit L-6: the previous group (release-${{ github.ref }})
+  # only ever deduped the SAME ref — two DIFFERENT near-simultaneous tags
+  # (the comment's own scenario) ran fully concurrently, and the
+  # cancel-in-progress could kill a same-tag re-push mid-Release-upload.
+  # A single group WITHOUT cancel serializes every release run instead:
+  # distinct tags queue behind each other (one release pipeline at a
+  # time) and nothing is ever killed mid-publish.
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -231,6 +234,14 @@ jobs:
           chmod 600 .env deploy/secrets/token_secret \
             deploy/secrets/auth_token_secret deploy/secrets/postgres_password \
             deploy/secrets/backup_key deploy/secrets/metrics_token
+          # 2026-09-28 audit L-4: ONE value into BOTH metrics-token sinks
+          # (api secret file + the monitoring stack's bearer_token_file),
+          # asserted equal — same contract ci.yml's docker job enforces.
+          mkdir -p deploy/monitoring
+          cp deploy/secrets/metrics_token deploy/monitoring/token
+          chmod 600 deploy/monitoring/token
+          cmp -s deploy/secrets/metrics_token deploy/monitoring/token \
+            || { echo '::error::metrics token sinks diverged' >&2; exit 1; }
       - name: Assert the db password is ONE value across .env and the secret file
         # Same fail-fast contract as ci.yml's docker job (re-audit
         # 2026-09-27): the api interpolates POSTGRES_PASSWORD from .env into
@@ -241,7 +252,8 @@ jobs:
         run: |
           set -euo pipefail
           for f in .env deploy/secrets/token_secret deploy/secrets/auth_token_secret \
-                   deploy/secrets/postgres_password deploy/secrets/backup_key; do
+                   deploy/secrets/postgres_password deploy/secrets/backup_key \
+                   deploy/secrets/metrics_token; do
             test -f "$f" || { echo "::error::required file $f was not written by the previous step" >&2; exit 1; }
           done
           env_password=$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)

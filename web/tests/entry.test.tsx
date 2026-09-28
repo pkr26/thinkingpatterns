@@ -217,6 +217,59 @@ describe("EntryView sentiment semantics (H-5, audit 2026-09-26)", () => {
   });
 });
 
+/** M-3 (2026-09-28 audit): vault.get()'s key buffers are SHARED, and a lock
+ *  landing during the entry-encrypt await zeroizes them. The mood log used
+ *  to be recorded under the (now all-zero) buffer — REPLACING the
+ *  device-local mood history with ciphertext nothing can open. The
+ *  snapshot + post-await re-check (the Measures P1 pattern, one screen
+ *  over) close it. */
+describe("EntryView zeroized-key race (audit 2026-09-28 M-3)", () => {
+  it("a lock landing during the encrypt records NO mood log, sends nothing, and keeps the draft", async () => {
+    // Seed the mood history the old bug destroyed, under a STABLE key copy.
+    const seeded = vault.get();
+    const originalKey = new Uint8Array(new ArrayBuffer(32));
+    originalKey.set(seeded.dataKey);
+    const { recordMood } = await import("../src/moodLog");
+    await recordMood(originalKey, "user-1", localDateISO(), 0.25, null);
+
+    // The lock lands exactly inside the encrypt await — after the snapshot,
+    // before the re-check.
+    const patient = await import("../src/crypto/patient");
+    const realEncrypt = patient.encryptEntry;
+    const spy = vi.spyOn(patient, "encryptEntry").mockImplementation(
+      (...args: Parameters<typeof realEncrypt>) => {
+        vault.lock();
+        return realEncrypt(...args);
+      },
+    );
+    const posted: unknown[] = [];
+    stubFetch((url, init) => {
+      if (url.endsWith("/entries")) {
+        posted.push(init.body);
+        return jsonResponse({ id: "row" }, { status: 201 });
+      }
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const onSaved = vi.fn();
+    const root = await render(<EntryView onSaved={onSaved} />);
+    await typeArea(root, "How was today?", "a day worth recording");
+    await press(root, "Save entry");
+    await settle(40, 5);
+    spy.mockRestore();
+
+    // Nothing was POSTed, nothing parked, no completion, and the honest
+    // locked message — the save aborted instead of writing under a dead key.
+    expect(posted).toHaveLength(0);
+    expect(await queueLength()).toBe(0);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Your session locked");
+    // The seeded mood history still opens under the ORIGINAL key, untouched.
+    const days = await recentMoods(originalKey, "user-1", 1);
+    expect(days).toHaveLength(1);
+    expect(days[0]!.value).toBeCloseTo(0.25, 10);
+  });
+});
+
 describe("EntryView crisis-prompt cadence (LOW c, audit 2026-09-26)", () => {
   it("prompts once per (account, day): a second crisis entry the same day saves without re-prompting", async () => {
     const mock = stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));

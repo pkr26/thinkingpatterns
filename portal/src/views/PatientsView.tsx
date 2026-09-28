@@ -819,6 +819,13 @@ export function PatientsView(props: {
               // cross-check could not run.
               const serverFp = validServerFingerprint(sasResult.wrap_key_fingerprint);
               const mismatch = serverFp !== null && sasLocalFingerprint !== null && serverFp !== sasLocalFingerprint;
+              // L-10 (2026-09-28): a PRESENT server fingerprint with no
+              // locally computed one (no session prop, or the digest failed)
+              // must not silently skip the substitution cross-check while
+              // "(key id …)" renders as if it had been verified — the
+              // honest note names what could not run, and only the
+              // out-of-band comparison remains.
+              const crossCheckUnavailable = serverFp !== null && sasLocalFingerprint === null;
               return (
                 <>
                   <p data-testid="pairing-sas" className="pairing-code">
@@ -829,6 +836,14 @@ export function PatientsView(props: {
                       KEY FINGERPRINT MISMATCH — the fingerprint the server reported for this pairing
                       does not match the one this portal computed for your own sharing key. Do not
                       proceed: generate a new code and contact support; a key may have been substituted.
+                    </Note>
+                  )}
+                  {crossCheckUnavailable && (
+                    <Note tone="warn">
+                      This portal could not compute the fingerprint of your own sharing key, so the local
+                      cross-check against the server&apos;s key id could not run — only the out-of-band
+                      comparison of the verification code and key fingerprint with your patient verifies
+                      this pairing&apos;s key. Do not treat the key id above as verified.
                     </Note>
                   )}
                   <Note tone={mismatch ? "danger" : "warn"}>

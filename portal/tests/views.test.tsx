@@ -419,6 +419,49 @@ describe("PatientsView", () => {
     expect(textOf(root)).not.toContain("KEY FINGERPRINT MISMATCH");
   });
 
+  it("L-10 (2026-09-28): a present server fingerprint with NO local digest says the local cross-check could not run", async () => {
+    // Digest-failure path: the session exists, but the portal could not
+    // compute its own wrap-key fingerprint — the cross-check must not
+    // silently no-op behind the "(key id …)" render.
+    const digest = vi.spyOn(mockedCrypto, "serverWrapKeyFingerprint")
+      .mockRejectedValueOnce(new Error("digest unavailable"));
+    try {
+      let root = await sasWithSession();
+      expect(textOf(root)).toContain("482 913");
+      // The server value is present and well-formed, so it still renders as
+      // the key id — now with the honest caveat beside it, never as a
+      // silently skipped check.
+      expect(textOf(root)).toContain("key id a1b2c3d4e5f60718");
+      expect(textOf(root)).toContain("cross-check against the server's key id could not run");
+      expect(textOf(root)).toContain("only the out-of-band");
+      // Nothing was compared, so no mismatch alarm fires.
+      expect(textOf(root)).not.toContain("KEY FINGERPRINT MISMATCH");
+      // With the digest restored, a genuinely foreign server fingerprint
+      // still raises the visible mismatch warning (unchanged behavior).
+      root = await sasWithSession();
+      expect(textOf(root)).toContain("KEY FINGERPRINT MISMATCH");
+    } finally {
+      digest.mockRestore();
+    }
+  });
+
+  it("L-10: with no session prop the same honest could-not-run note renders beside the key id", async () => {
+    // No session → no local wrap-key digest at all, while the server's
+    // fingerprint is present: the local cross-check is skipped, and the
+    // panel must say so instead of rendering the key id as if verified.
+    const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush();
+    await press(root, "Generate pairing code");
+    await flush();
+    await typeInto(root, "Patient's account id (shown in their app)", "0123456789abcdef0123456789abcdef");
+    await press(root, "Show verification code");
+    await flush();
+    expect(textOf(root)).toContain("482 913");
+    expect(textOf(root)).toContain("key id a1b2c3d4e5f60718");
+    expect(textOf(root)).toContain("cross-check against the server's key id could not run");
+    expect(textOf(root)).not.toContain("KEY FINGERPRINT MISMATCH");
+  });
+
   it("lists active and stopped patients; open hands the patient up", async () => {
     const onOpen = vi.fn();
     mockedApi.patients.mockResolvedValueOnce([
@@ -2023,5 +2066,43 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
     const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
     expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
     expect(textOf(root)).toContain("Conflict then retry.");
+  });
+
+  it("M-2 (2026-09-28): a 409 version_conflict burns the id too — the retry mints a FRESH client_note_id and succeeds", async () => {
+    // A manual re-press re-encrypts with a fresh GCM nonce, so the uploaded
+    // bytes differ from the stored note and the backend (commit 7b7337a)
+    // answers 409 version_conflict instead of rewriting in place — mirror
+    // the differing ciphertext per attempt.
+    mockedCrypto.encryptNote
+      .mockResolvedValueOnce({ clientNoteId: "pending-1", blobB64: "SEALEDNOTE-1==" })
+      .mockResolvedValueOnce({ clientNoteId: "pending-2", blobB64: "SEALEDNOTE-2==" });
+    mockedApi.createNote
+      .mockRejectedValueOnce(
+        new ApiError(
+          409,
+          "a different note with this client_note_id already exists; edit it with PATCH and a base_version",
+          "version_conflict",
+        ),
+      )
+      .mockResolvedValueOnce({
+        id: "n1", client_note_id: "fresh-after-version-conflict", pattern_pid: null, blob: "b",
+        created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
+      });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush();
+    await typeTextarea(root, "Note about this patient…", "Version conflict then retry.");
+    await press(root, "Save note");
+    await flush();
+    expect(textOf(root)).toContain("a different note with this client_note_id already exists");
+    // The version-conflicted id is burned: the second press mints a FRESH
+    // client_note_id (different bytes underneath it) and the draft is
+    // savable again — not wedged on the dead id forever.
+    await press(root, "Save note");
+    await flush();
+    const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string; blob: string }][];
+    expect(calls.length).toBe(2);
+    expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+    expect(calls[1]![1].blob).toBe("SEALEDNOTE-2==");
+    expect(textOf(root)).toContain("Version conflict then retry.");
   });
 });

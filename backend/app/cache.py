@@ -525,6 +525,14 @@ class TokenRevocationStore:
             self._prune_locked(current)
             for row in rows:
                 self._by_expiry[row.jti] = row.expires_at.timestamp()
+            # 2026-09-28 audit L-1: a table larger than the cap truncates
+            # the hydration — the loaded map is then NOT a complete mirror,
+            # so a memory miss must fall back to the durable point query
+            # exactly as it does after a runtime eviction. Without this
+            # flag a boot-time truncation silently honored revoked tokens
+            # that did not fit the newest-expiry-first window.
+            if len(rows) == self._max_entries:
+                self._overflowed = True
             return len(rows)
 
     async def is_revoked_checked(self, session, jti: str | None, now: float | None = None) -> bool:

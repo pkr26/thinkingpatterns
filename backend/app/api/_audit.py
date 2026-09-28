@@ -52,6 +52,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -213,25 +214,70 @@ def read_journal_head(journal_path: str, user_id: str) -> tuple[int, str] | None
     One linear scan of the append-only file; the daily verification sweep
     is the only runtime caller, so the O(file) walk is fine there.
     """
-    best: tuple[int, str] | None = None
+    return read_journal_heads(journal_path).get(user_id)
+
+
+def read_journal_heads(journal_path: str) -> dict[str, tuple[int, str]]:
+    """Every user's (max chain_seq, at) from the journal — ONE pass.
+
+    2026-09-28 audit M-5: the sweep used to call read_journal_head per
+    patient (O(patients × file)); the daily walk now builds this map once
+    and hands it to each verification. Corrupt lines contribute no anchor
+    (the journal is evidence, not authority) and never raise.
+    """
+    heads: dict[str, tuple[int, str]] = {}
     try:
         with open(journal_path, encoding="utf-8") as handle:
             for line in handle:
                 parts = line.split()
-                if len(parts) != 5 or parts[0] != user_id:
+                if len(parts) != 5:
                     continue
                 try:
                     seq = int(parts[1])
                 except ValueError:
-                    # A corrupt journal line must never crash verification —
-                    # the journal is evidence, not authority: unreadable
-                    # lines simply contribute no anchor.
                     continue
+                best = heads.get(parts[0])
                 if best is None or seq > best[0]:
-                    best = (seq, parts[4])
+                    heads[parts[0]] = (seq, parts[4])
     except OSError:
-        return None
-    return best
+        return {}
+    return heads
+
+
+def compact_audit_journal(journal_path: str, cutoff_at: str) -> tuple[int, int]:
+    """Drop journal lines whose ``at`` predates the cutoff; (kept, dropped).
+
+    2026-09-28 audit M-5: the database trail is pruned by retention but
+    the journal file grew forever, and every verification pass walked all
+    of it. Compaction is retention-aligned and SAFE by the journal's own
+    contract: a journal behind the database head is benign (crash-window
+    semantics), and every line older than the retention cutoff describes
+    rows the database no longer has either — the truncation detector only
+    ever compares the journal's NEWEST line. Atomic (temp file + replace)
+    so a crash mid-compaction leaves the old file intact; best-effort
+    (an OSError propagates to the sweep's existing per-cycle catch, which
+    logs and retries next cycle — an uncompactable journal must never
+    take the app down).
+    """
+    kept: list[str] = []
+    dropped = 0
+    with open(journal_path, encoding="utf-8") as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) == 5 and parts[4] < cutoff_at:
+                # ISO-8601 UTC instants sort lexically as chronologically
+                # (canonical_occurred_at guarantees the shape on write);
+                # unparseable lines are kept, never destroyed.
+                dropped += 1
+                continue
+            kept.append(line)
+    tmp_path = f"{journal_path}.compact.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        handle.writelines(kept)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, journal_path)
+    return len(kept), dropped
 
 
 async def append_access_log(
@@ -356,6 +402,7 @@ async def verify_access_log_chain(
     mac_key: bytes | None = None,
     journal_path: str | None = None,
     retention_cutoff=None,
+    journal_heads: dict[str, tuple[int, str]] | None = None,
 ) -> ChainVerification:
     """Walk one patient's audit rows in chain order and detect tampering.
 
@@ -396,7 +443,11 @@ async def verify_access_log_chain(
     legacy = 0
     if not rows:
         if journal_path:
-            head = read_journal_head(journal_path, user_id)
+            head = (
+                journal_heads.get(user_id)
+                if journal_heads is not None
+                else read_journal_head(journal_path, user_id)
+            )
             if head is not None and retention_cutoff is not None:
                 from datetime import datetime as _dt
 
@@ -436,14 +487,21 @@ async def verify_access_log_chain(
             legacy += 1
         elif mac_key is not None:
             expected_mac = compute_entry_mac(mac_key, row.user_id, row.chain_seq, row.entry_hash)
-            if expected_mac != row.entry_mac:
+            # 2026-09-28 audit L-2: the keyed comparison gets the same
+            # constant-time discipline as the token signature check
+            # (tokens.py) — hmac.compare_digest, never !=.
+            if not hmac.compare_digest(expected_mac, row.entry_mac):
                 return _broken(
                     row.chain_seq,
                     "entry_mac does not verify (row rewritten without the chain key)",
                 )
         previous = row
     if journal_path:
-        head = read_journal_head(journal_path, user_id)
+        head = (
+            journal_heads.get(user_id)
+            if journal_heads is not None
+            else read_journal_head(journal_path, user_id)
+        )
         if head is not None and head[0] > rows[-1].chain_seq:
             return ChainVerification(
                 ok=False,

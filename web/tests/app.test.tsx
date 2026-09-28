@@ -367,4 +367,43 @@ describe("App", () => {
     const calls = fetchMock?.mock.calls ?? [];
     expect(calls.some(([url]) => url.endsWith("/auth/logout"))).toBe(true);
   });
+
+  it("L-8 (2026-09-28): mounting the App sweeps the legacy plaintext crisis stamps", async () => {
+    authStubs();
+    const storage = (globalThis as { window?: { localStorage?: Storage } }).window?.localStorage;
+    expect(storage).toBeTruthy();
+    storage!.setItem("mindpattern.crisisDialog.v1.user-7", "2026-09-26");
+    const root = await render(<App />);
+    await vi.advanceTimersByTimeAsync(50);
+    await flush();
+    expect(textOf(root)).toContain("Sign in");
+    // Swept for EVERY visitor at mount — not only after a crisis-flagged
+    // save first consults the module.
+    expect(storage!.getItem("mindpattern.crisisDialog.v1.user-7")).toBeNull();
+    await act(async () => {
+      void root;
+    });
+  });
+
+  it("M-4 (2026-09-28): a rotation broadcast from another tab locks this tab down", async () => {
+    authStubs();
+    const root = await render(<App />);
+    await vi.advanceTimersByTimeAsync(50);
+    await flush();
+    await signIn(root);
+    await press(root, "Next");
+    await press(root, "Next");
+    await press(root, "Start journaling");
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    // Another tab started a password rotation and broadcast the lockdown.
+    const { broadcastTabLockdown } = await import("../src/tabLockdown");
+    await act(async () => {
+      broadcastTabLockdown("rotation");
+    });
+    await flush(6);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(hasSession()).toBe(false);
+    expect(textOf(root)).toContain("Sign in");
+  });
 });

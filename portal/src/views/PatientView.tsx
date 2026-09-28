@@ -398,7 +398,8 @@ export function PatientView(props: {
   const drilldownGeneration = useRef(0);
   /** 2026-09-26 audit round (L): the per-context idempotency key for note
    *  creation — minted on a draft's first save attempt, reused across its
-   *  retries, cleared on success/conflict (see saveNote). */
+   *  byte-identical retries, cleared on success or either 409 code
+   *  ("conflict" / "version_conflict" — see saveNote). */
   const pendingNoteId = useRef<{ general: string | null; pattern: string | null }>({
     general: null,
     pattern: null,
@@ -839,12 +840,16 @@ export function PatientView(props: {
     setError("");
     // 2026-09-26 audit round (L): the client_note_id is allocated on the
     // FIRST save attempt of the current draft and REUSED across retries of
-    // that draft (the backend contract at app/api/therapist.py —
-    // idempotency on (therapist, client_note_id) — rewrites in place, so
-    // a timeout + user re-press no longer mints a second clinical note).
-    // A fresh id is minted only after a SUCCESSFUL save (the next note is a
-    // new note) or a 409 conflict (the id is burned server-side). The id is
-    // scoped per draft context, like the draft buffers themselves (F-6).
+    // that draft (the backend contract at app/api/therapist.py — idempotency
+    // on (therapist, client_note_id) for a BYTE-IDENTICAL replay — so a
+    // timeout + user re-press no longer mints a second clinical note). A
+    // retry is byte-identical only when the request never reached the
+    // server; a manual re-press re-encrypts with a FRESH GCM nonce, and the
+    // server answers different bytes under a stored id with 409
+    // version_conflict (commit 7b7337a) — never an in-place rewrite. A
+    // fresh id is therefore minted after a SUCCESSFUL save (the next note
+    // is a new note) or either 409 (the id is burned server-side). The id
+    // is scoped per draft context, like the draft buffers themselves (F-6).
     const scope = selected ? "pattern" : "general";
     if (!pendingNoteId.current[scope]) pendingNoteId.current[scope] = newNoteId();
     const clientNoteId = pendingNoteId.current[scope];
@@ -865,12 +870,20 @@ export function PatientView(props: {
       setDraft("");
       pendingNoteId.current[scope] = null;
     } catch (err) {
-      // An explicit conflict means the server rejected THIS id (e.g. it was
-      // already used for another patient): retrying with it can only fail
-      // again, so the id is burned and the next attempt mints a fresh one.
-      // Any other failure (timeout, offline) KEEPS the id — that is exactly
-      // the idempotent-retry case the backend contract exists for.
-      if (err instanceof ApiError && err.status === 409 && err.code === "conflict") {
+      // Either 409 means the server rejected THIS id: "conflict" (the id
+      // was already used for another patient) or "version_conflict"
+      // (different bytes under the stored note — unavoidable on a manual
+      // retry, since every attempt encrypts with a fresh GCM nonce).
+      // Retrying with a burned id can only fail again, so the next attempt
+      // mints a fresh one; without this the composer would be stuck on an
+      // unsavable draft forever. Any other failure (timeout, offline) KEEPS
+      // the id — that is exactly the byte-identical idempotent-retry case
+      // the backend contract exists for.
+      if (
+        err instanceof ApiError
+        && err.status === 409
+        && (err.code === "conflict" || err.code === "version_conflict")
+      ) {
         pendingNoteId.current[scope] = null;
       }
       setError(err instanceof Error ? err.message : "could not save the note");

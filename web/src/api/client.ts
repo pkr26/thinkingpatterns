@@ -904,21 +904,31 @@ export const api = {
    *  key_scheme_conflict (swapping the salt without re-wrapping the
    *  envelope would strand the random data key irrecoverably). Success
    *  bumps the token epoch — every session, this one included, dies with
-   *  the 204; the caller locks down with honest copy. */
+   *  the 204; the caller locks down with honest copy.
+   *  2026-09-28 audit M-1: the possession probe is required from EVERY
+   *  caller — a processing session opened with the CURRENT data key rides
+   *  as X-Processing-Token (the verifier proves the credential, not the
+   *  key; only the probe authorizes replacing wrapped_data_key). */
   changePassword: (payload: {
     verifierB64: string;
     newSaltB64: string;
     newVerifierB64: string;
     wrappedDataKeyB64: string;
     newKdfParams?: Record<string, unknown>;
+    processingToken: string;
   }) =>
-    request<null>("PUT", "/account/password", {
-      verifier: payload.verifierB64,
-      new_salt: payload.newSaltB64,
-      new_verifier: payload.newVerifierB64,
-      wrapped_data_key: payload.wrappedDataKeyB64,
-      ...(payload.newKdfParams !== undefined ? { new_kdf_params: payload.newKdfParams } : {}),
-    }),
+    request<null>(
+      "PUT",
+      "/account/password",
+      {
+        verifier: payload.verifierB64,
+        new_salt: payload.newSaltB64,
+        new_verifier: payload.newVerifierB64,
+        wrapped_data_key: payload.wrappedDataKeyB64,
+        ...(payload.newKdfParams !== undefined ? { new_kdf_params: payload.newKdfParams } : {}),
+      },
+      { "X-Processing-Token": payload.processingToken },
+    ),
 
   /** The v1→v2 self-upgrade (2026-09-26): after unlocking, wrap the
    *  account's CURRENT data key under the password-derived KEK and upload

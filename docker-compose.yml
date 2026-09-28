@@ -53,6 +53,16 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+    volumes:
+      # 2026-09-28 audit H-2: the audit-journal tail anchor. Every
+      # committed access-log append also lines out to this file OUTSIDE the
+      # database; verification flags a journal ahead of the DB head as tail
+      # truncation (deletion of the newest audit rows — invisible to the
+      # forward chain alone). The daily sweep compacts it at the retention
+      # boundary so it cannot grow unbounded. Threat model (stated
+      # honestly): this binds an attacker with DATABASE-only write access;
+      # anyone who can write the volume can truncate the anchor too.
+      - auditjournal:/var/lib/mindpattern/audit
     secrets:
       - token_secret
       - metrics_token
@@ -77,6 +87,11 @@ services:
       # else; MINDPATTERN_METRICS_TOKEN env stays supported for dev.
       MINDPATTERN_METRICS_TOKEN: ${MINDPATTERN_METRICS_TOKEN:-}
       MINDPATTERN_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      # The audit journal path on the named volume below (2026-09-28 audit
+      # H-2 — the anchor existed but was never wired, so production ran
+      # without tail-truncation detection). The app user owns the mount
+      # via the Dockerfile's directory ownership.
+      MINDPATTERN_AUDIT_JOURNAL: /var/lib/mindpattern/audit/journal.log
       MINDPATTERN_UNLOCK_DAYS: "30"
       # Safe forwarding is opt-in: the app accepts X-Forwarded-For only when
       # the direct peer also matches this explicit IP/CIDR allowlist. Do not
@@ -377,6 +392,11 @@ volumes:
   # Only created when the backups profile is active. Contents are sensitive
   # (see the backup service comments) and must never enter version control.
   pgbackups:
+  # The api's audit-journal tail anchor (2026-09-28 audit H-2): append-only
+  # lines mirroring committed access-log rows, outside the database. Compact
+  # only via the app's daily sweep (retention-aligned); it is tamper
+  # EVIDENCE, not authoritative state.
+  auditjournal:
 
 # File-mounted secrets (2026-09-26 infra audit): copy the examples from
 # deploy/secrets/, fill, chmod 600. The api's auth_token_secret file is

@@ -97,7 +97,7 @@ describe("endpoint surface", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer token-123");
 
     mock.mockImplementation(() => new Response(null, { status: 204 }));
-    await api.changePassword({ verifierB64: "old", newSaltB64: "salt", newVerifierB64: "new", wrappedDataKeyB64: "wrap" });
+    await api.changePassword({ verifierB64: "old", newSaltB64: "salt", newVerifierB64: "new", wrappedDataKeyB64: "wrap", processingToken: "probe-token" });
     [url, init] = lastCall(mock);
     expect(url).toBe(`${ORIGIN}/api/v1/account/password`);
     expect(init.method).toBe("PUT");
@@ -107,10 +107,12 @@ describe("endpoint surface", () => {
       new_verifier: "new",
       wrapped_data_key: "wrap",
     });
+    // The possession probe rides the PUT (M-1, 2026-09-28 audit).
+    expect((init.headers as Record<string, string>)["X-Processing-Token"]).toBe("probe-token");
     // new_kdf_params is optional and omitted entirely when absent.
     expect(JSON.parse(String(init.body)).new_kdf_params).toBeUndefined();
 
-    await api.changePassword({ verifierB64: "old", newSaltB64: "salt", newVerifierB64: "new", wrappedDataKeyB64: "wrap", newKdfParams: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 } });
+    await api.changePassword({ verifierB64: "old", newSaltB64: "salt", newVerifierB64: "new", wrappedDataKeyB64: "wrap", newKdfParams: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 }, processingToken: "probe-token" });
     [, init] = lastCall(mock);
     expect(JSON.parse(String(init.body))).toEqual({
       verifier: "old",

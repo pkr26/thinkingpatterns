@@ -567,12 +567,14 @@ class RekeyJournal(Base):
     it now commits each batch in a short transaction and journals the
     cursor here, atomically with the batch's blob rewrites. A rekey that
     dies mid-way (process crash, DB failure) leaves a partially rotated
-    account plus this row; the client's retry resumes from the cursor
-    instead of re-walking the corpus, and rows already under the NEW key
-    are authenticated with it and skipped (the loop's idempotency rule).
-    The row is deleted in the same transaction that bumps the collection
-    revisions at completion, so its presence always means "an interrupted
-    rotation is resumable".
+    account plus this row. 2026-09-28 audit H-1: the retry RE-WALKS the
+    whole corpus (entry ids are random hex, so a stored cursor cannot
+    bound rows written after the interrupted run); rows already under the
+    NEW key are authenticated with it and skipped (the loop's
+    idempotency rule), and the stage/cursor/counters below are per-run
+    observability, never resume input. The row is deleted in the same
+    transaction that bumps the collection revisions at completion, so its
+    presence always means "an interrupted rotation is resumable".
     """
 
     __tablename__ = "rekey_journal"

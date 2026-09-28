@@ -140,6 +140,7 @@ beforeEach(() => {
   apiState.failRelogin = null;
   keychainMock.__reset();
   vi.mocked(api.changePassword).mockClear();
+  vi.mocked(api.openProcessingSession).mockClear();
   vi.mocked(api.cacheKeyEnvelope).mockClear();
   vi.mocked(api.login).mockClear();
   vi.mocked(api.rekeyStoredData).mockClear();
@@ -165,11 +166,24 @@ describe("rotatePassword v2 branch (O(1) rewrap)", () => {
       rewrapped: 0,
       rewrapFailures: [],
     });
+    // M-1 (2026-09-28 wire change): the possession probe ships on every PUT —
+    // a processing session opened with the CURRENT (unwrapped) data key
+    // FIRST, its token riding the password change as X-Processing-Token
+    // (the client-side arg here), exactly the proof the v1→v2 migration
+    // path sends on /account/key-envelope/upgrade.
+    expect(api.openProcessingSession).toHaveBeenCalledTimes(1);
+    expect(api.openProcessingSession).toHaveBeenCalledWith(DATA_KEY.toString("base64"));
+    expect(api.openProcessingSession.mock.invocationCallOrder[0]).toBeLessThan(
+      api.changePassword.mock.invocationCallOrder[0]!,
+    );
     // One transaction, exactly the contract's payload shape.
     expect(api.changePassword).toHaveBeenCalledTimes(1);
-    const [verifier, newSaltB64, newVerifierB64, wrappedB64, newParams] = vi.mocked(api.changePassword)
-      .mock.calls[0] as [string, string, string, string, unknown];
+    const [verifier, newSaltB64, newVerifierB64, wrappedB64, processingToken, newParams] = vi.mocked(
+      api.changePassword,
+    ).mock.calls[0] as [string, string, string, string, string, unknown];
     expect(verifier).toBe(OLD_VERIFIER_B64);
+    // The token on the PUT is the one the CURRENT data key's session minted.
+    expect(processingToken).toBe(`tok-${DATA_KEY.toString("base64").slice(0, 6)}`);
     expect(Buffer.from(newSaltB64, "base64")).toHaveLength(16);
     expect(newParams).toBeUndefined(); // keeps the account's current params
     // The new verifier is the NEW password's derivation under the NEW salt.
@@ -296,6 +310,86 @@ describe("rotatePassword v2 branch (O(1) rewrap)", () => {
       expect(outcome.reason).toBe("wrong-password");
     }
     expect(api.login).not.toHaveBeenCalled();
+  });
+
+  // --- M-1 client side (2026-09-28 wire change) --------------------------------
+  // The PUT demands the possession probe on every call; a refused probe is
+  // an honest typed failure and the flow NEVER falls back to a tokenless
+  // PUT (that would smuggle the new envelope past the probe).
+  it("a 403 processing_session_invalid on the PUT fails honestly — NO tokenless retry", async () => {
+    apiState.failChangePassword = {
+      status: 403,
+      code: "processing_session_invalid",
+      message: "processing session missing or expired",
+    };
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: OLD_PASSWORD,
+      newPassword: NEW_PASSWORD,
+    });
+    // The password was RIGHT (the verifier passed the mock's gate) — the
+    // session was not. Never classified as wrong-password.
+    expect(outcome).toMatchObject({ ok: false, stage: "credential", reason: "server" });
+    if (!outcome.ok) expect(outcome.detail).toMatch(/encryption key session/i);
+    // Exactly ONE PUT, carrying the token — no second, tokenless attempt.
+    expect(api.changePassword).toHaveBeenCalledTimes(1);
+    const [, , , , processingToken] = vi.mocked(api.changePassword).mock.calls[0] as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+    expect(processingToken).toBe(`tok-${DATA_KEY.toString("base64").slice(0, 6)}`);
+    // Nothing moved: no re-login with a credential the server never adopted.
+    expect(api.login).not.toHaveBeenCalled();
+    expect(vault.isUnlocked()).toBe(true);
+  });
+
+  it("a 422 processing_session_required on the PUT fails honestly — NO tokenless retry", async () => {
+    apiState.failChangePassword = {
+      status: 422,
+      code: "processing_session_required",
+      message: "processing session token required (X-Processing-Token)",
+    };
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: OLD_PASSWORD,
+      newPassword: NEW_PASSWORD,
+    });
+    expect(outcome).toMatchObject({ ok: false, stage: "credential", reason: "server" });
+    expect(api.changePassword).toHaveBeenCalledTimes(1);
+    expect(api.login).not.toHaveBeenCalled();
+  });
+
+  it("a processing session that cannot OPEN aborts before the PUT (typed, not thrown)", async () => {
+    vi.mocked(api.openProcessingSession).mockRejectedValueOnce(new Error("network unreachable"));
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: OLD_PASSWORD,
+      newPassword: NEW_PASSWORD,
+    });
+    expect(outcome).toEqual({ ok: false, stage: "credential", reason: "offline" });
+    expect(api.changePassword).not.toHaveBeenCalled();
+    expect(api.login).not.toHaveBeenCalled();
+  });
+
+  it("an unauthenticated session key (open → 403 processing_session_invalid) surfaces the honest-retry copy", async () => {
+    vi.mocked(api.openProcessingSession).mockRejectedValueOnce(
+      new ApiError(403, "processing session missing or expired", "processing_session_invalid"),
+    );
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: OLD_PASSWORD,
+      newPassword: NEW_PASSWORD,
+    });
+    expect(outcome).toMatchObject({ ok: false, stage: "credential", reason: "server" });
+    if (!outcome.ok) expect(outcome.detail).toMatch(/encryption key session/i);
+    expect(api.changePassword).not.toHaveBeenCalled();
   });
 
   it("a failed re-login caches the new envelope FIRST, then locks and drops the wrap", async () => {

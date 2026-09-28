@@ -187,7 +187,7 @@ collect_pins() {
   # images (trivy, promtool's prom/prometheus). Same repo:tag@sha256 rule
   # as the compose files; tagless repo@sha256 release references are not
   # pins and do not match the pattern.
-  for wf_file in "$REPO_ROOT"/.github/workflows/*.yml; do
+  for wf_file in "$REPO_ROOT"/.github/workflows/*.yml "$REPO_ROOT"/.github/workflows/*.yaml; do
     [ -f "$wf_file" ] || continue
     grep -Eo '[a-zA-Z0-9][a-zA-Z0-9._/-]*:[a-zA-Z0-9][a-zA-Z0-9._-]*@sha256:[a-f0-9]{64}' \
       "$wf_file" >> "$out" || true
@@ -206,7 +206,7 @@ collect_pins() {
     grep -Eo '([a-zA-Z0-9][a-zA-Z0-9._/-]*:[a-zA-Z0-9][a-zA-Z0-9._-]*)?@sha256:[a-f0-9]{64}' \
       "$other_file" | sed 's/^@//' >> "$out" || true
   done < <(find "$REPO_ROOT/backend/Dockerfile" "$REPO_ROOT/deploy/backup-offsite/Dockerfile" \
-    "$REPO_ROOT/deploy" "$REPO_ROOT/backend/scripts" "$REPO_ROOT/scripts" \
+    "$REPO_ROOT/deploy" "$REPO_ROOT/backend/scripts" "$REPO_ROOT/scripts" "$REPO_ROOT/backup" \
     -type f \( -name '*.sh' -o -name 'Dockerfile' \) -print0 2>/dev/null)
 
   sort -u -o "$out" "$out"
@@ -264,6 +264,10 @@ if [ "${1:-}" = "--selftest" ]; then
   # Yesterday, portably (BSD/GNU): the fresh-pin fixture must be inside
   # the 90d window no matter when the selftest runs.
   selftest_yesterday=$(date -j -v-1d +%Y-%m-%d 2>/dev/null || date -d '1 day ago' +%Y-%m-%d)
+  # One year OUT (portably): the future-dated-row fixture must postdate
+  # the run no matter when the selftest runs (and must stay inside the
+  # README parser's 20xx date grammar — 2100-style years do not match it).
+  selftest_next_year=$(date -j -v+1y +%Y-%m-%d 2>/dev/null || date -d '+1 year' +%Y-%m-%d)
   mkdir -p "$selftest_root/deploy"
   cat > "$selftest_root/deploy/README.md" <<'EOF'
 # fixture inventory
@@ -287,6 +291,19 @@ EOF
   cat > "$selftest_root/deploy/Dockerfile" <<'EOF'
 FROM gone:1@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 EOF
+  # 2026-09-28 audit L-5: the future-dated-inventory fixture — a README
+  # row whose PINNED ON date is in the future is bad data, not a window,
+  # and must fail loudly. Quoted heredocs can't expand the date: patched
+  # below like the fresh-row fixture.
+  cat >> "$selftest_root/docker-compose.yml" <<'EOF'
+  future:
+    image: future:1@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+EOF
+  cat >> "$selftest_root/deploy/README.md" <<'EOF'
+| `future:1@sha256:ffffffffffffffffffffffffffffffff` | fixture | FUTURE_DATE_PLACEHOLDER | fixture |
+EOF
+  sed -i '' "s/FUTURE_DATE_PLACEHOLDER/${selftest_next_year}/" "$selftest_root/deploy/README.md" 2>/dev/null \
+    || sed -i "s/FUTURE_DATE_PLACEHOLDER/${selftest_next_year}/" "$selftest_root/deploy/README.md"
   # The fixture repo IS the script's REPO_ROOT for this run: re-exec the
   # collection + comparison against the stub by sourcing this same file
   # with REPO_ROOT pointed there.
@@ -298,30 +315,67 @@ EOF
       unknown:1) printf '%s\n' "sha256:3333333333333333333333333333333333333333333333333333333333333333" ;; # moved + no inventory row
       gone:1)   printf '%s\n' "NOTFOUND" ;;                                                        # deleted tag
       netfail:1) printf '%s\n' "LOOKUP-FAIL" ;;                                                   # transport down
+      future:1) printf '%s\n' "sha256:4444444444444444444444444444444444444444444444444444444444444444" ;; # moved + future-dated row
     esac
   }
+  # 2026-09-28 audit L-5: prove EVERY failure mode fires INDIVIDUALLY.
+  # The old selftest asserted only "at least one mode failed" — a
+  # regression that silenced any single mode kept the selftest green
+  # while claiming all modes were proven. Each case resets status and
+  # asserts the expected outcome for that mode alone.
+  selftest_case() {
+    # selftest_case <expect: fail|pass> <description> <image_ref...>
+    local expect="$1"; shift
+    local desc="$1"; shift
+    status=0
+    check_pin "$@"
+    if [ "$expect" = "fail" ] && [ "$status" -eq 0 ]; then
+      printf 'drift: SELFTEST FAILED — mode did NOT fail: %s\n' "$desc" >&2
+      exit 1
+    fi
+    if [ "$expect" = "pass" ] && [ "$status" -ne 0 ]; then
+      printf 'drift: SELFTEST FAILED — mode wrongly fails: %s\n' "$desc" >&2
+      exit 1
+    fi
+  }
+  selftest_case fail "moved + stale pin (>90d)" \
+    "stale:1@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  selftest_case pass "moved + fresh pin (<=90d) is a note, not a failure" \
+    "fresh:1@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  selftest_case fail "moved + missing inventory row" \
+    "unknown:1@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  selftest_case fail "deleted tag (registry 404)" \
+    "gone:1@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  selftest_case fail "transport failure" \
+    "netfail:1@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  selftest_case fail "future-dated inventory row" \
+    "future:1@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  # Collection must also see the fixture files: the Dockerfile and shell
+  # scan is part of what the selftest exercises.
   pins_file=$(mktemp)
   collect_pins "$pins_file"
-  st=0
-  while IFS= read -r ref; do
-    [ -n "$ref" ] || continue
-    # Shellcheck: check_pin sets globals on purpose (single-pass loop).
-    check_pin "$ref"
-  done < "$pins_file"
-  rm -f "$pins_file"
-  # A transport failure must ALSO fail: prove it directly.
-  check_pin "netfail:1@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-  if [ "$status" -eq 0 ]; then
-    printf 'drift: SELFTEST FAILED — no failure mode fired (gate is fail-open)\n' >&2
+  if ! grep -q '^gone:1@' "$pins_file"; then
+    printf 'drift: SELFTEST FAILED — Dockerfile/shell scan collected nothing\n' >&2
     exit 1
   fi
-  printf 'drift: selftest OK — moved/stale, missing-inventory, deleted-tag, and transport failures all fail the gate\n'
+  rm -f "$pins_file"
+  printf 'drift: selftest OK — every failure mode proven individually: moved/stale, missing-inventory, deleted-tag, transport, future-dated row\n'
   exit 0
 fi
+
+# 2026-09-28 audit L-5: the live walk must never pass on an EMPTY or
+# shrunken pin set (a glob or find regression collecting zero pins would
+# otherwise print ALL CHECKS PASSED over nothing). The expected count
+# lives with the pin inventory; bump it WITH the pin, in the same commit.
+MIN_PINS_EXPECTED=9
 
 pins_file=$(mktemp)
 trap 'rm -f "$pins_file"' EXIT
 collect_pins "$pins_file"
+pin_count=$(grep -c . "$pins_file" || true)
+if [ "$pin_count" -lt "$MIN_PINS_EXPECTED" ]; then
+  fail "collected ${pin_count} pins, expected at least ${MIN_PINS_EXPECTED} — the scan scope regressed (a whole pin class went invisible)"
+fi
 
 while IFS= read -r image_ref; do
   [ -n "$image_ref" ] || continue

@@ -476,6 +476,22 @@ else
   note "shellcheck not on PATH — skipped (sh -n syntax check still ran)"
 fi
 
+# --- metrics token sinks (2026-09-28 audit L-4) -------------------------------
+# The api reads its bearer token from deploy/secrets/metrics_token; the
+# monitoring stack reads a COPY from ../monitoring/token (this script's
+# directory). When BOTH exist they must be byte-identical — divergence
+# 401s every scrape silently. One file alone is fine (the stacks can be
+# deployed separately); CI generates both and asserts the same equality.
+if [ -f ../secrets/metrics_token ] && [ -f token ]; then
+  if cmp -s ../secrets/metrics_token token; then
+    note "metrics token sinks agree (deploy/secrets + deploy/monitoring)"
+  else
+    fail "metrics token DIVERGED between deploy/secrets/metrics_token and deploy/monitoring/token — every /metrics scrape would 401; regenerate ONE value into both"
+  fi
+else
+  note "metrics token sink check skipped (needs both deploy/secrets/metrics_token and deploy/monitoring/token)"
+fi
+
 if [ "$status" -eq 0 ]; then
   note "ALL CHECKS PASSED"
 else

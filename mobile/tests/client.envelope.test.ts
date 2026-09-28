@@ -129,14 +129,17 @@ describe("key-envelope endpoint and cache", () => {
 });
 
 describe("v2 password change and upgrade wire shapes", () => {
-  it("changePassword PUTs the one-transaction payload", async () => {
-    await api.changePassword("old", "c2FsdA==", "dmVyaWZpZXI=", WRAPPED_60_B64);
+  it("changePassword PUTs the one-transaction payload with the possession token as X-Processing-Token", async () => {
+    // M-1 (2026-09-28 wire change): the endpoint demands the probe on every
+    // call — a missing header answers 422 processing_session_required.
+    await api.changePassword("old", "c2FsdA==", "dmVyaWZpZXI=", WRAPPED_60_B64, "proc-tok");
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
       RequestInit,
     ];
     expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/account/password`);
     expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>)["X-Processing-Token"]).toBe("proc-tok");
     expect(JSON.parse(init.body as string)).toEqual({
       verifier: "old",
       new_salt: "c2FsdA==",
@@ -146,11 +149,24 @@ describe("v2 password change and upgrade wire shapes", () => {
   });
 
   it("changePassword carries new_kdf_params only when supplied", async () => {
-    await api.changePassword("old", "c2FsdA==", "dmVyaWZpZXI=", WRAPPED_60_B64, PARAMS);
+    await api.changePassword("old", "c2FsdA==", "dmVyaWZpZXI=", WRAPPED_60_B64, "proc-tok", PARAMS);
     const body = JSON.parse(
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit])[1].body as string,
     );
     expect(body.new_kdf_params).toEqual(PARAMS);
+  });
+
+  it("a 422 processing_session_required survives sanitization for branch logic", async () => {
+    // The code feeds rotation.ts's refusal branch — sanitizeCode must not
+    // erase it (the 403 processing_session_invalid twin is already pinned).
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "processing session token required", code: "processing_session_required" }, 422),
+    );
+    const err = await api.changePassword("v", "s", "n", WRAPPED_60_B64, "t").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe("processing_session_required");
+    expect((err as ApiError).status).toBe(422);
   });
 
   it("upgradeKeyEnvelope ships the blob with BOTH proofs as headers", async () => {

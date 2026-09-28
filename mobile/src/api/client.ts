@@ -432,6 +432,12 @@ export const API_ERROR_CODES = [
   // H-1 (2026-09-20): the rotation endpoints' specific failures.
   "rekey_key_mismatch",
   "processing_session_invalid",
+  // M-1 (2026-09-28 wire change): PUT /account/password now demands the
+  // possession probe (X-Processing-Token) on EVERY call, not just the v1→v2
+  // migration — its absence answers 422 with this code (an invalid/expired
+  // token still answers 403 processing_session_invalid above). rotation.ts
+  // branches on both to fail honestly instead of retrying tokenless.
+  "processing_session_required",
   // v2 key scheme (2026-09-26): the OLD credential-rotation endpoint
   // answers this 409 for v2 accounts — swapping the salt without
   // re-wrapping the data-key envelope would strand the random data key
@@ -1259,12 +1265,19 @@ export const api = {
    *  proof gates it; the epoch bump still kills every bearer, so the
    *  caller must re-login afterwards. new_kdf_params is optional — omit it
    *  to keep the account's current cost profile (the default blob on v1
-   *  accounts upgrading through this endpoint). */
+   *  accounts upgrading through this endpoint).
+   *  M-1 (2026-09-28 wire change): the endpoint also demands POSSESSION of
+   *  the current data key on every call — processingToken is a live,
+   *  owner-bound session token opened with the UNWRAPPED key (the same
+   *  probe the v1→v2 migration path ships), carried in X-Processing-Token.
+   *  A missing token answers 422 processing_session_required; an
+   *  invalid/expired one 403 processing_session_invalid. */
   changePassword: (
     oldVerifierB64: string,
     newSaltB64: string,
     newVerifierB64: string,
     wrappedDataKeyB64: string,
+    processingToken: string,
     newKdfParams?: KdfParams,
   ) =>
     request(
@@ -1277,7 +1290,7 @@ export const api = {
         wrapped_data_key: wrappedDataKeyB64,
         ...(newKdfParams !== undefined ? { new_kdf_params: newKdfParams } : {}),
       },
-      {},
+      { "X-Processing-Token": processingToken },
       { sensitive: true },
     ),
   /** v1→v2 self-service upgrade (2026-09-26): wrap the account's CURRENT

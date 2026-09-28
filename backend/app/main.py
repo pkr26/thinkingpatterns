@@ -148,6 +148,16 @@ async def _prune_access_log_once(app: FastAPI) -> None:
         logger.error("audit MAC secret is not valid hex; chain verification runs link-only")
         mac_key = None
     retention_cutoff = now - timedelta(days=settings.access_log_retention_days)
+    # 2026-09-28 audit M-5: ONE pass over the journal file builds every
+    # patient's head (the per-patient scan made the sweep O(patients ×
+    # file) on a file that grows forever); verification below consumes the
+    # map, and compaction afterwards drops lines older than the retention
+    # boundary (minus a 7-day margin so the tail-truncation anchor can
+    # never lose a line the empty-trail check still compares against).
+    from .api._audit import compact_audit_journal, read_journal_heads
+
+    journal_path = settings.audit_journal_path or None
+    journal_heads = read_journal_heads(journal_path) if journal_path else None
     async with app.state.sessionmaker() as session:
         user_ids = (
             (
@@ -167,8 +177,9 @@ async def _prune_access_log_once(app: FastAPI) -> None:
                 session,
                 uid,
                 mac_key=mac_key,
-                journal_path=settings.audit_journal_path or None,
+                journal_path=journal_path,
                 retention_cutoff=retention_cutoff,
+                journal_heads=journal_heads,
             )
             if not verdict.ok:
                 failures += 1
@@ -180,6 +191,19 @@ async def _prune_access_log_once(app: FastAPI) -> None:
                 )
         if failures:
             app.state.metrics.observe_audit_chain(failures=failures)
+    if journal_path:
+        compaction_cutoff = (retention_cutoff - timedelta(days=7)).isoformat()
+        try:
+            kept, dropped = compact_audit_journal(journal_path, compaction_cutoff)
+            if dropped:
+                logger.info(
+                    "audit journal compacted: %d lines kept, %d older than %s dropped",
+                    kept,
+                    dropped,
+                    compaction_cutoff,
+                )
+        except Exception:  # noqa: BLE001 — compaction is best-effort by contract
+            logger.exception("audit journal compaction failed; retrying next cycle")
 
 
 async def _access_log_retention_sweep(app: FastAPI) -> None:

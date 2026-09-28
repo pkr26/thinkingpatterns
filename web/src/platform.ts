@@ -98,14 +98,167 @@ type LocksLike = {
   };
 };
 
+// --- L-7 (2026-09-28 audit): the Web Locks fallback ---------------------------
+//
+// navigator.locks is missing on Safari < 15.2 — a plausible population for
+// a patient web client — and the old fallback simply RAN the section, so
+// the cross-tab last-write-wins the lock was added to prevent silently
+// returned there. The fallback is a Lamport-bakery mutex over
+// localStorage: each contender writes its own vote key, everyone reads
+// every live vote, and the SMALLEST contender id holds the lock (unique
+// per attempt, so there is never a tie). Under localStorage's coherent
+// same-origin store the write→read order is a total order, which makes
+// "both contenders miss each other's vote" a cyclic impossibility —
+// mutual exclusion holds. Crashed holders self-heal: votes older than
+// LOCK_STALE_MS are swept by the next contender, so a tab that died
+// mid-section cannot deadlock the lock. Browsers whose storage throws
+// (private mode edge) degrade to the historical unlocked run, disclosed
+// here rather than silently claimed.
+const LOCK_VOTE_PREFIX = "mindpattern.lockvote.";
+const LOCK_STALE_MS = 15_000;
+const LOCK_MAX_WAIT_MS = 30_000;
+
+interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+  key(index: number): string | null;
+  length: number;
+}
+
+function lockStorage(): StorageLike | null {
+  try {
+    const storage = (globalThis as { window?: { localStorage?: StorageLike } }).window
+      ?.localStorage;
+    return storage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** One live vote: a monotonic Lamport ticket plus a per-attempt suffix.
+ *  The id is the zero-padded ticket first, so lexicographic order IS
+ *  ticket order — the bakery's "smallest active ticket holds" rule. */
+interface Vote {
+  id: string;
+  voteKey: string;
+  ts: number;
+}
+
+/** The bakery read: every LIVE vote for this lock, smallest id first.
+ *  Expired votes (a crashed holder's) are swept on sight. */
+function liveVotes(storage: StorageLike, name: string): Vote[] {
+  const now = Date.now();
+  const prefix = `${LOCK_VOTE_PREFIX}${name}.`;
+  const votes: Vote[] = [];
+  const expired: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const voteKey = storage.key(index);
+    if (voteKey === null || !voteKey.startsWith(prefix)) continue;
+    const id = voteKey.slice(prefix.length);
+    try {
+      const stamp = JSON.parse(storage.getItem(voteKey) ?? "{}") as { ts?: number };
+      if (typeof stamp.ts === "number" && now - stamp.ts < LOCK_STALE_MS) {
+        votes.push({ id, voteKey, ts: stamp.ts });
+        continue;
+      }
+    } catch {
+      // An unparseable vote is a crashed write: sweep it.
+    }
+    expired.push(voteKey);
+  }
+  expired.forEach((voteKey) => {
+    try {
+      storage.removeItem(voteKey);
+    } catch {
+      // Sweeping is best-effort.
+    }
+  });
+  return votes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+function nextTicket(votes: Vote[]): number {
+  let max = 0;
+  for (const vote of votes) {
+    const ticket = parseInt(vote.id.split("-", 1)[0] ?? "0", 36);
+    if (Number.isFinite(ticket) && ticket > max) max = ticket;
+  }
+  return max + 1;
+}
+
+async function withStorageLock<T>(storage: StorageLike, name: string, run: () => Promise<T>): Promise<T> {
+  // Lamport bakery over the coherent same-origin store. The ticket is
+  // MONOTONIC (one past every live vote): a later contender can never
+  // order before a live holder — the failure mode of the first cut,
+  // which ordered by random ids and let a late arrival "win" while the
+  // real holder was still running. Contenders that choose simultaneously
+  // draw the same ticket; the unique random suffix breaks that tie, and
+  // the beat before the first gate read ensures both writes are visible
+  // before either decides (write→read is a total order on this store, so
+  // "both miss each other" is a cyclic impossibility).
+  const suffix = Math.floor(Math.random() * 2 ** 31).toString(36);
+  const ticket = nextTicket(liveVotes(storage, name));
+  const id = `${ticket.toString(36).padStart(8, "0")}-${suffix}`;
+  const voteKey = `${LOCK_VOTE_PREFIX}${name}.${id}`;
+  const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+  const touch = (): void => {
+    storage.setItem(voteKey, JSON.stringify({ ts: Date.now() }));
+  };
+  touch();
+  const beat = (): Promise<void> => sleep(2 + Math.floor(Math.random() * 8));
+  try {
+    await beat();
+    for (;;) {
+      const votes = liveVotes(storage, name);
+      const mine = votes.find((vote) => vote.id === id);
+      if (mine !== undefined && votes[0]!.id === id) break; // we hold it
+      if (mine === undefined) touch(); // our vote was swept as stale: re-draw
+      if (Date.now() >= deadline) break; // liveness over exclusion past the cap
+      // Refresh OUR stamp so a long wait is never mistaken for a crash,
+      // then back off a randomized beat before re-reading.
+      touch();
+      await beat();
+    }
+    // A section that outlives LOCK_STALE_MS must not read as a crash to
+    // the next contender: keep the stamp fresh for the whole run.
+    const keepalive = setInterval(() => {
+      try {
+        touch();
+      } catch {
+        // Best-effort; staleness recovers the vote either way.
+      }
+    }, Math.floor(LOCK_STALE_MS / 3));
+    try {
+      return await run();
+    } finally {
+      clearInterval(keepalive);
+    }
+  } finally {
+    try {
+      storage.removeItem(voteKey);
+    } catch {
+      // Release is best-effort; staleness recovers the vote anyway.
+    }
+  }
+}
+
 /** Serialize an async section across SAME-ORIGIN tabs via the Web Locks
  *  API (WEB_PLAN P4/P5, R-4: two tabs must not double-flush the offline
- *  queue or double-run reconciliation). Where the API is absent the
- *  single-tab fallback simply runs the section — correctness there is
- *  carried by server-side idempotency, not by the lock. */
+ *  queue or double-run reconciliation). Where the API is absent (L-7,
+ *  2026-09-28 audit: Safari < 15.2) a localStorage bakery mutex provides
+ *  real cross-tab serialization; where even storage is unusable the
+ *  section runs unlocked and correctness falls back to server-side
+ *  idempotency — the historical behavior, now a disclosed residual
+ *  instead of a silent one. */
 export async function withLock<T>(name: string, run: () => Promise<T>): Promise<T> {
   const locks = (globalThis as { navigator?: LocksLike }).navigator?.locks;
   if (locks?.request) return locks.request(name, run);
+  const storage = lockStorage();
+  if (storage !== null) return withStorageLock(storage, name, run);
   return run();
 }
 

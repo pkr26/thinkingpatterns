@@ -22,6 +22,8 @@ import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { preserveActiveDraft } from "./entryDraft";
 import { adoptLegacyPlaintextMutes } from "./patternMutes";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from "./sessionLock";
+import { subscribeTabLockdown } from "./tabLockdown";
+import { sweepLegacyCrisisStamps } from "./crisisDialog";
 import { isOnline, localStore, onWindowEvent } from "./platform";
 import { AppFrame, BottomNav, Card, ErrorBanner, MoreMenu, NavTabs, Note, ToastHost, type IconName, type NavItem, type ToastItem } from "./ui";
 import { CrisisCard } from "./crisis";
@@ -121,6 +123,13 @@ export function App(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, []);
 
+  // L-8 (2026-09-28 audit): sweep the pre-2026-09-27 plaintext crisis
+  // stamps for EVERY visitor at mount — the module-scoped trigger only
+  // fired when a crisis-flagged save first consulted it.
+  useEffect(() => {
+    sweepLegacyCrisisStamps();
+  }, []);
+
   const lockDown = useCallback((notice: string | null): void => {
     // FIRST, seal the in-progress journal draft under the data key while it
     // still exists (audit 2026-09-26, MEDIUM user-data-loss): the hidden-
@@ -165,6 +174,14 @@ export function App(): React.JSX.Element {
   // same, or decrypted text stays rendered (and readable in tab previews)
   // indefinitely while the user is elsewhere.
   useHiddenTabLock(sessionActive, onLock);
+  // M-4 (2026-09-28 audit): another tab starting a password rotation
+  // broadcasts a lockdown BEFORE its first server step — this tab's old
+  // key + live bearer must not upload old-key blobs to a rekeyed corpus.
+  // Same funnel as every other lock, with the rotated-elsewhere copy.
+  useEffect(() => {
+    if (!sessionActive) return;
+    return subscribeTabLockdown(() => lockDown(t("app.noticeRotatedElsewhere")));
+  }, [sessionActive, lockDown]);
 
   // Reconnect: flush the offline queue (throttled + Web Locks-serialized
   // inside flushQueueOnReconnect), only while a session exists.

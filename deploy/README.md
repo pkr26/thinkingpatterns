@@ -55,6 +55,18 @@ The public release env asset contains image references only. It deliberately
 does not contain `MINDPATTERN_TOKEN_SECRET`, database credentials, `BACKUP_KEY`,
 or proxy settings. Keep those in an owner-only file outside the checkout.
 
+## The audit journal volume
+
+The api service mounts the named `auditjournal` volume at
+`/var/lib/mindpattern/audit` and appends every committed access-log row to
+`journal.log` there (the out-of-DB tail anchor: a journal AHEAD of the
+database head is tail truncation — deletion of the newest audit rows,
+invisible to the forward chain alone). Threat model, stated honestly: the
+anchor binds an attacker with DATABASE-only write access; anyone who can
+write the volume can truncate it too. The api's daily sweep compacts the
+file at the retention boundary (minus a 7-day margin), atomically — do not
+edit or rotate it by hand unless the api is stopped.
+
 ## Operator tooling (opt-in, outside the release contract)
 
 Two directories add opt-in operator capabilities without weakening the

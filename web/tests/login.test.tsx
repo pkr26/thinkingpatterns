@@ -415,6 +415,90 @@ describe("v2 key envelope (2026-09-26)", () => {
     randomSpy.mockRestore();
   });
 
+  it("C-1 (2026-09-28): v2 sign-in on FRESH module state installs the session BEFORE the envelope fetch", async () => {
+    // The roundtrip test above cannot catch the fresh-page-load bug: its
+    // register half leaves the module session installed, so the sign-in
+    // half's key-envelope fetch was already authenticated by accident.
+    // This test resets the module registry first — session, vault, and
+    // view all come from virgin module state, the exact world of every
+    // real page load. Before the fix, the envelope fetch threw "not
+    // signed in" before any HTTP request left the tab and the sign-in
+    // dead-ended on login.envelopeUnlockWeb.
+    const saltBytes = fromBase64(SALT_B64);
+    const master = await deriveMasterKey(GOOD_PASSWORD, saltBytes);
+    const envelope = await createRegistrationEnvelope(master, saltBytes, "v2user");
+    const envelopeAuth: (string | undefined)[] = [];
+    stubFetch((url, init) => {
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT_B64 });
+      if (url.endsWith("/auth/login")) return jsonResponse(tokenResponse({ key_scheme: "v2" }));
+      if (url.endsWith("/auth/key-envelope")) {
+        envelopeAuth.push((init.headers as Record<string, string>)?.["Authorization"]);
+        return jsonResponse({
+          key_scheme: "v2",
+          salt: SALT_B64,
+          kdf_params: envelope.kdfParams,
+          wrapped_data_key: envelope.wrappedDataKeyB64,
+        });
+      }
+      return jsonResponse({ detail: "unmatched route", code: "not_found" }, { status: 404 });
+    });
+
+    vi.resetModules();
+    const { LoginView: FreshLoginView } = await import("../src/views/LoginView");
+    const { hasSession: freshHasSession } = await import("../src/api/client");
+    const { vault: freshVault } = await import("../src/vault");
+    expect(freshHasSession()).toBe(false); // the fresh-page-load world
+
+    const onLogin = vi.fn();
+    const root = await render(<FreshLoginView onSuccess={onLogin} />);
+    await typeInto(root, "Username", "v2user");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await press(root, "Sign in");
+    await settle();
+
+    // The envelope fetch left the tab AUTHENTICATED with the fresh token.
+    expect(envelopeAuth).toEqual(["Bearer tok-1"]);
+    expect(onLogin).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "v2user" });
+    expect(freshVault.isUnlocked()).toBe(true);
+    expect(toBase64(freshVault.get().dataKey)).toBe(toBase64(envelope.dataKey));
+  });
+
+  it("C-1 rollback: a v2 sign-in whose envelope will not open leaves NO session behind", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT_B64 });
+      if (url.endsWith("/auth/login")) return jsonResponse(tokenResponse({ key_scheme: "v2" }));
+      if (url.endsWith("/auth/key-envelope")) {
+        // Names a DIFFERENT salt: the unwrap cannot succeed by construction.
+        return jsonResponse({
+          key_scheme: "v2",
+          salt: toBase64(new Uint8Array(16).fill(7)),
+          kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 100000 },
+          wrapped_data_key: envelopeGarbage(),
+        });
+      }
+      return jsonResponse({ detail: "unmatched route", code: "not_found" }, { status: 404 });
+    });
+    vi.resetModules();
+    const { LoginView: FreshLoginView } = await import("../src/views/LoginView");
+    const { hasSession: freshHasSession } = await import("../src/api/client");
+
+    const onLogin = vi.fn();
+    const root = await render(<FreshLoginView onSuccess={onLogin} />);
+    await typeInto(root, "Username", "v2user");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await press(root, "Sign in");
+    await settle();
+
+    expect(onLogin).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("key envelope could not be opened");
+    expect(freshHasSession()).toBe(false); // the pre-installed session was rolled back
+  });
+
+  /** 60 bytes of base64 garbage shaped like a wrapped key. */
+  function envelopeGarbage(): string {
+    return toBase64(globalThis.crypto.getRandomValues(new Uint8Array(new ArrayBuffer(60))));
+  }
+
   it("V1 UNCHANGED: no key_scheme → the derived data key, and NO envelope request at all", async () => {
     const urls: string[] = [];
     stubFetch((url) => {

@@ -94,6 +94,10 @@ vi.mock("../../src/nativeFeatures", () => ({
   // nativeFeatures seam (own stable id); deletion cancels both schedules.
   cancelMeasureReminder: async () => true,
   scheduleMeasureReminder: (...args: unknown[]) => scheduleMeasureReminder(...(args as [Date])),
+  // L-9 (2026-09-28): the one-time orphan sweep runs inside every
+  // syncReminderSchedule; stubbed to a no-op here (its own seam is covered
+  // in tests/nativeFeatures.test.ts against the real module).
+  migrateOrphanedReminderNotifications: async () => {},
 }));
 
 // The HealthKit State of Mind seam (2026-09-19): controllable per test,

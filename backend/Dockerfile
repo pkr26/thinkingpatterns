@@ -49,7 +49,15 @@ COPY alembic ./alembic
 COPY docker-entrypoint.sh ./
 
 # Run as an unprivileged user; the API never needs root.
-RUN useradd --system --no-create-home --uid 10001 mindpattern
+# /var/lib/mindpattern/audit is the audit journal's mount point: the named
+# volume compose mounts there inherits THIS directory's ownership on first
+# use, so the app user can append the out-of-DB tail anchor (2026-09-28
+# audit H-2 — the anchor shipped claimed-but-unwired, silently disabling
+# tail-truncation detection in every deployment).
+RUN useradd --system --no-create-home --uid 10001 mindpattern \
+    && mkdir -p /var/lib/mindpattern/audit \
+    && chown mindpattern:root /var/lib/mindpattern/audit \
+    && chmod 0750 /var/lib/mindpattern/audit
 USER mindpattern
 
 EXPOSE 8000

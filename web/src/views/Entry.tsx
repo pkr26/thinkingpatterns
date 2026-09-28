@@ -38,6 +38,7 @@ import { ENERGY_OPTIONS, MOOD_OPTIONS, SLEEP_OPTIONS, ACTIVITY_TAGS, activityTag
 import { enqueue, queueLength } from "../offlineQueue";
 import { promptChipsFor } from "../promptChips";
 import { isOnline } from "../platform";
+import { zeroize } from "../crypto/core";
 import { detectLanguage, sentimentScore } from "../brain/sentiment";
 import { dateLocaleTag, getLocale, t } from "../strings";
 import { vault } from "../vault";
@@ -166,59 +167,81 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       const entryDate = date; // WEB_PLAN D-7: creation is today-only
       const clientEntryId = newClientEntryId(entryDate);
       const createdAt = new Date().toISOString();
-      // H-5 (audit 2026-09-26): ONLY the explicit pick rides in the
-      // encrypted payload's sentiment slot — null when no pick was made.
-      // The machine estimate is never written where the backend/therapist
-      // would read it as the user's own report.
-      const { blobB64 } = await encryptEntry(
-        keys.dataKey,
-        owner,
-        clientEntryId,
-        text,
-        createdAt,
-        moodPick,
-        {
-          ...(energyPick !== null ? { energy: energyPick } : {}),
-          ...(sleepPick !== null ? { sleep: sleepPick } : {}),
-          ...(tags.length > 0 ? { tags } : {}),
-          tod: timeOfDayBucket(new Date().getHours()),
-        },
-        1,
-      );
-      // The mood log is device-local metadata recorded on EVERY save
-      // (mobile EntryScreen parity): the explicit pick wins, the quick
-      // text estimate fills in when there is none.
-      await recordMood(keys.dataKey, owner, date, moodPick ?? sentimentScore(text, detectLanguage(text)), energyPick).catch(() => undefined);
+      // M-3 (2026-09-28 audit): snapshot the data key BEFORE the encrypt
+      // await — vault.get()'s buffers are SHARED, and a lock landing during
+      // that await zeroizes them. The Measures P1 fix closed this for the
+      // questionnaire submit; the entry save had the same hole one screen
+      // over: recordMood read the log under the (now zero) shared buffer
+      // and REPLACED it with ciphertext under 32 zero bytes, destroying
+      // the device-local mood history. The snapshot (plus the re-check
+      // below) closes both halves; the copy dies in the finally.
+      const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
+      dataKey.set(keys.dataKey);
+      try {
+        // H-5 (audit 2026-09-26): ONLY the explicit pick rides in the
+        // encrypted payload's sentiment slot — null when no pick was made.
+        // The machine estimate is never written where the backend/therapist
+        // would read it as the user's own report.
+        const { blobB64 } = await encryptEntry(
+          dataKey,
+          owner,
+          clientEntryId,
+          text,
+          createdAt,
+          moodPick,
+          {
+            ...(energyPick !== null ? { energy: energyPick } : {}),
+            ...(sleepPick !== null ? { sleep: sleepPick } : {}),
+            ...(tags.length > 0 ? { tags } : {}),
+            tod: timeOfDayBucket(new Date().getHours()),
+          },
+          1,
+        );
+        // A lock during the encrypt await: the snapshot kept the blob safe,
+        // but nothing more may be written this submit — abort honestly (the
+        // draft is still on screen for a post-unlock re-save) instead of
+        // recording the mood log under a dead key.
+        if (!vault.isUnlocked()) {
+          setError(t("common.sessionLocked"));
+          return;
+        }
+        // The mood log is device-local metadata recorded on EVERY save
+        // (mobile EntryScreen parity): the explicit pick wins, the quick
+        // text estimate fills in when there is none.
+        await recordMood(dataKey, owner, date, moodPick ?? sentimentScore(text, detectLanguage(text)), energyPick).catch(() => undefined);
 
-      let result: SaveResult = "queued";
-      if (isOnline()) {
-        try {
-          await api.createEntry(clientEntryId, blobB64, entryDate, 1);
-          result = "sent";
-        } catch {
-          // EVERY failure while online parks the entry in the queue —
-          // including a 409 (audit 2026-09-25): this id carries 72 random
-          // bits, so a genuine duplicate is practically impossible, and an
-          // unverified "already exists" is exactly the lying-server case
-          // the queue's M-5 GET-verification exists to referee. The entry
-          // stays safe locally either way; the queue proves or refutes the
-          // 409 before dropping anything.
+        let result: SaveResult = "queued";
+        if (isOnline()) {
+          try {
+            await api.createEntry(clientEntryId, blobB64, entryDate, 1);
+            result = "sent";
+          } catch {
+            // EVERY failure while online parks the entry in the queue —
+            // including a 409 (audit 2026-09-25): this id carries 72 random
+            // bits, so a genuine duplicate is practically impossible, and an
+            // unverified "already exists" is exactly the lying-server case
+            // the queue's M-5 GET-verification exists to referee. The entry
+            // stays safe locally either way; the queue proves or refutes the
+            // 409 before dropping anything.
+            await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
+          }
+        } else {
           await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
         }
-      } else {
-        await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
+        setText("");
+        setMoodPick(null);
+        setEnergyPick(null);
+        setSleepPick(null);
+        setTags([]);
+        setCrisisPrompt(false);
+        setDraftRestored(false);
+        // The entry is safe (server or ciphertext queue) — the sealed draft's
+        // custody ends here (entryDraft.ts, audit 2026-09-26).
+        await clearActiveDraft(owner).catch(() => undefined);
+        props.onSaved(result, date);
+      } finally {
+        zeroize(dataKey);
       }
-      setText("");
-      setMoodPick(null);
-      setEnergyPick(null);
-      setSleepPick(null);
-      setTags([]);
-      setCrisisPrompt(false);
-      setDraftRestored(false);
-      // The entry is safe (server or ciphertext queue) — the sealed draft's
-      // custody ends here (entryDraft.ts, audit 2026-09-26).
-      await clearActiveDraft(owner).catch(() => undefined);
-      props.onSaved(result, date);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("entry.couldNotSave"));
     } finally {

@@ -26,7 +26,7 @@
  * policy matter, not an app control).
  */
 import { useState } from "react";
-import { ApiError, api, auth, setSession, type TokenResponse } from "../api/client";
+import { ApiError, api, auth, clearSession, setSession, type TokenResponse } from "../api/client";
 import { deriveMasterKey, fromBase64, toBase64, zeroize } from "../crypto/core";
 import { createRegistrationEnvelope, unwrapEnvelope } from "../crypto/envelope";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
@@ -103,9 +103,11 @@ type AdoptionResult = "ok" | "therapist-role" | "invalid-response";
 function adoptSession(keys: PatientKeys, token: TokenResponse, username: string, onSuccess: (s: LoginSuccess) => void): AdoptionResult {
   if (token.role !== "user") {
     // A therapist account cannot use the patient app — fail closed, and
-    // leave nothing behind.
+    // leave nothing behind. (The v2 path pre-installs the session for the
+    // envelope fetch — C-1, 2026-09-28 — so it must be torn down here too.)
     zeroize(keys.authKey, keys.dataKey, keys.masterKey);
     vault.lock();
+    clearSession();
     return "therapist-role";
   }
   if (!USER_ID_PATTERN.test(token.user_id)) {
@@ -114,6 +116,7 @@ function adoptSession(keys: PatientKeys, token: TokenResponse, username: string,
     // AAD contexts, or storage keys, and leave nothing behind.
     zeroize(keys.authKey, keys.dataKey, keys.masterKey);
     vault.lock();
+    clearSession();
     return "invalid-response";
   }
   // expires_in rides along (audit 2026-09-26 LOW): the client schedules the
@@ -229,9 +232,20 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         // v2 accounts swap the derived data label for the unwrapped random
         // key BEFORE adoption; v1 (or a key_scheme-less legacy backend)
         // keeps deriving locally — exactly the pre-2026-09-26 bytes.
-        if (token.key_scheme === "v2" && !(await adoptEnvelopeDataKey(keys, salt, username))) {
-          setError(t("login.envelopeUnlockWeb"));
-          return;
+        // 2026-09-28 audit C-1: the envelope fetch rides the session'd
+        // request core, which refuses to run without an installed session
+        // — and adoptSession (which installs it) ran AFTER the fetch. On
+        // every fresh page load the fetch threw "not signed in" before any
+        // HTTP request left the tab and v2 sign-in dead-ended. The session
+        // is installed FIRST now; every failure path below rolls it back
+        // so nothing outlives a refused login.
+        if (token.key_scheme === "v2") {
+          setSession(token.token, token.user_id, username, token.expires_in);
+          if (!(await adoptEnvelopeDataKey(keys, salt, username))) {
+            clearSession();
+            setError(t("login.envelopeUnlockWeb"));
+            return;
+          }
         }
         const adoption = adoptSession(keys, token, username, props.onSuccess);
         if (adoption === "therapist-role") {

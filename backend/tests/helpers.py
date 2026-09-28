@@ -683,8 +683,13 @@ class EnvelopeClientEmulator(ClientEmulator):
         # data_key deliberately untouched — no rekey, no consent re-wrap.
 
     async def change_password(self, client: AsyncClient, new_password: str) -> int:
-        """PUT /account/password — the O(1) v2 credential+envelope swap."""
+        """PUT /account/password — the O(1) v2 credential+envelope swap.
+
+        2026-09-28 audit M-1: the swap now requires the possession probe
+        from EVERY caller — a processing session opened with the CURRENT
+        data key (single-use) rides along as X-Processing-Token."""
         old_auth_b64 = self.auth_key_b64
+        token = await self.open_processing_session(client)
         new_salt = os.urandom(16)
         # Wrap FIRST with the OLD password still current is impossible server-
         # side (the server cannot wrap); the client wraps under the NEW
@@ -693,7 +698,7 @@ class EnvelopeClientEmulator(ClientEmulator):
         wrapped = self.wrap_for(new_password, new_salt)
         response = await client.put(
             "/api/account/password",
-            headers=self.headers,
+            headers={**self.headers, "X-Processing-Token": token},
             json={
                 "verifier": old_auth_b64,
                 "new_salt": base64.b64encode(new_salt).decode("ascii"),

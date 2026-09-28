@@ -321,16 +321,19 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
     if (serializedBytes(candidate) > MAX_QUEUE_BYTES) throw new QueueFullError("over 1 MB of pending entries");
     if (wipedSince(generation)) throw new QueueAbandonedError();
     await writeItems(scope.queue, candidate);
-    // Write-after-wipe rollback (audit 2026-09-25): a clearQueue that won
-    // the race between the last fence check and this commit would find its
-    // wipe undone. The storage mutex is still held, so the content below is
-    // exactly what this enqueue wrote — remove it and fail honestly. (A
-    // NEXT session's enqueue chains on the mutex after this callback and
-    // cannot interleave.)
-    if (wipedSince(generation)) {
-      await kv.removeItem(scope.queue);
-      throw new QueueAbandonedError();
-    }
+    // Post-commit fence check (audit 2026-09-25 → corrected 2026-09-28,
+    // H-3): the generation can only have moved here if abortInFlightFlush()
+    // fired during the write — a sign-out/idle/expiry lockDown. Those
+    // deliberately KEEP ciphertext ("sign-out keeps ciphertext for the
+    // account scope"), so the honest response is to fail THIS enqueue's
+    // caller (their session ended) while leaving storage exactly as
+    // committed: every parked entry plus this one. The old "rollback"
+    // deleted the WHOLE queue key — it was written for a clearQueue race
+    // that the shared queue-flush Web Lock has since made unreachable
+    // (clearQueue bumps the generation inside the same lock this enqueue
+    // holds), which left the destructive path triggering ONLY on the
+    // must-not-wipe one.
+    if (wipedSince(generation)) throw new QueueAbandonedError();
   }));
 }
 

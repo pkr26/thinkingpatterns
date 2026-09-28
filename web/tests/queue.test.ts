@@ -387,19 +387,21 @@ describe("audit 2026-09-25 hardening", () => {
     expect(await queueLength("user-1")).toBe(0);
   });
 
-  it("a wipe racing the enqueue commit is rolled back — nothing outlives sign-out", async () => {
+  it("H-3 (2026-09-28): an abort racing the enqueue commit keeps every parked entry", async () => {
     const map = new Map<string, string>();
-    let bumped = false;
+    let writes = 0;
     setKvBackendForTests({
       async getItem(k) {
         return map.get(k) ?? null;
       },
       async setItem(k, v) {
         map.set(k, v);
-        // The commit lands, THEN the clearQueue generation bump fires —
-        // the write-after-wipe interleave (audit TOCTOU).
-        if (!bumped && k.includes(".items.")) {
-          bumped = true;
+        // The second save's commit lands, THEN a lockDown (sign-out /
+        // idle / hidden-tab / token expiry) bumps the generation — the
+        // write-after-abort interleave. The old code deleted the WHOLE
+        // queue key here, destroying offline-written entries a sign-out
+        // must keep.
+        if (k.includes(".items.") && ++writes === 2) {
           abortInFlightFlush();
         }
       },
@@ -407,8 +409,11 @@ describe("audit 2026-09-25 hardening", () => {
         map.delete(k);
       },
     });
-    await expect(enqueue(item(1))).rejects.toThrow(QueueAbandonedError);
-    expect([...map.keys()].filter((k) => k.includes(".items."))).toHaveLength(0);
+    await enqueue(item(1)); // a parked entry from an earlier offline save
+    await expect(enqueue(item(2))).rejects.toThrow(QueueAbandonedError);
+    // Both entries survive the raced lockDown: sign-out keeps ciphertext.
+    expect(await queueLength()).toBe(2);
+    expect((await rejectedEntries()).length).toBe(0);
   });
 
   it("corrupt member records inside a valid envelope are quarantined, not dropped", async () => {

@@ -14,12 +14,18 @@ const scheduleDailyReminder = vi.fn(async () => true);
 const cancelDailyReminder = vi.fn(async () => true);
 const scheduleMeasureReminder = vi.fn(async () => true);
 const cancelMeasureReminder = vi.fn(async () => true);
+// L-9 (2026-09-28): the one-time orphan sweep runs inside every
+// syncReminderSchedule; the sync suite stubs it to a no-op (its own seam is
+// covered in tests/nativeFeatures.test.ts against the real module).
+const migrateOrphanedReminderNotifications = vi.fn(async () => {});
 
 vi.mock("../src/nativeFeatures", () => ({
   scheduleDailyReminder: (...args: unknown[]) => scheduleDailyReminder(...(args as [number, number])),
   cancelDailyReminder: (...args: unknown[]) => cancelDailyReminder(...(args as [])),
   scheduleMeasureReminder: (...args: unknown[]) => scheduleMeasureReminder(...(args as [Date])),
   cancelMeasureReminder: (...args: unknown[]) => cancelMeasureReminder(...(args as [])),
+  migrateOrphanedReminderNotifications: (...args: unknown[]) =>
+    migrateOrphanedReminderNotifications(...(args as [string])),
 }));
 
 const { syncReminderSchedule, syncMeasureReminderSchedule } = await import("../src/reminderSync");
@@ -42,6 +48,8 @@ beforeEach(async () => {
   scheduleMeasureReminder.mockResolvedValue(true);
   cancelMeasureReminder.mockReset();
   cancelMeasureReminder.mockResolvedValue(true);
+  migrateOrphanedReminderNotifications.mockReset();
+  migrateOrphanedReminderNotifications.mockResolvedValue(undefined);
   // The cadence stamp is secureStore-backed (device-key ciphertext in
   // AsyncStorage): clear it so one test's completion never leaks into the
   // next test's cadence.

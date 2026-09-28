@@ -12,6 +12,29 @@ All notable changes to this project are documented here. Format follows
 > campaign logs and are summarized (not deleted) under [2.0.0]; they stay
 > in place below it as the detailed history, newest first.
 
+## [Unreleased]
+
+Deep-audit remediation 2026-09-28 (see AUDIT_SESSIONS_2026-09-28.md for the
+findings and AUDIT_REMEDIATION_2026-09-28.md for the fixes): web v2 sign-in
+fresh-page-load dead-end fixed (session installed before the envelope
+fetch, rolled back on every failure); rekey resume re-walks every stage
+(the stage-skip could permanently strand old-key rows); the audit-journal
+tail anchor actually wired (compose volume + env, Dockerfile-owned mount,
+single-pass heads + retention-aligned atomic compaction); the offline
+queue no longer wiped by a lockDown racing an enqueue; PUT
+/account/password requires the processing-session possession probe from
+every key scheme (web + mobile clients updated); the portal note composer
+recovers from a timed-out save (both 409 codes burn the retry id); the
+Entry mood log gets the Measures zeroize-race fix; rotations broadcast a
+cross-tab lockdown before their first server step; Safari <15.2 gets a
+real localStorage bakery mutex under withLock; legacy plaintext crisis
+stamps swept at app mount; mobile sweeps orphaned random-id reminders
+once; drift gate scans backup/ + *.yaml, proves every selftest failure
+mode individually, and enforces a minimum pin count; metrics-token sinks
+generated + asserted equal in CI/release and checked by verify.sh;
+release runs serialize without mid-publish cancellation; token-revocation
+hydration marks overflow; MAC verification constant-time.
+
 ## [2.0.1] — 2026-09-27
 
 Independent-audit remediation round 2 (see AUDIT_REMEDIATION_2026_09_27_ROUND2.md):
