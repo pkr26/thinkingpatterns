@@ -1101,7 +1101,14 @@ CURATED_SENTIMENT: dict[str, float] = {
     "bad": -1.9,
     "meh": -0.9,
     "off": -0.8,
-    "down": -1.3,
+    # 2026-09-28 polysemy remediation (found by the 1-year, 10-user
+    # simulation, reports/simulation1y): at -1.3 the particle sense
+    # ("took it down", "wrote it down", "calmed down") scored a whole
+    # cluster past the -0.30 rumination bar on its own — a chore journal
+    # surfaced as a "repeated worry". VADER's own weight for the
+    # affective sense is -0.153 (x4 scale = -0.6): "feeling down" stays
+    # mildly negative, "down" as direction no longer carries a cluster.
+    "down": -0.6,
     "low": -1.2,
     "flat": -0.8,
     "dull": -1.1,
@@ -1115,6 +1122,16 @@ CURATED_SENTIMENT: dict[str, float] = {
     "bleak": -1.9,
     "gloomy": -1.8,
     "mehh": -1.0,
+    # 2026-09-28 polysemy remediation, part 2 (same simulation finding):
+    # VADER ships "stop" at -1.2, so perseverative negation INVERTED it —
+    # "can't sleep, my mind won't stop" scored +0.222 (the x-0.74
+    # negation scalar flips the negative to positive) and the flagship
+    # worry phrase escaped the rumination kind entirely. The word's
+    # affect lives in what is stopped ("can't stop crying" is carried by
+    # "crying"); scored neutral, "won't stop" phrasing lands at <= 0 and
+    # classifies through the negation-heavy rumination path (>= 2
+    # negators) that exists for exactly this perseverative shape.
+    "stop": 0.0,
     "awkward": -1.3,
     "annoyed": -1.7,
     "irritated": -1.8,

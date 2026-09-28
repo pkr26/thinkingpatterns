@@ -220,3 +220,15 @@ Artifacts: [simulate.py](simulate.py) (harness), [results.json](results.json)
 (full per-user patterns, timelines, storage metrics),
 [sim_run.log](sim_run.log) (annotated run), [probe_tune.py](probe_tune.py)
 (offline detector-tuning probe).
+
+## Historical-snapshot note (added 2026-09-28)
+
+The results in this directory are a snapshot of the engine as of
+2026-09-20/21 and are NOT reproducible under today's code by design:
+the statistical-replication gates tightened after this run (audit H-9
+and the 2026-09-26 statistical review), so e.g. omar's rising topic —
+surfaced live from a single recompute here — now correctly waits for a
+second qualifying recompute day. Re-running `simulate.py` today still
+passes its internal consistency checks but yields more conservative
+pattern sets. The current, fully-reproducible campaign is
+`reports/simulation1y/` (365 days, 10 users, all 52 endpoints).

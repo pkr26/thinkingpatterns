@@ -14,6 +14,45 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sentiment-lexicon polysemy at the rumination gate** (found by the
+  1-year simulation above, pinned by
+  `backend/tests/test_lexicon_remediation_2026_09_28.py`): "down" was
+  curated at -1.3, so the directional particle ("took it down", "wrote
+  it down") pushed mundane clusters past the -0.30 rumination bar alone
+  — a recycling chore surfaced as a "repeated worry". Re-curated to
+  -0.6 (VADER's own affective-sense weight, x4 scale): "feeling down"
+  stays mildly negative, direction no longer classifies. "stop"
+  inherited VADER's -1.2, so perseverative negation INVERTED it
+  ("can't sleep, my mind won't stop" scored +0.222) and the flagship
+  worry shape escaped the rumination kind entirely; curated to 0.0 —
+  the word's affect lives in what is stopped — the phrase now lands
+  non-positive and classifies through the negation-heavy path built
+  for exactly that perseverative shape. Regenerated
+  `shared/brain_lexicon.json`, both TS lexicon modules and
+  `shared/brain_vectors.json` (one sentiment row: -0.95 -> -0.65);
+  backend 1629 / web 668 / mobile 1965 / portal 413 tests green, and
+  the 1-year campaign re-run proves both flips end-to-end (tom: zero
+  rumination cards; maya: the sleep worry is rumination).
+
+### Added
+
+- **1-year, 10-user, every-endpoint E2E simulation** (2026-09-28,
+  `reports/simulation1y/`): the simulation60 approach extended to 365
+  days, ten personas (incl. a 365-day pure-noise control, a
+  crisis-language persona, a structured-channels + PHQ-9 power user, an
+  editor, and a sharing/key-lifecycle user) and all 52 mounted routes —
+  live HTTP, real client crypto, clock-accurate per-day brain replays,
+  determinism cross-checks (live == single-shot, 10/10), the full
+  therapist-sharing lifecycle with both-end SAS verification and
+  wrap-key rotation, data-key rekey, v1→v2 envelope upgrade + O(1)
+  password change (consents survive), TOTP lifecycle, exports decrypted
+  locally, access-log pagination, deletion + decoy salts, at-rest
+  zero-knowledge probes (raw DB and WAL), and default-bucket rate
+  limiting. **245/245 checks passed**; full story in
+  `reports/simulation1y/SIMULATION_REPORT.md`.
+
 Deep-audit remediation 2026-09-28, second batch (same audit wave,
 continued): the LLM narrative sanitizer truncates BEFORE its rejection
 chain (an over-length narrative used to return early, skipping the

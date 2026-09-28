@@ -726,6 +726,17 @@ names the finding it guards; the durable summary lives in CHANGELOG.md
 preserved in git history. The executable attack harnesses remain in
 `redteam/` (`bash redteam/run_all.sh`).
 
+A standing full-system E2E campaign extends that history: **the 1-year,
+10-user, every-endpoint simulation** (`reports/simulation1y/`,
+2026-09-28, **245/245 checks**) drives all 52 mounted routes over live
+HTTP with the real client crypto — a full simulated journaling year per
+persona (including a 365-day pure-noise control that surfaces zero
+statistical kinds), encrypted PHQ-9 measures, the therapist-sharing
+lifecycle end to end, key rotations/rekey/envelope-v2/TOTP, exports,
+deletion, and at-rest zero-knowledge probes of the raw database file.
+Re-run instructions and the per-persona pattern story:
+`reports/simulation1y/SIMULATION_REPORT.md`.
+
 Facts an operator should know from that history:
 
 - **Statistical honesty is regression-pinned.** All statistical pattern
