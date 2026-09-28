@@ -134,6 +134,12 @@ export function App(): React.JSX.Element {
     }
     wipePortalSession(retiring);
     sessionRef.current = null;
+    // independent audit 2026-09-27: the triage-scan "don't ask again" latch
+    // is MODULE state, so it survives this component's unmount — without
+    // this reset, an HMR remount (and any future remount path) would keep
+    // the previous mount's acknowledgment alive. Harmless in production,
+    // where the only unmount is this tab's teardown.
+    resetScanConfirmation();
   }, []);
 
   // Idle auto-lock: reset on any real interaction.
@@ -148,7 +154,13 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (!session) return;
     let timer = setTimeout(() => lockDown("Locked after inactivity — sign in again to continue."), IDLE_LOCK_MS);
+    // independent audit 2026-09-27: the wall-clock stamp of the last REAL
+    // interaction. The visibility handler needs it to close the gap where
+    // idle accrued BEFORE the tab was hidden used to go unmeasured (see
+    // onVisibility below).
+    let lastInteractionAt = Date.now();
     const bump = (): void => {
+      lastInteractionAt = Date.now();
       clearTimeout(timer);
       timer = setTimeout(() => lockDown("Locked after inactivity — sign in again to continue."), IDLE_LOCK_MS);
     };
@@ -161,8 +173,16 @@ export function App(): React.JSX.Element {
         hiddenAt = Date.now();
         return;
       }
-      if (hiddenAt !== null && Date.now() - hiddenAt >= IDLE_LOCK_MS) {
-        lockDown("Locked after inactivity — sign in again to continue.");
+      if (hiddenAt !== null) {
+        // independent audit 2026-09-27: lock on the OLDER of the two clocks.
+        // The old check used only the hidden duration, so 9 idle minutes in
+        // the foreground followed by a 2-minute hide slipped under a
+        // 10-minute threshold and re-shown the decrypted chart. Idle accrued
+        // BEFORE hiding counts exactly like time spent hidden.
+        const now = Date.now();
+        if (Math.max(now - hiddenAt, now - lastInteractionAt) >= IDLE_LOCK_MS) {
+          lockDown("Locked after inactivity — sign in again to continue.");
+        }
       }
       hiddenAt = null;
     };

@@ -13,7 +13,7 @@ import { buildAad } from "../src/crypto/aad";
 import { deriveMasterKey, encrypt, fromBase64, toBase64, zeroize } from "../src/crypto/core";
 import { derivePatientKeys } from "../src/crypto/keys";
 import { kv, setKvBackendForTests, type KvBackend } from "../src/kvstore";
-import { enqueue } from "../src/offlineQueue";
+import { enqueue, queueLength, rejectedEntries } from "../src/offlineQueue";
 import { buildFeedbackBlob, recordFeedbackTap } from "../src/questionFeedback";
 import { recentMoods, recordMood } from "../src/moodLog";
 import { observeEntryVersions } from "../src/entryVersions";
@@ -372,6 +372,91 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     expect(onLockdown.mock.calls[0]![0]).toContain("could not be re-wrapped");
+  });
+});
+
+/** independent audit 2026-09-27 (P1): the offline queue was never in the
+ *  rotation's rewrap family — blobs sealed under the OLD data key uploaded
+ *  after the rekey and became permanently undecryptable. The rotation now
+ *  drains the queue first (aborting honestly when entries cannot leave)
+ *  and rewraps whatever is still held locally after the credential step. */
+describe("SettingsView rotation × offline queue (audit 2026-09-27)", () => {
+  /** baseStubs, plus one intercepting handler consulted first (returning
+   * undefined falls through to the base routes). */
+  function wrappedStubs(intercept: (url: string, init: RequestInit) => Response | undefined): ReturnType<typeof stubFetch> {
+    const base = baseStubs();
+    const inner = base.getMockImplementation() as (url: string, init: RequestInit) => Response;
+    return stubFetch((url, init) => intercept(url, init) ?? inner(url, init));
+  }
+
+  it("a queued entry that cannot drain ABORTS the rotation before any server step, with the honest queue-blocked message", async () => {
+    // A rate-limited upload keeps the entry queued — the drain's "cannot
+    // leave right now" shape.
+    const mock = wrappedStubs((url, init) => {
+      if (url.endsWith("/entries") && init.method === "POST") {
+        return jsonResponse({ detail: "slow down", code: "rate_limited" }, { status: 429, headers: { "Retry-After": "60" } });
+      }
+      return undefined;
+    });
+    const { blobB64 } = await encryptEntry(OLD_KEY, USER, "e-rot-1", "still waiting to upload", "2026-09-25T00:00:00Z", null, undefined, 1);
+    await enqueue({ userId: USER, clientEntryId: "e-rot-1", blobB64, entryDate: "2026-09-25" });
+    const onLockdown = vi.fn();
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await fillRotateForm(root);
+    await press(root, "Change password");
+    await settle(60, 5);
+    expect(textOf(root)).toContain("still waiting to upload");
+    expect(onLockdown).not.toHaveBeenCalled();
+    // Nothing rotated: no processing session, no rekey, no credential call.
+    const urls = mock.mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.endsWith("/processing/sessions"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/processing/rekey"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/account/credential"))).toBe(false);
+    // The entry is STILL held locally, byte-identical — nothing was orphaned.
+    expect(await queueLength(USER)).toBe(1);
+  });
+
+  it("an empty queue drains silently and the rotation proceeds (the normal path)", async () => {
+    baseStubs();
+    const onLockdown = vi.fn();
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await fillRotateForm(root);
+    await press(root, "Change password");
+    await settle(120, 8);
+    expect(onLockdown).toHaveBeenCalledTimes(1);
+    expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
+  });
+
+  it("a rotation rewraps locally held rejected entries under the NEW key — same id, identical plaintext", async () => {
+    // The rejected store is never drained by the rotation (its entries are
+    // held back after server refusals), so it is exactly the local residue
+    // the post-credential rewrap exists for.
+    const backend = memoryBackend();
+    setKvBackendForTests(backend);
+    const { blobB64 } = await encryptEntry(OLD_KEY, USER, "e-rej-1", "held back honesty", "2026-09-24T00:00:00Z", null, undefined, 1);
+    await enqueue({ userId: USER, clientEntryId: "e-rej-1", blobB64, entryDate: "2026-09-24" });
+    const map = backend.dump();
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    map.set(queueKey.replace(".items.", ".rejected."), map.get(queueKey)!);
+    map.delete(queueKey);
+    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    baseStubs();
+    const onLockdown = vi.fn();
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await fillRotateForm(root);
+    await press(root, "Change password");
+    await settle(120, 8);
+    expect(onLockdown).toHaveBeenCalledTimes(1);
+    expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
+    // Same id, readable under the NEW generation's key, plaintext intact.
+    const { dataKey } = await derivePendingKeys();
+    const rejected = await rejectedEntries(USER);
+    expect(rejected.map((entry) => entry.clientEntryId)).toEqual(["e-rej-1"]);
+    const payload = await decryptEntry(dataKey, USER, "e-rej-1", rejected[0]!.blobB64, 1);
+    expect(payload.text).toBe("held back honesty");
   });
 });
 

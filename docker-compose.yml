@@ -55,6 +55,7 @@ services:
       - /tmp:size=128m,mode=1777
     secrets:
       - token_secret
+      - metrics_token
     environment:
       # POSTGRES_PASSWORD is interpolated RAW into this URL: it must be a
       # hex string (openssl rand -hex 16, as the db service example shows)
@@ -70,6 +71,12 @@ services:
       MINDPATTERN_TOKEN_SECRET: ${MINDPATTERN_TOKEN_SECRET:-}
       MINDPATTERN_TOKEN_SECRET_FILE: /run/secrets/token_secret
       MINDPATTERN_AUTH_TOKEN_SECRET_FILE: /run/secrets/auth_token_secret
+      # Independent audit 2026-09-27: the metrics bearer token was the
+      # last secret still delivered as a plain env var (docker-inspect
+      # readable). It now rides the same file-mount chain as everything
+      # else; MINDPATTERN_METRICS_TOKEN env stays supported for dev.
+      MINDPATTERN_METRICS_TOKEN: ${MINDPATTERN_METRICS_TOKEN:-}
+      MINDPATTERN_METRICS_TOKEN_FILE: /run/secrets/metrics_token
       MINDPATTERN_UNLOCK_DAYS: "30"
       # Safe forwarding is opt-in: the app accepts X-Forwarded-For only when
       # the direct peer also matches this explicit IP/CIDR allowlist. Do not
@@ -384,3 +391,10 @@ secrets:
     file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/postgres_password
   backup_key:
     file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/backup_key
+  # Independent audit 2026-09-27: the api's metrics bearer token. The
+  # monitoring stack reads its COPY of the same value from
+  # deploy/monitoring/token (prometheus bearer_token_file) — generate ONE
+  # value into both files (the CI jobs assert this for their own
+  # generated set).
+  metrics_token:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/metrics_token

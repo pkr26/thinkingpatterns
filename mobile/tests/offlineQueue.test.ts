@@ -49,6 +49,8 @@ const {
   requeueRejected,
   hasLegacyQueueRecovery,
   abortInFlightFlush,
+  drainPendingQueueForRotation,
+  rewrapQueue,
   MAX_QUEUE_LENGTH,
   MAX_QUEUE_BYTES,
   QueueFullError,
@@ -1125,5 +1127,83 @@ describe("clearQueue mutual exclusion (2026-09-26 audit LOW)", () => {
     }
     expect(await queueLength("alice")).toBe(0);
     expect(await scopedKeys("items")).toHaveLength(0);
+  });
+});
+
+// --- rotation parity (independent audit 2026-09-27, P2) ------------------------
+//
+// The v1 password rotation drains the queue BEFORE any server-side step and
+// re-seals whatever is still held locally (rejected entries, or items queued
+// by a racing write mid-rotation) old→new data key afterwards. These pin the
+// queue-side halves; the rotation orchestration is pinned in
+// tests/securityPins.test.ts.
+describe("drainPendingQueueForRotation + rewrapQueue", () => {
+  const OLD_KEY = Buffer.alloc(32, 1);
+  const NEW_KEY = Buffer.alloc(32, 2);
+
+  it("drain flushes best-effort and reports the REMAINING count honestly", async () => {
+    await enqueue(entry("alice", "d-1"));
+    expect(await drainPendingQueueForRotation("alice")).toBe(0); // it left
+    expect(await queueLength("alice")).toBe(0);
+
+    // A 503 (retryable) keeps the item queued — the rotation must see 1 and
+    // abort rather than orphan the blob under the retired key.
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(503, "server busy"));
+    await enqueue(entry("alice", "d-2"));
+    expect(await drainPendingQueueForRotation("alice")).toBe(1);
+  });
+
+  it("rewrapQueue re-seals queue AND rejected blobs old→new under the SAME AAD; corrupt blobs stay as-is", async () => {
+    const { encrypt, decrypt } = await import("../src/crypto/envelope");
+    const { buildAad } = await import("../src/crypto/aad");
+
+    // One item parked in REJECTED (a 400 upload rejection moves it there).
+    vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(400, "invalid blob"));
+    await enqueue({
+      userId: "alice",
+      clientEntryId: "rejected-1",
+      blobB64: encrypt(OLD_KEY, Buffer.from("rejected text"), buildAad("entry", "alice", "rejected-1", "1")).toString("base64"),
+      entryDate: "2026-09-01",
+    });
+    await flushQueue("alice");
+    expect(await rejectedEntryCount("alice")).toBe(1);
+
+    // One item still QUEUED (the mid-rotation race), legacy-AAD-bound.
+    await enqueue({
+      userId: "alice",
+      clientEntryId: "queued-1",
+      blobB64: encrypt(OLD_KEY, Buffer.from("queued text"), buildAad("entry", "alice", "queued-1")).toString("base64"),
+      entryDate: "2026-09-01",
+    });
+    // One corrupt blob that no key can open.
+    const corruptB64 = Buffer.alloc(48, 7).toString("base64");
+    await enqueue({ userId: "alice", clientEntryId: "corrupt-1", blobB64: corruptB64, entryDate: "2026-09-01" });
+
+    await rewrapQueue("alice", OLD_KEY, NEW_KEY);
+
+    const rejected = await rejectedEntries("alice");
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.clientEntryId).toBe("rejected-1");
+    // Opens under the NEW key with the SAME version-bound AAD…
+    expect(
+      decrypt(NEW_KEY, Buffer.from(rejected[0]!.blobB64, "base64"), buildAad("entry", "alice", "rejected-1", "1")).toString(),
+    ).toBe("rejected text");
+    // …and no longer under the old one (the rewrap really happened).
+    expect(() =>
+      decrypt(OLD_KEY, Buffer.from(rejected[0]!.blobB64, "base64"), buildAad("entry", "alice", "rejected-1", "1")),
+    ).toThrow();
+
+    const raw = await storage.getItem(await itemsKeyContaining("queued-1"));
+    const parsed = JSON.parse(raw!) as { items: Array<{ clientEntryId: string; blobB64: string }> };
+    const queued = parsed.items.find((i) => i.clientEntryId === "queued-1")!;
+    // The legacy three-part AAD is honored on rewrap (first-generation rule).
+    expect(
+      decrypt(NEW_KEY, Buffer.from(queued.blobB64, "base64"), buildAad("entry", "alice", "queued-1")).toString(),
+    ).toBe("queued text");
+
+    // The corrupt blob is left EXACTLY as-is — visible quarantine on requeue,
+    // never silently destroyed and never blocking the rotation.
+    const corrupt = parsed.items.find((i) => i.clientEntryId === "corrupt-1")!;
+    expect(corrupt.blobB64).toBe(corruptB64);
   });
 });

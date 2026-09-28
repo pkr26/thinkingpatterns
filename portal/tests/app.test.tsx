@@ -310,6 +310,58 @@ describe("App", () => {
     }
   });
 
+  it("independent audit 2026-09-27: idle accrued BEFORE hiding counts — 9 idle minutes + a 2-minute hide locks on return", async () => {
+    // The old visibility check used ONLY the hidden duration (2 min < 10 min
+    // threshold), so the decrypted chart came back after a total of 11 idle
+    // minutes. The lock now fires on max(hiddenFor, since-last-interaction).
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      // 9 minutes of foreground idle first — under the timer's own deadline,
+      // so nothing has locked yet.
+      await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60 * 1000); });
+      expect(textOf(root)).toContain("Patients — Dr. Portal");
+      // Hide, then move the WALL CLOCK forward without running timer
+      // callbacks (the background-tab throttling case).
+      (document as { hidden: boolean }).hidden = true;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      await act(async () => { vi.setSystemTime(Date.now() + 2 * 60 * 1000); });
+      expect(textOf(root)).toContain("Patients — Dr. Portal"); // not locked while hidden
+      // Returning after 11 TOTAL idle minutes must lock through the same
+      // lockDown path even though the tab was hidden for only 2 of them.
+      (document as { hidden: boolean }).hidden = false;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      expect(textOf(root)).toContain("Locked after inactivity");
+      expect(hasSession()).toBe(false);
+      expect(vi.mocked(api.logout)).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      (document as { hidden: boolean }).hidden = false;
+    }
+  });
+
+  it("a foreground interaction just before hiding pushes the idle clock back (max-of-two-clocks is honest both ways)", async () => {
+    vi.useFakeTimers();
+    try {
+      const root = await login();
+      await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60 * 1000); });
+      // A real interaction at minute 9 re-arms BOTH the timer and the
+      // last-interaction stamp the visibility handler reads.
+      await act(async () => { window.dispatchEvent({ type: "click" } as Event); });
+      (document as { hidden: boolean }).hidden = true;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      await act(async () => { vi.setSystemTime(Date.now() + 2 * 60 * 1000); });
+      (document as { hidden: boolean }).hidden = false;
+      await act(async () => { document.dispatchEvent({ type: "visibilitychange" } as Event); });
+      // 2 minutes hidden + 2 minutes since the click: under the threshold.
+      expect(textOf(root)).toContain("Patients — Dr. Portal");
+      expect(hasSession()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      (document as { hidden: boolean }).hidden = false;
+    }
+  });
+
   it("L-75 fallback: without sessionStorage the old scrub-on-lock contract returns", async () => {
     // Some privacy modes expose no (or a dead) sessionStorage; the anchor
     // store then falls back to localStorage, which MUST keep the old
@@ -349,6 +401,42 @@ describe("App", () => {
     expect(window.sessionStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeTruthy();
     expect(window.sessionStorage.getItem("mindpattern.lastVisit.other-therapist.user-1")).toBeTruthy();
     expect(window.localStorage.getItem("mindpattern.lastVisit.therapist-1.user-1")).toBeNull();
+  });
+
+  it("independent audit 2026-09-27: unmount resets the triage-scan 'don't ask again' latch (module state survives remounts)", async () => {
+    // Same scenario as the sign-out latch test, but the session ends by
+    // REMOUNT (HMR in dev; harmless belt-and-braces in production): the
+    // acknowledgment must not leak into the next mount.
+    vi.mocked(api.patients).mockResolvedValue([
+      {
+        user_id: "user-1", username: "patienta", status: "active",
+        granted_at: "2026-09-01T00:00:00Z", revoked_at: null,
+        ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
+      },
+      {
+        user_id: "user-2", username: "patientb", status: "active",
+        granted_at: "2026-09-02T00:00:00Z", revoked_at: null,
+        ephemeral_pub: "E".repeat(124), wrapped_key: "W==",
+      },
+    ]);
+    const root = await login();
+    await flush();
+    await press(root, "Scan caseload for triage");
+    await flush();
+    const box = root.root.findAllByType("input").find((n) => n.props["aria-label"] === "Do not ask again in this browser session");
+    await act(async () => { box!.props.onChange({ target: { checked: true } }); });
+    await press(root, "Start the triage scan");
+    await flush(8);
+
+    await act(async () => { root.unmount(); });
+
+    // A fresh mount + sign-in must ask for the footprint confirmation
+    // again — the latch died with the unmount effect, not just lockDown.
+    const root2 = await login();
+    await flush();
+    await press(root2, "Scan caseload for triage");
+    await flush();
+    expect(textOf(root2)).toContain("one request and one audit entry per patient");
   });
 
   it("re-audit 2026-09-27: sign-out resets the triage-scan 'don't ask again' latch — the next sign-in asks again", async () => {

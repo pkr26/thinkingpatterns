@@ -43,7 +43,10 @@ def run_cell(n: int, phi: float, reps: int) -> tuple[float, float]:
 
 
 def scan(reps: int) -> None:
-    for k in (2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0):
+    # K=1.0 included (independent audit 2026-09-27): it is the
+    # contrast the 'K=2.0 is the measured frontier' claim rests on — the
+    # phi=0.8 short-n nulls sit at 15-23% there vs 3-7% at K=2.0.
+    for k in (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0):
         for cap in (0.99, 2.2):
             brain._MOOD_SHIFT_PHI_EFF_K = k
             brain._MOOD_SHIFT_PHI_EFF_MAX = cap

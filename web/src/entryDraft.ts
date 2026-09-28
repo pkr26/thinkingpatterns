@@ -32,6 +32,23 @@ export interface EntryDraft {
 
 const key = (userId: string): string => `mindpattern.draft.active.${userId}`;
 
+/** independent audit 2026-09-27 (P2): a lock-time seal and a save/discard
+ *  clear can be in flight for the SAME account at the same instant (the
+ *  lock fires mid-save; the save's clear commits once the entry is safe).
+ *  With bare kv writes the clear's removeItem could commit BEFORE the
+ *  seal's setItem landed — the sealed slot then survived a successful save
+ *  and resurrected the entry as a draft. Every slot mutation therefore
+ *  runs through ONE per-account chain: a clear queued behind a seal waits
+ *  for that seal to land first, so the clear is always the last write and
+ *  the slot is genuinely empty when it resolves. */
+const slotChains = new Map<string, Promise<unknown>>();
+
+function chained<T>(userId: string, operation: () => Promise<T>): Promise<T> {
+  const run = (slotChains.get(userId) ?? Promise.resolve()).then(operation, operation);
+  slotChains.set(userId, run.catch(() => {}));
+  return run;
+}
+
 /** An empty draft is "no entry in progress" — nothing to seal (and a
  *  reason to clear a stale slot: the user emptied the editor on purpose). */
 function draftIsEmpty(draft: EntryDraft): boolean {
@@ -79,8 +96,10 @@ export async function saveActiveDraft(dataKey: Bytes, userId: string, draft: Ent
   }
   const payload = new TextEncoder().encode(JSON.stringify(draft));
   try {
-    const blob = await encrypt(dataKey, payload, buildAad("draft", userId));
-    await kv.setItem(key(userId), toBase64(blob));
+    await chained(userId, async () => {
+      const blob = await encrypt(dataKey, payload, buildAad("draft", userId));
+      await kv.setItem(key(userId), toBase64(blob));
+    });
   } finally {
     zeroize(payload);
   }
@@ -105,9 +124,12 @@ export async function loadActiveDraft(dataKey: Bytes, userId: string): Promise<E
 }
 
 /** The draft's custody ended: saved (sent or parked), discarded, or the
- *  account is gone. */
+ *  account is gone. The clear is COMBINED (audit 2026-09-27): it removes
+ *  the stored record AND any seal still in flight — it runs after that
+ *  seal's write lands, so a lock racing a save can never leave a sealed
+ *  slot behind to resurrect an already-saved entry. */
 export async function clearActiveDraft(userId: string): Promise<void> {
-  await kv.removeItem(key(userId));
+  await chained(userId, () => kv.removeItem(key(userId)));
 }
 
 /** Rotation parity with the B-7 rewrap family: re-seal an existing draft

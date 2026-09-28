@@ -542,6 +542,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         if (outcome.scheme === "v2") setKeyScheme("v2");
       } else if (outcome.reason === "wrong-password") {
         Alert.alert(tr("settings.rotateFailedTitle"), tr("settings.rotateWrongOld"));
+      } else if (outcome.reason === "queue-blocked") {
+        // independent audit 2026-09-27 (P2): queued entries are sealed under
+        // the OLD data key — the rotation refused to strand them.
+        Alert.alert(tr("settings.rotateFailedTitle"), tr("settings.rotateQueueBlocked"));
       } else if (outcome.reason === "offline") {
         Alert.alert(tr("settings.rotateFailedTitle"), tr("common.reauthOffline"));
       } else {

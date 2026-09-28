@@ -1018,14 +1018,30 @@ class TestNotes:
             )
 
         first = await make("one")
-        second = await make("two")
+        # Independent audit 2026-09-27: the idempotency contract on the
+        # create channel is now EXACTLY the offline-queue replay — the
+        # SAME ciphertext BYTES (what a queue actually re-sends; a fresh
+        # encryption has a fresh GCM nonce and different bytes) replays
+        # as success, while different bytes under an existing
+        # client_note_id are a 409 (last-write-wins was the exact
+        # semantics item 15 closed for PATCH; edits go through PATCH +
+        # base_version).
+        replay_blob = first.json()["blob"]
+        second = await client.post(
+            f"/api/therapist/patients/{patient.user_id}/notes",
+            headers=th.headers,
+            json={"client_note_id": "same-id", "blob": replay_blob},
+        )
+        changed = await make("two")
         assert first.status_code == 201 and second.status_code == 201
         assert first.json()["id"] == second.json()["id"]
+        assert changed.status_code == 409
+        assert changed.json()["code"] == "version_conflict"
         listed = (
             await client.get(f"/api/therapist/patients/{patient.user_id}/notes", headers=th.headers)
         ).json()
         assert len(listed) == 1
-        assert th.decrypt_note(patient, "same-id", listed[0]["blob"])["text"] == "two"
+        assert th.decrypt_note(patient, "same-id", listed[0]["blob"])["text"] == "one"
 
     async def test_list_byte_budget_requires_opt_in_and_returns_continuation(self, client):
         """A count-bounded page must not serialize a chart-sized response.

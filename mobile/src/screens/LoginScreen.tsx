@@ -215,8 +215,6 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // data key, byte-for-byte as before. The sealed proof below is
         // stored under whichever key won.
         const fetched = await fetchEnvelope();
-        const envelope: EnvelopeInfo | null =
-          fetched.status === "ok" ? fetched.envelope : await cachedEnvelope(name);
         // Re-audit 2026-09-27 (M): when the account is v2 but the envelope
         // can be NEITHER fetched ("invalid" — the server answered with a
         // shape this client refuses; "unreachable" — the endpoint failed)
@@ -227,9 +225,20 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // instead: the password was accepted, so the honest copy says the
         // key could not be verified and NOTHING was changed. ("legacy" — a
         // 404 from a pre-envelope server — cannot host a v2 account and
-        // keeps v1 semantics, as does a cached v1 marker.)
-        if (envelope === null && (fetched.status === "invalid" || fetched.status === "unreachable")) {
-          throw new Error(tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "login.envelopeUnavailable"));
+        // keeps v1 semantics.)
+        // independent audit 2026-09-27 (P2): the refusal now also covers the
+        // STALE-v1-MARKER case. Only a definitive server answer ("ok" v1,
+        // or "legacy") or a cached v2 ENVELOPE with material may authorize
+        // the v1 path; after a FAILED fetch, a cached v1 marker is a scheme
+        // hint from an earlier session — routing on it would re-seal the
+        // proof under the v1-derived key, safe today only because v1→v2
+        // wraps the SAME data key and a silent wrong-key write under any
+        // future scheme rotation. Fail closed with honest retry copy.
+        const envelope: EnvelopeInfo | null =
+          fetched.status === "ok" ? fetched.envelope : await cachedEnvelope(name);
+        if (fetched.status !== "ok" && fetched.status !== "legacy"
+          && (envelope === null || envelope.scheme !== "v2")) {
+          throw new Error(tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "unlock.schemeUnconfirmed"));
         }
         if (envelope !== null && envelope.scheme === "v2") {
           const unwrapped = await unwrapSessionDataKey({
@@ -249,12 +258,14 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           await storeUnlockProof(unwrapped.dataKey, body.user_id);
           await cacheEnvelope(name, envelope).catch(() => {});
         } else {
-          // Login SUCCEEDED — the password is verified. Seal the proof that
-          // offline unlocks will be checked against (see UnlockScreen).
+          // Login SUCCEEDED and the scheme answer is definitive (fetched
+          // v1, or a legacy 404 server): seal the proof that offline
+          // unlocks will be checked against (see UnlockScreen).
           await storeUnlockProof(derived.dataKey, body.user_id);
-          // A v1 marker (or a fetched-but-v1 envelope) is cached so the
-          // next OFFLINE unlock knows the sealed-proof path is the right
-          // one without another round-trip.
+          // A fetched v1 envelope is cached so the next OFFLINE unlock
+          // knows the sealed-proof path is the right one without another
+          // round-trip. (This branch is unreachable with a mere cached v1
+          // marker after a failed fetch — the refusal above already threw.)
           if (envelope !== null) await cacheEnvelope(name, envelope).catch(() => {});
         }
         verifiedUserId = body.user_id;

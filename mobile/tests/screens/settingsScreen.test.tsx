@@ -39,6 +39,10 @@ vi.mock("../../src/offlineQueue", () => ({
   requeueRejected: vi.fn(async () => 0),
   quarantinedQueueExists: vi.fn(async () => false),
   hasLegacyQueueRecovery: vi.fn(async () => false),
+  // independent audit 2026-09-27 (P2): the rotation's queue discipline —
+  // the drain reports an empty queue by default so rotations proceed.
+  drainPendingQueueForRotation: vi.fn(async () => 0),
+  rewrapQueue: vi.fn(async () => {}),
 }));
 
 // The rotation flow derives keys four times per attempt; the node tests
@@ -81,6 +85,7 @@ const reminderCapabilityResult = { available: false, reason: "notification modul
 const reminderCapability = vi.fn(() => reminderCapabilityResult);
 const scheduleDailyReminder = vi.fn(async () => true);
 const cancelDailyReminder = vi.fn(async () => true);
+const scheduleMeasureReminder = vi.fn(async () => true);
 vi.mock("../../src/nativeFeatures", () => ({
   reminderCapability: () => reminderCapability(),
   scheduleDailyReminder: (...args: unknown[]) => scheduleDailyReminder(...(args as [number, number])),
@@ -88,6 +93,7 @@ vi.mock("../../src/nativeFeatures", () => ({
   // 2026-09-27 clinical wave: the opt-in check-in reminder rides the same
   // nativeFeatures seam (own stable id); deletion cancels both schedules.
   cancelMeasureReminder: async () => true,
+  scheduleMeasureReminder: (...args: unknown[]) => scheduleMeasureReminder(...(args as [Date])),
 }));
 
 // The HealthKit State of Mind seam (2026-09-19): controllable per test,
@@ -145,6 +151,8 @@ beforeEach(() => {
   scheduleDailyReminder.mockResolvedValue(true);
   cancelDailyReminder.mockReset();
   cancelDailyReminder.mockResolvedValue(true);
+  scheduleMeasureReminder.mockReset();
+  scheduleMeasureReminder.mockResolvedValue(true);
   healthKitCapability.mockReset();
   healthKitCapability.mockReturnValue({ available: false, reason: "health module not linked in this build" });
   ensureStateOfMindWriteAccess.mockReset();
@@ -1537,5 +1545,204 @@ describe("scheme-aware change-password copy", () => {
     await flush();
     expect(textOf(v2Root)).toContain("Your journal is not re-encrypted");
     expect(textOf(v2Root)).toContain("Change password and sign in again");
+  });
+});
+
+// --- independent audit 2026-09-27 (coverage): the appearance, reminder,
+// check-in cadence, sign-out, and navigation sections — the behavioral
+// branches the functions gate needs.
+const { Switch } = await import("../helpers/rnMock");
+
+/** independent audit 2026-09-27 (coverage): find a Switch by its
+ *  accessibilityLabel — the reminder/biometrics/haptics rows each carry
+ *  one, and value-based lookup is ambiguous across sections. */
+function switchByA11y(root: Awaited<ReturnType<typeof render>>, label: string) {
+  const node = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === label);
+  if (!node) throw new Error(`no Switch labeled ${label}`);
+  return node;
+}
+
+describe("appearance and haptics (independent audit 2026-09-27)", () => {
+  it("a theme radio tap selects the mode and persists the preference", async () => {
+    const { ThemeProvider } = await import("../../src/theme");
+    const root = await render(
+      <ThemeProvider>
+        <SettingsScreen navigation={nav as never} />
+      </ThemeProvider>,
+    );
+    await flush();
+    await pressLabel(root, "Dark");
+    await flush();
+    expect(touchActivity).toHaveBeenCalled();
+    // The persisted preference follows the tap (the storage-backed radio).
+    const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+    expect(await AsyncStorage.getItem("@mindpattern/theme.mode")).toBe("dark");
+    // Selecting is visible in the a11y state of the tapped radio.
+    const radios = root.root.findAll((n) => n.props.accessibilityRole === "radio");
+    const dark = radios.find((n) => String(n.props.accessibilityLabel).includes("Dark"));
+    expect(dark?.props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it("the haptics switch persists through its own preference lane", async () => {
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      switchByA11y(root, "Haptics").props.onValueChange(false);
+    });
+    await flush();
+    const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+    expect(await AsyncStorage.getItem("@mindpattern/haptics.enabled")).toBe("off");
+    expect(switchByA11y(root, "Haptics").props.value).toBe(false);
+  });
+});
+
+describe("daily reminder and check-in cadence (independent audit 2026-09-27)", () => {
+  it("toggling the daily reminder ON schedules at the stored time and shows the time chips", async () => {
+    reminderCapability.mockReturnValue({ available: true });
+    const { setReminderTime } = await import("../../src/reminders");
+    await setReminderTime("user-1", 12, 0);
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush(5);
+    expect(switchByA11y(root, "Daily reminder").props.value).toBe(false);
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      switchByA11y(root, "Daily reminder").props.onValueChange(true);
+    });
+    await flush(5);
+    // The sync scheduled at the STORED preference time (the reconciliation
+    // contract: preference is the direction of truth).
+    expect(scheduleDailyReminder).toHaveBeenCalledWith(12, 0);
+    expect(switchByA11y(root, "Daily reminder").props.value).toBe(true);
+    // The time chips render with the current one selected.
+    const chips = root.root.findAll((n) => n.props.accessibilityRole === "radio");
+    const midday = chips.find((n) => String(n.props.accessibilityLabel).includes("Midday"));
+    expect(midday?.props.accessibilityState).toMatchObject({ selected: true });
+  });
+
+  it("a custom stored time renders as its own chip; tapping a preset re-schedules", async () => {
+    reminderCapability.mockReturnValue({ available: true });
+    const { setReminderEnabled, setReminderTime } = await import("../../src/reminders");
+    await setReminderEnabled("user-1", true);
+    await setReminderTime("user-1", 6, 45);
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush(5);
+    expect(textOf(root)).toContain("6:45");
+    await pressLabel(root, "6:45"); // the custom chip exists and is tappable
+    await flush(5);
+    scheduleDailyReminder.mockClear();
+    await pressLabel(root, "Evening");
+    await flush(5);
+    expect(scheduleDailyReminder).toHaveBeenCalledWith(20, 0);
+    const { getReminderPrefs } = await import("../../src/reminders");
+    expect((await getReminderPrefs("user-1")).hour).toBe(20);
+  });
+
+  it("toggling the daily reminder OFF cancels the native schedule", async () => {
+    reminderCapability.mockReturnValue({ available: true });
+    const { setReminderEnabled } = await import("../../src/reminders");
+    await setReminderEnabled("user-1", true);
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush(5);
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      switchByA11y(root, "Daily reminder").props.onValueChange(false);
+    });
+    await flush(5);
+    expect(cancelDailyReminder).toHaveBeenCalledTimes(1);
+    expect(switchByA11y(root, "Daily reminder").props.value).toBe(false);
+  });
+
+  it("toggling check-in reminders ON schedules the nudge; the interval chips persist the cadence", async () => {
+    reminderCapability.mockReturnValue({ available: true });
+    // The nudge only schedules when the cadence is DUE: the last completed
+    // measure is seeded 5 weeks back through the encrypted stamp lane.
+    const { secureStore } = await import("../../src/secureStore");
+    await secureStore.setItem("@mindpattern/last_measure_user-1", new Date(Date.now() - 63 * 86_400_000).toISOString().slice(0, 10));
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush(5);
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      switchByA11y(root, "Check-in reminders").props.onValueChange(true);
+    });
+    await flush(5);
+    expect(scheduleMeasureReminder).toHaveBeenCalledTimes(1);
+    // The cadence chips render; choosing 8 weeks persists and re-syncs.
+    scheduleMeasureReminder.mockClear();
+    await pressLabel(root, "8 weeks");
+    await flush(5);
+    const { getMeasureReminderPrefs } = await import("../../src/measureReminders");
+    expect((await getMeasureReminderPrefs("user-1")).intervalWeeks).toBe(8);
+    expect(scheduleMeasureReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("with the module absent the toggles persist the preference but schedule nothing", async () => {
+    // reminderCapability defaults to unavailable in this file's beforeEach.
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush(5);
+    expect(textOf(root)).toContain("notification module not linked in this build");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      const { Switch } = await import("../helpers/rnMock");
+      const node = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder");
+      node!.props.onValueChange(true);
+    });
+    await flush(5);
+    const { getReminderPrefs } = await import("../../src/reminders");
+    expect((await getReminderPrefs("user-1")).enabled).toBe(true);
+    // The switch is disabled — the OS-level honest state for this build.
+    expect(switchByA11y(root, "Daily reminder").props.disabled).toBe(true);
+  });
+});
+
+describe("navigation rows and sign-out hygiene (independent audit 2026-09-27)", () => {
+  it("the section rows navigate to Measures, the safety plan, and Privacy", async () => {
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Wellbeing measures");
+    await pressLabel(root, "Make a safety plan");
+    await pressLabel(root, "Privacy policy");
+    expect(nav.navigate).toHaveBeenCalledWith("Measures");
+    expect(nav.navigate).toHaveBeenCalledWith("SafetyPlan");
+    expect(nav.navigate).toHaveBeenCalledWith("Privacy");
+  });
+
+  it("sign-out locks the vault FIRST, then signs the session out and pops to top", async () => {
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    expect(vault.isUnlocked()).toBe(true);
+    await pressLabel(root, "Sign out");
+    await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(nav.popToTop).toHaveBeenCalledTimes(1);
+  });
+
+  it("'Why can't I export my journal?' explains the honest export stance", async () => {
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Why export is unavailable");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(Alert.alert.mock.calls[0]![1]).toContain("verified secure file-export component");
+  });
+
+  it("the re-auth card's Cancel retires the pending action and clears the field", async () => {
+    vi.mocked(api.getLlmConsent).mockResolvedValue({ enabled: false } as never);
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true, sharing_available: true } as never);
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush(5);
+    const { Switch } = await import("../helpers/rnMock");
+    const { act } = await import("../helpers/rtr");
+    await act(async () => {
+      const node = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis");
+      node!.props.onValueChange(true);
+    });
+    await flush();
+    expect(textOf(root)).toContain("Confirm with password");
+    await typeInto(root, "password", "typed-then-cancelled");
+    await pressLabel(root, "Cancel");
+    await flush();
+    expect(textOf(root)).not.toContain("Confirm with password");
   });
 });

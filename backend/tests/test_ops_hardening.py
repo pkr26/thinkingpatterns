@@ -12,7 +12,7 @@ from app.main import _acquire_cross_host_guard, create_app
 from app.metrics import MetricsRegistry, RECOMPUTE_BUCKETS
 from app.models import AccessLog, Entry, new_id, utcnow
 from app.security import crypto
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from tests.helpers import ClientEmulator, TherapistEmulator
 import asyncio
@@ -29,7 +29,10 @@ import uuid
 # Pins from test_ops_hardening_2026_09_17.py (renamed in the 2026-09-20 production
 # cleanup; see git history for the original file).
 # ---------------------------------------------------------------------------
-TODAY = date(2026, 9, 17)
+# Clock-anchored (independent audit 2026-09-27): the entry API validates
+# against the server's UTC today minus a 1-day grace; a fixed date ages
+# out at UTC midnight. Engine math here is date-agnostic.
+TODAY = datetime.now(timezone.utc).date()
 
 
 # ---------------------------------------------------------------------------

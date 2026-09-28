@@ -344,24 +344,32 @@ _MOOD_SHIFT_P_FLOOR = 1e-12
 #     phi_eff = min(_MOOD_SHIFT_PHI_EFF_MAX, phi_hat + K/sqrt(n-1))
 #
 # i.e. the same 1/sqrt(n-1) standard error the shrinkage subtracts, added
-# back (and then some) on the conservative side: under estimator
-# uncertainty the p must be valid for the worst phi the data plausibly
-# supports, because the limits already took the optimistic branch. K is a
-# MC-tuned conservatism dial (see the regression test for the spec + seed);
-# phi_eff saturates at _MOOD_SHIFT_PHI_EFF_MAX, where the table lookup's own
-# extrapolation cap (_MOOD_SHIFT_ALARM_MAX) takes over. When the shrunk
-# estimate is 0 (the ~98% of iid charts where r never cleared 2 SE),
-# phi_eff stays 0: a null chart reports exactly the pre-fix p, so phi=0
-# behavior is bit-identical and no iid power is spent on the correction.
+# back so the chart and the lookup share ONE phi. Independent audit
+# 2026-09-27, stated honestly: at K = 2.0 the added term EXACTLY cancels
+# the shrinkage — phi_eff equals the raw clamped autocorrelation estimate
+# wherever r cleared 2 SE, and 0 where it did not. There is no extra
+# conservatism beyond the raw estimate; the shrinkage acts purely as a
+# significance GATE (noise-only charts run phi=0, bit-identical to the
+# pre-fix iid behavior). The MC calibration (independent seeds included)
+# still holds the deployed false-alarm band at the corners BECAUSE the
+# limits and the p-table are indexed by the same phi_eff — the property
+# that matters — not because phi_eff is biased high. A future change that
+# shrinks phi_hat harder without re-deriving K re-narrows the limits and
+# silently invalidates the table: re-run scripts/mc_phi_eff.py first.
+# phi_eff saturates at _MOOD_SHIFT_PHI_EFF_MAX, where the table lookup's
+# own extrapolation cap (_MOOD_SHIFT_ALARM_MAX) takes over.
 #
-# K=2.0 is the measured frontier (seeded sweep, 2026-09-27): K=1.0 keeps
-# mirror-chart power (0.84 for a 3σ sustained shift at phi=0.5/n=90) but
-# leaves the phi=0.8 short-n nulls at 15-23% false alarms; K=2.0 holds
-# every cell at 3-7% at a deployed power of ~0.68. Validity was bought
-# with power — deliberately: a false "your mood has shifted" card is the
-# harm vector here, and the downstream replication gate (window kinds
-# need qualification days >=2 calendar days apart) further suppresses the
-# residual. Recovering 0.8+ deployed power needs a different lever (a
+# K=2.0 is the measured frontier (seeded sweep, 2026-09-27, K in
+# {1.0, 2.0, ...}): K=1.0 leaves the phi=0.8 short-n nulls at 15-23%
+# false alarms; K=2.0 holds every cell at 3-7% (independent replication:
+# 3.7-8.0%) at a deployed power of ~0.68. Validity was bought with power
+# — deliberately: a false "your mood has shifted" card is the harm vector
+# here, and the downstream replication gate (window kinds need
+# qualification days >=2 calendar days apart) further suppresses the
+# residual. The (1+phi)/(1-phi) limit inflation below is itself an UPPER
+# bound on the exact EWMA variance (1.26x at phi=0.5, 1.87x at phi=0.8
+# for lambda=0.18) — conservative for false alarms, a further documented
+# power cost. Recovering 0.8+ deployed power needs a different lever (a
 # longer chart or a length-scaled L), not a smaller K.
 _MOOD_SHIFT_PHI_EFF_K = 2.0
 _MOOD_SHIFT_PHI_EFF_MAX = 0.99
@@ -2364,6 +2372,14 @@ def _strip_weekday_effects(day_residuals: dict[date, float]) -> dict[date, float
     by construction, no association unless the THEME-Mondays differ
     from the non-theme Mondays. Iteration is over SORTED days and a
     weekday-ordered table — deterministic under every PYTHONHASHSEED.
+
+    Honest boundary (independent audit 2026-09-27): the ≤6 removed
+    weekday means are NOT reflected in the downstream Welch/Satterthwaite
+    degrees of freedom, and a weekday with a SINGLE observation centers to
+    exactly 0.0 (suppression, the safe direction). For sparse writers the
+    df are therefore overstated by up to ~6 — negligible at the operating
+    point (~180-day window, ~25 days/weekday), noted here so nobody reads
+    the p-values as exact for very short journals.
     """
     by_weekday: dict[int, list[float]] = {}
     for day in sorted(day_residuals):
@@ -3051,8 +3067,16 @@ def _detect_links(
         delta = sum(unexposed) / len(unexposed) - sum(exposed) / len(exposed)
         effect = statsig.cohens_d(exposed, unexposed, variance_floor=MOOD_SD_FLOOR)
         _, pvalue = statsig.welch_test(exposed, unexposed, variance_floor=MOOD_SD_FLOOR, lag1=lag1)
-        gap1 = sum(1 for prev, cur in exposed_pairs if (cur - prev).days == 1)
-        gap2 = len(exposed_pairs) - gap1
+        # Independent audit 2026-09-27: the gap census counts MEASURED
+        # outcome pairs only (cur in day_residuals), matching the
+        # denominator. The previous numerator counted every gap-1
+        # transition including unmeasured outcome days (the F-3 blanked
+        # class), so a corpus with 5 measured + 3 unmeasured gap-1 and 6
+        # measured gap-2 passed the 70% gate on a 45% measured share —
+        # "the day after" copy on a measured minority.
+        measured_pairs = [pair for pair in exposed_pairs if pair[1] in day_residuals]
+        gap1 = sum(1 for prev, cur in measured_pairs if (cur - prev).days == 1)
+        gap2 = len(measured_pairs) - gap1
         # Evidence follows what was MEASURED (see the F-3 filter above):
         # unmeasured outcome days back no part of the claim.
         outcome_days = [cur for _, cur in exposed_pairs if cur in day_residuals]
@@ -4560,6 +4584,15 @@ def update(
 
     cutoff = today - timedelta(days=WINDOW_DAYS)
     ordered = sorted(entries, key=lambda e: e.entry_date)
+    # Calendar validity boundary (independent audit 2026-09-27): update()
+    # is a pure transform over the entries it is GIVEN and deliberately
+    # does NOT clamp entry_date to `today` — the engine's own contract
+    # tests (test_structured_channels) run recomputes behind their fresh
+    # evidence to exercise the replication gate, and a client's local
+    # calendar may legitimately lead the server's UTC day by the API's
+    # forward grace (entries.py FORWARD_GRACE_DAYS = 1, enforced on every
+    # write). Every production path into this function is API-validated;
+    # a NEW caller that feeds unvalidated dates owns that validation.
     window = [e for e in ordered if e.entry_date >= cutoff][-MAX_WINDOW_ENTRIES:]
 
     # Structured channels (2026-09-17): the sleep-quality split is decided

@@ -28,7 +28,9 @@ def _tokens(text: str) -> list[str]:
     # audit H-8). A hand-copied regex would silently pin drift instead of
     # catching it the day one side changes tokenization.
     tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
-    tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
+    # Independent audit 2026-09-27: canonical emoji tokenization, same as
+    # the generator — bare VS16 base spellings count like qualified ones.
+    tokens.extend(brain._emoji_tokens(text))
     return tokens
 
 

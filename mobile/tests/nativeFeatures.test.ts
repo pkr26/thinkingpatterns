@@ -242,3 +242,134 @@ describe("notification copy resolves through the catalog (audit fix 22, 2026-09-
     expect(english.body).toBe("A quiet moment to write, whenever it suits you.");
   });
 });
+
+// --- independent audit 2026-09-27 (P3): the cancel-all fallback must not
+// kill the sibling reminder. Builds without per-id cancel used to wipe BOTH
+// schedules; with a userId the survivor is re-created from its stored
+// preference through the same schedule function and stable id.
+const storageForSiblings = (await import("./helpers/storageMock")).default;
+const { cancelMeasureReminder } = await import("../src/nativeFeatures");
+const { setReminderEnabled, setReminderTime } = await import("../src/reminders");
+const { setMeasureReminderEnabled, recordMeasureCompleted } = await import("../src/measureReminders");
+
+describe("fallback cancel-all restores the SIBLING reminder (P3, 2026-09-27)", () => {
+  const storage = storageForSiblings;
+
+  /** Simulate the ancient notifee build for one test body. */
+  const withoutPerIdCancel = async (): Promise<() => void> => {
+    const notifee = (await import("@notifee/react-native")) as unknown as {
+      default: Record<string, unknown>;
+    };
+    const original = notifee.default.cancelNotification;
+    delete notifee.default.cancelNotification;
+    return () => {
+      notifee.default.cancelNotification = original;
+    };
+  };
+
+  beforeEach(() => {
+    storage.__reset();
+  });
+
+  it("cancelDailyReminder(userId) re-creates the measure nudge when its preference + cadence say one exists", async () => {
+    const restore = await withoutPerIdCancel();
+    try {
+      // Enabled AND the cadence is due: the last completion is 5 weeks old
+      // (the stamp is forward-only, so the encrypted slot is seeded
+      // directly — the same lane recordMeasureCompleted writes).
+      await setMeasureReminderEnabled("user-1", true);
+      const { secureStore } = await import("../src/secureStore");
+      const fiveWeeksAgo = new Date(Date.now() - 35 * 86_400_000).toISOString().slice(0, 10);
+      await secureStore.setItem("@mindpattern/last_measure_user-1", fiveWeeksAgo);
+      createTriggerNotification.mockClear();
+      cancelAllNotifications.mockClear();
+
+      expect(await cancelDailyReminder("user-1")).toBe(true);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1); // the fallback ran
+      // …and the sibling came back under its OWN stable id.
+      expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+      const [notification] = createTriggerNotification.mock.calls[0] as [
+        { id: string },
+        unknown,
+      ];
+      expect(notification.id).toBe("mindpattern-measure-reminder");
+    } finally {
+      restore();
+    }
+  });
+
+  it("cancelDailyReminder(userId) skips the restore when the measure nudge is opted out", async () => {
+    const restore = await withoutPerIdCancel();
+    try {
+      createTriggerNotification.mockClear();
+      expect(await cancelDailyReminder("user-1")).toBe(true);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+      expect(createTriggerNotification).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("cancelDailyReminder(userId) skips the restore when the cadence is not yet due (fresh completion)", async () => {
+    const restore = await withoutPerIdCancel();
+    try {
+      await setMeasureReminderEnabled("user-1", true);
+      await recordMeasureCompleted("user-1", new Date().toISOString().slice(0, 10));
+      createTriggerNotification.mockClear();
+      expect(await cancelDailyReminder("user-1")).toBe(true);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+      expect(createTriggerNotification).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("cancelMeasureReminder(userId) re-creates the DAILY reminder at the preference's own time", async () => {
+    const restore = await withoutPerIdCancel();
+    try {
+      await setReminderEnabled("user-1", true);
+      await setReminderTime("user-1", 20, 30);
+      createTriggerNotification.mockClear();
+      const before = Date.now();
+      expect(await cancelMeasureReminder("user-1")).toBe(true);
+      const after = Date.now();
+
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+      expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+      const [notification, trigger] = createTriggerNotification.mock.calls[0] as [
+        { id: string },
+        { timestamp: number },
+      ];
+      expect(notification.id).toBe("mindpattern-daily-reminder");
+      expect(trigger.timestamp).toBeGreaterThanOrEqual(nextReminderFireTime(new Date(before), 20, 30).getTime());
+      expect(trigger.timestamp).toBeLessThanOrEqual(nextReminderFireTime(new Date(after), 20, 30).getTime());
+    } finally {
+      restore();
+    }
+  });
+
+  it("WITHOUT a userId (sign-out / account deletion) the fallback stays a plain cancel-all", async () => {
+    const restore = await withoutPerIdCancel();
+    try {
+      await setMeasureReminderEnabled("user-1", true);
+      createTriggerNotification.mockClear();
+      expect(await cancelDailyReminder()).toBe(true);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+      expect(createTriggerNotification).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("a failing sibling restore never fails the cancel itself (self-heals at next sync)", async () => {
+    const restore = await withoutPerIdCancel();
+    try {
+      await setMeasureReminderEnabled("user-1", true);
+      createTriggerNotification.mockRejectedValueOnce(new Error("native exploded"));
+      expect(await cancelDailyReminder("user-1")).toBe(true);
+      expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    } finally {
+      restore();
+    }
+  });
+});

@@ -111,3 +111,41 @@ export function therapistKeyFingerprint(therapistPubSpkiB64: string): string {
   const hex = digest.subarray(0, 16).toString("hex").toUpperCase();
   return hex.match(/.{4}/g)?.join(" ") ?? hex;
 }
+
+/** independent audit 2026-09-27: fixed-length, constant-ish string equality
+ *  for the short-hex fingerprint compare — no early exit on the first
+ *  differing character. */
+function hexEquals(a: string, b: string): boolean {
+  if (a.length !== b.length || a.length === 0) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** independent audit 2026-09-27: cross-check the SERVER-computed wrap-key
+ *  fingerprint against THIS app's own digest of the same response's key
+ *  bytes. The server value is accepted only in the exact shape the contract
+ *  defines (16 LOWERCASE hex chars — backend sharing.wrap_key_fingerprint is
+ *  sha256(der).hexdigest()[:16]); the local digest is computed the SAME way
+ *  over the SAME DER bytes and compared without early exit.
+ *
+ *  Returns:
+ *    true  — valid server value that matches this app's digest;
+ *    false — VALID server value that disagrees (the substitution tripwire);
+ *    null  — absent/malformed server value: treated as absent (older
+ *            server), never as a mismatch.
+ *
+ *  (The previous inline comparison in TherapistShareScreen compared this
+ *  16-lowercase-hex value against therapistKeyFingerprint's 32-uppercase
+ *  space-grouped format with strict inequality — they could NEVER be
+ *  equal, so the red mismatch alert fired on every honest pairing.) */
+export function serverFingerprintMatches(therapistPubSpkiB64: string, serverValue: string): boolean | null {
+  if (!/^[0-9a-f]{16}$/.test(serverValue)) return null;
+  const local = engine
+    .createHash("sha256")
+    .update(Buffer.from(therapistPubSpkiB64, "base64"))
+    .digest()
+    .toString("hex")
+    .slice(0, 16);
+  return hexEquals(local, serverValue);
+}

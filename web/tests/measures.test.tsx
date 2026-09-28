@@ -262,6 +262,57 @@ describe("MeasuresView offline persistence (audit 2026-09-26 LOW: the offline ga
   });
 });
 
+/** independent audit 2026-09-27 (P1): vault.get()'s key buffers are
+ *  SHARED, and a lock landing during the pre-send persist await zeroizes
+ *  them — the questionnaire used to be encrypted under 32 zero bytes,
+ *  POSTed, and the pending retry record destroyed. The snapshot + the
+ *  post-await re-check close both halves. */
+describe("MeasuresView zeroized-key race (audit 2026-09-27)", () => {
+  it("a lock landing during the persist await sends NOTHING, keeps the pending record, and says so honestly", async () => {
+    // A STABLE key reference: the record must stay readable under the key
+    // the session actually held, proving the SNAPSHOT (not the zeroized
+    // shared buffer) sealed it. (The assertion copy is NEVER handed to the
+    // vault — vault.lock() zeroizes the buffer it was given.)
+    const heldKey = new Uint8Array(new ArrayBuffer(32)).fill(4);
+    const originalKey = new Uint8Array(new ArrayBuffer(32));
+    originalKey.set(heldKey);
+    vault.unlock({ authKey: heldKey, dataKey: heldKey }, USER);
+    // The lock lands exactly at the persistence write — inside
+    // savePendingMeasure's kv.setItem, after the snapshot was taken.
+    const base = memoryBackend();
+    const innerSet = base.setItem;
+    base.setItem = async (k: string, v: string) => {
+      if (k.startsWith("mindpattern.pendingMeasure.")) vault.lock();
+      return innerSet(k, v);
+    };
+    setKvBackendForTests(base);
+    const posted: string[] = [];
+    stubFetch((url, init) => {
+      if (url.endsWith("/measures") && init.method === "POST") {
+        posted.push(String(init.body));
+        return jsonResponse({ id: "row" }, { status: 201 });
+      }
+      if (url.startsWith(`${ORIGIN}/api/v1/measures?`)) return jsonResponse([], { headers: { "X-Measures-Revision": "2" } });
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<MeasuresView onCrisis={() => undefined} />);
+    await settle(40, 3);
+    await press(root, "PHQ-2");
+    await pressNth(root, "Several days", 0);
+    await pressNth(root, "Nearly every day", 1);
+    await press(root, "Save measure");
+    await settle(60, 5);
+    // Nothing was POSTed — and certainly not under an all-zero key.
+    expect(posted).toEqual([]);
+    // The honest locked message, not a dead end...
+    expect(textOf(root)).toContain("session locked while saving");
+    // ...and the pending record SURVIVES, readable under the ORIGINAL key
+    // (it will retry after the next unlock, under the same id).
+    const pending = await loadPendingMeasure(originalKey, USER);
+    expect(pending).toMatchObject<Partial<PendingMeasure>>({ kind: "phq2", picks: [1, 3] });
+  });
+});
+
 describe("MeasuresView answer values (audit 2026-09-26 LOW: values, not indexes)", () => {
   it("a completed PHQ-2 posts an encrypted blob whose score is the sum of the picked VALUES", async () => {
     let posted: { id: string; blob: string } | null = null;

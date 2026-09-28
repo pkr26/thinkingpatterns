@@ -36,7 +36,9 @@ import {
 export async function syncReminderSchedule(userId: string): Promise<boolean> {
   try {
     const prefs = await getReminderPrefs(userId);
-    if (!prefs.enabled) return await cancelDailyReminder();
+    // independent audit 2026-09-27 (P3): the userId rides the cancel so a
+    // fallback cancel-all can re-schedule the surviving measure nudge.
+    if (!prefs.enabled) return await cancelDailyReminder(userId);
     return await scheduleDailyReminder(prefs.hour, prefs.minute);
   } catch {
     // A storage or native hiccup must never take a screen down; the next
@@ -59,10 +61,12 @@ export async function syncReminderSchedule(userId: string): Promise<boolean> {
 export async function syncMeasureReminderSchedule(userId: string): Promise<boolean> {
   try {
     const prefs = await getMeasureReminderPrefs(userId);
-    if (!prefs.enabled) return await cancelMeasureReminder();
+    // independent audit 2026-09-27 (P3): the userId rides the cancels so a
+    // fallback cancel-all can re-schedule the surviving daily reminder.
+    if (!prefs.enabled) return await cancelMeasureReminder(userId);
     const last = await lastMeasureCompletedOn(userId);
     if (!measureReminderDue(last, prefs.intervalWeeks, new Date())) {
-      return await cancelMeasureReminder();
+      return await cancelMeasureReminder(userId);
     }
     return await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date()));
   } catch {

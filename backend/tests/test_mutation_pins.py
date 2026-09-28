@@ -193,6 +193,11 @@ def test_settings_defaults_are_pinned(clean_env):
         "cors_origins": [],
         "trust_proxy_headers": False,
         "trusted_proxy_ips": [],
+        # Independent audit 2026-09-27: the audit-chain MAC override
+        # (default derives from the token secret) and the optional
+        # out-of-DB journal path (default off).
+        "audit_mac_secret_explicit": "",
+        "audit_journal_path": "",
     }
 
 

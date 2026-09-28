@@ -160,6 +160,81 @@ describe("entryDraft custody (module)", () => {
     vault.unlock({ authKey: DATA_KEY, dataKey: DATA_KEY }, USER);
     expect(await loadActiveDraft(DATA_KEY, USER)).toEqual(DRAFT);
   });
+
+  /** independent audit 2026-09-27 (P2): a lock can seal the draft WHILE a
+   *  save is in flight; if the save's clear committed before the seal's
+   *  write landed, the sealed slot survived a successful save and
+   *  resurrected the entry as a draft. The combined clear now waits for
+   *  any in-flight seal first — the clear is always the last write. */
+  it("a save's clear cannot commit before an in-flight lock seal — no resurrected draft", async () => {
+    // A gated kv backend: the seal's write hangs until released, exactly
+    // like a slow IndexedDB commit would.
+    let releaseSeal: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseSeal = resolve;
+    });
+    const inner = memoryBackend();
+    setKvBackendForTests({
+      async getItem(k) {
+        return inner.getItem(k);
+      },
+      async setItem(k, v) {
+        if (k === `mindpattern.draft.active.${USER}`) await gate;
+        return inner.setItem(k, v);
+      },
+      async removeItem(k) {
+        return inner.removeItem(k);
+      },
+    });
+    // Pre-seed the slot with an EARLIER sealed draft (bypassing the gate):
+    // mid-race, its survival is what proves the clear has not committed.
+    await inner.setItem(`mindpattern.draft.active.${USER}`, "earlier-sealed-blob");
+    // The lock seals the half-written entry; the write is IN FLIGHT.
+    registerDraftSource(() => DRAFT);
+    const sealing = preserveActiveDraft();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The save completes while the seal is still pending: its clear must
+    // queue BEHIND the seal (the old bare removeItem committed now, and the
+    // seal's setItem then resurrected the slot).
+    const clearing = clearActiveDraft(USER);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await kv.getItem(`mindpattern.draft.active.${USER}`)).toBe("earlier-sealed-blob"); // the clear is still queued
+    releaseSeal();
+    await Promise.all([sealing, clearing]);
+    // The seal landed, then the clear removed it: the slot is genuinely
+    // empty — the saved entry cannot come back as a draft.
+    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+  });
+
+  it("a discard racing an in-flight seal gets the same combined clear (both slots)", async () => {
+    // Same race, discard path: the explicit discard's clear also waits for
+    // the in-flight seal, so "this entry is not happening" cannot be undone
+    // by a late seal write.
+    let releaseSeal: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseSeal = resolve;
+    });
+    const inner = memoryBackend();
+    setKvBackendForTests({
+      async getItem(k) {
+        return inner.getItem(k);
+      },
+      async setItem(k, v) {
+        if (k === `mindpattern.draft.active.${USER}`) await gate;
+        return inner.setItem(k, v);
+      },
+      async removeItem(k) {
+        return inner.removeItem(k);
+      },
+    });
+    registerDraftSource(() => DRAFT);
+    const sealing = preserveActiveDraft();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const clearing = clearActiveDraft(USER);
+    releaseSeal();
+    await Promise.all([sealing, clearing]);
+    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+  });
 });
 
 describe("EntryView draft contract", () => {

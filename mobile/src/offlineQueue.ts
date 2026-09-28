@@ -10,6 +10,8 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
+import { buildAad, decrypt, encrypt } from "./crypto/envelope";
+import { zeroize } from "./crypto/kdf";
 
 const LEGACY_QUEUE_KEY = "@mindpattern/queue";
 const LEGACY_REJECTED_KEY = "@mindpattern/queue_rejected";
@@ -663,6 +665,82 @@ export async function queueLength(userId?: string): Promise<number> {
   await migrateUnscopedLegacyData();
   const scope = await scopeFor(await resolveUserId(userId));
   return serialized(async () => (await readItems(scope.queue, scope, queueGeneration)).length);
+}
+
+/** independent audit 2026-09-27 (P2, parity with the web fix): the
+ *  rotation-time drain. The queue's blobs are sealed under the OLD data
+ *  key and were never part of the v1 rotation's rewrap family — after the
+ *  server rekey they would upload and become permanently undecryptable.
+ *  Best-effort flush FIRST (the user is necessarily online during a
+ *  rotation); the returned count is whatever could NOT leave right now,
+ *  and the caller aborts honestly on any non-zero value. */
+export async function drainPendingQueueForRotation(userId: string): Promise<number> {
+  await flushQueue(userId).catch(() => undefined);
+  return queueLength(userId);
+}
+
+/** Open one queued blob under the rotation's OLD key and re-seal it under
+ *  the new key with the SAME AAD it was sealed with (queue uploads are
+ *  always the first generation of their id, so the version-bound AAD is
+ *  tried first and the legacy three-part binding is the fallback —
+ *  decryptEntry's rule). Null when the blob cannot be opened at all. */
+async function rewrapEntryBlob(item: QueuedEntry, oldKey: Buffer, newKey: Buffer): Promise<string | null> {
+  const blob = Buffer.from(item.blobB64, "base64");
+  const bindings = [
+    buildAad("entry", item.userId, item.clientEntryId, "1"),
+    buildAad("entry", item.userId, item.clientEntryId),
+  ];
+  let plaintext: Buffer | null = null;
+  try {
+    for (const aad of bindings) {
+      try {
+        plaintext = decrypt(oldKey, blob, aad);
+        const resealed = encrypt(newKey, plaintext, aad).toString("base64");
+        return resealed;
+      } catch {
+        // Wrong binding for this blob: fall through to the legacy one.
+      } finally {
+        if (plaintext !== null) zeroize(plaintext);
+        plaintext = null;
+      }
+    }
+    return null;
+  } finally {
+    for (const aad of bindings) aad.fill(0);
+  }
+}
+
+/** Re-seal every locally held blob — queue items AND rejected entries —
+ *  from the rotation's old data key to the new one, under the queue's
+ *  storage mutex so the read-modify-write cannot interleave with an
+ *  enqueue or drain. A blob that fails to rewrap is left EXACTLY as-is
+ *  (a rejected item then fails visibly on requeue); nothing here may
+ *  block or unwind the completed rotation. independent audit 2026-09-27
+ *  (P2, parity with the web fix — same semantics). */
+export async function rewrapQueue(userId: string, oldKey: Buffer, newKey: Buffer): Promise<void> {
+  await migrateUnscopedLegacyData();
+  const scope = await scopeFor(userId);
+  return serialized(async () => {
+    const generation = queueGeneration;
+    const [queue, rejected] = await Promise.all([
+      readItems(scope.queue, scope, generation),
+      readItems(scope.rejected, scope, generation),
+    ]);
+    const rewrap = async (items: QueuedEntry[]): Promise<QueuedEntry[]> => {
+      const out: QueuedEntry[] = [];
+      for (const item of items) {
+        const blobB64 = await rewrapEntryBlob(item, oldKey, newKey);
+        out.push(blobB64 === null ? item : { ...item, blobB64 });
+      }
+      return out;
+    };
+    const items = await rewrap(queue);
+    const rejects = await rewrap(rejected);
+    if (wipedSince(generation)) return;
+    await writeItems(scope.queue, items);
+    if (wipedSince(generation)) return;
+    await writeItems(scope.rejected, rejects);
+  });
 }
 
 /** A visible, non-uploadable indication for an upgrade that found old global

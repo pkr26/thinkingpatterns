@@ -283,9 +283,13 @@ jobs:
           openssl rand -hex 32 > deploy/secrets/token_secret
           : > deploy/secrets/auth_token_secret
           openssl rand -base64 32 > deploy/secrets/backup_key
+          # Independent audit 2026-09-27: the metrics token rides the same
+          # file-mount chain (api MINDPATTERN_METRICS_TOKEN_FILE); ONE
+          # generated value, no env-var plaintext hop.
+          openssl rand -hex 16 > deploy/secrets/metrics_token
           chmod 600 .env deploy/secrets/postgres_password \
             deploy/secrets/token_secret deploy/secrets/auth_token_secret \
-            deploy/secrets/backup_key
+            deploy/secrets/backup_key deploy/secrets/metrics_token
       - name: Assert the db password is ONE value across .env and the secret file
         # Fail-fast re-audit assertion (2026-09-27): the api authenticates
         # with the password interpolated from .env into MINDPATTERN_DB_URL,
@@ -316,7 +320,13 @@ jobs:
               echo "compose render: api MINDPATTERN_DB_URL contains the deploy/secrets/postgres_password value"
               ;;
             *)
-              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): ${rendered_url:-<empty>}" >&2
+              # Independent audit 2026-09-27: redact the credential from
+              # the annotation — rendered_url is the FULL connection URL
+              # including the password, and ::error text lands in the
+              # run log (this is a throwaway per-run value, but the
+              # secret-in-log pattern is the one this job exists to
+              # prevent).
+              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): $(printf '%s' "${rendered_url:-}" | sed 's/:[^:@\/]*@/:***@/')" >&2
               exit 1
               ;;
           esac
@@ -515,7 +525,13 @@ jobs:
         # fails when the tag moved AND the pin is >90 days old per the
         # deploy/README.md inventory — a re-pin becomes scheduled, not
         # accidental.
-        run: bash deploy/monitoring/check-image-drift.sh
+        run: |
+          # Selftest first (independent audit 2026-09-27): prove the gate's
+          # failure modes actually fail — moved/stale pin, missing
+          # inventory row, deleted tag, transport failure — before
+          # trusting the live registry walk below.
+          bash deploy/monitoring/check-image-drift.sh --selftest
+          bash deploy/monitoring/check-image-drift.sh
       - name: Shellcheck every shell script (error severity)
         run: shellcheck --severity=error $(find . -name '*.sh' -not -path '*/node_modules/*')
 

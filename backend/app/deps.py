@@ -51,8 +51,45 @@ class ApiError(HTTPException):
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    from sqlalchemy import event
+
+    from .api._audit import flush_audit_journal
+
     async with request.app.state.sessionmaker() as session:
-        yield session
+        # Independent audit 2026-09-27: the audit journal must be appended
+        # strictly AFTER the handler's commit (a pre-commit journal line
+        # could outlive a rolled-back transaction and read as tail
+        # truncation). Track the outcome via session events, then flush the
+        # staged journal entries once the request handler has finished.
+        # Best-effort and no-op unless an audit row was appended AND the
+        # journal path is configured.
+        committed = False
+        rolled_back = False
+
+        def _mark_commit(_session=None) -> None:
+            nonlocal committed
+            committed = True
+
+        def _mark_rollback(_session=None) -> None:
+            nonlocal rolled_back
+            rolled_back = True
+
+        event.listen(session.sync_session, "after_commit", _mark_commit)
+        event.listen(session.sync_session, "after_rollback", _mark_rollback)
+        try:
+            yield session
+        finally:
+            if committed and not rolled_back:
+                try:
+                    await flush_audit_journal(
+                        session, request.app.state.settings.audit_journal_path
+                    )
+                except Exception:  # noqa: BLE001 — journal is best-effort by contract
+                    import logging
+
+                    logging.getLogger(__name__).exception(
+                        "post-commit audit journal flush failed (benign; journal falls behind)"
+                    )
 
 
 async def require_user(
@@ -81,8 +118,13 @@ async def require_user(
     # Single-token revocation (2026-09-26): a logout records the token's
     # jti until its own exp. Legacy jti-less tokens cannot be individually
     # revoked — they remain covered by the account-wide epoch below.
+    # Independent audit 2026-09-27: the check is the durable-backed one —
+    # the in-memory map is the fast path, boot hydration keeps it warm, and
+    # a point query answers only once the cap has evicted entries.
     jti = payload.get("jti")
-    if isinstance(jti, str) and request.app.state.token_revocations.is_revoked(jti):
+    if isinstance(jti, str) and await request.app.state.token_revocations.is_revoked_checked(
+        session, jti
+    ):
         raise failure
     user = await session.get(User, payload["uid"])
     if user is None or not user.is_active:

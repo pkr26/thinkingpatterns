@@ -159,6 +159,30 @@
    "na": 0.0
   },
   {
+   "text": "love this \u2764 and this \u2764\ufe0f the same",
+   "score": 1.0,
+   "pa": 1.0,
+   "na": 0.0
+  },
+  {
+   "text": "\u2639 all morning but \u2600\ufe0f by noon",
+   "score": -0.1875000000000001,
+   "pa": 0.6375,
+   "na": 0.825
+  },
+  {
+   "text": "\u2639\ufe0f again \u2639 again",
+   "score": -1.0,
+   "pa": 0.0,
+   "na": 1.0
+  },
+  {
+   "text": "\ud83c\udf27 storm \u26c8 again \u2764 anyway",
+   "score": 0.17500000000000004,
+   "pa": 0.75,
+   "na": 0.575
+  },
+  {
    "text": "good good good good good",
    "score": 1.0,
    "pa": 1.0,

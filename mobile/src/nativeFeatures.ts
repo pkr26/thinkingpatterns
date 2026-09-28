@@ -24,7 +24,13 @@
  *    biometricUnlock.ts over react-native-keychain (already a dependency).
  */
 
-import { nextReminderFireTime } from "./reminders";
+import { getReminderPrefs, nextReminderFireTime } from "./reminders";
+import {
+  getMeasureReminderPrefs,
+  lastMeasureCompletedOn,
+  measureReminderDue,
+  nextMeasureReminderFireTime,
+} from "./measureReminders";
 import { t } from "./strings";
 
 export interface NativeCapability {
@@ -264,9 +270,17 @@ export async function scheduleMeasureReminder(fireAt: Date): Promise<boolean> {
 /** Remove the measure check-in nudge — scoped to ITS id, never the app's
  *  whole notification set (the daily reminder is a separate schedule).
  *  Returns false — never throws — when the module is absent or the call
- *  fails; a stale one-shot nudge that survives is a single calm line, not
- *  a data event. */
-export async function cancelMeasureReminder(): Promise<boolean> {
+ *  fails; a stale one-shot nudge that survives is a single calm line, not a
+ *  data event.
+ *
+ *  independent audit 2026-09-27 (P3): on builds without per-id cancel the
+ *  fallback used to cancelAllNotifications() and silently kill the SIBLING
+ *  daily reminder too. When a userId is supplied (the reminderSync call
+ *  sites always have one), the sibling is re-scheduled from its stored
+ *  preference right after the cancel-all — the same schedule function, the
+ *  same stable id. Sign-out / account deletion call this WITHOUT a userId
+ *  on purpose: there the point is to remove every schedule. */
+export async function cancelMeasureReminder(userId?: string): Promise<boolean> {
   const api = notifeeFrom(await probeAsync("@notifee/react-native"));
   if (api === null) return false;
   try {
@@ -277,10 +291,37 @@ export async function cancelMeasureReminder(): Promise<boolean> {
     // Ancient builds without per-id cancel: cancel-all is the only tool.
     // The measure nudge (and any reschedule) self-heals at the next sync.
     await api.cancelAllNotifications();
+    if (userId !== undefined) {
+      await rescheduleDailyReminderSibling(userId).catch(() => {});
+    }
     return true;
   } catch {
     return false;
   }
+}
+
+/** independent audit 2026-09-27 (P3): after a fallback cancel-all killed
+ *  every schedule, re-create the DAILY reminder exactly when its stored
+ *  preference says one should exist (the reminderSync reconciliation rule,
+ *  applied to the survivor). Best-effort and silent: a restore failure
+ *  self-heals at the next sync point. */
+async function rescheduleDailyReminderSibling(userId: string): Promise<void> {
+  const prefs = await getReminderPrefs(userId);
+  if (!prefs.enabled) return;
+  await scheduleDailyReminder(prefs.hour, prefs.minute);
+}
+
+/** independent audit 2026-09-27 (P3): after a fallback cancel-all killed
+ *  every schedule, re-create the MEASURE check-in nudge exactly when its
+ *  stored preference AND cadence say one should exist (the
+ *  syncMeasureReminderSchedule rule, applied to the survivor). Best-effort
+ *  and silent: a restore failure self-heals at the next sync point. */
+async function rescheduleMeasureReminderSibling(userId: string): Promise<void> {
+  const prefs = await getMeasureReminderPrefs(userId);
+  if (!prefs.enabled) return;
+  const last = await lastMeasureCompletedOn(userId);
+  if (!measureReminderDue(last, prefs.intervalWeeks, new Date())) return;
+  await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date()));
 }
 
 /**
@@ -288,11 +329,13 @@ export async function cancelMeasureReminder(): Promise<boolean> {
  * the app now schedules a second notification, the measure check-in nudge,
  * and a sign-out / preference-off must not silently kill the user's other
  * reminder). An ancient notifee build without per-id cancel falls back to
- * cancelAllNotifications; the measure schedule reschedules itself at the
- * next session-start sync. Returns false — never throws — when the module
- * is absent or the native call fails.
+ * cancelAllNotifications and — when a userId is supplied (the reminderSync
+ * call sites always have one) — re-schedules the surviving measure nudge
+ * from its stored preference + cadence (independent audit 2026-09-27, P3).
+ * Returns false — never throws — when the module is absent or the native
+ * call fails.
  */
-export async function cancelDailyReminder(): Promise<boolean> {
+export async function cancelDailyReminder(userId?: string): Promise<boolean> {
   const api = notifeeFrom(await probeAsync("@notifee/react-native"));
   if (api === null) return false;
   try {
@@ -301,6 +344,9 @@ export async function cancelDailyReminder(): Promise<boolean> {
       return true;
     }
     await api.cancelAllNotifications();
+    if (userId !== undefined) {
+      await rescheduleMeasureReminderSibling(userId).catch(() => {});
+    }
     return true;
   } catch {
     return false;

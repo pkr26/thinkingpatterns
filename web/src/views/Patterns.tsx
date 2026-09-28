@@ -227,6 +227,11 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
   const toggleMute = useCallback(async (pid: string | undefined): Promise<void> => {
     const owner = vault.ownerUserId();
     if (!pid || !owner || !vault.isUnlocked()) return;
+    // independent audit 2026-09-27 (P2): fetch the keys ONCE, before any
+    // await — the second vault.get() used to sit AFTER the local-persist
+    // await, so a lock mid-write threw inside this void callback as an
+    // unhandled rejection.
+    const keys = vault.get();
     const next = new Set(muted);
     const muting = !next.has(pid);
     if (muting) next.add(pid);
@@ -234,9 +239,13 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     setMuted(next);
     // M-W4: the local set persists as ONE data-key-encrypted blob — never
     // plaintext localStorage (the pids are content-derived theme words).
-    await writeMutedPids(vault.get().dataKey, owner, next).catch(() => undefined);
+    await writeMutedPids(keys.dataKey, owner, next).catch(() => undefined);
+    // A lock during that write: the UI state above stays, the server-side
+    // sync is quietly skipped (the mute re-rides on the next toggle) —
+    // never a throw, never a write under the zeroized shared buffer.
+    if (!vault.isUnlocked()) return;
     // The mute also rides the next recompute (server-side suppression):
-    await recordPatternMute(vault.get().dataKey, owner, pid, muting).catch(() => undefined);
+    await recordPatternMute(keys.dataKey, owner, pid, muting).catch(() => undefined);
   }, [muted]);
 
   const visible = useMemo(() => {

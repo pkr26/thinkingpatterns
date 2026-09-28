@@ -375,11 +375,10 @@ false_pos = [
     if p.kind in ("mood_correlation", "link") and p.label not in ("work", "family")
 ]
 false_topics = [p for p in pats.values() if p.kind == "topic" and p.label != "guitar"]
-check(
-    "H no confound/false associations",
-    (not false_pos or str([(p.kind, p.label, p.detail.get("direction")) for p in false_pos]) == "")
-    and not false_topics,
-)
+# Independent audit 2026-09-27: the old first clause contained a dead
+# disjunct (str(list) is never ""), so the condition silently reduced to
+# `not false_pos` — which IS the intended check; stated plainly now.
+check("H no confound/false associations", not false_pos and not false_topics)
 
 # A FAILing probe must fail CI: exit nonzero so the ground-truth check can
 # gate builds instead of only printing.

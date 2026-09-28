@@ -42,6 +42,10 @@ interface Tables {
   languageDetection: { minTokens: number; hitFloor: number; knownEn: Set<string>; knownEs: Set<string> };
   emojiValences: Record<string, number>;
   emojiOrder: string[];
+  /** independent audit 2026-09-27: the VS16-canonicalizing emoji scanner
+   *  (brain._EMOJI_SCAN_RE / _EMOJI_BASE_TO_KEY) — see emojiTokens. */
+  emojiScanRegex: RegExp | null;
+  emojiBaseToKey: Record<string, string>;
 }
 let tables: Tables | null = null;
 /** Null-prototype copies for every lexicon table used as a Record lookup
@@ -73,6 +77,31 @@ function T(): Tables {
       emoji_valences: Record<string, number>;
       emoji_order: string[];
     };
+    // independent audit 2026-09-27: brain._EMOJI_BASE_TO_KEY — each map key
+    // with its optional trailing U+FE0F stripped is a BASE; a
+    // fully-qualified (VS16-bearing) key is the canonical spelling of a
+    // shared base and displaces a bare one (insertion-order stable
+    // otherwise — one spelling per base today).
+    const VS16 = "\ufe0f";
+    const emojiBaseToKey: Record<string, string> = Object.create(null);
+    for (const key of lex.emoji_order) {
+      const base = key.endsWith(VS16) ? key.slice(0, -1) : key;
+      if (!(base in emojiBaseToKey) || key.endsWith(VS16)) {
+        emojiBaseToKey[base] = key;
+      }
+    }
+    // brain._EMOJI_SCAN_RE: one alternation of every base with an OPTIONAL
+    // trailing U+FE0F, LONGEST bases first so no base can eat another's
+    // prefix. (Only prefix-related bases can both match at one position,
+    // and both length metrics — code points and UTF-16 units — order those
+    // identically, so unit-length sorting is behaviorally identical to the
+    // server's (-len, base) tuple sort.)
+    const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const bases = Object.keys(emojiBaseToKey).sort((a, b) => b.length - a.length);
+    const emojiScanRegex =
+      bases.length > 0
+        ? new RegExp(bases.map((base) => escapeRe(base) + "\ufe0f?").join("|"), "g")
+        : null;
     tables = {
       scalars: lex.scalars,
       butWords: new Set(lex.word_sets.but_words),
@@ -90,6 +119,8 @@ function T(): Tables {
       },
       emojiValences: nullProto(lex.emoji_valences),
       emojiOrder: lex.emoji_order,
+      emojiScanRegex,
+      emojiBaseToKey,
     };
   }
   return tables;
@@ -228,17 +259,36 @@ export function valenceWalk(tokens: string[], language?: string): number[] {
   return sentiments;
 }
 
+/** brain._emoji_tokens (independent audit 2026-09-27): the entry's emoji
+ *  as canonical EMOJI_VALENCES keys, one per occurrence, counted on a
+ *  VS16-CANONICALIZED view of the raw text — each distinct base matched
+ *  with an OPTIONAL trailing U+FE0F (longest bases first, so no base can
+ *  eat another's prefix), each occurrence emitted once as the map's
+ *  canonical key. Bare ("❤") and fully-qualified ("❤️") spellings score
+ *  identically, and shared bases count once — byte-identical to the
+ *  server's engine (the old per-key text.count loop missed every bare
+ *  base spelling and would double-count shared bases). */
+function emojiTokens(text: string): string[] {
+  const t = T();
+  if (t.emojiScanRegex === null) return [];
+  const out: string[] = [];
+  for (const match of text.match(t.emojiScanRegex) ?? []) {
+    const base = match.endsWith("\ufe0f") ? match.slice(0, -1) : match;
+    const canonical = t.emojiBaseToKey[base];
+    if (canonical !== undefined) out.push(canonical);
+  }
+  return out;
+}
+
 /** Tokenize text exactly as the server does: lowered, folded [a-z']+
- *  plus every emoji occurrence as its own token, appended in the
- *  engine's own emoji-map iteration order. */
+ *  plus every emoji occurrence as its own token (VS16-canonicalized,
+ *  appended in the order they appear in the text — the same occurrence
+ *  sequence brain._emoji_tokens produces). */
 export function tokenize(text: string): string[] {
   // Lowercase FIRST, then fold — the server's exact order. The fold is
   // what keeps accented words and iOS U+2019 contractions whole (H-8).
   const tokens = (foldSentimentText(text.toLowerCase()).match(WORD_RE) ?? []) as string[];
-  for (const emoji of T().emojiOrder) {
-    const count = text.split(emoji).length - 1;
-    for (let i = 0; i < count; i++) tokens.push(emoji);
-  }
+  tokens.push(...emojiTokens(text));
   return tokens;
 }
 

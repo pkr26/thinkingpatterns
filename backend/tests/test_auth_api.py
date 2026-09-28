@@ -121,7 +121,11 @@ async def test_salt_lookup_never_reveals_existence(client):
     assert len(base64.b64decode(real.json()["salt"])) == 16
 
 
-async def test_logout_revokes_every_token(client):
+async def test_logout_revokes_only_the_presented_token(client):
+    # Renamed (independent audit 2026-09-27): since single-token jti
+    # revocation shipped, logout kills exactly the presented bearer (plus
+    # the legacy epoch-bump fallback for jti-less tokens) — the old
+    # "every token" name described the pre-jti contract.
     emu = ClientEmulator("revoker", "some-password")
     await emu.register(client)
     old_token = emu.token

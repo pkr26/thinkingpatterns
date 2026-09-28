@@ -481,6 +481,7 @@ class TestSettingsReprHidesSecrets:
             "pairing_secret_explicit",
             "decoy_secret",
             "metrics_token",
+            "audit_mac_secret_explicit",
             "llm_api_key",
             "therapist_enrollment_token",
         }

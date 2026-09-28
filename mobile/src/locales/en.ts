@@ -140,6 +140,14 @@ export const en: Record<string, string> = {
   // is unusable — a calm server/data message, never "wrong password".
   "unlock.envelopeFailed":
     "your account's key envelope could not be opened on this server. Nothing was changed — try again, and contact support if it repeats.",
+  // independent audit 2026-09-27 (P2): the online login succeeded but the
+  // key-scheme fetch failed and all this device has is a STALE scheme marker
+  // (or nothing). A marker alone cannot authorize deriving v1 keys: today it
+  // is safe only because v1→v2 wraps the same data key, and any future
+  // scheme rotation would turn this into a silent wrong-key write. Refused
+  // with honest retry copy — nothing was unlocked or changed.
+  "unlock.schemeUnconfirmed":
+    "We couldn't confirm how your account's encryption is set up right now. Check your connection and try again in a moment — nothing was unlocked and nothing was changed.",
 
   // ----------------------------------------------------------------- login
   "login.subtitle": "Your patterns, from your words. Encrypted on this device.",
@@ -707,6 +715,11 @@ export const en: Record<string, string> = {
     "Your password now unlocks a freshly wrapped copy of your encryption key; the key itself did not change, so your journal and sharing are exactly as they were. Sign in again on this device and on any other device you use.",
   "settings.rotateFailedTitle": "Could not change password",
   "settings.rotateWrongOld": "The current password was not accepted. Nothing was changed.",
+  // independent audit 2026-09-27 (P2): the offline queue is sealed under the
+  // OLD data key; rotating before it drains would orphan every queued entry.
+  // The rotation aborts before any server-side step with this honest copy.
+  "settings.rotateQueueBlocked":
+    "Entries are still waiting to upload from this device, sealed under your current password — changing it now would leave them unreadable. Save them first (keep the app open while online until the queue is empty), then try again.",
   "settings.rotateRewrapFailed":
     "These sharing grants could not be re-wrapped and must be re-paired from the therapist's pairing code: {names}",
   // --- v1 → v2 key-envelope upgrade (2026-09-26) --------------------------

@@ -67,6 +67,11 @@ export interface KdfParams {
 const MIN_ITERATIONS = 100_000;
 const PBKDF2_MAX_ITERATIONS = 10_000_000;
 const ARGON2_MIN_ITERATIONS = 2;
+/** independent audit 2026-09-27 (P3): the backend caps argon2id at
+ *  10_000_000 too (kdf.py ARGON2_MAX_ITERATIONS) — validation must mirror
+ *  the server on BOTH sides of the range, or a hostile/buggy echo above
+ *  the cap would pass here and die (or burn CPU) server-side. */
+const ARGON2_MAX_ITERATIONS = 10_000_000;
 const ARGON2_MIN_MEMORY_KIB = 19 * 1024;
 const ARGON2_MAX_MEMORY_KIB = 256 * 1024;
 const ARGON2_MAX_PARALLELISM = 4;
@@ -111,8 +116,8 @@ export function validateKdfParams(value: unknown): KdfParams {
   const iterations = raw.iterations as number;
   const memoryKib = raw.memory_kib as number;
   const parallelism = raw.parallelism as number;
-  if (iterations < ARGON2_MIN_ITERATIONS) {
-    throw new Error(`kdf_params.iterations must be >= ${ARGON2_MIN_ITERATIONS} for argon2id`);
+  if (iterations < ARGON2_MIN_ITERATIONS || iterations > ARGON2_MAX_ITERATIONS) {
+    throw new Error(`kdf_params.iterations must be ${ARGON2_MIN_ITERATIONS}-${ARGON2_MAX_ITERATIONS} for argon2id`);
   }
   if (memoryKib < ARGON2_MIN_MEMORY_KIB || memoryKib > ARGON2_MAX_MEMORY_KIB) {
     throw new Error(`kdf_params.memory_kib must be ${ARGON2_MIN_MEMORY_KIB}-${ARGON2_MAX_MEMORY_KIB}`);

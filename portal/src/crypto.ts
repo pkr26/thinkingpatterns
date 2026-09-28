@@ -625,3 +625,19 @@ export async function keyFingerprint(spkiB64: string): Promise<string> {
   hex = hex.toUpperCase();
   return hex.match(/.{4}/g)?.join(" ") ?? hex;
 }
+
+/** independent audit 2026-09-27: the SHORT server-format wrap-key
+ *  fingerprint — first 16 hex chars of SHA-256 over the SPKI DER,
+ *  lowercase, no separators — byte-identical to backend
+ *  sharing.wrap_key_fingerprint(der). Running the portal's OWN wrap
+ *  public key through this function yields the value the pairing-SAS
+ *  response's `wrap_key_fingerprint` must be cross-checked against: the
+ *  server computes BOTH pairing SAS strings, so the SAS alone proves
+ *  nothing against a malicious server; this locally computed digest is
+ *  the actual key-substitution check. */
+export async function serverWrapKeyFingerprint(spkiB64: string): Promise<string> {
+  const digest = new Uint8Array(await subtle().digest("SHA-256", unb64(spkiB64)));
+  let hex = "";
+  for (const byte of digest.subarray(0, 8)) hex += byte.toString(16).padStart(2, "0");
+  return hex;
+}

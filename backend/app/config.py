@@ -107,7 +107,12 @@ def _secret_env(name: str, default: str = "") -> str:
     matching the empty-env-var semantics.
     """
     raw = os.getenv(name, "")
-    if raw.strip():
+    # Independent audit 2026-09-27: the env branch is stripped too, matching
+    # the file branch — a secret that resolves differently by source was a
+    # configuration trap (the same value pasted into a file worked, into an
+    # env var with a trailing newline broke).
+    raw = raw.strip()
+    if raw:
         return raw
     file_name = os.getenv(f"{name}_FILE", "")
     if not file_name.strip():
@@ -290,6 +295,41 @@ class Settings:
         minted under and deps refuses a mismatch, so rotating to a split
         secret invalidates EVEN WHEN an operator copies the same bytes."""
         return 2 if self.auth_token_secret_explicit.strip() else 1
+
+    # Independent audit 2026-09-27: keyed seal for the access-log chain.
+    # The link hashes are SHA-256 over public fields, so a DB-write attacker
+    # could recompute them; the MAC key must live OUTSIDE the database.
+    # Explicit MINDPATTERN_AUDIT_MAC_SECRET (env or _FILE) wins; otherwise
+    # it is HKDF-derived from the token secret with its own info label, so
+    # rotating the token secret rotates the MAC key by construction. LIVE
+    # property on the same standing as the purpose-split secrets above.
+    audit_mac_secret_explicit: str = field(default="", repr=False)
+
+    @property
+    def audit_mac_secret_hex(self) -> str:
+        """Hex-encoded HMAC key for AccessLog.entry_mac (32 bytes)."""
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+        from cryptography.hazmat.primitives import hashes
+
+        explicit = self.audit_mac_secret_explicit.strip()
+        if explicit:
+            return explicit
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b"mindpattern/audit-chain/v1",
+            info=b"mindpattern/audit-chain-mac/v1",
+        )
+        return hkdf.derive(self.token_secret.encode("utf-8")).hex()
+
+    # Independent audit 2026-09-27: append-only journal anchoring the audit
+    # chain's TAIL. A forward hash chain cannot detect deletion of its
+    # newest rows; when this path is set (a volume-mounted file), every
+    # committed audit append also writes a line here and verification flags
+    # a journal that is AHEAD of the database head as tail truncation.
+    # Empty (default) keeps the honest link-only boundary; compose wires a
+    # named volume by default so production gets the anchor for free.
+    audit_journal_path: str = ""
 
     # 2026-09-26 remediation (LOW c): server-side scrypt work factor.
     # Raised 2^16 -> 2^17 as the config default (~70ms and 128 MiB per
@@ -618,6 +658,15 @@ class Settings:
         # MAX_BODY_BYTES constant above (A-8-style fail-fast bound).
         if self.max_body_bytes > MAX_BODY_BYTES:
             raise RuntimeError(f"max_body_bytes must be <= {MAX_BODY_BYTES}")
+        # Independent audit 2026-09-27: the audit-chain MAC secret must be
+        # usable key material — 32 bytes hex (64 chars). A typo'd value
+        # would otherwise explode later inside create_app with an opaque
+        # traceback instead of a named boot error.
+        explicit_mac = self.audit_mac_secret_explicit.strip()
+        if explicit_mac and (
+            len(explicit_mac) != 64 or any(c not in "0123456789abcdefABCDEF" for c in explicit_mac)
+        ):
+            raise RuntimeError("MINDPATTERN_AUDIT_MAC_SECRET must be 32 bytes of hex (64 chars)")
         # 2026-09-26 audit item 9: the edge buffers one complete body per
         # in-flight request, so the deployment's worst-case buffer memory is
         # this product. Refuse the combination up front with the arithmetic
@@ -742,6 +791,12 @@ class Settings:
             auth_token_secret_explicit=_secret_env("MINDPATTERN_AUTH_TOKEN_SECRET"),
             totp_wrap_secret_explicit=_secret_env("MINDPATTERN_TOTP_WRAP_SECRET"),
             pairing_secret_explicit=_secret_env("MINDPATTERN_PAIRING_SECRET"),
+            # Independent audit 2026-09-27: same file-mount resolution as
+            # every other secret — the metrics bearer token was the last
+            # one still readable via `docker inspect` env.
+            metrics_token=_secret_env("MINDPATTERN_METRICS_TOKEN"),
+            audit_mac_secret_explicit=_secret_env("MINDPATTERN_AUDIT_MAC_SECRET"),
+            audit_journal_path=os.getenv("MINDPATTERN_AUDIT_JOURNAL", "").strip(),
             scrypt_n=_int_env("MINDPATTERN_SCRYPT_N", 2**17),
             decoy_secret=_secret_env("MINDPATTERN_DECOY_SECRET"),
             token_ttl_seconds=_int_env("MINDPATTERN_TOKEN_TTL", 86_400),
@@ -762,7 +817,6 @@ class Settings:
             max_user_blob_bytes=_int_env("MINDPATTERN_MAX_USER_BLOB_BYTES", 256 * 1024 * 1024),
             recompute_entry_limit=_int_env("MINDPATTERN_RECOMPUTE_ENTRY_LIMIT", 2_000),
             analysis_blob_budget=_int_env("MINDPATTERN_ANALYSIS_BLOB_BUDGET", 8 * 1024 * 1024),
-            metrics_token=os.getenv("MINDPATTERN_METRICS_TOKEN", "").strip(),
             db_pool_size=_int_env("MINDPATTERN_DB_POOL_SIZE", 5),
             db_max_overflow=_int_env("MINDPATTERN_DB_MAX_OVERFLOW", 10),
             db_pool_timeout=_int_env("MINDPATTERN_DB_POOL_TIMEOUT", 30),

@@ -1712,8 +1712,8 @@ async def create_note(
             .first()
         )
         if existing is not None:
-            # Idempotent retry of an offline queue: rewrite in place (the
-            # patient's entries do the same on client_entry_id conflicts).
+            # Idempotent retry of an offline queue: the SAME ciphertext and
+            # pattern anchor replays as success.
             # Patient-scoped (2026-09-17 audit): the idempotency key is
             # (therapist, client_note_id) — reusing an id for a DIFFERENT
             # patient must not silently rewrite the first patient's note; that
@@ -1726,47 +1726,28 @@ async def create_note(
                 )
             changed = bytes(existing.blob) != blob or existing.pattern_pid != body.pattern_pid
             if changed:
-                if bytes(existing.blob) != blob:
-                    # Note-history parity (independent audit V-4,
-                    # 2026-09-21): an idempotent RETRY arriving with
-                    # different content is still a CHANGING update — the
-                    # superseded blob is preserved as an immutable revision
-                    # exactly like PATCH, or a retried create silently
-                    # replaces history. Same AAD (client_note_id is stable).
-                    session.add(
-                        TherapistNoteRevision(
-                            note_id=existing.id,
-                            therapist_id=user.id,
-                            blob=bytes(existing.blob),
-                            created_at=utcnow(),
-                        )
-                    )
-                    # 2026-09-26 audit H-6: evict beyond the per-note cap
-                    # BEFORE the quota math so the chart budget sees the
-                    # post-eviction history (same rule as PATCH below).
-                    await _enforce_note_revision_cap(session, existing.id)
-                # H-6: the quota check runs AFTER the pending revision is
-                # visible, so the preserved superseded blob is counted.
-                await _assert_note_quota(
-                    session,
-                    user.id,
-                    patient_id,
-                    len(blob),
-                    previous_size=len(bytes(existing.blob)),
-                    is_new=False,
+                # Independent audit 2026-09-27: a POST carrying DIFFERENT
+                # content under an existing client_note_id used to rewrite
+                # the note in place — last-write-wins, the exact semantics
+                # item 15 closed for PATCH. The create channel is now
+                # consistent with it: same-content retries stay idempotent,
+                # different content is a 409 and the client must PATCH with
+                # base_version, where the loser's edit is preserved as an
+                # immutable revision instead of silently discarded.
+                raise ApiError(
+                    status_code=409,
+                    detail="a different note with this client_note_id already exists; "
+                    "edit it with PATCH and a base_version",
+                    code="version_conflict",
                 )
-                existing.blob = blob
-                existing.pattern_pid = body.pattern_pid
-                existing.updated_at = utcnow()
-            else:
-                await _assert_note_quota(
-                    session,
-                    user.id,
-                    patient_id,
-                    len(blob),
-                    previous_size=len(bytes(existing.blob)),
-                    is_new=False,
-                )
+            await _assert_note_quota(
+                session,
+                user.id,
+                patient_id,
+                len(blob),
+                previous_size=len(bytes(existing.blob)),
+                is_new=False,
+            )
             row = existing
         else:
             await _assert_note_quota(session, user.id, patient_id, len(blob), is_new=True)

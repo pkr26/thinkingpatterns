@@ -657,4 +657,106 @@ describe("SAS display (out-of-band pairing verification)", () => {
     await flush();
     expect(textOf(root)).toContain("Do not continue");
   });
+
+  // --- independent audit 2026-09-27: the cross-check must actually pass on
+  // an honest server. The old inline compare held the server's 16-lowercase
+  // hex value against therapistKeyFingerprint's 32-uppercase space-grouped
+  // format — they could NEVER be equal, so the mismatch alert fired on every
+  // honest pairing and trained users to ignore it.
+
+  /** The server-format fingerprint of the test keypair: exactly what the
+   *  backend computes — sha256(der).hexdigest()[:16], lowercase. */
+  const honestServerFingerprint = (): string =>
+    nodeCrypto.createHash("sha256").update(Buffer.from(THERAPIST_PUB, "base64")).digest("hex").slice(0, 16);
+
+  it("an HONEST server fingerprint (derived from the real key) renders NO mismatch alert", async () => {
+    vi.mocked(api.pairingLookup).mockResolvedValue({
+      therapist_id: THERAPIST_ID,
+      display_name: "Dr. Real",
+      wrap_pub_key: THERAPIST_PUB,
+      sas: "123 456",
+      wrap_key_fingerprint: honestServerFingerprint(),
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).toContain("Dr. Real");
+    expect(textOf(root)).toContain("Match code: 123 456");
+    // The mismatch alert's distinctive body copy is absent (the SAS note's
+    // generic "Do not continue." instruction is always present and is not
+    // the alert).
+    expect(textOf(root)).not.toContain("the pairing may have been intercepted");
+  });
+
+  it("a tampered fingerprint (valid shape, wrong key) keeps firing the tripwire", async () => {
+    const honest = honestServerFingerprint();
+    const tampered = (honest.slice(0, 15) + (honest[15] === "0" ? "1" : "0"));
+    vi.mocked(api.pairingLookup).mockResolvedValue({
+      therapist_id: THERAPIST_ID,
+      display_name: "Dr. Real",
+      wrap_pub_key: THERAPIST_PUB,
+      sas: "123 456",
+      wrap_key_fingerprint: tampered,
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).toContain("Do not continue");
+    expect(textOf(root)).toContain("the pairing may have been intercepted");
+  });
+
+  it("a MALFORMED server value is treated as absent — no alert (an older server predates the field)", async () => {
+    vi.mocked(api.pairingLookup).mockResolvedValue({
+      therapist_id: THERAPIST_ID,
+      display_name: "Dr. Real",
+      wrap_pub_key: THERAPIST_PUB,
+      sas: "123 456",
+      wrap_key_fingerprint: "0123456789ABCDEF", // uppercase: wrong shape, not a mismatch claim
+    } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    await typeInto(root, "e.g. 7X2KQM4N", "7X2KQM4N");
+    await pressLabel(root, "Find my therapist");
+    await flush();
+    expect(textOf(root)).toContain("Dr. Real");
+    expect(textOf(root)).not.toContain("the pairing may have been intercepted");
+  });
+});
+
+// independent audit 2026-09-27: unit pins for the crypto-side cross-check.
+const { serverFingerprintMatches, therapistKeyFingerprint } = await import("../../src/crypto/sharing");
+describe("serverFingerprintMatches (crypto/sharing)", () => {
+  const honest = nodeCrypto
+    .createHash("sha256")
+    .update(Buffer.from(THERAPIST_PUB, "base64"))
+    .digest("hex")
+    .slice(0, 16);
+
+  it("true for the server-format digest of the same DER bytes", () => {
+    expect(honest).toMatch(/^[0-9a-f]{16}$/); // the honest value really is the contract shape
+    expect(serverFingerprintMatches(THERAPIST_PUB, honest)).toBe(true);
+  });
+
+  it("false for a valid-shaped but different value", () => {
+    const other = (honest.slice(0, 15) + (honest[15] === "f" ? "0" : "f"));
+    expect(serverFingerprintMatches(THERAPIST_PUB, other)).toBe(false);
+  });
+
+  it("null (absent) for malformed values — never a mismatch claim", () => {
+    expect(serverFingerprintMatches(THERAPIST_PUB, "")).toBeNull();
+    expect(serverFingerprintMatches(THERAPIST_PUB, "not-hex-at-all")).toBeNull();
+    expect(serverFingerprintMatches(THERAPIST_PUB, honest.toUpperCase())).toBeNull();
+    expect(serverFingerprintMatches(THERAPIST_PUB, honest.slice(0, 15))).toBeNull();
+    expect(serverFingerprintMatches(THERAPIST_PUB, honest + "ab")).toBeNull();
+  });
+
+  it("compares against the server format, not the display format (the old never-equal bug)", () => {
+    // The spaced/uppercase DISPLAY fingerprint must not be mistaken for the
+    // server value; only the lowercase short digest matches.
+    expect(serverFingerprintMatches(THERAPIST_PUB, therapistKeyFingerprint(THERAPIST_PUB))).toBeNull();
+  });
 });

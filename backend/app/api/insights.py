@@ -255,7 +255,9 @@ async def create_processing_session(
             # waited must fail closed here exactly like an epoch bump — a
             # logged-out session must not mint fresh key material).
             fence_jti = getattr(request.state, "mindpattern_token_jti", None)
-            if fence_jti and request.app.state.token_revocations.is_revoked(fence_jti):
+            if fence_jti and await request.app.state.token_revocations.is_revoked_checked(
+                session, fence_jti
+            ):
                 raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
             # Return the pooled connection before touching the in-memory keystore;
             # this is only a short authorization re-check, not a transaction that

@@ -235,11 +235,50 @@ export function tokenize(text: string): string[] {
   // Lowercase FIRST, then fold — the server's exact order. The fold is
   // what keeps accented words and iOS U+2019 contractions whole (H-8).
   const tokens = (foldSentimentText(text.toLowerCase()).match(WORD_RE) ?? []) as string[];
-  for (const emoji of T().emojiOrder) {
-    const count = text.split(emoji).length - 1;
-    for (let i = 0; i < count; i++) tokens.push(emoji);
-  }
+  tokens.push(...emojiTokens(text));
   return tokens;
+}
+
+// Independent audit 2026-09-27 (VS16 parity): the per-key split() loop was
+// the same dead counter the backend generator had — it missed every BARE
+// base spelling ("❤" without U+FE0F scored nothing while "❤️" scored), and
+// the new bare-spelling vector rows in shared/brain_vectors.json exposed
+// it. Mirror the backend's canonical counter exactly: one regex pass per
+// distinct base with an OPTIONAL trailing U+FE0F (longest bases first, so
+// no base can eat another's prefix), each occurrence emitted once as the
+// map's canonical key — bare and fully-qualified spellings score
+// identically on every platform.
+const VS16 = "\ufe0f";
+let emojiScan: { re: RegExp; baseToKey: Map<string, string> } | null = null;
+
+function emojiScanner(): { re: RegExp; baseToKey: Map<string, string> } {
+  if (emojiScan !== null) return emojiScan;
+  const baseToKey = new Map<string, string>();
+  for (const key of T().emojiOrder) {
+    const base = key.endsWith(VS16) ? key.slice(0, -VS16.length) : key;
+    // A fully-qualified (VS16-bearing) key is the canonical spelling of a
+    // shared base; a bare key never displaces it (first-insert wins only
+    // when the base is new — matches the backend's rule).
+    if (!baseToKey.has(base) || key.endsWith(VS16)) baseToKey.set(base, key);
+  }
+  const pattern = [...baseToKey.keys()]
+    .sort((a, b) => b.length - a.length || (a < b ? -1 : 1))
+    .map((base) => base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + VS16 + "?")
+    .join("|");
+  emojiScan = { re: new RegExp(pattern, "g"), baseToKey };
+  return emojiScan;
+}
+
+function emojiTokens(text: string): string[] {
+  if (!text) return [];
+  const { re, baseToKey } = emojiScanner();
+  const out: string[] = [];
+  for (const match of text.matchAll(re)) {
+    const raw = match[0];
+    const key = baseToKey.get(raw.endsWith(VS16) ? raw.slice(0, -VS16.length) : raw);
+    if (key !== undefined) out.push(key);
+  }
+  return out;
 }
 
 /** Graded lexicon sentiment in [-1, 1] — brain.sentiment_score.

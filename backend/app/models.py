@@ -518,10 +518,45 @@ class AccessLog(Base):
     # Forward chain (item 16). prev_hash is the previous row's entry_hash
     # for the same patient (NULL on a genesis row). entry_hash is the row's
     # own seal. Pre-existing rows are backfilled deterministically by the
-    # c3e9f2a6b8d4 migration (documented genesis backfill).
+    # c6e0b4f8a2d9 migration (documented genesis backfill).
     chain_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     entry_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Independent-audit 2026-09-27: keyed seal (HMAC-SHA256 over
+    # user_id:chain_seq:entry_hash under a secret held OUTSIDE the
+    # database). entry_hash alone is over public fields, so an attacker
+    # with arbitrary DB write access could rewrite a whole trail and
+    # recompute every link — the MAC makes that rewrite forgeable only
+    # with the server's key. Rows written before the column existed keep
+    # NULL (link-verified legacy; verification counts them honestly) —
+    # they age out through retention like every pre-chain row.
+    entry_mac: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class TokenRevocation(Base):
+    """Durable single-token logout record (independent audit 2026-09-27).
+
+    The jti revocation used to live ONLY in the process-local store: a
+    deploy or crash emptied it and every logged-out bearer resurrected
+    until its own exp (up to 24h) — the exact token-theft scenario logout
+    exists for. Logout now writes the jti here in the same lifecycle
+    transaction, boot re-hydrates the in-memory cache from this table,
+    and the daily sweep prunes rows whose tokens have expired. jti is a
+    random 128-bit hex string (32 chars); no FK on purpose — a revocation
+    must outlive any account row churn it describes.
+    """
+
+    __tablename__ = "token_revocation"
+    __table_args__ = (
+        # The daily prune is an expiry-leading DELETE; the boot hydration
+        # reads unexpired rows newest-expiry-first.
+        Index("ix_token_revocation_expiry", "expires_at"),
+    )
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # The token's own exp: the revocation is dead the moment its token is.
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class RekeyJournal(Base):

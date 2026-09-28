@@ -187,6 +187,17 @@ describe("kdf_params canonicalization (backend kdf.validate_kdf_params)", () => 
     expect(() => validateKdfParams({ algorithm: "argon2id", version: 1, iterations: 3 })).toThrow("require");
     expect(() => validateKdfParams(null)).toThrow("JSON object");
   });
+
+  // independent audit 2026-09-27 (P3): the backend caps argon2id
+  // iterations at 10_000_000 (kdf.py ARGON2_MAX_ITERATIONS) — the client
+  // only checked the floor, so validation did NOT mirror the server.
+  it("argon2id iterations mirror the server on BOTH bounds (audit 2026-09-27)", () => {
+    const shape = { algorithm: "argon2id", version: 1, memory_kib: 65536, parallelism: 1 } as const;
+    expect(() => validateKdfParams({ ...shape, iterations: 2 })).not.toThrow(); // at the floor
+    expect(() => validateKdfParams({ ...shape, iterations: 10_000_000 })).not.toThrow(); // at the cap
+    expect(() => validateKdfParams({ ...shape, iterations: 1 })).toThrow("2-10000000"); // below the floor
+    expect(() => validateKdfParams({ ...shape, iterations: 10_000_001 })).toThrow("2-10000000"); // above the cap
+  });
 });
 
 describe("envelope lifecycle helpers", () => {

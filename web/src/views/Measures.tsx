@@ -275,27 +275,45 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         date: localDateISO(),
       };
     try {
+      // independent audit 2026-09-27 (P1): snapshot the data key BEFORE the
+      // awaits — vault.get()'s buffers are SHARED, and a lock landing during
+      // the persist await zeroizes them, which used to encrypt the
+      // questionnaire under 32 zero bytes, POST it, and then destroy the
+      // pending retry record. The snapshot (plus the re-check below) closes
+      // both halves; the copy is zeroized in the inner finally.
       const keys = vault.get();
-      // Persist BEFORE the send (a status-0 failure can be a timeout AFTER
-      // the server committed; the stable id is what makes every retry
-      // idempotent). A persistence failure never blocks the send — the
-      // answers are also still on screen.
-      pendingRef.current = record;
-      await savePendingMeasure(keys.dataKey, owner, record).catch(() => undefined);
-      // measurePayload returns the canonical JSON string itself:
-      const encoded = new TextEncoder().encode(measurePayload(record.kind, record.picks, new Date().toISOString()));
+      const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
+      dataKey.set(keys.dataKey);
       try {
-        const blob = await encrypt(keys.dataKey, encoded, buildAad("measure", owner, record.clientMeasureId));
-        await api.createMeasure(record.clientMeasureId, toBase64(blob), record.date);
+        // Persist BEFORE the send (a status-0 failure can be a timeout AFTER
+        // the server committed; the stable id is what makes every retry
+        // idempotent). A persistence failure never blocks the send — the
+        // answers are also still on screen.
+        pendingRef.current = record;
+        await savePendingMeasure(dataKey, owner, record).catch(() => undefined);
+        // A lock during the persist: KEEP the pending record, skip the send,
+        // and say so honestly — never a POST under a dead key.
+        if (!vault.isUnlocked()) {
+          setError(t("measures.saveLockedNote"));
+          return;
+        }
+        // measurePayload returns the canonical JSON string itself:
+        const encoded = new TextEncoder().encode(measurePayload(record.kind, record.picks, new Date().toISOString()));
+        try {
+          const blob = await encrypt(dataKey, encoded, buildAad("measure", owner, record.clientMeasureId));
+          await api.createMeasure(record.clientMeasureId, toBase64(blob), record.date);
+        } finally {
+          zeroize(encoded);
+        }
+        await clearPendingMeasure(owner).catch(() => undefined);
+        pendingRef.current = null;
+        // Item 9 (self-harm) endorsement: point at support AFTER the save.
+        if (safetyItemEndorsed(record.kind, record.picks)) setItem9(true);
+        setSavedNote(t("measures.savedNote"));
+        await load();
       } finally {
-        zeroize(encoded);
+        zeroize(dataKey);
       }
-      await clearPendingMeasure(owner).catch(() => undefined);
-      pendingRef.current = null;
-      // Item 9 (self-harm) endorsement: point at support AFTER the save.
-      if (safetyItemEndorsed(record.kind, record.picks)) setItem9(true);
-      setSavedNote(t("measures.savedNote"));
-      await load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Idempotent retry of a send that already landed: the record dies

@@ -72,3 +72,54 @@ describe("on-device brain: the lexicon artifact is pinned to shared/", () => {
     expect(LEXICON).toEqual(shared);
   });
 });
+
+// --- independent audit 2026-09-27: VS16 emoji canonicalization ------------------
+//
+// brain._emoji_tokens (item 10) canonicalizes the raw text's emoji before
+// counting: each distinct base matched with an OPTIONAL trailing U+FE0F,
+// every occurrence emitted once as the map's CANONICAL key, in TEXT order.
+// The mobile tokenizer now mirrors it — a bare "❤" scores exactly like
+// "❤️" (same grapheme, same valence). The shared vectors gain bare-VS16
+// entries afterwards; these unit pins hold independently of them.
+const { tokenize } = await import("../src/brain/sentiment");
+
+describe("VS16 emoji canonicalization (brain._emoji_tokens parity)", () => {
+
+  it("a bare base spelling yields the canonical (VS16-bearing) map key", async () => {
+    const tokens = tokenize("❤");
+    expect(tokens).toEqual(["❤️"]);
+    expect(tokens[0]).toBe("❤\ufe0f");
+  });
+
+  it("bare and fully-qualified spellings tokenize IDENTICALLY", async () => {
+    expect(tokenize("feeling ☹ today")).toEqual(tokenize("feeling ☹️ today"));
+    expect(tokenize("feeling ☹ today")).toEqual(["feeling", "today", "☹\ufe0f"]);
+  });
+
+  it("every occurrence counts, in TEXT order, mixed spellings included", async () => {
+    expect(tokenize("❤ and ❤️ and ❤")).toEqual(["and", "and", "❤\ufe0f", "❤\ufe0f", "❤\ufe0f"]);
+  });
+
+  it("VS16 keys without a bare twin keep scoring exactly as before", async () => {
+    // ☀️ lives in the map ONLY as the VS16 spelling; it must still count.
+    expect(tokenize("☀️")).toEqual(["☀\ufe0f"]);
+    expect(sentimentScore("☀️")).not.toBe(0);
+  });
+
+  it("a bare VS16-map emoji scores the same as its fully-qualified twin", async () => {
+    expect(sentimentScore("☹")).toBe(sentimentScore("☹\ufe0f"));
+    expect(sentimentScore("☹")).not.toBe(0);
+    // The score is the map's valence through the same walk: identical
+    // components too, not just the clamped compound.
+    const bare = sentimentComponents("☹");
+    const full = sentimentComponents("☹\ufe0f");
+    expect(bare).toEqual(full);
+  });
+
+  it("non-emoji VS16 usage is inert (the scanner only knows map bases)", () => {
+    // A VS16 attached to a base with no map entry (the keycap text-style
+    // "#\uFE0F") produces no token at all: "#" is not a [a-z']+ word and
+    // the emoji scanner only knows the map's bases.
+    expect(tokenize("\u0023\ufe0f")).toEqual([]);
+  });
+});

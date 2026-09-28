@@ -143,7 +143,8 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
     // once per (account, calendar day) — LOW c (audit 2026-09-26), mobile
     // crisisDialog parity: a prompt on every draft trains dismissal. The
     // stamp records BEFORE the prompt so sequential saves cannot
-    // double-fire; a storage failure fails toward showing.
+    // double-fire; it is session-scoped in memory only (audit 2026-09-27),
+    // so a reload fails toward showing.
     if (detectCrisisLanguage(text) && !crisisPrompt) {
       const shownToday = await crisisDialogShownOn(owner, date).catch(() => false);
       if (!shownToday) {

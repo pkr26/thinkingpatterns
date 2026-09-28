@@ -16,9 +16,11 @@ import {
   quarantinedQueueExists,
   rejectedEntries,
   requeueRejected,
+  rewrapQueue,
   SessionExpiredError,
   MAX_QUEUE_LENGTH,
 } from "../src/offlineQueue";
+import { decryptEntry, encryptEntry } from "../src/crypto/patient";
 import { ApiError } from "../src/api/client";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
@@ -480,5 +482,151 @@ describe("audit 2026-09-25 hardening", () => {
     expect(await flushQueue("user-1")).toBe(0);
     expect(await queueLength("user-1")).toBe(0);
     expect(await rejectedEntries("user-1")).toHaveLength(1);
+  });
+});
+
+/** independent audit 2026-09-27 (P2): the READ APIs self-heal (readItems
+ *  quarantines + rewrites), so they used to run unlocked — a locked
+ *  enqueue in another tab could interleave and be dropped by the read's
+ *  rewrite. Both now serialize through the SAME queue-flush Web Lock as
+ *  every mutation. */
+describe("read APIs under the queue Web Lock (audit 2026-09-27)", () => {
+  it("queueLength and rejectedEntries wait behind a held enqueue — a read cannot interleave with a mutation", async () => {
+    const started: string[] = [];
+    let held = false;
+    const waiters: Array<() => void> = [];
+    const acquire = async (): Promise<void> => {
+      if (held) await new Promise<void>((resolve) => waiters.push(resolve));
+      held = true;
+    };
+    const release = (): void => {
+      held = false;
+      waiters.shift()?.();
+    };
+    let releaseFirst: () => void = () => undefined;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstSection = true;
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: async <T,>(name: string, callback: () => Promise<T>): Promise<T> => {
+          await acquire();
+          try {
+            started.push(`section:${name}`);
+            if (firstSection) {
+              firstSection = false;
+              await firstGate; // hold the lock like a slow enqueue would
+            }
+            return await callback();
+          } finally {
+            release();
+          }
+        },
+      },
+    });
+    const first = enqueue(item(1));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(started).toEqual(["section:queue-flush"]);
+    // The read queues BEHIND the held lock — it must not observe or rewrite
+    // the store mid-mutation.
+    const lengthRead = queueLength("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(started).toEqual(["section:queue-flush"]); // still waiting
+    releaseFirst();
+    await first;
+    expect(await lengthRead).toBe(1);
+    // rejectedEntries takes the SAME lock (a different name could interleave
+    // with a flush's read→commit window).
+    started.length = 0;
+    const rejectedRead = rejectedEntries("user-1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(started).toEqual(["section:queue-flush"]);
+    expect(await rejectedRead).toHaveLength(0);
+  });
+});
+
+/** independent audit 2026-09-27 (P1): the v1 rotation's rewrap family never
+ *  covered the offline queue — blobs sealed under the OLD data key uploaded
+ *  after the rekey and became permanently undecryptable. rewrapQueue is the
+ *  post-rotation half. */
+describe("rewrapQueue (rotation custody, audit 2026-09-27)", () => {
+  const OLD_KEY = new Uint8Array(new ArrayBuffer(32)).fill(7);
+  const NEW_KEY = new Uint8Array(new ArrayBuffer(32)).fill(8);
+
+  it("re-seals queued AND rejected blobs old→new under the SAME AAD — identical plaintext, same ids, old key dead", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    // One version-bound blob (today's shape) and one legacy three-part-AAD
+    // blob (pre-2026-09-20) — the rewrap must preserve whichever binding
+    // each blob was sealed under.
+    const { blobB64: boundBlob } = await encryptEntry(OLD_KEY, "user-1", "e-2026-09-25-1", "queued honesty", "2026-09-25T10:00:00Z", 0.5, undefined, 1);
+    const { blobB64: legacyBlob } = await encryptEntry(OLD_KEY, "user-1", "e-2026-09-25-2", "legacy-bound honesty", "2026-09-25T11:00:00Z", null);
+    const { blobB64: rejectedBlob } = await encryptEntry(OLD_KEY, "user-1", "e-2026-09-25-3", "rejected honesty", "2026-09-25T12:00:00Z", null, undefined, 1);
+    await enqueue({ ...item(1), blobB64: boundBlob });
+    await enqueue({ ...item(2), blobB64: legacyBlob });
+    // Seed the rejected store directly (the rejected-store shape is the
+    // same envelope as the queue's).
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    map.set(
+      queueKey.replace(".items.", ".rejected."),
+      JSON.stringify({ v: 1, items: [{ userId: "user-1", clientEntryId: "e-2026-09-25-3", blobB64: rejectedBlob, entryDate: "2026-09-25" }] }),
+    );
+
+    await rewrapQueue("user-1", OLD_KEY, NEW_KEY);
+
+    const items = JSON.parse(map.get(queueKey)!) as { items: { clientEntryId: string; blobB64: string }[] };
+    const rejectedKey = queueKey.replace(".items.", ".rejected.");
+    const rejected = JSON.parse(map.get(rejectedKey)!) as { items: { clientEntryId: string; blobB64: string }[] };
+    expect(items.items.map((entry) => entry.clientEntryId)).toEqual(["e-2026-09-25-1", "e-2026-09-25-2"]);
+    expect(rejected.items.map((entry) => entry.clientEntryId)).toEqual(["e-2026-09-25-3"]);
+    // Identical plaintext under the NEW key, under the SAME AAD each blob
+    // was sealed with (the legacy blob still opens through the legacy
+    // binding; the others through the version-bound one).
+    expect((await decryptEntry(NEW_KEY, "user-1", "e-2026-09-25-1", items.items[0]!.blobB64, 1)).text).toBe("queued honesty");
+    expect((await decryptEntry(NEW_KEY, "user-1", "e-2026-09-25-2", items.items[1]!.blobB64)).text).toBe("legacy-bound honesty");
+    expect((await decryptEntry(NEW_KEY, "user-1", "e-2026-09-25-3", rejected.items[0]!.blobB64, 1)).text).toBe("rejected honesty");
+    // The OLD key no longer opens anything — the rekey is real.
+    await expect(decryptEntry(OLD_KEY, "user-1", "e-2026-09-25-1", items.items[0]!.blobB64, 1)).rejects.toThrow();
+  });
+
+  it("a blob that cannot be rewrapped stays EXACTLY as-is — never dropped, never a rotation blocker", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return map.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        map.set(k, v);
+      },
+      async removeItem(k) {
+        map.delete(k);
+      },
+    });
+    // A foreign/garbage rejected blob: decrypt fails under both bindings.
+    await enqueue(item(1));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const foreign = { ...item(9), blobB64: "AAAA" };
+    map.set(queueKey.replace(".items.", ".rejected."), JSON.stringify({ v: 1, items: [foreign] }));
+
+    await rewrapQueue("user-1", OLD_KEY, NEW_KEY);
+
+    const rejected = JSON.parse([...map.entries()].find(([k]) => k.includes(".rejected."))![1]) as { items: { clientEntryId: string; blobB64: string }[] };
+    expect(rejected.items).toEqual([{ ...foreign, userId: "user-1" }]);
+    // The undecryptable QUEUED blob (the fixture default is not real
+    // ciphertext under OLD_KEY) stays byte-identical too — never dropped.
+    const queuedAfter = JSON.parse(map.get(queueKey)!) as { items: { clientEntryId: string; blobB64: string }[] };
+    expect(queuedAfter.items.map((entry) => entry.clientEntryId)).toEqual(["e-2026-09-25-1"]);
+    expect(queuedAfter.items[0]!.blobB64).toBe("AAECAwQFBgcICQoL");
   });
 });

@@ -9,6 +9,7 @@
  * stay complete and first in every state. */
 import { describe, expect, it, vi } from "vitest";
 import { CrisisCard } from "../src/crisis";
+import { crisisDialogShownOn, recordCrisisDialogShown } from "../src/crisisDialog";
 import { vault } from "../src/vault";
 import { press, render, textOf } from "./helpers/rtr";
 
@@ -65,5 +66,32 @@ describe("CrisisCard safety-plan link (clinical review 2026-09-27)", () => {
     await press(root, "Make a safety plan");
     expect(onMakeSafetyPlan).toHaveBeenCalledTimes(1);
     vault.lock();
+  });
+});
+
+/** independent audit 2026-09-27 (P2): the prompt throttle used to persist
+ *  a PLAINTEXT DATE of a crisis-flagged interaction in localStorage
+ *  (mindpattern.crisisDialog.v1.<userId>). The record is session-scoped in
+ *  memory now, and the legacy key is swept on first use. */
+describe("crisis prompt throttle (audit 2026-09-27: no plaintext date on disk)", () => {
+  it("stamps once per (account, day) IN MEMORY ONLY — no localStorage write, and the legacy plaintext stamp is swept", async () => {
+    const storage = (globalThis as { window?: { localStorage?: Storage } }).window!.localStorage!;
+    // A pre-fix leftover: a plaintext crisis-interaction date on disk.
+    storage.setItem("mindpattern.crisisDialog.v1.user-legacy", "2026-09-26");
+    const setSpy = vi.spyOn(storage, "setItem");
+    expect(await crisisDialogShownOn("user-crisis-a", "2026-09-27")).toBe(false);
+    await recordCrisisDialogShown("user-crisis-a", "2026-09-27");
+    // Once-per-day, per-account, in-memory semantics unchanged:
+    expect(await crisisDialogShownOn("user-crisis-a", "2026-09-27")).toBe(true);
+    expect(await crisisDialogShownOn("user-crisis-a", "2026-09-26")).toBe(false); // day-scoped
+    expect(await crisisDialogShownOn("user-crisis-b", "2026-09-27")).toBe(false); // account-scoped
+    // The throttle wrote NOTHING to localStorage — no date of a
+    // crisis-flagged interaction ever touches disk...
+    expect(setSpy).not.toHaveBeenCalled();
+    // ...and the pre-fix plaintext stamp was removed, not resurrected.
+    expect(storage.getItem("mindpattern.crisisDialog.v1.user-legacy")).toBeNull();
+    const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i));
+    expect(keys.filter((k) => k?.startsWith("mindpattern.crisisDialog"))).toEqual([]);
+    setSpy.mockRestore();
   });
 });

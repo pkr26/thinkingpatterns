@@ -22,6 +22,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
+import { zeroize } from "../crypto/core";
 import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/patient";
 import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind";
@@ -298,16 +299,29 @@ export function HistoryView(): React.JSX.Element {
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) return; // guarded like submitEdit
     setBusy(true);
+    // independent audit 2026-09-27 (P2): snapshot the data key BEFORE the
+    // delete await — the old code reused the vault's SHARED buffer after
+    // it, so a lock mid-delete zeroized it and the local maintenance below
+    // ran under an all-zero key. The copy is zeroized in finally.
+    const keys = vault.get();
+    const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
+    dataKey.set(keys.dataKey);
     try {
-      const keys = vault.get();
       await api.deleteEntry(entry.clientEntryId);
-      await forgetEntryVersion(owner, keys.dataKey, entry.clientEntryId);
-      await removeMoodDay(keys.dataKey, owner, entry.entryDate).catch(() => undefined);
+      // A lock mid-delete: the entry is gone server-side; the local
+      // hygiene (version mark, mood day) is disposable metadata — quietly
+      // skipped, never an unhandled rejection, never a write under a dead
+      // session.
+      if (vault.isUnlocked()) {
+        await forgetEntryVersion(owner, dataKey, entry.clientEntryId);
+        await removeMoodDay(dataKey, owner, entry.entryDate).catch(() => undefined);
+      }
       setArmedDelete(null);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t("history.deleteFailed"));
     } finally {
+      zeroize(dataKey);
       setBusy(false);
     }
   };

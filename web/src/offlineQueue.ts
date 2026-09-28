@@ -15,6 +15,8 @@
  *  - Buffer.byteLength → TextEncoder length, Buffer base64url → manual.
  */
 import { ApiError, api, sessionUserId } from "./api/client";
+import { buildAad } from "./crypto/aad";
+import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { currentOrigin, withLock } from "./platform";
 import { kv } from "./kvstore";
 
@@ -281,9 +283,16 @@ export async function quarantinedQueueExists(userId?: string): Promise<boolean> 
   return (await kv.getItem(scope.quarantine)) !== null;
 }
 
+/** independent audit 2026-09-27 (P2): the read APIs below self-heal —
+ *  readItems quarantines corrupt shapes and REWRITES the key — so a bare
+ *  unlocked read could interleave with a locked enqueue in another tab and
+ *  drop it exactly like the mutation race did. Both now take the SAME
+ *  queue-flush Web Lock as every mutation (never a different name: a
+ *  differently-named lock could still interleave with a flush's
+ *  read→commit window). */
 export async function rejectedEntries(userId?: string): Promise<QueuedEntry[]> {
   const scope = await scopeFor(await resolveUserId(userId));
-  return rejectedFor(scope);
+  return withLock(QUEUE_LOCK_NAME, () => serialized(() => rejectedFor(scope)));
 }
 
 export async function rejectedEntryCount(userId?: string): Promise<number> {
@@ -554,6 +563,87 @@ export async function clearQueue(userId?: string): Promise<void> {
 
 export async function queueLength(userId?: string): Promise<number> {
   const scope = await scopeFor(await resolveUserId(userId));
-  return serialized(async () => (await readItems(scope.queue, scope, queueGeneration)).length);
+  return withLock(QUEUE_LOCK_NAME, () =>
+    serialized(async () => (await readItems(scope.queue, scope, queueGeneration)).length));
+}
+
+/** independent audit 2026-09-27 (P1): a v1 password rotation rekeys the
+ *  SERVER corpus but never touched THIS queue — blobs sealed under the old
+ *  data key uploaded after the rekey and became permanently undecryptable
+ *  ("N entries hidden"). The two halves below close it: a best-effort
+ *  drain BEFORE the rotation's server steps (the user is necessarily
+ *  online to rotate), and a rewrap of anything still held locally AFTER
+ *  the credential rotation. */
+
+/** Best-effort upload of every due queued item for one account, under the
+ *  same cross-tab Web Lock a reconnect flush takes. Returns the number of
+ *  entries still held locally after the attempt — 0 means nothing a
+ *  rotation can orphan. A drain that errors outright reads as -1 (the
+ *  caller treats every non-zero answer as "do not rotate"). */
+export async function drainPendingQueueForRotation(userId: string): Promise<number> {
+  // The drain holds the lock; the length re-check must run OUTSIDE it —
+  // the Web Locks API is not reentrant and queueLength takes this lock.
+  await withLock(QUEUE_LOCK_NAME, () => flushQueue(userId)).catch(() => undefined);
+  return queueLength(userId);
+}
+
+/** Open one queued blob under the rotation's OLD key and re-seal it under
+ *  the new key with the SAME AAD it was sealed with (queue uploads are
+ *  always the first generation of their id, so the version-bound AAD is
+ *  tried first and the legacy three-part binding is the fallback —
+ *  decryptEntry's rule). Null when the blob cannot be opened at all. */
+async function rewrapEntryBlob(item: QueuedEntry, oldKey: Bytes, newKey: Bytes): Promise<string | null> {
+  const blob = fromBase64(item.blobB64);
+  const bindings = [
+    buildAad("entry", item.userId, item.clientEntryId, "1"),
+    buildAad("entry", item.userId, item.clientEntryId),
+  ];
+  try {
+    for (const aad of bindings) {
+      let plaintext: Bytes | null = null;
+      try {
+        plaintext = await decrypt(oldKey, blob, aad);
+        return toBase64(await encrypt(newKey, plaintext, aad));
+      } catch {
+        // Wrong binding for this blob: fall through to the legacy one.
+      } finally {
+        zeroize(plaintext);
+      }
+    }
+    return null;
+  } finally {
+    zeroize(...bindings);
+  }
+}
+
+/** Re-seal every locally held blob — queue items AND rejected entries —
+ *  from the rotation's old data key to the new one, under the queue's Web
+ *  Lock so the read-modify-write cannot interleave with an enqueue or
+ *  drain in another tab. A blob that fails to rewrap is left EXACTLY
+ *  as-is (a rejected item then fails visibly on requeue); nothing here
+ *  may block or unwind the completed rotation. */
+export async function rewrapQueue(owner: string, oldKey: Bytes, newKey: Bytes): Promise<void> {
+  const scope = await scopeFor(owner);
+  await withLock(QUEUE_LOCK_NAME, () => serialized(async () => {
+    const generation = queueGeneration;
+    const [queue, rejected] = await Promise.all([
+      readItems(scope.queue, scope, generation),
+      readItems(scope.rejected, scope, generation),
+    ]);
+    const rewrap = async (items: QueuedEntry[]): Promise<QueuedEntry[]> => {
+      const out: QueuedEntry[] = [];
+      for (const item of items) {
+        const blobB64 = await rewrapEntryBlob(item, oldKey, newKey);
+        out.push(blobB64 === null ? item : { ...item, blobB64 });
+      }
+      return out;
+    };
+    const items = await rewrap(queue);
+    const rejects = await rewrap(rejected);
+    if (wipedSince(generation)) return;
+    await writeItems(scope.queue, items);
+    if (wipedSince(generation)) return;
+    await writeItems(scope.rejected, rejects);
+  }));
 }
 

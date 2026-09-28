@@ -606,7 +606,16 @@ async def logout(
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         jti = payload.get("jti")
         if isinstance(jti, str) and jti:
-            request.app.state.token_revocations.revoke(jti, float(payload["exp"]))
+            # Independent audit 2026-09-27: the revocation is written to
+            # the durable table in the same fenced lifecycle event (the
+            # in-memory cache alone died with the process — a deploy or
+            # crash resurrected every logged-out bearer until its exp).
+            # The commit failure path raises: a logout that cannot make
+            # its revocation durable must not answer 204.
+            await request.app.state.token_revocations.revoke_durable(
+                session, jti, float(payload["exp"])
+            )
+            await session.commit()
         else:
             # Legacy jti-less bearer: the only honest revocation left is the
             # account-wide epoch bump (single atomic UPDATE, never a

@@ -87,6 +87,10 @@ vi.mock("../src/api/client", async (importOriginal) => {
       setSession: async () => {},
       listEntriesPage: vi.fn(async () => ({ entries: [], nextOffset: null, revision: null })),
       listMeasuresPage: vi.fn(async () => []),
+      // independent audit 2026-09-27 (P2): the rotation's offline-queue drain
+      // uploads through this seam (default success; per-test overrides make
+      // the drain fail to pin the abort).
+      createQueuedEntry: vi.fn(async () => ({})),
       getEntry: async () => {
         throw new ApiError(404, "entry not found", "not_found");
       },
@@ -147,6 +151,10 @@ beforeEach(() => {
   apiState.consents = [];
   keychainMock.__reset();
   vault.lock();
+  // independent audit 2026-09-27 (P2): the queue-drain seam resets to
+  // success like every other server spy.
+  vi.mocked(api.createQueuedEntry).mockReset();
+  vi.mocked(api.createQueuedEntry).mockImplementation(async () => ({}));
   // H-2 seam: clear call history/queued rejections, keep the delegating
   // default implementation.
   deriveKeysAsync.mockClear();
@@ -530,5 +538,89 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
     if (!outcome.ok) expect(outcome.stage).toBe("relogin");
     expect(vault.isUnlocked()).toBe(false);
     expect(await hasBiometricUnlock(USER)).toBe(false);
+  });
+});
+
+// --- rotation × offline queue (independent audit 2026-09-27, P2) ---------------
+//
+// The v1 ladder's queue discipline, parity with the web fix: drain FIRST
+// (abort honestly if anything cannot leave), rewrap whatever is still held
+// locally AFTER the server rotation (rejected entries + racing writes), and
+// never let a rewrap failure unwind a completed rotation.
+describe("rotatePassword × offline queue (P2, 2026-09-27)", () => {
+  const OLD_PASSWORD = "correct old password";
+  const NEW_PASSWORD = "a strong new passphrase 42!";
+
+  it("a queue that cannot drain ABORTS before any server-side step", async () => {
+    const { enqueue, queueLength } = await import("../src/offlineQueue");
+    const { encrypt } = await import("../src/crypto/envelope");
+    const { buildAad } = await import("../src/crypto/aad");
+    const oldKeys = await deriveKeysAsync(OLD_PASSWORD, Buffer.from(apiState.cachedSalt, "base64"));
+    await enqueue({
+      userId: USER,
+      clientEntryId: "block-1",
+      blobB64: encrypt(oldKeys.dataKey, Buffer.from("still pending"), buildAad("entry", USER, "block-1", "1")).toString("base64"),
+      entryDate: "2026-09-27",
+    });
+    // 503 = retryable: the item stays queued no matter how often the drain
+    // tries — exactly the "cannot leave right now" case.
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(503, "server busy"));
+    // Earlier tests in this file accumulate on this spy (no global reset) —
+    // clear it so the not-called assertion below is this test's alone.
+    vi.mocked(api.rekeyStoredData).mockClear();
+
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: OLD_PASSWORD,
+      newPassword: NEW_PASSWORD,
+    });
+
+    expect(outcome).toEqual({ ok: false, stage: "verify", reason: "queue-blocked" });
+    // NOTHING moved server-side — the ladder cannot even start (the rekey
+    // is its first server step; credential only ever follows it).
+    expect(api.rekeyStoredData).not.toHaveBeenCalled();
+    // The item survives locally, still sealed under the still-current key.
+    expect(await queueLength(USER)).toBe(1);
+  });
+
+  it("a queue that drains proceeds, and a REJECTED entry left behind is rewrapped old→new", async () => {
+    const { enqueue, flushQueue, rejectedEntries } = await import("../src/offlineQueue");
+    const { encrypt, decrypt } = await import("../src/crypto/envelope");
+    const { buildAad } = await import("../src/crypto/aad");
+    const oldKeys = await deriveKeysAsync(OLD_PASSWORD, Buffer.from(apiState.cachedSalt, "base64"));
+    // Park one entry in the REJECTED store (a 400 upload rejection): the
+    // drain only flushes the QUEUE, so this one must ride the rewrap.
+    vi.mocked(api.createQueuedEntry).mockRejectedValueOnce(new ApiError(400, "invalid blob"));
+    await enqueue({
+      userId: USER,
+      clientEntryId: "reject-1",
+      blobB64: encrypt(oldKeys.dataKey, Buffer.from("rejected text"), buildAad("entry", USER, "reject-1", "1")).toString("base64"),
+      entryDate: "2026-09-27",
+    });
+    await flushQueue(USER);
+    expect(await rejectedEntries(USER)).toHaveLength(1);
+    vi.mocked(api.cacheSalt).mockClear();
+
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: OLD_PASSWORD,
+      newPassword: NEW_PASSWORD,
+    });
+
+    expect(outcome.ok).toBe(true);
+    // The rotation resealed the rejected blob under the NEW data key, same
+    // AAD: it opens with the keys the next unlock will have.
+    const newSaltB64 = (vi.mocked(api.cacheSalt).mock.calls.at(-1) as [string, string])[1];
+    const newKeys = await deriveKeysAsync(NEW_PASSWORD, Buffer.from(newSaltB64, "base64"));
+    const rejected = await rejectedEntries(USER);
+    expect(rejected).toHaveLength(1);
+    expect(
+      decrypt(newKeys.dataKey, Buffer.from(rejected[0]!.blobB64, "base64"), buildAad("entry", USER, "reject-1", "1")).toString(),
+    ).toBe("rejected text");
+    expect(() =>
+      decrypt(oldKeys.dataKey, Buffer.from(rejected[0]!.blobB64, "base64"), buildAad("entry", USER, "reject-1", "1")),
+    ).toThrow();
   });
 });

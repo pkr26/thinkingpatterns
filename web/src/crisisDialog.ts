@@ -1,60 +1,63 @@
 /**
  * Crisis-prompt throttle (audit 2026-09-26, LOW c): at most once per
- * LOCAL calendar day per account — ported from mobile's crisisDialog.ts
- * onto the web localStore seam.
+ * LOCAL calendar day per account — ported from mobile's crisisDialog.ts.
  *
  * The Entry prompt used to fire on EVERY crisis-flagged draft — dialog
  * fatigue trains dismissal, and the person who needs the resources most
- * stops reading them. The stamp is an ISO LOCAL calendar date (the same
- * day the entry belongs to, never a UTC guess) persisted per account at
- * mindpattern.crisisDialog.v1.<userId>, the same non-content standing as
- * the onboarding and threshold stamps (WEB_PLAN D-4): a date names no
- * health data. The W-6 prefix wipe (sign-out / account deletion) removes
- * it with every other mindpattern.* flag.
+ * stops reading them.
  *
- * The failure direction is deliberately TOWARD SHOWING: when storage is
- * unusable a process-lifetime memory mirror is the only record, so a
- * broken store can suppress a repeat prompt WITHIN one session at most —
- * a restart re-shows it. The stamp is a fatigue guard, never a gate that
- * can permanently silence support.
+ * independent audit 2026-09-27 (P2): the stamp used to persist a
+ * PLAINTEXT DATE of a crisis-flagged interaction at
+ * mindpattern.crisisDialog.v1.<userId> in localStorage. A date paired
+ * with the account id is interaction metadata this app has no business
+ * leaving on disk — the zero-knowledge posture keeps even device-local
+ * content encrypted. The record is now SESSION-SCOPED, in memory only:
+ * the once-per-day UX is unchanged within a session, and a page reload
+ * can re-show the prompt the same day (fail toward showing — the stamp
+ * is a fatigue guard, never a gate that can permanently silence
+ * support). The legacy localStorage key is opportunistically removed
+ * the first time this module is consulted.
  */
 import { localStore } from "./platform";
 
-const key = (userId: string): string => `mindpattern.crisisDialog.v1.${userId}`;
+/** The pre-fix localStorage prefix (the one-time cleanup target). */
+const LEGACY_PREFIX = "mindpattern.crisisDialog.v1.";
 
-/** Process-lifetime mirror, consulted ONLY when storage is unusable. */
-const memoryStamps = new Map<string, string>();
+/** Session-scoped record: account id → the ISO LOCAL date the prompt last
+ *  ran on. Module-level by design — it dies with the page. */
+const sessionStamps = new Map<string, string>();
+
+/** Remove every legacy stamp this browser still carries, once per load. */
+let legacySwept = false;
+function sweepLegacyStampOnce(): void {
+  if (legacySwept) return;
+  legacySwept = true;
+  localStore.removePrefix(LEGACY_PREFIX);
+}
 
 /** True when the support prompt already ran for this account on `todayISO`. */
 export async function crisisDialogShownOn(userId: string, todayISO: string): Promise<boolean> {
-  try {
-    return localStore.get(key(userId)) === todayISO;
-  } catch {
-    // Storage unreadable: the memory mirror is the only record left.
-    return memoryStamps.get(userId) === todayISO;
-  }
+  sweepLegacyStampOnce();
+  return sessionStamps.get(userId) === todayISO;
 }
 
-/** Stamp the prompt as shown today. The mirror is always written, so a
- *  storage failure still throttles repeats within this session. The stamp
- *  records BEFORE the prompt shows — sequential saves cannot double-fire. */
+/** Stamp the prompt as shown today. The stamp records BEFORE the prompt
+ *  shows — sequential saves cannot double-fire. */
 export async function recordCrisisDialogShown(userId: string, todayISO: string): Promise<void> {
-  memoryStamps.set(userId, todayISO);
-  try {
-    localStore.set(key(userId), todayISO);
-  } catch {
-    // The mirror holds it; a restart simply re-shows the prompt (fail-open).
-  }
+  sweepLegacyStampOnce();
+  sessionStamps.set(userId, todayISO);
 }
 
-/** Test/deletion hygiene: the stamp must not outlive its account. (The
- *  W-6 prefix wipe already covers this; the explicit drop keeps the module
- *  self-contained like mobile's clearCrisisDialogStamp.) */
+/** Test/deletion hygiene: the stamp must not outlive its account. */
 export async function clearCrisisDialogStamp(userId: string): Promise<void> {
-  memoryStamps.delete(userId);
-  try {
-    localStore.removePrefix(key(userId));
-  } catch {
-    // Storage is optional; never fail a hygiene path on it.
-  }
+  sessionStamps.delete(userId);
+  localStore.remove(`${LEGACY_PREFIX}${userId}`);
+}
+
+/** Test seam: the stamps are a module singleton, so tests reset them the
+ *  way entryVersions' mirrors reset (tests/helpers/api.ts) — the throttle
+ *  must not leak between cases now that it left wipeable localStorage. */
+export function resetCrisisDialogStampsForTests(): void {
+  sessionStamps.clear();
+  legacySwept = false;
 }

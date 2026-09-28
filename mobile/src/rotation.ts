@@ -42,6 +42,7 @@ import { engine } from "./crypto/engine";
 import { envelopeKek, TamperError, unwrapDataKey, validateKdfParams, wrapDataKey } from "./crypto/keyEnvelope";
 import { deriveMasterKeyAsync, zeroize } from "./crypto/kdf";
 import { cacheEnvelope, fetchEnvelope, type EnvelopeInfo } from "./keyScheme";
+import { drainPendingQueueForRotation, rewrapQueue } from "./offlineQueue";
 import { wrapDataKeyForTherapist } from "./crypto/sharing";
 import { rebindEntryVersions, forgetAllEntryVersions } from "./entryVersions";
 import { clearMoodLog } from "./moodLog";
@@ -82,7 +83,7 @@ export type RotationOutcome =
   | {
       ok: false;
       stage: RotationStage;
-      reason: "wrong-password" | "offline" | "server" | "already-rotated-unverifiable";
+      reason: "wrong-password" | "offline" | "server" | "already-rotated-unverifiable" | "queue-blocked";
       /** Human-oriented detail (already sanitized server text or a local
        * constant) — the UI may render it after errors.ts treatment. */
       detail?: string;
@@ -435,6 +436,18 @@ export async function rotatePassword(input: {
     newKeys = await deriveKeysAsync(newPassword, newSalt);
     newSaltB64 = newSalt.toString("base64");
     newVerifierB64 = newKeys.authKey.toString("base64");
+    // --- 2b. drain the offline queue BEFORE any server-side step ----------
+    // independent audit 2026-09-27 (P2, parity with the web fix): the queue's
+    // blobs are sealed under the OLD data key and were never part of the
+    // rekey ladder's server-side rewrap family — after the rekey they would
+    // upload and become permanently undecryptable. Best-effort drain FIRST
+    // (the user is necessarily online to rotate); anything that cannot leave
+    // right now ABORTS before any server-side step, honestly — a rotation
+    // that orphaned queued entries is the worse outcome by far.
+    const remainingQueued = await drainPendingQueueForRotation(userId).catch(() => -1);
+    if (remainingQueued !== 0) {
+      return { ok: false, stage: "verify", reason: "queue-blocked" };
+    }
     // --- 3. rekey every stored blob old -> new -----------------------------
     let counts = { entries: 0, insights: 0, measures: 0 };
     let alreadyRekeyed = false;
@@ -579,6 +592,13 @@ export async function rotatePassword(input: {
     await rebindEntryVersions(userId, oldKeys!.dataKey, newKeys!.dataKey).catch(() =>
       forgetAllEntryVersions(userId),
     );
+    // The offline queue rides the same rewrap family (independent audit
+    // 2026-09-27, P2): anything still held locally — a REJECTED entry, or an
+    // item queued after the drain by another write mid-rotation — is
+    // rewrapped old→new under the SAME AAD, under the queue's storage mutex.
+    // A blob that cannot be rewrapped stays as-is (it fails visibly on
+    // requeue); the completed rotation is never blocked or unwound by it.
+    await rewrapQueue(userId, oldKeys!.dataKey, newKeys!.dataKey).catch(() => {});
     await clearMoodLog(userId).catch(() => {});
     await clearFeedback(userId).catch(() => {});
     await clearUnlockProof(userId).catch(() => {});

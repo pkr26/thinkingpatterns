@@ -20,6 +20,7 @@ import {
   keyFingerprint,
   openSealedPrivateKey,
   sealPrivateKeyForUpload,
+  serverWrapKeyFingerprint,
   toBase64,
   unwrapPatientDataKey,
 } from "../crypto";
@@ -43,6 +44,16 @@ let scanConfirmedForSession = false;
  *  shape as PatientView's resetInsightsFreshness). */
 export function resetScanConfirmation(): void {
   scanConfirmedForSession = false;
+}
+
+/** independent audit 2026-09-27: the server-computed wrap-key fingerprint
+ *  from the pairing-SAS response, accepted only in the exact shape the
+ *  contract defines (16 lowercase hex chars — backend
+ *  sharing.wrap_key_fingerprint). Absent/invalid → null → rendered as "no
+ *  valid fingerprint" (never free-form), mirroring the mobile app's
+ *  validServerFingerprint discipline. */
+export function validServerFingerprint(value: string): string | null {
+  return /^[0-9a-f]{16}$/.test(value) ? value : null;
 }
 
 /** S-4 (pentest 2026-09-26): the interrupted-change recovery salt, keyed by
@@ -121,6 +132,13 @@ export function PatientsView(props: {
   const [sasBusy, setSasBusy] = useState(false);
   const [sasError, setSasError] = useState("");
   const [sasResult, setSasResult] = useState<{ sas: string; wrap_key_fingerprint: string } | null>(null);
+  /** independent audit 2026-09-27: the LOCAL server-format fingerprint of
+   *  this portal's own wrap public key (null until computed / no session) —
+   *  the value the SAS response's server-computed fingerprint is
+   *  cross-checked against. The server derives BOTH pairing SAS strings,
+   *  so the SAS itself proves nothing against a malicious server; this
+   *  locally verified digest is the load-bearing substitution check. */
+  const [sasLocalFingerprint, setSasLocalFingerprint] = useState<string | null>(null);
   /** Audit B-4 (2026-09-21): the accountability view of this therapist's
    *  own portal actions, fetched on demand from the server's access log. */
   const [auditRows, setAuditRows] = useState<AccessLogRow[] | null>(null);
@@ -159,6 +177,13 @@ export function PatientsView(props: {
   // secret is shown exactly once, until confirmed or the panel closes.
   const [totpStatus, setTotpStatus] = useState<boolean | null>(null);
   const [totpPending, setTotpPending] = useState<{ secretBase32: string; otpauthUri: string } | null>(null);
+  /** independent audit 2026-09-27: the pending setup secret is MASKED by
+   *  default and revealed only through the explicit show/hide toggle — it
+   *  used to sit in the DOM in plaintext for the whole setup session (the
+   *  recovery codes correctly blur-clear, but the secret cannot: the user
+   *  must read it while typing the confirmation code). Masked-by-default
+   *  keeps shoulder/screen-recording exposure to the deliberate reveal. */
+  const [totpSecretVisible, setTotpSecretVisible] = useState(false);
   const [totpPw, setTotpPw] = useState("");
   const [totpCode, setTotpCode] = useState("");
   /** S-3 (pentest 2026-09-26): the one-time recovery-code set from enable —
@@ -397,6 +422,8 @@ export function PatientsView(props: {
       const verifier = await totpVerifierFor();
       const setup = await api.totpSetup(verifier);
       setTotpPending({ secretBase32: setup.secret_base32, otpauthUri: setup.otpauth_uri });
+      // Every freshly minted secret starts masked (see totpSecretVisible).
+      setTotpSecretVisible(false);
     } catch (err) {
       setSecError(err instanceof Error ? err.message : "could not start two-factor setup");
     } finally {
@@ -565,6 +592,7 @@ export function PatientsView(props: {
     // A new code is a NEW pairing session: its SAS differs by construction
     // (the code is an HMAC input), so any displayed comparison retires.
     setSasResult(null);
+    setSasLocalFingerprint(null);
     setSasError("");
     try {
       const { code } = await api.newPairingCode();
@@ -586,9 +614,22 @@ export function PatientsView(props: {
     setSasBusy(true);
     setSasError("");
     setSasResult(null);
+    setSasLocalFingerprint(null);
     try {
       const result = await api.pairingSas(sasPatientId.trim(), pairingCode);
       setSasResult({ sas: result.sas, wrap_key_fingerprint: result.wrap_key_fingerprint });
+      // independent audit 2026-09-27: compute OUR OWN fingerprint of OUR OWN
+      // wrap public key at the same time, in the server's short format, so
+      // the render below can cross-check the two. The server computes both
+      // SAS strings, so this locally verified digest — not the SAS — is the
+      // substitution check that actually binds the pairing to this key.
+      if (props.session) {
+        try {
+          setSasLocalFingerprint(await serverWrapKeyFingerprint(props.session.publicKeyB64));
+        } catch {
+          setSasLocalFingerprint(null);
+        }
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setSasError("pairing code not found or expired — generate a new code and try again");
@@ -741,12 +782,18 @@ export function PatientsView(props: {
         {fingerprint && (
           <Note>Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit.</Note>
         )}
-        {/* SAS out-of-band comparison (2026-09-26): after the patient
-            enters the code, their app shows a 6-digit verification code
-            and their account id. Enter that id here to pull the SAME
-            code from this side — then compare by voice before they
-            confirm the grant. A substituted key changes the SAS; the two
-            screens cannot be made to agree. */}
+        {/* SAS out-of-band comparison (2026-09-26; honesty re-audit
+            2026-09-27): after the patient enters the code, their app shows
+            a 6-digit verification code and their account id. Enter that id
+            here to pull the SAME code from this side — then compare by
+            voice before they confirm the grant. THREAT-MODEL HONESTY: the
+            server computes BOTH SAS strings, so against a malicious server
+            the SAS alone proves nothing — it is a server-computed
+            convenience for the two humans. The load-bearing substitution
+            check is LOCAL: this portal independently fingerprints its OWN
+            wrap public key and cross-checks the server-provided
+            wrap_key_fingerprint below; a disagreement renders the visible
+            mismatch warning and means do-not-proceed, full stop. */}
         {pairingCode && (
           <>
             <hr className="divider" />
@@ -764,19 +811,37 @@ export function PatientsView(props: {
               disabled={sasBusy || sasPatientId.length === 0}
             />
             {sasError && <Note tone="danger" role="status">{sasError}</Note>}
-            {sasResult && (
-              <>
-                <p data-testid="pairing-sas" className="pairing-code">
-                  {sasResult.sas}
-                </p>
-                <Note tone="warn">
-                  Verification code for this pairing (key id {sasResult.wrap_key_fingerprint}).
-                  The patient&apos;s app shows the same code after they enter yours — read it to
-                  each other and confirm it matches EXACTLY before they confirm sharing. A
-                  mismatch means a key was substituted: generate a new code and do not proceed.
-                </Note>
-              </>
-            )}
+            {sasResult && (() => {
+              // independent audit 2026-09-27: the server value is accepted
+              // only in the exact shape the contract defines (16 lowercase
+              // hex chars) — anything else is treated as ABSENT, never
+              // free-form rendered, and the honest note says the local
+              // cross-check could not run.
+              const serverFp = validServerFingerprint(sasResult.wrap_key_fingerprint);
+              const mismatch = serverFp !== null && sasLocalFingerprint !== null && serverFp !== sasLocalFingerprint;
+              return (
+                <>
+                  <p data-testid="pairing-sas" className="pairing-code">
+                    {sasResult.sas}
+                  </p>
+                  {mismatch && (
+                    <Note tone="danger" role="alert">
+                      KEY FINGERPRINT MISMATCH — the fingerprint the server reported for this pairing
+                      does not match the one this portal computed for your own sharing key. Do not
+                      proceed: generate a new code and contact support; a key may have been substituted.
+                    </Note>
+                  )}
+                  <Note tone={mismatch ? "danger" : "warn"}>
+                    {serverFp !== null
+                      ? <>Verification code for this pairing (key id {serverFp}). </>
+                      : <>Verification code for this pairing. The server sent no valid key fingerprint, so it could not be verified against your own key here. </>}
+                    The patient&apos;s app shows the same code after they enter yours — read it to
+                    each other and confirm it matches EXACTLY before they confirm sharing. A
+                    mismatch means a key was substituted: generate a new code and do not proceed.
+                  </Note>
+                </>
+              );
+            })()}
           </>
         )}
         <Button label={busy ? "Generating…" : "Generate pairing code"} onPress={newCode} disabled={busy} />
@@ -1086,22 +1151,39 @@ export function PatientsView(props: {
                 <>
                   <Note tone="warn">
                     Enter this secret in your authenticator app NOW — it is shown exactly once and
-                    never again. Two-factor only takes effect after you confirm a code below.
+                    never again. It is HIDDEN by default here: press “Show secret” only while you
+                    are typing it in, and hide it again afterwards. Two-factor only takes effect
+                    after you confirm a code below.
                   </Note>
+                  {/* independent audit 2026-09-27: the secret renders MASKED
+                      (same length, bullets) until the explicit toggle reveals
+                      it; the otpauth URI embeds the same secret, so it only
+                      exists in the DOM while revealed. Panel close/confirm
+                      still clears the material from state entirely. */}
                   <div className="totp-secret">
                     <p
                       aria-label="Authenticator secret (manual entry)"
                       className="mono mono-secret"
                     >
-                      {totpPending.secretBase32}
+                      {totpSecretVisible
+                        ? totpPending.secretBase32
+                        : totpPending.secretBase32.replace(/\S/g, "•")}
                     </p>
-                    <p
-                      aria-label="otpauth URI for apps that accept it"
-                      className="mono mono-uri"
-                    >
-                      {totpPending.otpauthUri}
-                    </p>
+                    {totpSecretVisible && (
+                      <p
+                        aria-label="otpauth URI for apps that accept it"
+                        className="mono mono-uri"
+                      >
+                        {totpPending.otpauthUri}
+                      </p>
+                    )}
                     <div className="row row--wrap">
+                      <Button
+                        label={totpSecretVisible ? "Hide secret" : "Show secret"}
+                        small
+                        variant="ghost"
+                        onPress={() => setTotpSecretVisible((visible) => !visible)}
+                      />
                       <Button
                         label="Copy secret"
                         small

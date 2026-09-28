@@ -113,34 +113,88 @@ async def _prune_access_log_once(app: FastAPI) -> None:
     provably share one definition) plus dead pairing codes (2026-09-21
     audit B-7: codes were pruned only opportunistically inside
     create_pairing_code — an idle therapist meant dead rows accumulated
-    forever; the steady-state sweep now owns it too)."""
-    from sqlalchemy import delete as sa_delete
+    forever; the steady-state sweep now owns it too), expired token
+    revocations (independent audit 2026-09-27), and the audit-chain
+    verification sweep for recently-active patients — the runtime caller
+    that makes the chain's tamper evidence load-bearing instead of a
+    test-only helper."""
+    from datetime import timedelta
 
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select
+
+    from .api._audit import verify_access_log_chain
     from .api.therapist import PAIRING_RETENTION, access_log_prune_statement
-    from .models import PairingCode, utcnow
+    from .models import AccessLog, PairingCode, TokenRevocation, utcnow
 
     now = utcnow()
+    settings = app.state.settings
     async with app.state.sessionmaker() as session:
-        await session.execute(
-            access_log_prune_statement(now, app.state.settings.access_log_retention_days)
-        )
+        await session.execute(access_log_prune_statement(now, settings.access_log_retention_days))
         await session.execute(
             sa_delete(PairingCode).where(PairingCode.expires_at < now - PAIRING_RETENTION)
         )
+        await session.execute(sa_delete(TokenRevocation).where(TokenRevocation.expires_at < now))
         await session.commit()
+
+    # Chain verification (independent audit 2026-09-27): every patient with
+    # an audit row in the last 24h, bounded, each verified with the MAC key
+    # and (when configured) against the out-of-DB journal. A broken chain
+    # logs at ERROR and bumps the metrics counter — the operator-visible
+    # tamper signal — but never fails the sweep cycle itself.
+    try:
+        mac_key = bytes.fromhex(settings.audit_mac_secret_hex)
+    except ValueError:
+        logger.error("audit MAC secret is not valid hex; chain verification runs link-only")
+        mac_key = None
+    retention_cutoff = now - timedelta(days=settings.access_log_retention_days)
+    async with app.state.sessionmaker() as session:
+        user_ids = (
+            (
+                await session.execute(
+                    select(AccessLog.user_id)
+                    .where(AccessLog.at >= now - timedelta(hours=24))
+                    .group_by(AccessLog.user_id)
+                    .limit(500)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        failures = 0
+        for uid in user_ids:
+            verdict = await verify_access_log_chain(
+                session,
+                uid,
+                mac_key=mac_key,
+                journal_path=settings.audit_journal_path or None,
+                retention_cutoff=retention_cutoff,
+            )
+            if not verdict.ok:
+                failures += 1
+                logger.error(
+                    "audit chain verification FAILED for user %s at seq %s: %s",
+                    uid,
+                    verdict.broken_at_seq,
+                    verdict.reason,
+                )
+        if failures:
+            app.state.metrics.observe_audit_chain(failures=failures)
 
 
 async def _access_log_retention_sweep(app: FastAPI) -> None:
-    """Retention pass immediately, then every 24h. A failed pass logs and
-    waits for the next cycle: retention lag must never take the app down."""
+    """Recurring retention pass every 24h. The FIRST pass runs AWAITED in
+    the lifespan startup (see there for why), so this loop sleeps first. A
+    failed pass logs and waits for the next cycle: retention lag must
+    never take the app down."""
     while True:
+        await asyncio.sleep(ACCESS_LOG_SWEEP_INTERVAL_SECONDS)
         try:
             await _prune_access_log_once(app)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("access_log retention sweep failed; retrying next cycle")
-        await asyncio.sleep(ACCESS_LOG_SWEEP_INTERVAL_SECONDS)
 
 
 async def _processing_key_sweep(app: FastAPI) -> None:
@@ -266,9 +320,33 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 # conflicts.
                 if is_development:
                     await init_models(app.state.engine)
-                # Started AFTER init_models so the first pass never races
-                # schema creation. The app.state handle pins the task's
-                # lifecycle to the lifespan for tests.
+                # Independent audit 2026-09-27: revive every durable logout
+                # revocation into the in-memory cache — a restart must not
+                # resurrect logged-out bearers. Tolerant of a schema-less
+                # database (the no-create_all boot contract): the table
+                # missing means the whole instance is non-functional anyway,
+                # so boot proceeds with an empty cache and the sweep logs
+                # loudly rather than refusing to start.
+                try:
+                    async with app.state.sessionmaker() as session:
+                        await app.state.token_revocations.hydrate(session)
+                except Exception as exc:  # noqa: BLE001 — boot must survive a missing table
+                    config.logger.warning(
+                        "token-revocation hydration skipped (schema not present yet?): %s", exc
+                    )
+                # The FIRST housekeeping pass runs AWAITED, before the app
+                # serves anything: a sweep interleaving with the first
+                # requests used to break savepoint-based audit appends on
+                # the shared test connection, and in production it means
+                # no request ever races the first prune + chain
+                # verification. The recurring task (created below) sleeps
+                # first, so this pass is not duplicated.
+                try:
+                    await _prune_access_log_once(app)
+                except Exception:  # noqa: BLE001 — boot must survive a failed sweep
+                    config.logger.exception("initial housekeeping pass failed; retrying in 24h")
+                # The app.state handle pins the task's lifecycle to the
+                # lifespan for tests.
                 sweep_task = asyncio.create_task(_access_log_retention_sweep(app))
                 app.state.access_log_sweep_task = sweep_task
                 key_sweep_task = asyncio.create_task(_processing_key_sweep(app))
@@ -318,6 +396,12 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # counter and the keystore (one host per database, enforced at boot).
     app.state.token_revocations = TokenRevocationStore()
     app.state.metrics = MetricsRegistry()
+    # Independent audit 2026-09-27: seal every runtime audit append with
+    # the keyed MAC (secret resolved from the env/file or derived from the
+    # token secret — never stored in the database).
+    from .api._audit import configure_audit_mac_key
+
+    configure_audit_mac_key(bytes.fromhex(settings.audit_mac_secret_hex))
     # Analysis (brain recomputes) is attacker-sized CPU work; a dedicated
     # limiter keeps it from occupying every worker thread that auth scrypt
     # and ordinary requests also need.

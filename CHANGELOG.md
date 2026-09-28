@@ -12,6 +12,24 @@ All notable changes to this project are documented here. Format follows
 > campaign logs and are summarized (not deleted) under [2.0.0]; they stay
 > in place below it as the detailed history, newest first.
 
+## [2.0.1] — 2026-09-27
+
+Independent-audit remediation round 2 (see AUDIT_REMEDIATION_2026_09_27_ROUND2.md):
+durable jti revocation (token_revocation table + boot hydration + prune),
+keyed audit-chain MAC seals + append-only journal tail anchor + seq-race
+retry + daily chain-verification sweep, note create-channel 409 on changed
+content, kdf_params re-store validation, _secret_env strip symmetry +
+metrics-token file path, measured-only link day-after gate, honest phi_eff
+documentation + K=1.0 sweep row + VS16 bare-emoji parity vectors, web
+rotation-vs-offline-queue + measure zeroize-race + queue-lock fixes, portal
+SAS/fingerprint cross-check + exact idle lock + masked TOTP secret, mobile
+fingerprint-tripwire fix + fail-closed scheme routing + reminder-fallback
+fix + VS16 canonicalization, fail-closed digest-drift gate with selftest
+(now scanning Dockerfiles and shell scripts) + restore-script re-pin, CI
+password-annotation redaction + metrics-token secret chain + release
+concurrency, and defused time-bomb tests. Mobile coverage gate green again
+(functions 86.11%); all suites re-verified.
+
 ## [2.0.0] - 2026-09-26
 
 The 2026-09-25 → 2026-09-26 remediation and hardening campaign, cut as

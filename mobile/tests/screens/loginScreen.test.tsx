@@ -941,7 +941,7 @@ describe("LoginScreen key scheme (register v2 default, login resolves scheme)", 
     expect(await AsyncStorage.getItem("@mindpattern/unlockproof_user-1")).toBeNull();
     expect(Alert.alert).toHaveBeenCalledWith(
       "Sign in failed",
-      "We couldn't verify your encryption key with the server. Check your connection and try again — nothing was changed.",
+      "We couldn't confirm how your account's encryption is set up right now. Check your connection and try again in a moment — nothing was unlocked and nothing was changed.",
     );
   });
 
@@ -984,6 +984,46 @@ describe("LoginScreen key scheme (register v2 default, login resolves scheme)", 
     expect(api.keyEnvelope).toHaveBeenCalledTimes(1);
     expect(vault.isUnlocked()).toBe(true);
     expect(vault.get().dataKey).toEqual(RANDOM_DATA_KEY);
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  // independent audit 2026-09-27 (P2): the stale-v1-marker mid-flow
+  // fallback. A cached scheme marker is a hint from an earlier session —
+  // after a FAILED fetch it may no longer route the session onto v1 keys.
+  it("unreachable fetch + cached v1 MARKER now REFUSES: no unlock, no proof under the v1-derived key", async () => {
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
+    vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue({
+      scheme: "v1",
+      saltB64: SALT_B64,
+      kdfParams: null,
+      wrappedB64: null,
+    } as never);
+    const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+    await AsyncStorage.removeItem("@mindpattern/unlockproof_user-1");
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(false);
+    expect(await AsyncStorage.getItem("@mindpattern/unlockproof_user-1")).toBeNull();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Sign in failed",
+      "We couldn't confirm how your account's encryption is set up right now. Check your connection and try again in a moment — nothing was unlocked and nothing was changed.",
+    );
+  });
+
+  it("a LEGACY 404 envelope endpoint (pre-envelope server) keeps v1 semantics — a definitive answer", async () => {
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new ApiError(404, "not found"));
+    const root = await render(<LoginScreen />);
+    await typeInto(root, "username", "alice");
+    await typeInto(root, "password", "Correct horse!");
+    await pressLabel(root, "Sign in");
+    await flush();
+
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 3)); // the v1 label
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 

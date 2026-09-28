@@ -92,13 +92,19 @@ async def test_no_change_no_revision(client):
     assert revisions.json() == []
 
 
-async def test_idempotent_retry_with_new_text_preserves_the_superseded_text(client):
-    # Independent audit V-4 (2026-09-21): the POST retry branch used to
-    # rewrite the blob in place — a retried create carrying different
-    # content silently replaced history. A CHANGING retry must preserve
-    # the superseded blob as a revision, exactly like PATCH.
+async def test_changing_retry_conflicts_and_patch_preserves_history(client):
+    # Independent audit V-4 (2026-09-21) then the 2026-09-27 independent
+    # audit: a POST retry carrying DIFFERENT content used to rewrite the
+    # blob in place (V-4 made it preserve a revision; the final contract
+    # closes the inconsistency entirely — the create channel is
+    # idempotent for the SAME bytes only, and a changed blob is a 409 the
+    # client resolves via PATCH + base_version, where the superseded text
+    # is preserved as an immutable revision).
     therapist, patient, note = await _shared_note(client)
-    retried = await client.post(
+    aad = crypto.build_aad("note", therapist.user_id or "", patient.user_id or "", "nh-1")
+
+    # CHANGING retry -> 409, the live note is untouched, no revision.
+    changed = await client.post(
         f"/api/therapist/patients/{patient.user_id}/notes",
         headers=therapist.headers,
         json={
@@ -106,31 +112,46 @@ async def test_idempotent_retry_with_new_text_preserves_the_superseded_text(clie
             "blob": therapist.encrypt_note(patient, "nh-1", REVISED_TEXT),
         },
     )
-    assert retried.status_code == 201, retried.text
+    assert changed.status_code == 409, changed.text
+    assert changed.json()["code"] == "version_conflict"
     revisions = await client.get(
         f"/api/therapist/notes/{note['id']}/revisions", headers=therapist.headers
     )
     assert revisions.status_code == 200, revisions.text
-    rows = revisions.json()
-    assert len(rows) == 1
-    aad = crypto.build_aad("note", therapist.user_id or "", patient.user_id or "", "nh-1")
-    plain = crypto.decrypt(therapist.notes_key, base64.b64decode(rows[0]["blob"]), aad)
-    assert json.loads(plain.decode("utf-8"))["text"] == TODAY_TEXT
+    assert len(revisions.json()) == 0
     notes = await client.get(
         f"/api/therapist/patients/{patient.user_id}/notes", headers=therapist.headers
     )
     live = base64.b64decode(notes.json()[0]["blob"])
-    assert (
-        json.loads(crypto.decrypt(therapist.notes_key, live, aad).decode())["text"] == REVISED_TEXT
+    assert json.loads(crypto.decrypt(therapist.notes_key, live, aad).decode())["text"] == TODAY_TEXT
+
+    # The edit flows through PATCH with a base_version: superseded text
+    # preserved as a revision, live text advanced.
+    patched = await client.patch(
+        f"/api/therapist/notes/{note['id']}",
+        headers=therapist.headers,
+        json={
+            "blob": therapist.encrypt_note(patient, "nh-1", REVISED_TEXT),
+            "base_version": note["version"],
+        },
     )
-    # A byte-identical retry (the genuine offline-queue replay) still
-    # writes NO revision.
+    assert patched.status_code == 200, patched.text
+    revisions = await client.get(
+        f"/api/therapist/notes/{note['id']}/revisions", headers=therapist.headers
+    )
+    rows = revisions.json()
+    assert len(rows) == 1
+    plain = crypto.decrypt(therapist.notes_key, base64.b64decode(rows[0]["blob"]), aad)
+    assert json.loads(plain.decode("utf-8"))["text"] == TODAY_TEXT
+
+    # A byte-identical POST replay (the genuine offline-queue retry) still
+    # succeeds idempotently and writes NO revision.
     replay = await client.post(
         f"/api/therapist/patients/{patient.user_id}/notes",
         headers=therapist.headers,
         json={
             "client_note_id": "nh-1",
-            "blob": retried.json()["blob"],
+            "blob": patched.json()["blob"],
         },
     )
     assert replay.status_code == 201

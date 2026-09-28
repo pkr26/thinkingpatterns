@@ -765,7 +765,7 @@ describe("UnlockScreen v2 key envelope", () => {
     expect(recordUnlockFailure).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalledWith(
       "Unlock failed",
-      "We couldn't verify your encryption key with the server. Check your connection and try again — nothing was changed.",
+      "We couldn't confirm how your account's encryption is set up right now. Check your connection and try again in a moment — nothing was unlocked and nothing was changed.",
     );
   });
 
@@ -807,9 +807,13 @@ describe("UnlockScreen v2 key envelope", () => {
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it("ONLINE login + unreachable fetch + cached v1 MARKER keeps the v1 sealed-proof path (v1 unaffected)", async () => {
-    // A v1 account's cache holds a scheme marker, not a wrap: the online
-    // refresh of the sealed proof under the derived key proceeds unchanged.
+  it("independent audit 2026-09-27 (P2): ONLINE login + unreachable fetch + cached v1 MARKER now REFUSES — a stale marker cannot authorize the v1 path", async () => {
+    // The cache holds a scheme MARKER, not a wrap. It is a hint from an
+    // earlier session: routing the session onto v1 semantics after a FAILED
+    // fetch re-seals the proof under the v1-derived key — safe today only
+    // because v1→v2 wraps the same data key, and a silent wrong-key write
+    // under any future scheme rotation. The unlock is refused with honest
+    // retry copy; no proof refresh, no wrong-password backoff.
     vi.mocked(api.keyEnvelope).mockRejectedValue(new Error("network died mid-flow"));
     vi.mocked(api.getCachedKeyEnvelope).mockResolvedValue({
       scheme: "v1",
@@ -817,6 +821,46 @@ describe("UnlockScreen v2 key envelope", () => {
       kdfParams: null,
       wrappedB64: null,
     } as never);
+    recordUnlockFailure.mockClear();
+    storeUnlockProof.mockClear();
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(api.login).toHaveBeenCalledTimes(1); // the password WAS accepted online…
+    expect(vault.isUnlocked()).toBe(false); // …but the scheme was never confirmed
+    expect(storeUnlockProof).not.toHaveBeenCalled(); // no re-seal under the v1-derived key
+    expect(recordUnlockFailure).not.toHaveBeenCalled(); // not a 401
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Unlock failed",
+      "We couldn't confirm how your account's encryption is set up right now. Check your connection and try again in a moment — nothing was unlocked and nothing was changed.",
+    );
+  });
+
+  it("independent audit 2026-09-27 (P2): a DEFINITIVE v1 answer from the server still unlocks through the v1 path", async () => {
+    // The server ANSWERED key_scheme=v1 — that, not a cache hint, is what
+    // authorizes deriving the v1 key while online.
+    vi.mocked(api.keyEnvelope).mockResolvedValue({
+      key_scheme: "v1",
+      salt: SALT_B64,
+      kdf_params: null,
+      wrapped_data_key: null,
+    } as never);
+    const root = await render(<UnlockScreen />);
+    await typeInto(root, "password", "correct horse");
+    await pressLabel(root, "Unlock");
+    await flush();
+
+    expect(api.keyEnvelope).toHaveBeenCalledTimes(1);
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 3)); // the v1 label
+    expect(storeUnlockProof).toHaveBeenCalledWith(Buffer.alloc(32, 3), "user-1");
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("independent audit 2026-09-27 (P2): a LEGACY 404 server (pre-envelope) keeps v1 semantics — a definitive answer", async () => {
+    vi.mocked(api.keyEnvelope).mockRejectedValue(new ApiError(404, "not found"));
     const root = await render(<UnlockScreen />);
     await typeInto(root, "password", "correct horse");
     await pressLabel(root, "Unlock");

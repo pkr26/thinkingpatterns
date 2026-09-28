@@ -22,7 +22,7 @@ import base64
 import hashlib
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -32,7 +32,12 @@ from httpx import AsyncClient
 from app.security import crypto, envelope, kdf, sharing
 from tests.helpers import FAST_ITERATIONS, ClientEmulator, EnvelopeClientEmulator, TherapistEmulator
 
-TODAY = date(2026, 9, 26)
+# Clock-anchored (independent audit 2026-09-27): the entry API validates
+# entry_date against the SERVER's UTC today minus a 1-day backdate grace,
+# so a fixed date ages out the night the UTC clock passes it — the suite
+# went red at 2026-09-28T00:00Z with zero code changes. Anchor on the
+# server clock instead; the engine math below is date-agnostic.
+TODAY = datetime.now(timezone.utc).date()
 
 
 # ===========================================================================

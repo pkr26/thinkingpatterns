@@ -39,6 +39,7 @@ class MetricsRegistry:
         self._recompute_bucket_counts: dict[float, int] = {b: 0 for b in RECOMPUTE_BUCKETS}
         self._llm_failures = 0
         self._llm_successes = 0
+        self._audit_chain_failures = 0
 
     def observe_request(self, status: int) -> None:
         family = f"{status // 100}xx"
@@ -60,6 +61,14 @@ class MetricsRegistry:
                 self._llm_failures += 1
             else:
                 self._llm_successes += 1
+
+    def observe_audit_chain(self, failures: int) -> None:
+        """Daily chain-verification outcome (independent audit 2026-09-27).
+
+        Counts FAILED patients, not rows: one tampered trail is one signal
+        however many rows it has. Zero when every verified chain holds."""
+        with self._lock:
+            self._audit_chain_failures += failures
 
     def render(self, keystore_sessions: int) -> str:
         with self._lock:
@@ -83,6 +92,8 @@ class MetricsRegistry:
             lines.append(f'mindpattern_llm_calls_total{{outcome="success"}} {self._llm_successes}')
             lines.append("# TYPE mindpattern_keystore_sessions gauge")
             lines.append(f"mindpattern_keystore_sessions {keystore_sessions}")
+            lines.append("# TYPE mindpattern_audit_chain_failures counter")
+            lines.append(f"mindpattern_audit_chain_failures {self._audit_chain_failures}")
             return "\n".join(lines) + "\n"
 
 

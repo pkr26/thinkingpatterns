@@ -76,7 +76,7 @@ const mockedApi = vi.mocked(api);
 const { ApiError } = await import("../src/api");
 const { LoginView } = await import("../src/views/LoginView");
 const { PatientsView } = await import("../src/views/PatientsView");
-const { render, flush, textOf, press, typeInto } = await import("./helpers/rtr");
+const { render, flush, textOf, press, typeInto, buttonByLabel } = await import("./helpers/rtr");
 
 const session = {
   username: "drportal",
@@ -174,12 +174,28 @@ describe("PatientsView TOTP enrollment (2026-09-22)", () => {
     await typeInto(root, "Current password (to authorize setup)", "deep-password-1");
     await press(root, "Set up authenticator");
     await flush(6);
-    // The secret and otpauth URI are rendered exactly once…
-    expect(textOf(root)).toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
-    expect(textOf(root)).toContain("otpauth://totp/MindPattern:drportal");
+    // independent audit 2026-09-27: the pending secret renders MASKED by
+    // default — plaintext (and the otpauth URI, which embeds it) exists in
+    // the DOM only behind the explicit reveal toggle.
+    expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
+    expect(textOf(root)).not.toContain("otpauth://totp/MindPattern:drportal");
+    expect(textOf(root)).toContain("•".repeat(32)); // same-length mask
+    expect(buttonByLabel(root, "Show secret")).toBe(true);
     expect(mockedApi.totpSetup).toHaveBeenCalledTimes(1);
     // …not yet enabled: no enable call happened.
     expect(mockedApi.totpEnable).not.toHaveBeenCalled();
+
+    // The deliberate reveal shows both the secret and the URI…
+    await press(root, "Show secret");
+    await flush();
+    expect(textOf(root)).toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
+    expect(textOf(root)).toContain("otpauth://totp/MindPattern:drportal");
+    // …and hiding re-masks them while the setup stage stays armed.
+    await press(root, "Hide secret");
+    await flush();
+    expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
+    expect(textOf(root)).not.toContain("otpauth://totp/MindPattern:drportal");
+    expect(textOf(root)).toContain("•".repeat(32));
 
     await typeInto(root, "Current password (to authorize setup)", "deep-password-1");
     await typeInto(root, "6-digit code from the app", "123456");
@@ -189,6 +205,7 @@ describe("PatientsView TOTP enrollment (2026-09-22)", () => {
     expect(textOf(root)).toContain("Two-factor authentication is on");
     // The one-time secret is gone from the tree after enabling.
     expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
+    expect(textOf(root)).not.toContain("•".repeat(32));
   });
 
   it("an enabled account offers the both-halves disable flow", async () => {

@@ -106,7 +106,7 @@ export function Field(props: {
   );
 }
 
-export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn"; role?: "status" }): React.JSX.Element {
+export function Note(props: { children: ReactNode; tone?: "muted" | "ok" | "danger" | "warn"; role?: "status" | "alert" }): React.JSX.Element {
   const classes = ["note"];
   if (props.tone) classes.push(`note--${props.tone}`);
   // Audit fix 16 (2026-09-21): NOTE_TEMPLATES invite multi-line drafts; a

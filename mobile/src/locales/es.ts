@@ -141,6 +141,16 @@ export const es: Record<string, string> = {
   // un mensaje sereno sobre el servidor o los datos, nunca "contraseña incorrecta".
   "unlock.envelopeFailed":
     "el sobre de llaves de esta cuenta no se pudo abrir en este servidor. No se cambió nada — inténtelo de nuevo y contacte a soporte si se repite.",
+  // Auditoría independiente 27/09/2026 (P2): el inicio de sesión en línea
+  // funcionó, pero la consulta del esquema de llaves falló y este dispositivo
+  // solo tiene un marcador de esquema obsoleto (o nada). Un marcador por sí
+  // solo no autoriza derivar llaves v1: hoy es seguro solo porque v1→v2
+  // envuelve la misma llave de datos, y cualquier rotación futura de esquema
+  // convertiría esto en una escritura silenciosa con la llave equivocada. Se
+  // rechaza con un mensaje honesto de reintento — no se desbloqueó ni se
+  // cambió nada.
+  "unlock.schemeUnconfirmed":
+    "No pudimos confirmar ahora cómo está configurado el cifrado de su cuenta. Compruebe su conexión e inténtelo de nuevo en un momento — no se desbloqueó nada y no se cambió nada.",
 
   // ----------------------------------------------------------------- login
   "login.subtitle": "Sus patrones, a partir de sus palabras. Cifrado en este dispositivo.",
@@ -710,6 +720,12 @@ export const es: Record<string, string> = {
     "Su contraseña ahora abre una copia recién envuelta de su clave de cifrado; la clave en sí no cambió, así que su diario y sus permisos de compartir quedaron tal como estaban. Inicie sesión de nuevo en este dispositivo y en cualquier otro que use.",
   "settings.rotateFailedTitle": "No se pudo cambiar la contraseña",
   "settings.rotateWrongOld": "La contraseña actual no fue aceptada. No se cambió nada.",
+  // Auditoría independiente 27/09/2026 (P2): la cola sin conexión está sellada
+  // con la llave de datos ANTIGUA; rotar antes de vaciarla dejaría huérfanas
+  // todas las entradas en cola. La rotación se aborta antes de cualquier paso
+  // en el servidor con este mensaje honesto.
+  "settings.rotateQueueBlocked":
+    "Aún hay entradas esperando para subirse desde este dispositivo, selladas con su contraseña actual — cambiarla ahora las dejaría ilegibles. Guárdelas primero (mantenga la aplicación abierta con conexión hasta que la cola se vacíe) y vuelva a intentarlo.",
   "settings.rotateRewrapFailed":
     "Estos permisos de compartir no pudieron re-envolverse y deben emparejarse de nuevo con el código del terapeuta: {names}",
   // --- Mejora v1 → v2 del sobre de llaves (2026-09-26) --------------------

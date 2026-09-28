@@ -4,6 +4,7 @@
  *  normalized between tests. */
 import { vi } from "vitest";
 import { clearSession, setSession } from "../../src/api/client";
+import { resetCrisisDialogStampsForTests } from "../../src/crisisDialog";
 import { setKvBackendForTests, type KvBackend } from "../../src/kvstore";
 import { resetEntryVersionMirrors } from "../../src/entryVersions";
 import { vault } from "../../src/vault";
@@ -54,6 +55,10 @@ export function resetTestState(): void {
   vault.lock();
   setKvBackendForTests(memoryKvBackend());
   resetEntryVersionMirrors();
+  // The crisis-prompt throttle is a module singleton since the
+  // 2026-09-27 audit (no plaintext date on disk) — reset it like the
+  // entry-version mirrors so it cannot leak between cases.
+  resetCrisisDialogStampsForTests();
   const win = (globalThis as { window?: { localStorage?: Storage; sessionStorage?: Storage } }).window;
   win?.localStorage?.clear();
   win?.sessionStorage?.clear();

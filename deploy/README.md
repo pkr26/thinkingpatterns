@@ -24,7 +24,7 @@ updates for service images):
 |---|---|---|---|
 | API + backup worker | release env asset (`mindpattern-release-vX.Y.Z.env`), consumed as `@sha256` by `docker-compose.yml` | each release (workflow publishes provenance + SBOM, and since 2026-09-26 cosign-signs both digests keyless — verify with `cosign verify <ref>` against the repo's OIDC identity) | deploy the next tagged release; never rebuild on the host |
 | `postgres:16-alpine@sha256:721873c34ceb…` | `docker-compose.yml` (db service) + `backup/Dockerfile` | 2026-09-26 (re-resolved via the Docker Hub registry API; previous pin 2026-09-07 had fallen ~6 weeks behind the moving tag) | `docker buildx imagetools inspect postgres:16-alpine` → replace tag AND digest together, deliberately — in BOTH files |
-| `postgres:16-alpine@sha256:721873c34ceb…` (workflow-side) | `.github/workflows/ci.yml` (restore container) + `.github/workflows/release.yml` (postgres service container, production-integration restore container) | 2026-09-26 (moved off the superseded 2026-09-07 `cf78e766…` pin when the drift gate learned to scan workflows) | same inspect-and-replace discipline |
+| `postgres:16-alpine@sha256:721873c34ceb…` (workflow-side) | `.github/workflows/ci.yml` (restore container) + `.github/workflows/release.yml` (postgres service container, production-integration restore container) + `backend/scripts/rehearse_restore.sh` (DR rehearsal container — re-pinned 2026-09-27 after the independent audit caught the superseded digest there; the drift gate now scans `.sh` files too) | 2026-09-26 (moved off the superseded 2026-09-07 `cf78e766…` pin when the drift gate learned to scan workflows) | same inspect-and-replace discipline |
 | `python:3.14-slim@sha256:51dafde81dbdb…` | `backend/Dockerfile` (both stages) | 2026-09-26 (re-resolved via the registry API; previous pin 2026-09-07) | same inspect-and-replace discipline |
 | `prom/prometheus:v3.4.1@sha256:9abc6cf6aea7…` | `deploy/monitoring/docker-compose.yml` + `.github/workflows/ci.yml` (promtool copy step) | 2026-09-22 audit G-7/NEW-4 | same inspect-and-replace discipline; `deploy/monitoring/verify.sh --production` (CI's monitoring-verify job) fails any mutable reference |
 | `grafana/grafana:12.0.0@sha256:263cbefd5d9b…` | `deploy/monitoring/docker-compose.yml` | 2026-09-22 audit G-7/NEW-4 | same inspect-and-replace discipline |
@@ -166,7 +166,9 @@ variables are visible to `docker inspect` on the host, so the signing and
 backup secrets additionally mount as compose `secrets:` files under
 `deploy/secrets/` (examples committed; real files gitignored; the app
 resolves `<VAR>_FILE`, the db reads `POSTGRES_PASSWORD_FILE` natively, the
-backup worker builds its pgpass line and passes `-pass file:` to openssl):
+backup worker builds its pgpass line and passes `-pass file:` to openssl;
+independent audit 2026-09-27 added the metrics token, the last secret that
+still shipped as plain env):
 
 ```bash
 mkdir -p "$APP_DIR/deploy/secrets" && cd "$APP_DIR/deploy/secrets"
@@ -174,7 +176,10 @@ openssl rand -hex 32  > token_secret        # = MINDPATTERN_TOKEN_SECRET
 : > auth_token_secret                       # optional; empty = derive
 openssl rand -hex 16  > postgres_password   # same value as .env's POSTGRES_PASSWORD
 openssl rand -base64 32 > backup_key        # = BACKUP_KEY
-chmod 600 token_secret auth_token_secret postgres_password backup_key
+openssl rand -hex 16  > metrics_token       # api /metrics bearer; SAME value must
+                                            # go into deploy/monitoring/token for
+                                            # prometheus' bearer_token_file
+chmod 600 token_secret auth_token_secret postgres_password backup_key metrics_token
 # Only if you use the off-site replication overlay:
 cp rclone_config.example rclone_config && $EDITOR rclone_config  # fill the S3 remote
 chmod 600 rclone_config

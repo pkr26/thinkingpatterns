@@ -59,6 +59,22 @@ describe("catalog parity (P8.2)", () => {
     expect(missing).toEqual([]);
   });
 
+  // independent audit 2026-09-27 (P3): parity is BIDIRECTIONAL — an extra
+  // Spanish key is dead copy that drifts unpinned, and an EMPTY value in
+  // either catalog renders as nothing wherever t() lands it.
+  it("the Spanish catalog carries no EXTRA key the English catalog lacks", () => {
+    const extra = Object.keys(esCatalog).filter((key) => !(key in enCatalog));
+    expect(extra).toEqual([]);
+  });
+
+  it("no key in either catalog maps to an EMPTY string", () => {
+    for (const catalog of [enCatalog, esCatalog]) {
+      for (const [key, value] of Object.entries(catalog)) {
+        expect(value.length, `empty value for ${key}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("the crisis-surface keys are never empty in either locale", () => {
     for (const catalog of [enCatalog, esCatalog]) {
       for (const key of Object.keys(catalog).filter((k) => k.startsWith("mood.option") || k.startsWith("measures."))) {

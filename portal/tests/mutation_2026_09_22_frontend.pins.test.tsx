@@ -1182,6 +1182,10 @@ describe("mutation pins 2026-09-22: PatientsView account security", () => {
     await flush(4);
     await typeInto(root, "Current password (to authorize setup)", "current-password-1");
     await press(root, "Set up authenticator");
+    // 2026-09-27 masking: the secret renders masked by default; the reveal
+    // toggle puts the plaintext up while the code is typed in.
+    await vi.waitFor(() => expect(buttonByLabel(root, "Show secret")).toBe(true), { timeout: 4000 });
+    await press(root, "Show secret");
     await vi.waitFor(() => expect(textOf(root)).toContain("SECRET"), { timeout: 4000 });
     await typeInto(root, "Current password (to authorize setup)", "current-password-1");
     const { act } = await import("react");
@@ -1201,12 +1205,18 @@ describe("mutation pins 2026-09-22: PatientsView account security", () => {
     await flush(4);
     await typeInto(root, "Current password (to authorize setup)", "current-password-1");
     await press(root, "Set up authenticator");
-    await vi.waitFor(() => expect(textOf(root)).toContain("ONE-TIME-SECRET"), { timeout: 4000 });
+    // 2026-09-27 masking: the pending secret exists behind the reveal
+    // toggle — confirm it arrived, then hide the panel and prove the
+    // material (masked or not) is discarded.
+    await vi.waitFor(() => expect(buttonByLabel(root, "Show secret")).toBe(true), { timeout: 4000 });
+    expect(textOf(root)).toContain("•".repeat("ONE-TIME-SECRET".length));
+    expect(textOf(root)).not.toContain("ONE-TIME-SECRET");
     await press(root, "Hide account security");
     await flush(2);
     await press(root, "Show account security");
     await flush(2);
     expect(textOf(root)).not.toContain("ONE-TIME-SECRET");
+    expect(textOf(root)).not.toContain("•".repeat("ONE-TIME-SECRET".length));
     expect(buttonByLabel(root, "Set up authenticator")).toBe(true);
   });
 

@@ -892,7 +892,19 @@ async def change_password(
             raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
         params_json = canonical_kdf_params_json(canonical_params)
     elif user.kdf_params:
-        params_json = user.kdf_params
+        # Independent audit 2026-09-27: re-storing the account's current
+        # blob verbatim used to propagate a hand-edited or legacy-garbage
+        # column into the fresh envelope row. Re-validate + canonicalize
+        # first; a corrupt column fails CLOSED here (the row stays as-is,
+        # the operator investigates) instead of bricking a later unlock.
+        stored_params = parse_kdf_params_json(user.kdf_params)
+        if stored_params is None:
+            raise ApiError(
+                status_code=409,
+                detail="stored kdf_params are invalid; contact the operator",
+                code="envelope_key_mismatch",
+            )
+        params_json = canonical_kdf_params_json(stored_params)
     else:
         params_json = canonical_kdf_params_json(kdf.KDF_PARAMS_DEFAULT)
 
@@ -1113,7 +1125,19 @@ async def upgrade_key_envelope(
             raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
         params_json = canonical_kdf_params_json(canonical_params)
     elif user.kdf_params:
-        params_json = user.kdf_params
+        # Independent audit 2026-09-27: re-storing the account's current
+        # blob verbatim used to propagate a hand-edited or legacy-garbage
+        # column into the fresh envelope row. Re-validate + canonicalize
+        # first; a corrupt column fails CLOSED here (the row stays as-is,
+        # the operator investigates) instead of bricking a later unlock.
+        stored_params = parse_kdf_params_json(user.kdf_params)
+        if stored_params is None:
+            raise ApiError(
+                status_code=409,
+                detail="stored kdf_params are invalid; contact the operator",
+                code="envelope_key_mismatch",
+            )
+        params_json = canonical_kdf_params_json(stored_params)
     else:
         params_json = canonical_kdf_params_json(kdf.KDF_PARAMS_DEFAULT)
 

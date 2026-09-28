@@ -213,34 +213,59 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       // unreadable. The session is now REFUSED — the copy is set here and
       // thrown BELOW the try, because this try's catch deliberately swallows
       // non-401 failures to reach the offline path, and the refusal must
-      // bypass that fall-through. ("legacy" — a 404 from a pre-envelope
-      // server — cannot host a v2 account and keeps v1 semantics.)
+      // bypass that fall-through.
+      // independent audit 2026-09-27 (P2): the refusal now also covers the
+      // STALE-v1-MARKER case. A definitive server answer ("ok" v1, or
+      // "legacy" — a 404 from a pre-envelope server) or a cached v2 ENVELOPE
+      // with material are the ONLY things that may authorize the v1 path; a
+      // cached v1 marker alone is a scheme hint from an earlier session, and
+      // routing on it after a FAILED fetch re-seals the proof under the
+      // v1-derived key — safe today only because v1→v2 wraps the SAME data
+      // key, and a silent wrong-key write the moment any future scheme
+      // rotation lands. Fail closed with honest retry copy instead.
       let envelopeRefusal: string | null = null;
       if (!offline) {
         try {
           const body = await api.login(username, keys.authKey.toString("base64"));
           await api.setSession(body.token, body.user_id, username);
-          // KEY SCHEME: the fresh bearer fetches the envelope; v2 unwraps
-          // locally, v1 refreshes the sealed proof exactly as before. A
-          // failed fetch (network died mid-flow) falls back to the CACHED
-          // envelope, then to the sealed proof below.
+          // KEY SCHEME: the fresh bearer fetches the envelope. Only a
+          // definitive answer routes the session; a FAILED fetch falls back
+          // to the cached envelope, and only a cached v2 ENVELOPE (which
+          // authenticates the password itself through GCM) may carry the
+          // session from there.
           const fetched = await fetchEnvelope();
-          const envelope = fetched.status === "ok" ? fetched.envelope : await cachedEnvelope(username);
-          if (envelope === null && (fetched.status === "invalid" || fetched.status === "unreachable")) {
-            envelopeRefusal = tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "login.envelopeUnavailable");
-          } else if (envelope !== null && envelope.scheme === "v2") {
-            const dataKey = await unwrapFor(envelope);
-            // Verified online AND by the envelope's own authentication:
-            // refresh the sealed proof so a future offline unlock (and the
-            // biometric path) checks against this very key.
-            await storeUnlockProof(dataKey, body.user_id);
-            await cacheEnvelope(username, envelope).catch(() => {});
-            sessionDataKey = dataKey;
-          } else {
-            // Verified against the server: refresh the sealed proof so the
-            // next offline unlock checks against this very key.
+          if (fetched.status === "ok") {
+            const envelope = fetched.envelope;
+            if (envelope.scheme === "v2") {
+              const dataKey = await unwrapFor(envelope);
+              // Verified online AND by the envelope's own authentication:
+              // refresh the sealed proof so a future offline unlock (and the
+              // biometric path) checks against this very key.
+              await storeUnlockProof(dataKey, body.user_id);
+              await cacheEnvelope(username, envelope).catch(() => {});
+              sessionDataKey = dataKey;
+            } else {
+              // Definitive v1 answer: refresh the sealed proof so the next
+              // offline unlock checks against this very key.
+              await storeUnlockProof(keys.dataKey, body.user_id);
+              await cacheEnvelope(username, envelope).catch(() => {});
+            }
+          } else if (fetched.status === "legacy") {
+            // 404 from a pre-envelope server — a definitive answer that
+            // cannot host a v2 account: v1 semantics hold.
             await storeUnlockProof(keys.dataKey, body.user_id);
-            if (envelope !== null) await cacheEnvelope(username, envelope).catch(() => {});
+          } else {
+            // "unreachable" | "invalid": the server gave NO scheme answer
+            // this session. Only a cached v2 envelope (material + its own
+            // GCM proof) may proceed; a stale v1 marker may not.
+            const cached = await cachedEnvelope(username);
+            if (cached !== null && cached.scheme === "v2") {
+              const dataKey = await unwrapFor(cached);
+              await storeUnlockProof(dataKey, body.user_id);
+              sessionDataKey = dataKey;
+            } else {
+              envelopeRefusal = tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "unlock.schemeUnconfirmed");
+            }
           }
           verifiedOnline = true;
         } catch (loginErr) {

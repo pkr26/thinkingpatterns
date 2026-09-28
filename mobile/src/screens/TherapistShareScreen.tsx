@@ -18,7 +18,7 @@ import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-nati
 import { api, ApiError, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
-import { therapistKeyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
+import { therapistKeyFingerprint, serverFingerprintMatches, wrapDataKeyForTherapist } from "../crypto/sharing";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { calmFallbackCopy } from "../components/errors";
@@ -69,17 +69,12 @@ const dayOf = (iso: string): string => {
 /** SAS (2026-09-26): the pairing checksum is SERVER-CONTROLLED text on a
  *  security screen — accept only the exact shape the contract defines
  *  ("ddd ddd"), never free-form rendering. Absent/invalid → null → the
- *  line is simply not shown (an older server predates the field). */
+ *  line is simply not shown (an older server predates the field).
+ *  (The wrap-key fingerprint's shape validation + cross-check moved into
+ *  crypto/sharing.ts serverFingerprintMatches — independent audit
+ *  2026-09-27.) */
 export function validSas(value: unknown): string | null {
   return typeof value === "string" && /^\d{3} \d{3}$/.test(value) ? value : null;
-}
-
-/** The server-computed wrap-key fingerprint (16 hex). Same validation
- *  discipline; used to CROSS-CHECK the locally computed fingerprint of the
- *  wrap key the same response carried — agreement is another substitution
- *  tripwire, disagreement must be visible. */
-export function validServerFingerprint(value: unknown): string | null {
-  return typeof value === "string" && /^[0-9a-f]{16}$/.test(value) ? value : null;
 }
 
 export function TherapistShareScreen({ navigation }: { navigation: any }): React.JSX.Element {
@@ -391,11 +386,19 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
           {/* Cross-check: the server's fingerprint of the wrap key must equal
               THIS app's fingerprint of the same response's key bytes —
               disagreement means the response is internally inconsistent and
-              is surfaced as the mismatch guidance, never silently ignored. */}
+              is surfaced as the mismatch guidance, never silently ignored.
+              independent audit 2026-09-27: the comparison goes through
+              serverFingerprintMatches (the server value is 16 LOWERCASE hex
+              chars, the display fingerprint is 32 UPPERCASE space-grouped —
+              the old strict string compare could never be equal and fired
+              the alert on every honest pairing). false = valid-but-different
+              → alert; null = absent/invalid → treated as absent (no alert). */}
           {(() => {
-            const server = validServerFingerprint(lookup.wrap_key_fingerprint);
-            const local = therapistKeyFingerprint(lookup.wrap_pub_key);
-            return server !== null && server !== local ? (
+            const match = serverFingerprintMatches(
+              lookup.wrap_pub_key,
+              typeof lookup.wrap_key_fingerprint === "string" ? lookup.wrap_key_fingerprint : "",
+            );
+            return match === false ? (
               <Text style={{ color: t.colors.error, fontSize: 12, lineHeight: 18 }} accessibilityRole="alert">
                 {tr("share.mismatchTitle")}: {tr("share.mismatchBody")}
               </Text>

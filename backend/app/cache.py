@@ -26,6 +26,7 @@ import time
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -412,6 +413,13 @@ class TokenRevocationStore:
         self._by_expiry: dict[str, float] = {}
         self._lock = threading.Lock()
         self._max_entries = max_entries
+        # Independent audit 2026-09-27: set the first time the cap forces an
+        # eviction. Before that moment the in-memory map is provably a
+        # complete mirror of the durable table (boot hydration + insert on
+        # every revoke), so a miss is authoritative "not revoked" with no
+        # database round-trip. Once entries have been evicted, a miss is
+        # ambiguous and is_revoked_checked falls back to a point query.
+        self._overflowed = False
 
     def revoke(self, jti: str, expires_at_epoch: float, now: float | None = None) -> None:
         """Record one revoked token id until its expiry.
@@ -431,6 +439,7 @@ class TokenRevocationStore:
                 overflow = len(self._by_expiry) - self._max_entries
                 for oldest in sorted(self._by_expiry, key=self._by_expiry.__getitem__)[:overflow]:
                     del self._by_expiry[oldest]
+                self._overflowed = True
 
     def is_revoked(self, jti: str | None, now: float | None = None) -> bool:
         """Membership check for a (possibly legacy, jti-less) token."""
@@ -461,3 +470,92 @@ class TokenRevocationStore:
         with self._lock:
             self._prune_locked(time.time())
             return len(self._by_expiry)
+
+    # --- durable backing (independent audit 2026-09-27) -----------------------
+    #
+    # The in-process map died with the process: a deploy or crash emptied
+    # it and every logged-out bearer resurrected until its own exp. The
+    # table-backed methods below keep the in-memory map as a cache (no DB
+    # round-trip per request) while making the revocation itself durable:
+    # logout writes through, boot re-hydrates, and once the cap has evicted
+    # entries the checked lookup falls back to a point query so eviction
+    # pressure can never resurrect a token either.
+
+    async def revoke_durable(self, session, jti: str, expires_at_epoch: float) -> None:
+        """Write the revocation to the durable table AND the memory cache.
+
+        Called inside the logout lifecycle fence; the caller commits.
+        ``merge`` (SELECT-then-INSERT/UPDATE) is dialect-neutral and makes
+        a double logout of the same bearer idempotent — the second merge
+        refreshes the same row instead of colliding on the primary key.
+        """
+        from .models import TokenRevocation
+
+        self.revoke(jti, expires_at_epoch)
+        expires_at = datetime.fromtimestamp(expires_at_epoch, tz=timezone.utc)
+        await session.merge(TokenRevocation(jti=jti, expires_at=expires_at))
+        await session.flush()
+
+    async def hydrate(self, session, now: float | None = None) -> int:
+        """Load every unexpired durable revocation into memory (boot path).
+
+        Newest-expiry-first under the cap: if the table somehow outgrew the
+        cache, the entries with the longest remaining life win. Returns the
+        number loaded (observability + tests).
+        """
+        from sqlalchemy import select
+
+        from .models import TokenRevocation
+
+        current = now if now is not None else time.time()
+        cutoff = datetime.fromtimestamp(current, tz=timezone.utc)
+        rows = (
+            (
+                await session.execute(
+                    select(TokenRevocation)
+                    .where(TokenRevocation.expires_at > cutoff)
+                    .order_by(TokenRevocation.expires_at.desc())
+                    .limit(self._max_entries)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        with self._lock:
+            self._prune_locked(current)
+            for row in rows:
+                self._by_expiry[row.jti] = row.expires_at.timestamp()
+            return len(rows)
+
+    async def is_revoked_checked(self, session, jti: str | None, now: float | None = None) -> bool:
+        """Revocation check that stays exact once the cache has evicted.
+
+        Memory hit -> revoked. Memory miss while the cache has never
+        overflowed -> authoritative not-revoked (the map mirrors the table
+        completely). Miss after an eviction -> point query, so an attacker
+        who pressures the cap cross-tenant cannot push a victim's
+        revocation out of memory and have it honored as "not revoked".
+        """
+        if not jti:
+            return False
+        if self.is_revoked(jti, now=now):
+            return True
+        with self._lock:
+            overflowed = self._overflowed
+        if not overflowed:
+            return False
+        from sqlalchemy import select
+
+        from .models import TokenRevocation
+
+        current_dt = datetime.fromtimestamp(
+            now if now is not None else time.time(), tz=timezone.utc
+        )
+        row = (
+            await session.execute(
+                select(TokenRevocation.jti).where(
+                    TokenRevocation.jti == jti, TokenRevocation.expires_at > current_dt
+                )
+            )
+        ).first()
+        return row is not None

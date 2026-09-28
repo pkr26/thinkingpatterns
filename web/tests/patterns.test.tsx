@@ -306,3 +306,51 @@ describe("questionFeedback queue semantics", () => {
     expect(parsed.feedback.length).toBe(1);
   });
 });
+
+/** independent audit 2026-09-27 (P2): toggleMute re-fetched vault.get()
+ *  AFTER the local-persist await — a lock mid-write threw inside the void
+ *  callback as an unhandled rejection. The keys are fetched once now, and
+ *  the server-sync leg is quietly skipped on a locked vault. */
+describe("toggleMute lock race (audit 2026-09-27)", () => {
+  it("a lock landing mid-mute-write is a quiet no-op — no unhandled rejection, local set intact, server sync skipped", async () => {
+    const kvMap = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) {
+        return kvMap.get(k) ?? null;
+      },
+      async setItem(k, v) {
+        // The lock lands exactly at the local mute persist.
+        if (k.startsWith("mindpattern.patternMutes.")) vault.lock();
+        kvMap.set(k, v);
+      },
+      async removeItem(k) {
+        kvMap.delete(k);
+      },
+      async keys() {
+        return [...kvMap.keys()];
+      },
+    });
+    stubEverything({
+      insights: () => insightsResponse([
+        { kind: "temporal", label: "'work' on Sundays", occurrences: 9, confidence: 0.87, detail: { pattern_pid: "temporal:work", pattern_state: "confirmed" } },
+      ]),
+    });
+    const root = await render(<PatternsView onCrisis={() => undefined} />);
+    await settle(40, 4);
+    await press(root, "Mute");
+    await settle(40, 3);
+    // The UI state kept the mute (the card body is hidden, the count shows).
+    expect(textOf(root)).not.toContain("seen 9 times");
+    expect(textOf(root)).toContain("1 pattern muted");
+    // The local encrypted store kept it too — written under the write's own
+    // key snapshot, which was taken BEFORE the lock could zeroize it.
+    const stored = kvMap.get("mindpattern.patternMutes.v1.user-1");
+    expect(stored).toBeTruthy();
+    const opened = await decrypt(DATA_KEY, fromBase64(stored!), buildAad("pattern-mutes", USER));
+    expect(JSON.parse(new TextDecoder().decode(opened))).toEqual(["temporal:work"]);
+    // The server-side sync (questionFeedback queue) was SKIPPED, not sealed
+    // under a dead key: no feedback store exists.
+    expect(kvMap.has("mindpattern.feedback.user-1")).toBe(false);
+    expect(await buildFeedbackBlob(DATA_KEY, USER)).toBeNull();
+  });
+});

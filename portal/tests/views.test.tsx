@@ -368,6 +368,57 @@ describe("PatientsView", () => {
     expect(textOf(root)).not.toContain("482 913");
   });
 
+  // --- independent audit 2026-09-27: local wrap-key fingerprint cross-check ---
+
+  /** Drive the SAS flow on a session-backed view and return the root. */
+  const sasWithSession = async (): Promise<Awaited<ReturnType<typeof render>>> => {
+    const root = await render(
+      <PatientsView displayName="Dr. Portal" session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />,
+    );
+    await flush();
+    await press(root, "Generate pairing code");
+    await flush();
+    await typeInto(root, "Patient's account id (shown in their app)", "0123456789abcdef0123456789abcdef");
+    await press(root, "Show verification code");
+    await flush(6);
+    return root;
+  };
+
+  it("a server fingerprint that MATCHES the locally computed one renders no warning", async () => {
+    // The server value is derived from the SAME SPKI DER the portal holds —
+    // the honest-server case. serverWrapKeyFingerprint is the real (unmocked)
+    // implementation, so the test computes exactly what the view should.
+    const honest = await mockedCrypto.serverWrapKeyFingerprint(session.publicKeyB64);
+    mockedApi.pairingSas.mockResolvedValueOnce({ sas: "482 913", wrap_key_fingerprint: honest, expires_in: 900 });
+    const root = await sasWithSession();
+    expect(textOf(root)).toContain("482 913");
+    expect(textOf(root)).toContain(`key id ${honest}`);
+    expect(textOf(root)).not.toContain("KEY FINGERPRINT MISMATCH");
+  });
+
+  it("a server fingerprint that DIFFERS from the locally computed one renders the visible mismatch warning", async () => {
+    // The default mock value ("a1b2c3d4e5f60718") is a well-formed server
+    // fingerprint of some OTHER key — a substituted-key or lying server.
+    const honest = await mockedCrypto.serverWrapKeyFingerprint(session.publicKeyB64);
+    expect("a1b2c3d4e5f60718").not.toBe(honest); // the fixture really is foreign
+    const root = await sasWithSession();
+    expect(textOf(root)).toContain("KEY FINGERPRINT MISMATCH");
+    expect(textOf(root)).toContain("does not match the one this portal computed");
+    expect(textOf(root)).toContain("generate a new code and do not proceed");
+  });
+
+  it("a missing/malformed server fingerprint is treated as absent — no warning, no free-form render, honest copy", async () => {
+    mockedApi.pairingSas.mockResolvedValueOnce({ sas: "482 913", wrap_key_fingerprint: "NOT-16-HEX!!", expires_in: 900 });
+    const root = await sasWithSession();
+    expect(textOf(root)).toContain("482 913");
+    // Invalid shape never renders as a "key id" and never raises the
+    // mismatch alarm (nothing was compared); the note says so honestly.
+    expect(textOf(root)).toContain("sent no valid key fingerprint");
+    expect(textOf(root)).not.toContain("NOT-16-HEX!!");
+    expect(textOf(root)).not.toContain("key id");
+    expect(textOf(root)).not.toContain("KEY FINGERPRINT MISMATCH");
+  });
+
   it("lists active and stopped patients; open hands the patient up", async () => {
     const onOpen = vi.fn();
     mockedApi.patients.mockResolvedValueOnce([

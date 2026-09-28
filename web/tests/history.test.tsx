@@ -289,3 +289,44 @@ describe("HistoryView windowed rendering + Map mapping (audit 2026-09-26 LOW)", 
     expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Show more")).toBe(false);
   });
 });
+
+/** independent audit 2026-09-27 (P2): remove() reused the vault's SHARED
+ *  dataKey buffer after the deleteEntry await — a lock mid-delete
+ *  zeroized it and the local hygiene (version mark, mood day) ran under
+ *  an all-zero key. The key is snapshotted before the await now, and a
+ *  locked vault quietly skips the disposable local hygiene. */
+describe("HistoryView delete lock race (audit 2026-09-27)", () => {
+  it("a lock landing mid-delete quietly skips the local hygiene — no unhandled rejection, no zero-key write", async () => {
+    const { recordMood, recentMoods } = await import("../src/moodLog");
+    const { kv } = await import("../src/kvstore");
+    const rows = [await encryptedRow({ id: "e-a", date: "2026-09-25", text: "deleted under lock", sentiment: 0, version: 1 })];
+    // Local hygiene targets: a version mark and a mood day for the entry.
+    await observeEntryVersions(USER, DATA_KEY, [{ clientEntryId: "e-a", contentVersion: 1 }]);
+    resetEntryVersionMirrors();
+    await recordMood(DATA_KEY, USER, "2026-09-25", 0.4);
+    let deletes = 0;
+    stubFetch((url, init) => {
+      if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return !url.includes("offset=0") || deletes > 0 ? entriesResponse([]) : entriesResponse(rows);
+      if (url.endsWith("/entries/e-a") && init.method === "DELETE") {
+        deletes += 1;
+        vault.lock(); // the lock lands mid-delete, after the key snapshot
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const root = await render(<HistoryView />);
+    await settle(40, 4);
+    expect(textOf(root)).toContain("deleted under lock");
+    await press(root, "Delete");
+    await press(root, "Delete permanently");
+    await settle(40, 4);
+    // The server-side delete landed exactly once...
+    expect(deletes).toBe(1);
+    // ...and the disposable local hygiene was quietly SKIPPED (not written
+    // under the zeroized shared buffer): the mood day and version store
+    // survive for the next unlocked pass.
+    const days = await recentMoods(DATA_KEY, USER);
+    expect(days.map((day) => day.date)).toContain("2026-09-25");
+    expect(await kv.getItem(`mindpattern.entryVersions.${USER}`)).not.toBeNull();
+  });
+});

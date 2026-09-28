@@ -117,7 +117,7 @@ POSTGRES_DB=$("${COMPOSE[@]}" exec -T db sh -ceu 'printf "%s" "$POSTGRES_DB"')
 # Keep the restore target on the exact immutable Postgres image used by the
 # compose service and CI.  A mutable `postgres:16-alpine` tag could otherwise
 # make a rehearsal pass or fail for reasons unrelated to the stored archive.
-POSTGRES_IMAGE="postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685"
+POSTGRES_IMAGE="postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"
 
 # Where the newest backup lives INSIDE the backup-service container, plus the
 # extra `compose run` flags that make that true. Local mode: the compose

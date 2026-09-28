@@ -20,6 +20,14 @@ on:
 # Least privilege workflow-wide: every job can read the repo. The two
 # jobs that ship artifacts (image -> GHCR, release-notes -> GitHub
 # release) declare their own broader grants below.
+concurrency:
+  # Independent audit 2026-09-27: two near-simultaneous tag pushes (or a
+  # dispatch + a tag) used to run release pipelines concurrently — two
+  # production-integration runs, two GitHub Releases for one repo state.
+  # Latest tag wins; the superseded run cancels.
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -217,9 +225,12 @@ jobs:
           : > deploy/secrets/auth_token_secret
           printf '%s\n' "$pg_password" > deploy/secrets/postgres_password
           printf '%s\n' "$backup_key" > deploy/secrets/backup_key
+          # Independent audit 2026-09-27: metrics token file (api
+          # MINDPATTERN_METRICS_TOKEN_FILE), same no-plaintext-env chain.
+          openssl rand -hex 16 > deploy/secrets/metrics_token
           chmod 600 .env deploy/secrets/token_secret \
             deploy/secrets/auth_token_secret deploy/secrets/postgres_password \
-            deploy/secrets/backup_key
+            deploy/secrets/backup_key deploy/secrets/metrics_token
       - name: Assert the db password is ONE value across .env and the secret file
         # Same fail-fast contract as ci.yml's docker job (re-audit
         # 2026-09-27): the api interpolates POSTGRES_PASSWORD from .env into
@@ -250,7 +261,10 @@ jobs:
               echo "compose render: api MINDPATTERN_DB_URL contains the deploy/secrets/postgres_password value"
               ;;
             *)
-              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): ${rendered_url:-<empty>}" >&2
+              # Independent audit 2026-09-27: redact the credential from
+              # the annotation (same as ci.yml) — ::error text lands in
+              # the run log.
+              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): $(printf '%s' "${rendered_url:-}" | sed 's/:[^:@\/]*@/:***@/')" >&2
               exit 1
               ;;
           esac

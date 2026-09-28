@@ -68,6 +68,14 @@ TEXT_CASES: list[str] = [
     "because you asked, i will consider it",
     "",
     "🙂",
+    # VS16 parity (independent audit 2026-09-27): bare-base spellings of
+    # every VS16-bearing lexicon key, plus mixed bare/qualified text. The
+    # canonical counter scores both spellings identically; a port that
+    # only counts fully-qualified emoji fails these rows.
+    "love this ❤ and this ❤️ the same",
+    "☹ all morning but ☀️ by noon",
+    "☹️ again ☹ again",
+    "🌧 storm ⛈ again ❤ anyway",
     "good good good good good",
     "sad sad happy",
     # Regression inputs from the TS-port debugging session: negation via
@@ -217,7 +225,13 @@ def build_payload() -> dict:
 
     for text in [*TEXT_CASES, SENTIMENT_SUM_ORDER_CASE]:
         tokens = WORD_RE.findall(brain._fold_sentiment_text(text.lower()))
-        tokens.extend(e for e in brain.EMOJI_VALENCES for _ in range(text.count(e)))
+        # Independent audit 2026-09-27: the old text.count(key) loop was
+        # dead weight AFTER the engine's VS16 canonicalization (item 10)
+        # — it silently missed every bare base spelling, so no pinned
+        # vector exercised them and a TS port without canonicalization
+        # stayed green. Tokenize through the engine's own canonical
+        # counter; the bare-spelling TEXT_CASES below pin both sides.
+        tokens.extend(brain._emoji_tokens(text))
         pa, na = brain.sentiment_components(tokens)
         sentiment_vectors.append(
             {

@@ -27,7 +27,7 @@ import { clearActiveDraft, rewrapActiveDraft } from "../entryDraft";
 import { CADENCE_INTERVALS, clearMeasureCadence, readMeasureCadence, writeMeasureCadence, type MeasureCadencePref } from "../measureCadence";
 import { clearSafetyPlan, rewrapSafetyPlan } from "../safetyPlan";
 import { passwordPolicyError } from "./LoginView";
-import { requeueRejected, rejectedEntries, queueLength, clearQueue } from "../offlineQueue";
+import { drainPendingQueueForRotation, requeueRejected, rejectedEntries, queueLength, clearQueue, rewrapQueue } from "../offlineQueue";
 import { downloadTextFile, localStore, randomBytes } from "../platform";
 import { clearMoodLog, rewrapMoodLog } from "../moodLog";
 import { clearFeedback, rewrapFeedback } from "../questionFeedback";
@@ -296,6 +296,18 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     let newKeys: PatientKeys | null = null;
     let serverMovedToNewKey = false;
     try {
+      // independent audit 2026-09-27 (P1): the offline queue's blobs are
+      // sealed under the OLD data key and were never part of the rewrap
+      // family — after the server rekey they would upload and become
+      // permanently undecryptable. Best-effort drain FIRST (the user is
+      // necessarily online to rotate); anything that cannot leave right
+      // now ABORTS before any server-side step, honestly — a rotation that
+      // orphaned queued entries is the worse outcome by far.
+      const remainingQueued = await drainPendingQueueForRotation(owner).catch(() => -1);
+      if (remainingQueued !== 0) {
+        setError(t("settings.rotateQueueBlocked"));
+        return;
+      }
       // B-1 (2026-09-26 audit follow-up): reuse a PENDING salt from an
       // earlier attempt that died at/after its rekey, so this retry
       // derives the same keys that already encrypted the corpus — that is
@@ -397,6 +409,13 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       await readMutedPids(old.dataKey, owner)
         .then((pids) => writeMutedPids(newKey.dataKey, owner, pids))
         .catch(() => clearMutedPids(owner).catch(() => undefined));
+      // The offline queue rides the same family (independent audit
+      // 2026-09-27, P1): anything still held locally — a rejected entry,
+      // or an item another tab queued mid-rotation — is rewrapped old→new
+      // under the SAME AAD, under the queue's Web Lock. A blob that cannot
+      // be rewrapped stays as-is (it fails visibly on requeue); the
+      // completed rotation is never blocked.
+      await rewrapQueue(owner, old.dataKey, newKey.dataKey).catch(() => undefined);
       props.onLockdown(
         rewrapFailures.length > 0
           ? t("settings.rotateSuccessPartialNotice", { count: rewrapFailures.length })
