@@ -250,7 +250,7 @@ async def list_consents(
             select(Consent, User)
             .join(User, Consent.therapist_id == User.id)
             .where(Consent.user_id == user.id)
-            .order_by(Consent.granted_at.desc())
+            .order_by(Consent.granted_at.desc(), Consent.id.desc())
         )
     ).all()
     return [_consent_out(consent, therapist) for consent, therapist in rows]
@@ -457,9 +457,24 @@ async def grant_consent(
                 await session.commit()
             except IntegrityError as exc:
                 await session.rollback()
-                # Concurrent grants of the same pair (two tabs, same code
-                # redeemed twice concurrently — the code row was selected
-                # FOR-burn by both).
+                # 2026-09-28 deep audit: only the pair-unique violation is
+                # a 409 (two tabs, same code redeemed twice concurrently —
+                # the code row was selected FOR-burn by both). An FK
+                # failure (parent account vanished mid-grant) must answer
+                # 404 like the entries/measures/notes paths, not masquerade
+                # as a conflict. Same split the sibling modules enforce.
+                orig = getattr(exc, "orig", None)
+                sqlstate: str | None = getattr(orig, "pgcode", None) or getattr(
+                    orig, "sqlstate", None
+                )
+                if sqlstate == "23503":
+                    # FK failure: the parent account vanished mid-grant.
+                    raise ApiError(
+                        status_code=404, detail="account not found", code="not_found"
+                    ) from exc
+                # The pair-unique violation — and anything unclassifiable
+                # (a driver without SQLSTATE) — stays the retryable 409 the
+                # "never a 500" pin guards; only an EXPLICIT FK code is a 404.
                 raise ApiError(
                     status_code=409, detail="consent already being granted", code="conflict"
                 ) from exc

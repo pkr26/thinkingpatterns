@@ -97,7 +97,18 @@ DIALOG_SAMPLES = [
     "solo quiero dormir para siempre",  # 63 (solo )?quiero dormir para siempre
     "ya no puedo más",  # 64 no puedo/aguanto mas
     "no quiero despertar mañana",  # 65 no quiero despertar/seguir viviendo
-    "我想死",  # 66
+    # 2026-09-28 deep audit — Spanish past/periphrastic-future/progressive,
+    # the terminar-con-todo idiom, and the pointlessness/burden family
+    # (samples written post-fold where accented).
+    "me corté otra vez y no sé por qué",  # 66 me cort(e|aba)
+    "me voy a lastimar si esto sigue así",  # 67 me voy a cortar/lastimar/...
+    "me estoy haciendo daño y no sé cómo parar",  # 68 me estoy cortando/...
+    "simplemente quiero terminar con todo",  # 69 (quiero|voy a|pienso|...) terminar con todo
+    "me haré daño si nadie me escucha",  # 70 me har(e|ia) daño
+    "ya no le veo sentido a la vida",  # 71 no le veo sentido a la vida
+    "me siento un estorbo para mi familia",  # 72 (me siento|soy) un estorbo
+    "sería mejor si no estuviera aquí",  # 73 seria mejor si no estuviera
+    "我想死",  # 74
     "我想去死",  # 67
     "他留下了自杀的遗书",  # 68
     "死にたいと毎日思う",  # 69
@@ -141,6 +152,9 @@ SUPPRESS_SAMPLES = [
     "ya no vale la pena nada",  # 21 no vale la pena
     "volvi a pensar en quitar la vida",  # 22 quitar(le|me|se) la vida
     "pienso en hacerme daño seguido",  # 23 hacer(le|me|se) daño
+    # 2026-09-28 deep audit — the Spanish tense/idiom suppress counterparts.
+    "estoy pensando en terminar con todo",  # 24 terminar con todo (any person)
+    "volví a pensar en cortarme los antebrazos",  # 25 cortarme/lastimarme/...
 ]
 
 # Extra inflections and near-forms of contract patterns: not index-bound,

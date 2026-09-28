@@ -39,6 +39,9 @@ const apiState = {
   consents: [] as Array<Record<string, unknown>>,
   rekeyResult: { entries: 2, insights: 2, measures: 1 },
   failAt: null as null | "rekey" | "credential" | "relogin" | "verify",
+  /** Audit 2026-09-28: make rotateCredential answer 409 key_scheme_conflict
+   *  (the account upgraded to the v2 envelope from another device). */
+  credentialConflict: false,
 };
 
 vi.mock("../src/api/client", async (importOriginal) => {
@@ -78,6 +81,9 @@ vi.mock("../src/api/client", async (importOriginal) => {
       rewrapConsent: vi.fn(async () => ({})),
       rotateCredential: async () => {
         if (apiState.failAt === "credential") throw new ApiError(503, "server busy");
+        if (apiState.credentialConflict) {
+          throw new ApiError(409, "account uses the newer key protection", "key_scheme_conflict");
+        }
         return {};
       },
       login: async () => {
@@ -148,6 +154,7 @@ const USER = "0123456789abcdef0123456789abcdef";
 beforeEach(() => {
   store.clear();
   apiState.failAt = null;
+  apiState.credentialConflict = false;
   apiState.consents = [];
   keychainMock.__reset();
   vault.lock();
@@ -207,20 +214,27 @@ describe("entry content-version binding (M-2)", () => {
     expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-1", v2blob, 3)).toThrow();
   });
 
-  // 2026-09-26 audit M-M1: the legacy three-part AAD fallback is gated to
-  // declared version 1. A pre-v2 blob echoed as version >= 2 is exactly the
-  // stale-ciphertext laundering a compromised server would try — it must
-  // fail closed with the AEAD tamper error, never decrypt through the
-  // legacy binding.
-  it("a legacy-bound blob declared as version >= 2 fails closed (no legacy fallback laundering)", () => {
+  // Audit 2026-09-28 (MEDIUM): the 2026-09-26 M-M1 gating (legacy fallback
+  // for declared version 1 ONLY) failed closed on rows the SERVER itself
+  // legally produces — entries.py bumps content_version when a legacy
+  // client edits while keeping the legacy blob bytes, so those rows
+  // vanished from the app as TamperError. The mobile ladder now mirrors
+  // the server's crypto.entry_aad_candidates (v2 then v1 for ANY version).
+  // A stale-blob-with-fresh-echo replay is still caught by the high-water
+  // marks pinned below — that is where the rollback protection lives.
+  it("a legacy-bound blob decrypts at ANY declared version (server-legitimate rows, audit 2026-09-28)", () => {
     const legacyBlob = encryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", "stale text", "2026-09-19", null).blobB64;
-    // The same legacy blob still decrypts at its honest declared generation.
     expect(decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 1).text).toBe("stale text");
-    // ...but a server echoing version 2 for it is refused outright.
-    expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 2)).toThrow(
+    expect(decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 2).text).toBe("stale text");
+    expect(decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 5).text).toBe("stale text");
+    // The version is still IN the v2 binding: a v2-bound blob decrypts
+    // neither under a different declared version nor through the legacy
+    // three-part AAD, and a foreign owner still fails authentication.
+    const v2blob = encryptEntry({ dataKey: DATA_KEY }, USER, "e-v2b", "v2 text", "2026-09-20", null, undefined, 2).blobB64;
+    expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-v2b", v2blob, 3)).toThrow();
+    expect(() => decryptEntry({ dataKey: DATA_KEY }, "user-OTHER", "e-v2b", v2blob, 2)).toThrow(
       expect.objectContaining({ name: "TamperError" }),
     );
-    expect(() => decryptEntry({ dataKey: DATA_KEY }, USER, "e-stale", legacyBlob, 5)).toThrow();
   });
 
   it("flags a rolled-back row and remembers the high-water mark", async () => {
@@ -373,11 +387,15 @@ describe("rotatePassword (H-1/M-3)", () => {
     );
     // The rekey also moved the PHQ-9 history — the probe must fall through
     // to a measure row and refuse to resume on it.
+    // (2026-09-28 audit: listMeasuresPage returns the paged contract shape
+    // { measures, nextOffset, revision } — the entries paging mirror.)
     const { buildAad, encrypt } = await import("../src/crypto/envelope");
     const foreign = encrypt(Buffer.alloc(32, 1), Buffer.from('{"v":1}'), buildAad("measure", USER, "m-f")).toString("base64");
-    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce([
-      { blob: foreign, client_measure_id: "m-f" },
-    ] as never);
+    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce({
+      measures: [{ blob: foreign, client_measure_id: "m-f" }],
+      nextOffset: null,
+      revision: null,
+    } as never);
     const outcome = await rotatePassword({
       username: "alice",
       userId: USER,
@@ -399,9 +417,11 @@ describe("rotatePassword (H-1/M-3)", () => {
     vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
       new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
     );
-    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce([
-      { blob: readable, client_measure_id: "m-r" },
-    ] as never);
+    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce({
+      measures: [{ blob: readable, client_measure_id: "m-r" }],
+      nextOffset: null,
+      revision: null,
+    } as never);
     const outcome = await rotatePassword({
       username: "alice",
       userId: USER,
@@ -536,6 +556,30 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.stage).toBe("relogin");
+    expect(vault.isUnlocked()).toBe(false);
+    expect(await hasBiometricUnlock(USER)).toBe(false);
+  });
+
+  // Audit 2026-09-28 (MEDIUM): the key_scheme_conflict branch used to
+  // return WITHOUT the lock + biometric-wrap drop, on the strength of a
+  // comment claiming "NOTHING moved yet" — false: stage 3's
+  // api.rekeyStoredData had already committed the rekey, so the vault's
+  // OLD data key was dead for every stored blob exactly as in the generic
+  // branch above. Same F-4 self-clean, same observable contract.
+  it("a key_scheme_conflict credential failure also locks the vault and drops the wrap (audit 2026-09-28)", async () => {
+    await unlockWithWrap();
+    apiState.credentialConflict = true; // rotateCredential rejects (409 key_scheme_conflict)
+    const outcome = await rotatePassword({
+      username: "alice",
+      userId: USER,
+      oldPassword: "correct old password",
+      newPassword: "a strong new passphrase 42!",
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.stage).toBe("credential");
+      expect(outcome.detail).toContain("newer key protection");
+    }
     expect(vault.isUnlocked()).toBe(false);
     expect(await hasBiometricUnlock(USER)).toBe(false);
   });

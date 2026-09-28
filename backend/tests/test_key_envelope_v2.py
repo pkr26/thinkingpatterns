@@ -689,7 +689,8 @@ async def test_sas_endpoint_walls(client: AsyncClient):
     patient, therapist, code = await _setup_pairing(client)
     # Therapist-authenticated only.
     anon = await client.get("/api/therapist/pairing/sas", params={"patient_user_id": "x" * 32})
-    assert anon.status_code in (401, 403)
+    # Exact pin (2026-09-28): anonymous → 401 (the flat wall).
+    assert anon.status_code == 401
     as_patient = await client.get(
         "/api/therapist/pairing/sas",
         params={"patient_user_id": patient.user_id},

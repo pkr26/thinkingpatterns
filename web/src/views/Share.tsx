@@ -18,7 +18,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type ListedConsent } from "../api/client";
-import { toBase64 } from "../crypto/core";
+import { toBase64, zeroize } from "../crypto/core";
 import { keyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
 import { t } from "../strings";
 import { vault } from "../vault";
@@ -116,10 +116,24 @@ export function ShareView(): React.JSX.Element {
     if (!owner || !vault.isUnlocked() || !lookup) return;
     setBusy(true);
     setError("");
+    // 2026-09-28 audit (LOW, the moodLog/Entry M-3 idiom): snapshot BOTH
+    // vault buffers BEFORE the awaits — vault.get()'s buffers are SHARED,
+    // and a lock landing during the wrap await zeroizes them, so the grant
+    // would otherwise upload a wrap of the data key under all-zero bytes
+    // (and a zero verifier). The copies die in the finally; a lock at any
+    // re-check aborts with the honest locked message instead.
+    const keys = vault.get();
+    const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
+    dataKey.set(keys.dataKey);
+    const authKey = new Uint8Array(new ArrayBuffer(keys.authKey.length));
+    authKey.set(keys.authKey);
     try {
-      const keys = vault.get();
-      const wrap = await wrapDataKeyForTherapist(keys.dataKey, lookup.wrapPubKey, owner, lookup.therapistId);
-      await api.grantConsent(code.trim(), wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(keys.authKey));
+      const wrap = await wrapDataKeyForTherapist(dataKey, lookup.wrapPubKey, owner, lookup.therapistId);
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
+      await api.grantConsent(code.trim(), wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(authKey));
       setStatus(t("share.webGrantedStatus", { name: lookup.name }));
       setCode("");
       setLookup(null);
@@ -134,6 +148,7 @@ export function ShareView(): React.JSX.Element {
         setError(err instanceof Error ? err.message : t("share.webGrantFailed"));
       }
     } finally {
+      zeroize(dataKey, authKey);
       setBusy(false);
     }
   };

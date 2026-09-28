@@ -918,10 +918,23 @@ export function PatientView(props: {
         note.client_note_id,
         editing.text.trim(),
       );
-      const updated = await api.updateNote(note.id, sealed.blobB64);
+      // base_version (deep-audit 2026-09-28): the server requires the
+      // version this edit was based on; a colleague's edit that landed
+      // first answers 409 version_conflict instead of silently
+      // overwriting it.
+      const updated = await api.updateNote(note.id, sealed.blobB64, note.version ?? 1);
       setNotes((prev) => prev.map((n) => (n.id === updated.id ? { ...updated, text: editing.text.trim() } : n)));
       setEditing(null);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Another therapist's edit committed first. Drop this edit and
+        // reload so the winning version is visible; the editor's draft
+        // text stays on screen once for a manual re-apply.
+        setError("this note changed on another device while you edited it — showing the current version; re-apply your changes if still needed");
+        setEditing(null);
+        await load();
+        return;
+      }
       setError(err instanceof Error ? err.message : "could not save the note edit");
     } finally {
       setBusy(false);

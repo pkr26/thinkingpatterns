@@ -41,11 +41,18 @@ import math
 import secrets
 import time
 
-# Upper bound on a plausible `exp` claim: 2263-01-01T00:00:00Z. JSON ints are
-# arbitrary precision, so without a bound a forged-but-signed exp of 10**400
-# is "finite" as far as Python is concerned — and `math.isfinite` itself
-# raises OverflowError converting it to float (H-17: that raised a 500 out of
-# a module whose contract is never-500). No legitimate token lives 237 years.
+# Upper bound on a plausible `exp` claim: 3000-01-01T00:00:00Z. JSON ints
+# are arbitrary precision, so without a bound a forged-but-signed exp of
+# 10**400 is "finite" as far as Python is concerned — and `math.isfinite`
+# itself raises OverflowError converting it to float (H-17: that raised a
+# 500 out of a module whose contract is never-500). No legitimate token
+# lives anywhere near 974 years; the hardened-shape tests intentionally
+# use far-future epochs (e.g. 9999999999, year 2286) as VALID values, so
+# this bound is deliberately loose — its job is overflow protection, not
+# TTL policy (issued TTLs are capped at 30 days by config).
+# (Deep audit 2026-09-28: the previous comment claimed this encoded
+# 2263-01-01/237 years — it encodes year 3000. Comment corrected to the
+# code's actual, tested behavior.)
 MAX_EXP_EPOCH = 32_503_680_000
 
 PURPOSE_PATIENT = "patient"

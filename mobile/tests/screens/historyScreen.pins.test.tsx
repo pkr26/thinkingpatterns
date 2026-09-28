@@ -306,9 +306,12 @@ describe("HistoryScreen pins: list chrome and row contract", () => {
       { backgroundColor: "#1a1e26", borderRadius: 12, minHeight: 44 },
     ]);
 
-    const dateText = root.root.findAllByType(Text).find((n: any) => flat(n.props.children) === "2026-09-03");
-    expect(dateText.props.style).toEqual({ color: "#8a91a3", fontSize: 12 });
-    expect(dateText.parent.props.style).toEqual({
+    // Audit 2026-09-28 (INFO): the card date renders through
+    // formatEntryDate (the raw ISO string read as machine output) — the
+    // style pin targets the FORMATTED date text now.
+    const dateText = root.root.findAllByType(Text).find((n: any) => flat(n.props.children) === "Thursday, September 3, 2026");
+    expect(dateText!.props.style).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(dateText!.parent.props.style).toEqual({
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",

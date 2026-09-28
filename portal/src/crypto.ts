@@ -477,14 +477,42 @@ export async function decryptInsights(
 export async function decryptEntry(
   dataKey: Bytes,
   userId: string,
-  entry: { client_entry_id: string; blob: string },
+  entry: { client_entry_id: string; blob: string; content_version?: number },
 ): Promise<{ text: string; created_at?: string; sentiment?: number | null }> {
   const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let plain: Bytes | null = null;
   try {
     encrypted = unb64(entry.blob);
-    plain = await decrypt(dataKey, encrypted, buildAad("entry", userId, entry.client_entry_id));
+    // Deep-audit 2026-09-28 CRITICAL fix: since M-2 (2026-09-20) every
+    // patient client writes entries under the four-part v2 AAD and the
+    // server-side rekey upgrades every row to v2 — a v1-only attempt
+    // failed GCM for every current entry, rendering the therapist
+    // evidence drill-down permanently undecryptable. Mirror the server's
+    // entry_aad_candidates order exactly: v2 first, legacy v1 fallback
+    // for every generation (a legacy client's edit bumps content_version
+    // while still sealing the legacy binding).
+    const version =
+      entry.content_version !== undefined &&
+      Number.isSafeInteger(entry.content_version) &&
+      entry.content_version >= 1
+        ? entry.content_version
+        : 1;
+    const candidates = [
+      buildAad("entry", userId, entry.client_entry_id, String(version)),
+      buildAad("entry", userId, entry.client_entry_id),
+    ];
+    let failure: unknown = null;
+    for (const aad of candidates) {
+      try {
+        plain = await decrypt(dataKey, encrypted, aad);
+        break;
+      } catch (err) {
+        failure = err;
+        plain = null;
+      }
+    }
+    if (plain === null) throw failure ?? new Error("entry could not be decrypted");
     const payload = decodeJson(plain) as { text?: string };
     if (typeof payload.text !== "string") throw new Error("entry payload malformed");
     return payload as { text: string };

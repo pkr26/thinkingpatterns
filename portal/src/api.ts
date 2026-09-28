@@ -419,6 +419,10 @@ export interface PortalEntry {
   blob: string;
   entry_date: string;
   received_at: string;
+  /** Additive (backend EntryOut, 2026-09-20 M-2): the row's content
+   * generation — v2 entries bind it into the four-part entry AAD. Older
+   * serialized shapes without the field still decode (additive rule). */
+  content_version?: number;
 }
 
 /** The backend caps a therapist evidence response at 25 rows and 2 MiB of
@@ -555,6 +559,11 @@ export interface Note {
   blob: string;
   created_at: string;
   updated_at: string;
+  /** Additive (backend NoteOut, 2026-09-26 audit item 15): the note's
+   * optimistic-concurrency version — 1 on create, +1 on every changing
+   * PATCH. The portal echoes it back as base_version on edits; older
+   * serialized shapes without the field still decode (additive rule). */
+  version?: number;
 }
 
 /** One superseded revision of a note (P3, 2026-09-21): the prior blob
@@ -787,8 +796,17 @@ export const api = {
     request<Note>("POST", `/therapist/patients/${encodeURIComponent(userId)}/notes`, payload),
   noteRevisions: (noteId: string) =>
     request<NoteRevision[]>("GET", `/therapist/notes/${encodeURIComponent(noteId)}/revisions`),
-  updateNote: (noteId: string, blob: string) =>
-    request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, { blob }),
+  /** Deep-audit 2026-09-28 HIGH fix: the backend made base_version
+   * REQUIRED on PATCH (2026-09-26 audit item 15 — fail-closed optimistic
+   * concurrency for clinical notes); sending {blob} alone 400'd every
+   * note edit. baseVersion is the version of the note this edit was
+   * based on (Note.version); the server answers 409 version_conflict
+   * when a colleague's edit landed first. */
+  updateNote: (noteId: string, blob: string, baseVersion: number) =>
+    request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, {
+      blob,
+      base_version: baseVersion,
+    }),
   deleteNote: (noteId: string) => request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),
   newPairingCode: () => request<{ code: string; expires_in: number }>("POST", "/therapist/pairing-codes"),
   /** The therapist-side SAS read (2026-09-26): the patient reads their

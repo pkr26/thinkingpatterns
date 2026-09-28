@@ -27,8 +27,8 @@
  */
 import { useState } from "react";
 import { ApiError, api, auth, clearSession, setSession, type TokenResponse } from "../api/client";
-import { deriveMasterKey, fromBase64, toBase64, zeroize } from "../crypto/core";
-import { createRegistrationEnvelope, unwrapEnvelope } from "../crypto/envelope";
+import { deriveMasterKey, fromBase64, toBase64, zeroize, KDF_ITERATIONS, type Bytes } from "../crypto/core";
+import { createRegistrationEnvelope, unwrapEnvelope, validateKdfParams } from "../crypto/envelope";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { randomBytes } from "../platform";
 import { t } from "../strings";
@@ -134,8 +134,26 @@ function adoptSession(keys: PatientKeys, token: TokenResponse, username: string,
  *  proved, and swap it in for the (now wrong) derived label. Any failure
  *  leaves NOTHING behind: no session, no keys — an envelope that does not
  *  open under the just-proven password is a tampered or inconsistent
- *  server state, never something to paper over with the v1 derivation. */
-async function adoptEnvelopeDataKey(keys: PatientKeys, saltB64: string, username: string): Promise<boolean> {
+ *  server state, never something to paper over with the v1 derivation.
+ *
+ *  2026-09-28 audit (LOW, mobile keyScheme.ts parity): the unwrap HONORS
+ *  the envelope's declared kdf_params — when the account declares a
+ *  NON-default pbkdf2-sha256 iteration count, the KEK master is
+ *  re-derived at exactly that count (the params and the KEK from one
+ *  source); when the params name an algorithm this build cannot derive
+ *  (argon2id — no native WebCrypto Argon2), the answer is the explicit
+ *  unsupported-params outcome so the caller says THAT, never a
+ *  misleading invalid-credentials-shaped envelope failure. The pre-login
+ *  salt lookup deliberately does not echo params (backend existence
+ *  oracle), so the verifier-side derive keeps the pinned default — the
+ *  declared params are honored the moment they become visible. */
+type EnvelopeAdoption = "ok" | "unsupported-params" | "failed";
+async function adoptEnvelopeDataKey(
+  password: string,
+  keys: PatientKeys,
+  saltB64: string,
+  username: string,
+): Promise<EnvelopeAdoption> {
   try {
     const envelope = await api.keyEnvelope();
     if (envelope.key_scheme !== "v2" || typeof envelope.wrapped_data_key !== "string") {
@@ -146,15 +164,35 @@ async function adoptEnvelopeDataKey(keys: PatientKeys, saltB64: string, username
     if (envelope.salt !== saltB64) {
       throw new Error("envelope salt mismatch");
     }
+    const params = validateKdfParams(envelope.kdf_params);
+    if (params.algorithm !== "pbkdf2-sha256") {
+      zeroize(keys.authKey, keys.dataKey, keys.masterKey);
+      vault.lock();
+      return "unsupported-params";
+    }
     const salt = fromBase64(saltB64);
-    const unwrapped = await unwrapEnvelope(keys.masterKey, salt, username, envelope.wrapped_data_key, envelope.kdf_params);
+    // The declared count differs from the verifier-side derive: re-derive
+    // the master AT the declared count (mobile's unwrapSessionDataKey
+    // rule). The re-derivation is zeroized as soon as the KEK consumed it.
+    let master: Bytes = keys.masterKey;
+    let rederived: Bytes | null = null;
+    if (params.iterations !== KDF_ITERATIONS) {
+      rederived = await deriveMasterKey(password, salt, params.iterations);
+      master = rederived;
+    }
+    let unwrapped: Bytes;
+    try {
+      unwrapped = await unwrapEnvelope(master, salt, username, envelope.wrapped_data_key, params);
+    } finally {
+      if (rederived) zeroize(rederived);
+    }
     zeroize(salt, keys.dataKey);
     keys.dataKey = unwrapped;
-    return true;
+    return "ok";
   } catch {
     zeroize(keys.authKey, keys.dataKey, keys.masterKey);
     vault.lock();
-    return false;
+    return "failed";
   }
 }
 
@@ -241,9 +279,10 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         // so nothing outlives a refused login.
         if (token.key_scheme === "v2") {
           setSession(token.token, token.user_id, username, token.expires_in);
-          if (!(await adoptEnvelopeDataKey(keys, salt, username))) {
+          const adoption = await adoptEnvelopeDataKey(password, keys, salt, username);
+          if (adoption !== "ok") {
             clearSession();
-            setError(t("login.envelopeUnlockWeb"));
+            setError(t(adoption === "unsupported-params" ? "login.kdfUnsupportedWeb" : "login.envelopeUnlockWeb"));
             return;
           }
         }
@@ -269,12 +308,28 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           // legacy path). Registration carries kdf_params + the 60-byte
           // wrapped_data_key together.
           const envelope = await createRegistrationEnvelope(keys.masterKey, saltBytes, username);
-          zeroize(keys.dataKey);
+          // 2026-09-28 audit (LOW): the REGISTER RESPONSE is the only
+          // authority on which scheme was stored. Hold the derived v1
+          // label until the server ECHOES key_scheme "v2" — a backend
+          // that ignored the envelope fields (older server, hostile
+          // mirror) stored no wrapped_data_key, and adopting the random
+          // key anyway would seal every entry under a key no unlock path
+          // can ever reproduce. The login path's documented ambiguity
+          // defense, mirrored here.
+          const derivedDataKey = keys.dataKey;
           keys.dataKey = envelope.dataKey;
           token = await auth.register(username, saltB64, toBase64(keys.authKey), {
             kdfParams: envelope.kdfParams as unknown as Record<string, unknown>,
             wrappedDataKeyB64: envelope.wrappedDataKeyB64,
           });
+          if (token.key_scheme === "v2") {
+            zeroize(derivedDataKey); // the derived label is dead weight now
+          } else {
+            // No v2 echo: v1 semantics — restore the derived label and
+            // discard the random key the server never stored.
+            zeroize(keys.dataKey);
+            keys.dataKey = derivedDataKey;
+          }
         } catch (err) {
           zeroize(keys.authKey, keys.dataKey, keys.masterKey);
           throw err;

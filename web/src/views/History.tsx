@@ -24,6 +24,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
 import { zeroize } from "../crypto/core";
 import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/patient";
+import { detectCrisisLanguage } from "../crisisDetect";
+import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind";
 import { recentMoods, removeMoodDay } from "../moodLog";
@@ -33,6 +35,13 @@ import { dateLocaleTag, t } from "../strings";
 import { vault } from "../vault";
 import { moodFill, moodInk, currentPalette, usePaletteVersion } from "../tokens";
 import { Button, Card, Chip, ErrorBanner, Field, Icon, Note, Skeleton, TextArea } from "../ui";
+
+/** The client-side entry length cap (2026-09-28 audit MEDIUM): the
+ *  server's blob ceiling is far higher, so without a client gate a
+ *  pathological paste could park a megabyte of ciphertext in the queue
+ *  and silently die against entryDraft.ts's 100k parse bound. Mobile's
+ *  EntryScreen.tsx contract — the same constant, the same honest copy. */
+const MAX_ENTRY_CHARS = 100_000;
 
 interface DecodedEntry {
   clientEntryId: string;
@@ -91,6 +100,9 @@ export function HistoryView(): React.JSX.Element {
   const [conflict, setConflict] = useState<{ theirs: DecodedEntry; mine: string } | null>(null);
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // H-6 (audit 2026-09-28, mobile parity): the edit path's post-save
+  // crisis prompt card — the same tier the Entry tab runs pre-save.
+  const [crisisPrompt, setCrisisPrompt] = useState(false);
   // The windowed-render count (audit 2026-09-26 LOW): how many of the
   // filtered entries are actually on screen.
   const [shownCount, setShownCount] = useState(HISTORY_WINDOW);
@@ -124,6 +136,17 @@ export function HistoryView(): React.JSX.Element {
         if (decoded.length > 0 && decoded.length % DECRYPT_YIELD_EVERY === 0) {
           await yieldToHost();
           if (generation.current !== run) return;
+        }
+        // 2026-09-28 audit (LOW): re-check the lock inside the per-row
+        // loop — keys.dataKey is the vault's SHARED buffer, and a lock
+        // landing mid-walk zeroizes it, so every remaining row would
+        // fail GCM and be COUNTED TAMPERED. A locked vault stops the
+        // walk with the honest locked message instead; the rows already
+        // decrypted still render.
+        if (!vault.isUnlocked()) {
+          setEntries(decoded);
+          setError(t("common.sessionLocked"));
+          return;
         }
         try {
           const payload = await decryptEntry(keys.dataKey, owner, row.client_entry_id, row.blob, row.content_version ?? undefined);
@@ -221,11 +244,29 @@ export function HistoryView(): React.JSX.Element {
     setEditing(entry);
     setEditText(entry.payload.text);
     setConflict(null);
+    // A fresh edit starts the crisis tier over (H-6): the prompt that
+    // closed with the previous edit must not suppress the next one's.
+    setCrisisPrompt(false);
   };
 
   const submitEdit = async (theirsOverride?: DecodedEntry): Promise<void> => {
     const target = theirsOverride ?? editing;
     if (!target) return;
+    // Empty-text parity with mobile (HistoryScreen.tsx, 2026-09-28 audit
+    // MEDIUM): an edit that says nothing must be refused client-side —
+    // the server would accept the ciphertext, and the row would render
+    // as a saved blank day.
+    if (!editText.trim()) {
+      setError(t("entry.empty"));
+      return;
+    }
+    // The same client-side length cap as the create path (2026-09-28
+    // audit MEDIUM): MAX_ENTRY_CHARS gates the editor, not just the
+    // server's blob ceiling.
+    if (editText.trim().length > MAX_ENTRY_CHARS) {
+      setError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }));
+      return;
+    }
     const owner = vault.ownerUserId();
     // Guarded like load() (audit 2026-09-26 LOW): a lock that raced the
     // press is a quiet no-op, never vault.get()'s throw.
@@ -253,6 +294,22 @@ export function HistoryView(): React.JSX.Element {
       setEditing(null);
       setConflict(null);
       await load();
+      // H-6 (2026-09-28 audit, mobile HistoryScreen parity): the EDIT path
+      // runs the same on-device crisis detection as a new entry. The server
+      // only ever sees ciphertext, so this detector is the only net for a
+      // user who edits yesterday's entry into crisis language — the same
+      // text as a NEW entry gets the dialog, an edited one must too. Never
+      // before or instead of saving: the replacement is already committed
+      // server-side at this point. Same per-day throttle stamp (session-
+      // scoped, fail toward showing) and calm copy as the Entry tab.
+      if (detectCrisisLanguage(editText) && !crisisPrompt) {
+        const today = localDateISO();
+        const shownToday = await crisisDialogShownOn(owner, today).catch(() => false);
+        if (!shownToday) {
+          await recordCrisisDialogShown(owner, today).catch(() => undefined);
+          setCrisisPrompt(true);
+        }
+      }
     } catch (err) {
       if (err instanceof ApiError && err.code === "version_conflict") {
         // Another device edited first. Refetch their version and show both
@@ -334,6 +391,16 @@ export function HistoryView(): React.JSX.Element {
 
   return (
     <>
+      {/* H-6 (2026-09-28 audit): the edit path's crisis tier — the same
+          calm card the Entry tab shows, surfaced AFTER the replacement
+          committed server-side (mobile Alert parity). */}
+      {crisisPrompt && (
+        <Card title={t("entry.crisisPromptTitle")} tone="sensitive">
+          <Note tone="danger">{t("entry.crisisPromptBody")}</Note>
+          <Note tone="muted">{t("entry.crisisPromptProceed")}</Note>
+        </Card>
+      )}
+
       <Card title={t("history.calendarTitle")}>
         <div className="cal-toolbar">
           <button

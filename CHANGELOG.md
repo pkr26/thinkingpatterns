@@ -14,6 +14,31 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+Deep-audit remediation 2026-09-28, second batch (same audit wave,
+continued): the LLM narrative sanitizer truncates BEFORE its rejection
+chain (an over-length narrative used to return early, skipping the
+URL/contact/advice/crisis checks entirely); the crisis engine's
+concat-evasion channel marks original token boundaries ("weekend it
+all" no longer contains "enditall"), gains Spanish past-tense/
+periphrastic/progressive/idiom coverage ("me corté", "terminar con
+todo", "no le veo sentido a la vida" + suppress-tier counterparts),
+writes the Turkish dotless-ı pattern post-fold so BOTH engines match,
+folds the small-capital homoglyphs (ꜱ ᴜ ɪ ʟ) NFKC leaves alone, and
+maps leet "1" contextually (myse1f → myself while k1ll stays kill); the
+recompute path accepts the full ISO-timestamp `created_at` every real
+client writes (date-only parsing 400'd client-saved entries); the
+portal decrypts entries under the four-part v2 AAD with a legacy v1
+fallback (the therapist evidence drill-down was permanently
+undecryptable) and sends `base_version` on note edits (the required
+field 400'd every edit); the compose backup worker resolves
+`BACKUP_KEY_FILE` like the app's `_secret_env` (the env-only read
+failed every run — zero backups published) and the api service actually
+mounts its `auth_token_secret` (the env pointed at an unmounted file
+and crash-looped the boot); the Spanish sentiment lexicon drops the
+ambiguous "solo"/"sola" ("only" was being scored as loneliness); docs
+refreshed to match (release runbook's six-asset download, README
+env-var table's missing rows, retention-schedule anchors).
+
 Deep-audit remediation 2026-09-28 (see AUDIT_SESSIONS_2026-09-28.md for the
 findings and AUDIT_REMEDIATION_2026-09-28.md for the fixes): web v2 sign-in
 fresh-page-load dead-end fixed (session installed before the envelope

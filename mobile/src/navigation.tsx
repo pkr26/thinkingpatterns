@@ -118,7 +118,7 @@ export function AppNavigator(): React.JSX.Element {
   );
   // M-18 (2026-09-20 audit): backgrounding mid-onboarding locks the vault
   // (inMain flips false) and CONSUMES the one-shot pending flag — the old
-  // gate re-entered main on the journal with the privacy/13+ panels never
+  // gate re-entered main on the journal with the privacy/18+ panels never
   // shown or completed. The gate is therefore re-derived on EVERY entry
   // into the main flow from the PERSISTED per-account flag too: onboarding
   // shows until recordOnboardingSeen lands, however the user left it.

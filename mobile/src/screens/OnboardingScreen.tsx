@@ -2,8 +2,10 @@
  * First-run onboarding — three short, calm panels shown ONCE after a
  * registration (state in src/onboarding.ts): what MindPattern is, how the
  * encryption protects the journal (with the one honest exception), and the
- * no-recovery warning with the 13+ line. No verification theater: the
- * acknowledgment is a single button.
+ * no-recovery warning with the 18+ line (2026-09-27: the age floor moved
+ * from 13+ to 18+ with the registration age gate — audit 2026-09-28 fixed
+ * this stale comment). No verification theater: the acknowledgment is a
+ * single button.
  *
  * The privacy policy is one tap from the encryption panel; crisis help is
  * one tap from every panel — a brand-new account is not a reason to be

@@ -191,7 +191,7 @@ class RecomputeResponse(BaseModel):
     days_remaining: int
     patterns_stored: int
     question_stored: bool
-    analyzer: str  # "none" (baseline) | "brain" | "llm"
+    analyzer: str  # "none" (baseline) | "brain" | "llm" | "local" (local-recompute)
     # v2 mini-brain lifecycle counters (absent/0 for old clients is fine).
     patterns_new: int = 0
     patterns_fading: int = 0
@@ -378,6 +378,11 @@ class InsightOut(BaseModel):
     for_date: date | None
     blob: str
     created_at: datetime
+    # 2026-09-28 deep audit (models INFO): additive state_seq — the export
+    # bundle is the only insight read that omitted it, so a client
+    # re-importing its own document could not run the echo-vs-embedded
+    # equality check the live API contract promises. 0 for legacy bundles.
+    state_seq: int = 0
 
 
 class ExportBundle(BaseModel):

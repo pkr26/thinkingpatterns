@@ -1237,15 +1237,16 @@ async def test_llm_with_consent_runs_and_output_is_sanitized(client, settings, m
 
     await emu.create_entry(client, "a calm walk by the river", TODAY)
     body = await emu.recompute(client)
-    assert body["analyzer"] == "llm"
-    assert len(seen_payloads) == 1
+    # 2026-09-28 deep audit: with NO narratable finding (this tiny corpus
+    # surfaces nothing of the 4 narratable kinds), the enrichment is
+    # correctly SKIPPED — the consented plaintext never leaves the enclave
+    # for a round-trip that structurally could not produce anything, and
+    # the response must not claim the LLM ran. The sanitizer's hostile-
+    # output coverage (model fiction dropped) lives in test_llm.py's units.
+    assert body["analyzer"] == "brain"
+    assert len(seen_payloads) == 0
 
-    # 2026-09-17 inversion: the model may only NARRATE the brain's
-    # findings, so model fiction ("stop taking your medication"), invalid
-    # kinds, and even corpus-anchored inventions it was not handed as
-    # findings are ALL dropped from the surfaced list. With this tiny
-    # corpus the deterministic brain surfaces nothing, so the enriched
-    # payload carries no model-minted patterns at all.
+    # And the surfaced payload carries no model-minted patterns at all.
     payload = await emu.decrypt_insights(client)
     kept_patterns = payload["stats"]["patterns"]
     labels = [p["label"] for p in kept_patterns]

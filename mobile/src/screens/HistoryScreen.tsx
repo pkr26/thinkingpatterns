@@ -241,6 +241,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("neutral");
   // Stryker disable next-line StringLiteral: every path into edit mode goes through startEdit, which sets draft first — the initial draft value is never rendered or read
   const [draft, setDraft] = useState("");
+  /** Live mirror of `draft` for the Android hardware-back subscription: the
+   *  back-handler effect re-runs only when mode.kind changes, so a closure
+   *  over the state would see the draft as of edit-entry, not as typed. */
+  const draftRef = useRef("");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Double-tap guard: two presses inside one frame both pass a state-only
   // check (the Entry screen's savingRef pattern) — the ref is synchronous.
@@ -316,10 +320,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
       // WEB_PLAN S-8 (2026-09-25): EVERY row failing to decrypt with a live
       // session is the remote-rekey signature — the data key changed on
-      // another device. Surface the actionable funnel instead of an empty
-      // journal that looks like data loss.
+      // another device. Audit 2026-09-28 (MEDIUM): route this to the
+      // PERSISTENT error state, not a transient toast — the toast cleared
+      // in 2.6s and left the plain "No entries yet" empty state, which
+      // reads as data loss exactly when the fix instructions ("Sign out and
+      // sign back in") need to stay on screen.
       if (rows.length > 0 && failed === rows.length) {
-        showStatus(tr("history.rekeyedElsewhere"), "neutral");
+        setError(tr("history.rekeyedElsewhere"));
       }
       // Newest day first; same-day entries order by server arrival.
       decrypted.sort((a, b) => b.entryDate.localeCompare(a.entryDate) || b.receivedAt.localeCompare(a.receivedAt));
@@ -404,6 +411,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   useEffect(() => {
     if (mode.kind === "list") return;
     const onBack = () => {
+      // Audit 2026-09-28 (MEDIUM): hardware back in EDIT mode is a discard
+      // path — confirm when the draft has edits (draftRef, not the stale
+      // state closure; see its declaration).
+      if (mode.kind === "edit") {
+        confirmDiscardEdit(mode.entry, () => setMode({ kind: "list" }));
+        return true;
+      }
       setMode({ kind: "list" });
       return true;
     };
@@ -635,8 +649,24 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   };
 
   const startEdit = (entry: HistoryEntry) => {
+    draftRef.current = entry.text;
     setDraft(entry.text);
     setMode({ kind: "edit", entry });
+  };
+
+  /** Audit 2026-09-28 (MEDIUM): leaving edit mode — Android hardware back or
+   *  the on-screen Cancel — used to discard unsaved edits SILENTLY. When the
+   *  draft differs from the entry's text, confirm the discard first; an
+   *  unchanged draft (a read-only peek) leaves without a dialog. */
+  const confirmDiscardEdit = (entry: HistoryEntry, leave: () => void) => {
+    if (draftRef.current.trim() === entry.text.trim()) {
+      leave();
+      return;
+    }
+    Alert.alert(tr("history.discardEditTitle"), tr("history.discardEditBody"), [
+      { text: tr("history.discardEditCancel"), style: "cancel" },
+      { text: tr("history.discardEditConfirm"), style: "destructive", onPress: leave },
+    ]);
   };
 
   const saveEdit = async (entry: HistoryEntry) => {
@@ -873,6 +903,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             editable={!busy}
             onChangeText={(next) => {
               touchActivity();
+              draftRef.current = next;
               setDraft(next);
             }}
             accessibilityLabel={tr("history.editA11y")}
@@ -896,7 +927,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             disabled={!draft.trim()}
             busy={busy}
           />
-          <GhostButton label={tr("common.cancel")} onPress={() => setMode({ kind: "detail", entry })} disabled={busy} />
+          {/* Audit 2026-09-28 (MEDIUM): Cancel with edits on screen confirms
+              the discard instead of silently throwing them away. */}
+          <GhostButton
+            label={tr("common.cancel")}
+            onPress={() => confirmDiscardEdit(entry, () => setMode({ kind: "detail", entry }))}
+            disabled={busy}
+          />
           <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -962,7 +999,12 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           accessibilityLabel={tr("history.entryA11y", { date: formatEntryDate(entry.entryDate) })}
         >
           <View style={styles.rowHeader}>
-            <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>{entry.entryDate}</Text>
+            {/* Audit 2026-09-28 (INFO): formatEntryDate like every other
+                date on this screen — the raw ISO string read as machine
+                output. */}
+            <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+              {formatEntryDate(entry.entryDate)}
+            </Text>
             {badge(entry)}
           </View>
           <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 21 }}>

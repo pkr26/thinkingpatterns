@@ -32,6 +32,8 @@ from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
 from ..models import (
+     KEY_SCHEME_V1,
+     KEY_SCHEME_V2,
     AccessLog,
     Consent,
     Entry,
@@ -317,10 +319,10 @@ async def export_account(
             # user's own document — export-then-delete on a v2 account
             # without it would destroy the only copy of the data key's
             # locker (the salt alone re-derives nothing under v2).
-            key_scheme=fresh.key_scheme or "v1",
+            key_scheme=fresh.key_scheme or KEY_SCHEME_V1,
             wrapped_data_key=(
                 base64.b64encode(bytes(fresh.wrapped_data_key)).decode("ascii")
-                if fresh.key_scheme == "v2" and fresh.wrapped_data_key is not None
+                if fresh.key_scheme == KEY_SCHEME_V2 and fresh.wrapped_data_key is not None
                 else None
             ),
             kdf_params=parse_kdf_params_json(fresh.kdf_params),
@@ -550,6 +552,9 @@ async def export_account(
                                     for_date=row.for_date,
                                     blob=base64.b64encode(bytes(row.blob)).decode("ascii"),
                                     created_at=row.created_at,
+                                    # Legacy rows pre-date the column;
+                                    # the additive contract defaults them.
+                                    state_seq=row.state_seq or 0,
                                 ).model_dump(mode="json")
                             )
                             used_blob_bytes += blob_bytes
@@ -709,7 +714,7 @@ async def rotate_credential(
     PUT /account/password, which swaps the credential and the envelope in
     one atomically-committed operation.
     """
-    if user.key_scheme == "v2":
+    if user.key_scheme == KEY_SCHEME_V2:
         raise ApiError(
             status_code=409,
             detail=(
@@ -769,7 +774,13 @@ async def rotate_credential(
             .scalars()
             .first()
         )
-        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+        # 2026-09-28 deep audit: 404 for the vanished/deactivated account and
+        # 401 for the epoch fence — the same split upgrade_key_envelope
+        # uses, so a client cannot read "account gone" as "re-login" from
+        # one sibling and the opposite from another.
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh.token_epoch != expected_epoch:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         await session.execute(
             update(User)
@@ -960,7 +971,9 @@ async def change_password(
                 .scalars()
                 .first()
             )
-            if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+            if fresh is None or not fresh.is_active:
+                raise ApiError(status_code=404, detail="account not found", code="not_found")
+            if fresh.token_epoch != expected_epoch:
                 raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
             if candidate_key is not None:
                 # Possession probe, identical to /key-envelope/upgrade's: one
@@ -1022,7 +1035,7 @@ async def change_password(
                     verifier=new_verifier_hash,
                     scrypt_salt=scrypt_server_salt,
                     token_epoch=User.token_epoch + 1,
-                    key_scheme="v2",
+                    key_scheme=KEY_SCHEME_V2,
                     wrapped_data_key=wrapped_key_bytes,
                     kdf_params=params_json,
                 )
@@ -1089,7 +1102,7 @@ async def upgrade_key_envelope(
     After unlocking locally, a v1 client — which by definition holds the
     account's password-derived data key — wraps THAT key under the
     password-derived KEK and uploads the envelope. The account flips to
-    key_scheme="v2" and future password changes become O(1); the corpus
+    key_scheme=KEY_SCHEME_V2 and future password changes become O(1); the corpus
     keeps decrypting under the same key (now random-or-derived behind an
     envelope, transparent to every read path).
 
@@ -1233,7 +1246,7 @@ async def upgrade_key_envelope(
             await session.execute(
                 update(User)
                 .where(User.id == fresh.id)
-                .values(key_scheme="v2", wrapped_data_key=wrapped_key_bytes, kdf_params=params_json)
+                .values(key_scheme=KEY_SCHEME_V2, wrapped_data_key=wrapped_key_bytes, kdf_params=params_json)
             )
             await append_access_log(
                 session,
@@ -1622,6 +1635,14 @@ async def totp_enable(
     settings = request.app.state.settings
     secret = unwrap_secret(user.totp_secret, settings.totp_wrap_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
+    # 2026-09-28 deep audit: capture the WRAPPED secret the proof ran
+    # against, BEFORE the in-fence populate_existing re-read can refresh
+    # user.totp_secret in place — the guarded UPDATE's WHERE used the
+    # re-bound (post-refresh) attribute, comparing the column to its own
+    # current value: the guard could never fire and a concurrent re-setup
+    # committed between proof and arm armed the NEW secret on a code
+    # verified against the OLD one.
+    verified_wrapped_secret = user.totp_secret
     if matched is None:
         raise ApiError(status_code=403, detail="invalid totp code", code="totp_code_invalid")
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
@@ -1649,7 +1670,7 @@ async def totp_enable(
         # mypy gate.
         result = await session.execute(
             update(User)
-            .where(User.id == user.id, User.totp_secret == user.totp_secret)
+            .where(User.id == user.id, User.totp_secret == verified_wrapped_secret)
             .values(totp_enabled=True, totp_last_counter=matched)
         )
         if db_rowcount(result) != 1:
@@ -1715,6 +1736,14 @@ async def totp_disable(
     settings = request.app.state.settings
     secret = unwrap_secret(user.totp_secret, settings.totp_wrap_secret)
     matched = verify_code(secret, code=body.code) if secret is not None else None
+    # 2026-09-28 deep audit: capture the WRAPPED secret the proof ran
+    # against, BEFORE the in-fence populate_existing re-read can refresh
+    # user.totp_secret in place — the guarded UPDATE's WHERE used the
+    # re-bound (post-refresh) attribute, comparing the column to its own
+    # current value: the guard could never fire and a concurrent re-setup
+    # committed between proof and arm armed the NEW secret on a code
+    # verified against the OLD one.
+    verified_wrapped_secret = user.totp_secret
     replayed = (
         user.totp_last_counter is not None
         and matched is not None
@@ -1740,7 +1769,11 @@ async def totp_disable(
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         await session.execute(
             update(User)
-            .where(User.id == user.id)
+            # 2026-09-28 deep audit: only strips the factor the code was
+            # verified against — a concurrent re-setup between proof and
+            # strip survives for its own fresh confirm, instead of being
+            # silently wiped by this request.
+            .where(User.id == user.id, User.totp_secret == verified_wrapped_secret)
             .values(totp_secret=None, totp_enabled=None, totp_last_counter=None)
         )
         # The recovery-code set dies with the factor (2026-09-26 pentest

@@ -21,10 +21,37 @@ from pathlib import Path
 DOMAIN = b"mindpattern-backup-hmac-v1"
 
 
+def _resolve_backup_key() -> str:
+    """Resolve the backup key exactly like app.config._secret_env.
+
+    2026-09-28 audit (CRITICAL): the compose backup worker delivers the key
+    as a mounted FILE (BACKUP_KEY_FILE=/run/secrets/backup_key) and sets the
+    plain env var to "" — the old env-only read raised on every run, so the
+    entrypoint's && chain failed and zero backups were published. Resolution
+    order mirrors backend/app/config.py: env BACKUP_KEY first (dev overlay
+    path), else the file named by BACKUP_KEY_FILE with surrounding
+    whitespace stripped. The env var is deliberately NOT exported in
+    compose: keeping it out of the container environment preserves the
+    docker-inspect posture the file mount was introduced for.
+    """
+    raw = os.environ.get("BACKUP_KEY", "").strip()
+    if raw:
+        return raw
+    file_name = os.environ.get("BACKUP_KEY_FILE", "").strip()
+    if not file_name:
+        raise RuntimeError("BACKUP_KEY is required (env BACKUP_KEY or file BACKUP_KEY_FILE)")
+    try:
+        with open(file_name, encoding="utf-8") as handle:
+            content = handle.read().strip()
+    except OSError as exc:
+        raise RuntimeError(f"BACKUP_KEY_FILE={file_name!r} could not be read: {exc}") from exc
+    if not content:
+        raise RuntimeError(f"BACKUP_KEY_FILE={file_name!r} is empty")
+    return content
+
+
 def _tag(ciphertext: Path) -> bytes:
-    secret = os.environ.get("BACKUP_KEY")
-    if not secret:
-        raise RuntimeError("BACKUP_KEY is required")
+    secret = _resolve_backup_key()
     mac_key = hmac.new(secret.encode("utf-8"), DOMAIN, hashlib.sha256).digest()
     digest = hmac.new(mac_key, digestmod=hashlib.sha256)
     with ciphertext.open("rb") as handle:

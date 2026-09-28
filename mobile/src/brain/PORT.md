@@ -14,7 +14,7 @@ deterministic corpora → the complete surfaced-card list and the full new
 state (every StoredPattern field, floats rounded to 9 decimals). A port
 is correct when `mobile/tests/brainVectors.test.ts` runs it against
 every case and matches exactly. The sentiment + statistics cores already
-pass (sentiment.ts, stats.ts — 48 sentiment vectors, erfc/pearson/
+pass (sentiment.ts, stats.ts — 53 sentiment vectors, erfc/pearson/
 fisher-z). Regenerate with:
 `cd backend && MINDPATTERN_ENV=development ../.venv/bin/python scripts/gen_brain_vectors.py`
 
@@ -30,7 +30,8 @@ fisher-z). Regenerate with:
 
 1. **Tokenization + fold** — `_fold_sentiment_text` (NFKC, U+2019, Latin
    base fold), `WORD_RE`, `SENTENCE_RE`, `sentences_of`
-   (brain.py ~1469-1511). The fold must stay byte-identical (the ES
+   (brain.py `sentences_of`, 2309-2320 in the current tree). The fold
+   must stay byte-identical (the ES
    lexicon's accented keys depend on it).
 2. **Language detection + topic mining** — the function-word ratio
    detector, shingle/LSH clustering (phrases.py — blake2b shingles,

@@ -16,7 +16,9 @@ vi.mock("../../src/api/client", async () => {
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ touchActivity }) };
+  // Audit 2026-09-28: unlockDays mirrors the REAL store's sanitized default
+  // (30) — the baseline caption's fallback reads it instead of a hardcoded 30.
+  return { ...actual, useSession: () => ({ touchActivity, unlockDays: 30 }) };
 });
 
 /** The built-in day-one pool is mocked so tests control the exact question

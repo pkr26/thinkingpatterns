@@ -330,3 +330,96 @@ describe("HistoryView delete lock race (audit 2026-09-27)", () => {
     expect(await kv.getItem(`mindpattern.entryVersions.${USER}`)).not.toBeNull();
   });
 });
+
+/** H-6 (2026-09-28 audit, HIGH — mobile HistoryScreen parity): the EDIT
+ *  path runs the same on-device crisis detection as a new entry. The
+ *  server only ever sees ciphertext, so the detector is the only net for
+ *  a user who edits yesterday's entry into crisis language. The save
+ *  COMMITS first (never blocked, unlike the create path's pre-save gate);
+ *  the support prompt surfaces after, throttled once per account-day. */
+describe("HistoryView edit-path crisis detection (H-6, audit 2026-09-28)", () => {
+  it("an edit into crisis language commits, then shows the support prompt — throttled on the second edit", async () => {
+    const { crisisDialogShownOn } = await import("../src/crisisDialog");
+    const { localDateISO } = await import("../src/dates");
+    const rows = [await encryptedRow({ id: "e-a", date: "2026-09-25", text: "an ordinary day", sentiment: 0, version: 1 })];
+    const mock = stubFetch((url, init) => {
+      if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) {
+        return !url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows);
+      }
+      if (url.endsWith("/entries/e-a") && init.method === "PUT") return jsonResponse({ ok: true });
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const root = await render(<HistoryView />);
+    await settle(40, 4);
+    await press(root, "Edit");
+    await typeArea(root, "Your entry", "I want to kill myself");
+    await press(root, "Save edit");
+    await settle(40, 5);
+    // H-6 never blocks the save: the replacement is already committed
+    // server-side when the prompt appears.
+    const puts = () =>
+      (mock.mock.calls as [string, RequestInit][]).filter(
+        ([url, init]) => url.endsWith("/entries/e-a") && init.method === "PUT",
+      );
+    expect(puts()).toHaveLength(1);
+    expect(textOf(root)).toContain("sounds heavy");
+    expect(await crisisDialogShownOn(USER, localDateISO())).toBe(true);
+
+    // A SECOND crisis edit the same day: throttled — the save still
+    // lands, no prompt card (no dismissal training).
+    await press(root, "Edit");
+    await typeArea(root, "Your entry", "I want to kill myself again");
+    await press(root, "Save edit");
+    await settle(40, 5);
+    expect(puts()).toHaveLength(2);
+    expect(textOf(root)).not.toContain("sounds heavy");
+  });
+
+  it("an ordinary edit never triggers the prompt", async () => {
+    const rows = [await encryptedRow({ id: "e-a", date: "2026-09-25", text: "a calm morning", sentiment: 0, version: 1 })];
+    stubFetch((url, init) => {
+      if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) {
+        return !url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows);
+      }
+      if (url.endsWith("/entries/e-a") && init.method === "PUT") return jsonResponse({ ok: true });
+      return jsonResponse({ detail: "unmatched" }, { status: 404 });
+    });
+    const root = await render(<HistoryView />);
+    await settle(40, 4);
+    await press(root, "Edit");
+    await typeArea(root, "Your entry", "a calm morning, edited");
+    await press(root, "Save edit");
+    await settle(40, 5);
+    expect(textOf(root)).not.toContain("sounds heavy");
+  });
+});
+
+/** 2026-09-28 audit (MEDIUM): the client-side entry cap and the empty-edit
+ *  block — mobile parity for BOTH editor surfaces. */
+describe("HistoryView edit guards (audit 2026-09-28)", () => {
+  it("an over-cap edit is refused client-side with the honest copy — no PUT", async () => {
+    const rows = [await encryptedRow({ id: "e-a", date: "2026-09-25", text: "short text", sentiment: 0, version: 1 })];
+    const mock = stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
+    const root = await render(<HistoryView />);
+    await settle(40, 4);
+    await press(root, "Edit");
+    await typeArea(root, "Your entry", "x".repeat(100_001));
+    await press(root, "Save edit");
+    await settle(40, 4);
+    expect(textOf(root)).toContain("Entries are limited to 100,000 characters");
+    expect(mock.mock.calls.some(([url, init]) => url.endsWith("/entries/e-a") && init.method === "PUT")).toBe(false);
+  });
+
+  it("an EMPTY edit is refused client-side (mobile parity) — no blank saved day", async () => {
+    const rows = [await encryptedRow({ id: "e-a", date: "2026-09-25", text: "real text", sentiment: 0, version: 1 })];
+    const mock = stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
+    const root = await render(<HistoryView />);
+    await settle(40, 4);
+    await press(root, "Edit");
+    await typeArea(root, "Your entry", "   ");
+    await press(root, "Save edit");
+    await settle(40, 4);
+    expect(textOf(root)).toContain("Write something first");
+    expect(mock.mock.calls.some(([url, init]) => url.endsWith("/entries/e-a") && init.method === "PUT")).toBe(false);
+  });
+});

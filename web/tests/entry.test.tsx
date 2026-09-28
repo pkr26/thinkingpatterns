@@ -294,3 +294,31 @@ describe("EntryView crisis-prompt cadence (LOW c, audit 2026-09-26)", () => {
     expect(textOf(root)).not.toContain("sounds heavy");
   });
 });
+
+/** 2026-09-28 audit (MEDIUM): the client-side entry cap — the editor
+ *  itself refuses an over-cap save (mobile EntryScreen parity). This is
+ *  also what keeps entryDraft.ts's silent >100k parse rejection
+ *  unreachable: the editor can no longer produce such a draft. */
+describe("EntryView length cap (audit 2026-09-28)", () => {
+  it("refuses an over-cap entry client-side — nothing sent, nothing queued, the honest copy", async () => {
+    const mock = stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
+    const root = await render(<EntryView onSaved={() => undefined} />);
+    await typeArea(root, "How was today?", "x".repeat(100_001));
+    await press(root, "Save entry");
+    await settle(40, 4);
+    expect(textOf(root)).toContain("Entries are limited to 100,000 characters");
+    expect(mock).not.toHaveBeenCalled();
+    expect(await queueLength("user-1")).toBe(0);
+  });
+
+  it("an entry at exactly the cap still saves (the bound is inclusive)", async () => {
+    const mock = stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
+    const onSaved = vi.fn();
+    const root = await render(<EntryView onSaved={onSaved} />);
+    await typeArea(root, "How was today?", "y".repeat(100_000));
+    await press(root, "Save entry");
+    await settle(40, 5);
+    expect(onSaved).toHaveBeenCalledWith("sent", expect.any(String));
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+});

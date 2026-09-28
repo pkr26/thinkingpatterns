@@ -131,9 +131,11 @@ describe("HistoryScreen list", () => {
     expect(text).toContain("first day with a newline"); // snippets flatten newlines
     expect(entryRows(root)).toHaveLength(3);
     const flat = allText(root);
+    // Audit 2026-09-28 (INFO): card dates render through formatEntryDate —
+    // order the rows by their FORMATTED dates (the raw ISO string is gone).
     const idx = (s: string) => flat.findIndex((line) => line.includes(s));
-    expect(idx("2026-09-03")).toBeLessThan(idx("2026-09-02"));
-    expect(idx("2026-09-02")).toBeLessThan(idx("2026-09-01"));
+    expect(idx("September 3, 2026")).toBeLessThan(idx("September 2, 2026"));
+    expect(idx("September 2, 2026")).toBeLessThan(idx("September 1, 2026"));
     // Rows are buttons whose a11y label carries the friendly date.
     expect(entryRows(root).map((n) => n.props.accessibilityLabel)).toContain("Entry from Thursday, September 3, 2026");
   });
@@ -186,6 +188,37 @@ describe("HistoryScreen list", () => {
     await flush();
     expect(textOf(root)).toContain("third day");
     expect(textOf(root)).not.toContain("try again in a moment");
+  });
+
+  // Audit 2026-09-28 (MEDIUM): the remote-rekey signature (every row fails
+  // AEAD under this device's key) used to surface as a 2.6s toast that then
+  // left the plain "No entries yet" empty state — reading as data loss
+  // exactly when the fix instructions must stay on screen. It now routes to
+  // the persistent error state (the load-failure styling + Try again).
+  it("a fully-undecryptable page renders the persistent rekeyed-elsewhere error, never the plain empty state", async () => {
+    const foreignKey = Buffer.alloc(32, 9);
+    const foreignRow = (id: string) => ({
+      id: `srv-${id}`,
+      client_entry_id: id,
+      blob: encrypt(
+        foreignKey,
+        Buffer.from(JSON.stringify({ v: 1, text: "sealed elsewhere", sentiment: null, created_at: "2026-09-03" })),
+        buildAad("entry", "user-1", id),
+      ).toString("base64"),
+      entry_date: "2026-09-03",
+      received_at: "2026-09-03T10:00:00.000Z",
+    });
+    vi.mocked(api.listEntries).mockResolvedValue([foreignRow("e-x"), foreignRow("e-y")] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const text = textOf(root);
+    expect(text).toContain("Every entry failed to decrypt");
+    expect(text).toContain("Sign out and sign back in with your new password.");
+    expect(text).toContain("Try again");
+    // The empty-state copy is suppressed behind the error card.
+    expect(text).not.toContain("No entries yet.");
+    // Nothing decrypted renders as journal content.
+    expect(text).not.toContain("sealed elsewhere");
   });
 
   it("long entries collapse to a one-line snippet with an ellipsis", async () => {
@@ -744,7 +777,7 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     expect(textOf(root)).toContain("Edit this entry"); // detail again
   });
 
-  it("the editor's Cancel returns untouched, and a blank draft cannot save", async () => {
+  it("the editor's Cancel confirms a discard, leaves untouched drafts alone, and a blank draft cannot save", async () => {
     oneEntry();
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
@@ -754,8 +787,23 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     });
     const { touchableByLabel } = await import("../helpers/rtr");
     expect(touchableByLabel(root, "Save changes").props.disabled).toBe(true);
+    // Audit 2026-09-28 (MEDIUM): Cancel with a CHANGED draft now CONFIRMS
+    // the discard instead of silently throwing the edits away (this test
+    // pinned the old silent-return).
     await pressLabel(root, "Cancel");
-    expect(textOf(root)).toContain("original words");
+    expect(lastAlert()[0]).toBe("Discard your changes?");
+    expect(lastAlert()[1]).toContain("have not been saved");
+    // "Keep editing" stays in the editor with the draft intact.
+    await pressAlertButton("Keep editing");
+    expect(textOf(root)).not.toContain("Edit this entry");
+    // An UNTOUCHED draft leaves without any dialog.
+    await act(async () => {
+      (editor.props as { onChangeText: (t: string) => void }).onChangeText("original words");
+    });
+    Alert.alert.mockClear();
+    await pressLabel(root, "Cancel");
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("original words"); // detail again, untouched
     expect(api.updateEntry).not.toHaveBeenCalled();
   });
 

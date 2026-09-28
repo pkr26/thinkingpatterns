@@ -9,9 +9,23 @@ analysis) — against a live server and prints latency percentiles and
 throughput. No assertions, no pass/fail: it is a measurement tool for
 capacity planning against the single-process deployment contract.
 
-Usage:
+Usage (loopback targets run directly):
     python scripts/loadtest.py --url http://localhost:8000 --users 20 \
         --db-url postgresql+asyncpg://u:p@localhost/mindpattern
+
+Non-loopback targets (a production or staging box) require an explicit
+--yes-prod: this tool registers/logs in/floods real accounts and the
+scrypt phase alone can saturate a small server, so pointing it at
+infrastructure you do not mean to load must be a deliberate act.
+
+The account password is taken from LOADTEST_PASSWORD, or prompted for
+(hidden via getpass) when the variable is unset — there is deliberately
+NO committed default. The per-user salts are DETERMINISTIC and
+domain-separated (`mindpattern-loadtest:<name>`, seed_demo's mechanism —
+the re-run 409->login path needs the same salt the server stored), which
+makes every derived credential SYNTHETIC-ONLY: these handles exist solely
+for load measurement and their derivations must never be reused for real
+accounts.
 
 The 30-day threshold cannot be fast-forwarded through the API (the
 +/-1-day backdating guard is a security property), so measuring the FULL
@@ -32,11 +46,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import getpass
 import hashlib
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -88,7 +105,14 @@ class LoadUser:
         self.client = client
         self.name = f"load{n}"
         self.password = password
-        self.salt = hashlib.sha256(f"load-salt-{n}".encode()).digest()[:16]
+        # DETERMINISTIC, domain-separated per-user salt (seed_demo's
+        # mechanism, 2026-09-19 audit L-36): the re-run path (409 -> login)
+        # must re-derive the verifier under the SAME salt the server
+        # stored, so os.urandom cannot be used here. The
+        # "mindpattern-loadtest:" prefix keeps these synthetic handles'
+        # derivations out of every other salt namespace — these credentials
+        # are for load measurement ONLY, never real accounts.
+        self.salt = hashlib.sha256(f"mindpattern-loadtest:{self.name}".encode()).digest()[:16]
         self.token: str | None = None
         self.user_id: str | None = None
         self.data_key: bytes | None = None
@@ -209,6 +233,14 @@ async def phase(client: httpx.AsyncClient, label: str, coros) -> Stats:
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://localhost:8000")
+    parser.add_argument(
+        "--yes-prod",
+        action="store_true",
+        help="Explicit confirmation required for NON-loopback --url targets "
+        "(2026-09-28 audit hygiene): this probe registers/logs in/floods "
+        "real accounts and its scrypt phase alone can saturate a small "
+        "server. Loopback targets (localhost/127.0.0.1/::1) run without it.",
+    )
     parser.add_argument("--users", type=int, default=20)
     parser.add_argument(
         "--entries-per-user",
@@ -239,10 +271,36 @@ async def main() -> int:
     )
     args = parser.parse_args()
 
+    # Loopback guard (2026-09-28 audit hygiene): anything that is not
+    # localhost/127.0.0.1/::1 is a remote target — loading it needs the
+    # operator's explicit --yes-prod, printed loudly.
+    host = (urlsplit(args.url).hostname or "").strip("[]").lower()
+    loopback = host in ("localhost", "127.0.0.1", "::1")
+    if not loopback and not args.yes_prod:
+        print(
+            f"REFUSING to load-probe non-loopback target {args.url} without --yes-prod: "
+            "this tool registers accounts, burns scrypt CPU and drives the full "
+            "recompute pipeline against a live server. Re-run with --yes-prod if "
+            "that is genuinely the intent.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Password: env var first, else a hidden prompt — NO committed default
+    # (2026-09-28 audit hygiene: "loadtest-password-1" in git made every
+    # load handle derivable by anyone with the repo).
+    password = os.environ.get("LOADTEST_PASSWORD")
+    if not password:
+        try:
+            password = getpass.getpass("loadtest account password: ")
+        except (EOFError, KeyboardInterrupt):
+            password = ""
+    if not password:
+        print("no password given (LOADTEST_PASSWORD or prompt) — refusing to run", file=sys.stderr)
+        return 2
+
     from datetime import date, datetime, timedelta
     from datetime import timezone as tz
-
-    password = "loadtest-password-1"
     async with httpx.AsyncClient(base_url=args.url, timeout=120) as client:
         print(f"==> load probe against {args.url} ({args.users} users)")
         # Two scrypt phases over the SAME handles: a fresh database

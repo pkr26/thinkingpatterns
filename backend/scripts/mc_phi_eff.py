@@ -43,6 +43,13 @@ def run_cell(n: int, phi: float, reps: int) -> tuple[float, float]:
 
 
 def scan(reps: int) -> None:
+    # Restore the ORIGINALS, not hardcoded values (2026-09-28 audit): the
+    # old tail wrote 2.0/0.99 back unconditionally — correct only by
+    # coincidence while those happen to be the module defaults; a tuning
+    # change upstream would leave the imported brain monkeypatched at this
+    # scan's last cell for anything importing it afterwards.
+    original_k = brain._MOOD_SHIFT_PHI_EFF_K
+    original_max = brain._MOOD_SHIFT_PHI_EFF_MAX
     # K=1.0 included (independent audit 2026-09-27): it is the
     # contrast the 'K=2.0 is the measured frontier' claim rests on — the
     # phi=0.8 short-n nulls sit at 15-23% there vs 3-7% at K=2.0.
@@ -53,8 +60,8 @@ def scan(reps: int) -> None:
             rates = [run_cell(n, phi, reps)[1] for n, phi in CELLS]
             flag = "" if all(r <= 0.06 for r in rates) else "  <-- over"
             print(f"k={k:4.1f} cap={cap:4.2f} " + " ".join(f"{r:.3f}" for r in rates) + flag)
-    brain._MOOD_SHIFT_PHI_EFF_K = 2.0
-    brain._MOOD_SHIFT_PHI_EFF_MAX = 0.99
+    brain._MOOD_SHIFT_PHI_EFF_K = original_k
+    brain._MOOD_SHIFT_PHI_EFF_MAX = original_max
 
 
 def final(reps: int) -> None:

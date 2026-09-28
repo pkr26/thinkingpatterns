@@ -153,20 +153,22 @@ function healthFrom(mod: unknown): HealthModule | null {
  *  HealthBridge category answers unavailable there by design), and
  *  "predates State of Mind support" (a react-native-health build without
  *  the bridge category) are three different facts for the person reading
- *  the reason line. */
+ *  the reason line. Each reason is a LOCALE KEY (audit 2026-09-28, LOW):
+ *  Settings resolves them through tr() — raw English prose here leaked
+ *  into the localized reason line. */
 export function healthKitCapability(): NativeCapability {
   const mod = probe(HEALTH_MODULE);
   if (mod === null) {
-    return { available: false, reason: "health module not linked in this build" };
+    return { available: false, reason: "settings.reasonHealthModule" };
   }
   if (Platform.OS === "ios") {
     const version = typeof Platform.Version === "number" ? Platform.Version : Number.parseFloat(String(Platform.Version));
     if (Number.isFinite(version) && version < 18) {
-      return { available: false, reason: "Apple Health State of Mind requires iOS 18 or later" };
+      return { available: false, reason: "settings.reasonHealthIOS18" };
     }
   }
   if (healthFrom(mod) === null) {
-    return { available: false, reason: "health module predates State of Mind support" };
+    return { available: false, reason: "settings.reasonHealthOldModule" };
   }
   return { available: true };
 }

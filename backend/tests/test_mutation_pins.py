@@ -674,6 +674,7 @@ async def test_cors_middleware_contract(settings):
         "X-New-Processing-Token",
         "X-Account-Verifier",
         "X-Therapist-Enrollment-Token",
+        "X-Pairing-Code",  # 2026-09-28: SAS preflight for browser clients
     ]
     # 2026-09-26 audit (LOW, batch item a): the measures snapshot marker
     # and the access-log continuation cursor joined the expose list — a
@@ -1513,7 +1514,12 @@ def test_llm_prompt_and_payload_shape_are_pinned():
         posted.append(payload)
         or {"choices": [{"message": {"content": json.dumps({"patterns": []})}}]}
     )
-    analyzer.extract_patterns([_entry(0, "a work day", sentiment=-0.25)])
+    from app.services.patterns import Pattern
+
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    analyzer.extract_patterns(
+        [_entry(0, "a work day", sentiment=-0.25)], findings=findings
+    )
 
     payload = posted[0]
     # 2026-09-16 remediation (D2): generation is bounded.
@@ -1532,7 +1538,10 @@ def test_llm_prompt_and_payload_shape_are_pinned():
     assert "never discover new ones" in system["content"]
     assert user["role"] == "user"
     wire = json.loads(user["content"])
-    assert wire["findings"] == []
+    # 2026-09-28: the dispatch gate sends exactly the NARRATABLE findings
+    # it was handed (an empty summary used to ride a pointless plaintext
+    # round-trip when nothing was narratable).
+    assert wire["findings"] == [{"kind": "temporal", "label": "work"}]
     assert wire["recent_entries"] == [
         {"date": "2026-07-01", "sentiment": -0.25, "text": "a work day"}
     ]
@@ -1549,7 +1558,10 @@ def test_llm_budget_boundary_is_exact():
     analyzer._post = lambda payload: (
         posted.append(payload) or {"choices": [{"message": {"content": '{"patterns": []}'}}]}
     )
-    analyzer.extract_patterns(corpus)
+    from app.services.patterns import Pattern
+
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    analyzer.extract_patterns(corpus, findings=findings)
 
     sent_entries = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(sent_entries) == 2
@@ -1564,7 +1576,10 @@ def test_llm_sends_the_last_entries_within_the_slice_and_budget():
         posted.append(payload) or {"choices": [{"message": {"content": '{"patterns": []}'}}]}
     )
     corpus = [_entry(i, f"entry {i} " + "x" * 700) for i in range(250)]
-    analyzer.extract_patterns(corpus)
+    from app.services.patterns import Pattern
+
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    analyzer.extract_patterns(corpus, findings=findings)
     sent_entries = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(sent_entries) == 200  # the MAX_ENTRIES slice
     total = sum(len(item["text"]) for item in sent_entries)
@@ -2081,7 +2096,10 @@ def test_llm_budget_exhausts_mid_entry_with_one_char_left():
         _entry(2, "cccccccccc"),
         _entry(3, "dddddddddd"),
     ]
-    analyzer.extract_patterns(corpus)
+    from app.services.patterns import Pattern
+
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    analyzer.extract_patterns(corpus, findings=findings)
     sent = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(sent) == 3
     assert len(sent[2]["text"]) == 1  # exactly the remaining budget

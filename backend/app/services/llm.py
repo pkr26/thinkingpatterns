@@ -430,8 +430,19 @@ def _clean_narrative(raw: object) -> str | None:
     if not isinstance(raw, str):
         return None
     text = _CONTROL_CHARS.sub(" ", raw).strip()
-    if not text or len(text) > MAX_NARRATIVE_CHARS:
-        return None if not text else text[:MAX_NARRATIVE_CHARS].rstrip()
+    if not text:
+        return None
+    # Deep audit 2026-09-28 CRITICAL fix: the over-length branch used to
+    # truncate and return IMMEDIATELY — before the URL/phone/domain,
+    # spelled-contact, second-person-advice, imperative, manipulation,
+    # digit, clinical-term, and crisis-language checks ran at all. Any
+    # narrative pushed past MAX_NARRATIVE_CHARS (a prompt-injected journal
+    # only needs to steer the provider's output length) carried its
+    # manipulative or quoted-ideation content onto pattern cards verbatim.
+    # Truncate FIRST, then subject the truncated text to the full chain.
+    text = text[:MAX_NARRATIVE_CHARS].rstrip()
+    if not text:
+        return None
     if _URL_OR_PHONE.search(text) or _SPELLED_CONTACT.search(text) or _SPELLED_DOMAIN.search(text):
         return None
     if _SECOND_PERSON_ADVICE.search(text) or _IMPERATIVE_OPENERS.search(text):
@@ -470,6 +481,10 @@ class LLMAnalyzer:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        # 2026-09-28 deep audit: how many provider round-trips this run
+        # actually made — the analyzer name must not claim "llm" for a
+        # run that dispatched nothing (no narratable findings).
+        self.requests_made = 0
         # Honest-failure state (2026-09-17): the exception CLASS of the
         # last failed call, or None. Consumed by the recompute response so
         # `analyzer: "llm"` is only ever reported for a call that actually
@@ -563,6 +578,17 @@ class LLMAnalyzer:
         sentence, sanitized like everything else.
         """
         findings = findings or []
+        # 2026-09-28 deep audit (services MEDIUM): the summary used to
+        # carry EVERY kind the brain emits (17), but the sanitizer drops
+        # any narration whose kind is not in _ALLOWED_KINDS (4) — so for a
+        # corpus whose surfaced patterns are the newer kinds, the
+        # consented journal plaintext left the enclave for an enrichment
+        # round-trip that structurally could not produce anything. Filter
+        # to the narratable kinds BEFORE the request.
+        narratable = [f for f in findings if f.kind in _ALLOWED_KINDS]
+        if not narratable:
+            return []
+        findings = narratable
         findings_summary = [
             {
                 "kind": f.kind,
@@ -575,6 +601,7 @@ class LLMAnalyzer:
             }
             for f in findings
         ]
+        self.requests_made += 1
         body = self._post(
             {
                 "model": self.model,

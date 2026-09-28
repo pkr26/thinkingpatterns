@@ -311,16 +311,23 @@ export function sentimentComponents(text: string, language?: string): [number, n
 /** brain's language-detection heuristic (L-3 follow-up, 2026-09-26):
  *  shares of scored tokens (len >= 3) against the EN/ES detection sets;
  *  "es" only when its share clears the floor AND beats English, "en"
- *  when English clears the floor, otherwise "other". Below min-tokens
- *  the server keeps the historical English default — mirrored here by
- *  returning "en" so the walk falls back to the pinned default tables
- *  exactly like a language-neutral caller. The server applies this per
- *  CORPUS window; the on-device estimate classifies the single text,
- *  which converges to the same answer for monolingual journals. */
+ *  when English clears the floor, otherwise "other".
+ *  2026-09-28 audit (HIGH, brain parity — brain.py's 2026-09-26
+ *  statistical review item 9): the `scored.length < minTokens → "en"`
+ *  shortcut diverged from the server, which applies the SAME share rule
+ *  to short windows instead of defaulting to English — only the fully
+ *  EMPTY corpus keeps the historical English default, and text with
+ *  zero scored tokens reports "other" ("we do not know this language"
+ *  is the honest verdict). The server applies this per CORPUS window;
+ *  the on-device estimate classifies the single text, which converges
+ *  to the same answer for monolingual journals. */
 export function detectLanguage(text: string): "en" | "es" | "other" {
   const scored = tokenize(text).filter((t) => t.length >= 3);
   const det = T().languageDetection;
-  if (scored.length < det.minTokens) return "en";
+  // Empty corpus (no tokens at all): the historical English default —
+  // nothing is being suppressed there. Any raw text with zero SCORED
+  // tokens is an unknown language, never a guessed English.
+  if (scored.length === 0) return text.length === 0 ? "en" : "other";
   let enHits = 0;
   let esHits = 0;
   for (const t of scored) {

@@ -437,6 +437,28 @@ class TestExhaustiveRoleWalls:
         }
         assert not unwalled, f"routes shipped without any auth dependency: {sorted(unwalled)}"
 
+    async def test_every_walled_route_answers_401_without_a_token(self, client, app):
+        # 2026-09-28 deep audit (test-quality MEDIUM): the structural
+        # role-wall test above proves every route HAS a require_* dependency;
+        # this sweep additionally pins the HTTP envelope an anonymous caller
+        # actually receives (flat 401, code "unauthorized") on every walled
+        # route — auto-covering new routes.
+        mapping = self._route_roles(app)
+        for key, roles in sorted(mapping.items()):
+            if not roles:
+                continue
+            method, path = key.split(" ", 1)
+            path = self._fill_params(path)
+            response = await client.request(
+                method,
+                path,
+                json={} if method in ("POST", "PUT", "PATCH") else None,
+            )
+            assert response.status_code == 401, (
+                f"{key}: expected 401 anonymous, got {response.status_code} {response.text}"
+            )
+            assert response.json()["code"] == "unauthorized", key
+
     async def test_therapist_token_rejected_on_every_user_route(self, client, app):
         mapping = self._route_roles(app)
         th = TherapistEmulator("drwall", "pw")

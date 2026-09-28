@@ -133,7 +133,12 @@ export const GENERIC_QUESTIONS_ES: readonly string[] = [
   "¿Qué tres cosas salieron más o menos bien hoy?",
   "¿Quién hizo su día un poco más ligero hoy?",
   "¿Hay algo que espera con ilusión?",
-  "¿Qué la confortó hoy?",
+  // Audit 2026-09-28 (LOW): usted-register pronoun — "la" was the only
+  // person-referring feminine clitic in the pool; every other entry uses
+  // le/lo. (shared/generic_questions_es.json still carries the pre-fix
+  // string; genericQuestions.test.ts applies this one audited correction
+  // at the parity check until shared/ syncs.)
+  "¿Qué le confortó hoy?",
   "¿Qué vale la pena conservar de hoy?",
   "¿Qué fue lo que más le importó hoy?",
   "¿Cuándo sintió que hoy tenía sentido?",

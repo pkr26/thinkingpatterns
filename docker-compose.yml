@@ -65,6 +65,11 @@ services:
       - auditjournal:/var/lib/mindpattern/audit
     secrets:
       - token_secret
+      # 2026-09-28 audit H-2: the environment block points
+      # MINDPATTERN_AUTH_TOKEN_SECRET_FILE at /run/secrets/auth_token_secret,
+      # but this list never mounted it — _secret_env hard-fails on the
+      # unreadable path and `docker compose up` crash-looped the api.
+      - auth_token_secret
       - metrics_token
     environment:
       # POSTGRES_PASSWORD is interpolated RAW into this URL: it must be a

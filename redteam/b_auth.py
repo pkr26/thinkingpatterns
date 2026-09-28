@@ -149,7 +149,7 @@ async def b1_verifier_and_tokens() -> None:
 
 async def b2_rate_limits() -> None:
     section("B2: rate-limit evasion")
-    from app.cache import FixedWindowCounter, client_key_from_scope
+    from app.cache import SlidingWindowCounter, client_key_from_scope
 
     # IPv6 /64 aggregation holds (raw ASGI scope — the same input the
     # middleware passes, immune to Request-wrapper signature changes)
@@ -171,8 +171,10 @@ async def b2_rate_limits() -> None:
                 f"passed a 5/min limit using one spoofed XFF entry per request (deployment-"
                 f"conditional: safe only behind a proxy that always appends its observation)")
 
-    # Key-eviction flood against the 10k tracked-key cap
-    counter = FixedWindowCounter()
+    # Key-eviction flood against the 10k tracked-key cap (SlidingWindowCounter
+    # since commit e4585b3 — same probe, ported off the dead FixedWindowCounter
+    # name whose import crash-skipped all of B2 after the rate-limit rewrite)
+    counter = SlidingWindowCounter()
     for _ in range(10):
         counter.hit("auth-salt:1.2.3.4", 60)  # victim at the limit (count=10)
     for i in range(11_000):  # attacker floods 11k buckets with count 11 (>= victim's)
@@ -187,15 +189,23 @@ async def b2_rate_limits() -> None:
             f"~121k requests to reset ONE near-limit bucket — smallest-count/oldest bias makes "
             f"flooding strictly worse for the attacker than waiting out the window")
 
-    # Fixed-window boundary burst (counter level)
-    c = FixedWindowCounter()
-    first_burst = [c.hit("k", 1, now=100.0).count for _ in range(10)]
+    # Sliding-window boundary (ported to SlidingWindowCounter, 2026-09-28):
+    # the classic fixed-window doubling reset the count exactly at each
+    # integer window boundary, so a burst at the end of one bucket plus a
+    # burst at the start of the next pushed 2x the limit through a span far
+    # SHORTER than the window. Sliding semantics age a hit out only when it
+    # is a full window old, so a second burst 0.15s later — just past the
+    # old boundary — must still see every hit from the first burst.
+    c = SlidingWindowCounter()
+    first_burst = [c.hit("k", 1, now=100.90).count for _ in range(10)]
     second = [c.hit("k", 1, now=101.05).count for _ in range(10)]
-    verdict("B2.fixed-window-boundary", "PARTIAL",
-            f"window=1s, limit=10: 10 hits at t=100.0 (counts {first_burst[-1]}), 10 more at "
-            f"t=101.05 reset to {second[0]} — {first_burst[-1] + len(second)} hits inside "
-            f"~1.05s vs nominal 10/s: classic fixed-window doubling, bounded by capacity "
-            f"limiters on the expensive endpoints")
+    verdict("B2.fixed-window-boundary",
+            "BLOCKED" if second[0] == first_burst[-1] + 1 else "FINDING",
+            f"window=1s, limit=10: 10 hits at t=100.90 (count {first_burst[-1]}), 10 more "
+            f"just 0.15s later at t=101.05 resume at count {second[0]} — the count did NOT "
+            f"reset at the old bucket boundary (a fixed window would show 1 here, doubling "
+            f"the limit inside 0.15s): hits age out only when a full window old, so no "
+            f"window-aligned span can exceed the limit")
 
     # Anonymous victim lockout: failed-only per-username counting
     app = await make_app(make_settings(auth_rate_limit=1000))

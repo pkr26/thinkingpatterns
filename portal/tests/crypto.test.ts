@@ -450,6 +450,54 @@ describe("payload decryption helpers", () => {
     ).rejects.toThrow(/malformed/);
   });
 
+  it("decrypts v2 (version-bound AAD) entries — the wire shape every current patient client writes", async () => {
+    // Deep-audit 2026-09-28 CRITICAL regression pin: since M-2 (2026-09-20)
+    // patient clients seal entries under the FOUR-part AAD and rekey
+    // upgrades every stored row to v2. decryptEntry used to try only the
+    // three-part legacy binding, so every current entry failed GCM in the
+    // therapist evidence drill-down.
+    const dataKey = crypto.getRandomValues(new Uint8Array(32));
+    const userId = "user-v2";
+    const v2Payload = { v: 2, text: "structured entry body", sentiment: null, created_at: "2026-09-28T10:00:00.000Z", tod: "morning" };
+    const v2Blob = await encrypt(
+      dataKey,
+      new TextEncoder().encode(JSON.stringify(v2Payload)),
+      buildAad("entry", userId, "e-v2", "2"),
+    );
+    const v2 = await decryptEntry(dataKey, userId, {
+      client_entry_id: "e-v2",
+      blob: toB64(v2Blob),
+      content_version: 2,
+    });
+    expect(v2.text).toBe("structured entry body");
+
+    // The server-side rekey ladder tries v2 FIRST then falls back to the
+    // legacy binding for ANY generation (a legacy client's edit bumps the
+    // stored version while still sealing v1 bytes — entries.py keeps the
+    // row's content_version). A row whose stored version is ≥2 but whose
+    // bytes are legacy-bound must still decrypt.
+    const legacyPayload = { v: 1, text: "legacy-bound bytes, bumped version", sentiment: null, created_at: "2026-09-01" };
+    const legacyBlob = await encrypt(
+      dataKey,
+      new TextEncoder().encode(JSON.stringify(legacyPayload)),
+      buildAad("entry", userId, "e-mixed"),
+    );
+    const mixed = await decryptEntry(dataKey, userId, {
+      client_entry_id: "e-mixed",
+      blob: toB64(legacyBlob),
+      content_version: 3,
+    });
+    expect(mixed.text).toBe("legacy-bound bytes, bumped version");
+
+    // And a v1 row with no content_version field at all (additive wire
+    // rule) still decrypts through the same ladder.
+    const plainV1 = await decryptEntry(dataKey, userId, {
+      client_entry_id: "e-mixed",
+      blob: toB64(legacyBlob),
+    });
+    expect(plainV1.text).toBe("legacy-bound bytes, bumped version");
+  });
+
   it("wipes decrypted insights and entry plaintext on success and validation errors", async () => {
     const dataKey = crypto.getRandomValues(new Uint8Array(32));
     const userId = "user-wipe";

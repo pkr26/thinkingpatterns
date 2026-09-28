@@ -10,7 +10,6 @@ import {
   getLanguagePref,
   getLocale,
   LANGUAGE_STORAGE_KEY,
-  setLocale,
   subscribeLanguage,
   t,
   enCatalog,
@@ -34,22 +33,25 @@ describe("strings", () => {
 
   it("switches the catalog and the date locale together", () => {
     const english = t("mood.option.good");
-    setLocale("es");
+    // 2026-09-28 audit (INFO): setLocale's test-only backdoor was folded
+    // into __setLocaleForTests — production flips locales through
+    // applyLanguagePref alone.
+    __setLocaleForTests("es");
     expect(getLocale()).toBe("es");
     expect(dateLocaleTag()).toBe("es-ES");
     expect(t("mood.option.good")).not.toBe(english);
-    setLocale("en");
+    __setLocaleForTests("en");
     expect(getLocale()).toBe("en");
     expect(dateLocaleTag()).toBe("en-US");
     expect(t("mood.option.good")).toBe(english);
   });
 
   it("the Spanish catalog covers the English keys exactly (no missing string)", () => {
-    setLocale("es");
+    __setLocaleForTests("es");
     for (const key of ["mood.option.good", "entry.energyQuestion"]) {
       expect(t(key)).not.toBe(key);
     }
-    setLocale("en");
+    __setLocaleForTests("en");
   });
 });
 
@@ -132,6 +134,27 @@ describe("language preference (audit 2026-09-26 LOW: the override seam)", () => 
     const fresh = await import("../src/strings");
     expect(fresh.getLanguagePref()).toBe("auto");
     expect(fresh.getLocale()).toBe("en");
+  });
+});
+
+describe("documentElement.lang follows the locale (2026-09-28 audit INFO)", () => {
+  it("applyLanguagePref and the test seam keep the document's language tag in step", () => {
+    // The node test runtime has no DOM: stand in a minimal documentElement
+    // (what a browser provides) and exercise the announce path through it.
+    const element = { lang: "" };
+    vi.stubGlobal("document", { documentElement: element });
+    try {
+      applyLanguagePref("es");
+      expect(element.lang).toBe("es");
+      applyLanguagePref("en");
+      expect(element.lang).toBe("en");
+      __setLocaleForTests("es");
+      expect(element.lang).toBe("es");
+      __setLocaleForTests("en");
+      expect(element.lang).toBe("en");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

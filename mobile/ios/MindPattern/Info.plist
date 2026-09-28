@@ -38,8 +38,6 @@
 	<string>MindPattern never reads your Health data. This permission is only checked so the app can confirm its write access.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>MindPattern can write your mood check-ins to the Health app on this device, when you turn that on in Settings. It never reads anything from Health.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

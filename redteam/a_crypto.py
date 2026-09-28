@@ -124,11 +124,42 @@ async def a1_processing_sessions() -> None:
     SecureProcessingContext(bytearray(key)).run([(build_aad("entry", "u1", "c1"), blob)], analyze)
     del seen[:]
     gc.collect()
-    remnants = [o for o in gc.get_objects()
-                if isinstance(o, str) and marker in o]
+    # 2026-09-28 audit: gc.get_objects() returns only GC-TRACKED objects,
+    # and a bare str is never tracked — the old probe iterated that list
+    # for str instances and therefore ALWAYS reported zero (vacuously
+    # "clean"). Honest version: scan the tracked CONTAINERS (dict/list/
+    # tuple/set — the objects that can actually keep a str alive) for str
+    # elements/keys/values containing the marker. Bounded: cap the scanned
+    # containers so a pathological heap cannot stall the harness. The
+    # probe's own marker literal is excluded by identity — anything else
+    # containing the marker is a real remnant and a FINDING.
+    max_containers = 20_000
+    remnants: list[str] = []
+    scanned = 0
+    for obj in gc.get_objects():
+        if scanned >= max_containers:
+            break
+        scanned += 1
+        try:
+            if isinstance(obj, dict):
+                elems: list[object] = list(obj.keys()) + list(obj.values())
+            elif isinstance(obj, (list, tuple, set, frozenset)):
+                elems = list(obj)
+            else:
+                continue
+            for elem in elems:
+                if (isinstance(elem, str) and elem is not marker
+                        and marker in elem):
+                    remnants.append(elem[:120])
+                    if len(remnants) >= 5:  # enough to prove the leak
+                        break
+        except RuntimeError:  # container mutated mid-scan (threads) — skip it
+            continue
     verdict(audit + ".memory-remnants",
             "BLOCKED" if not remnants else "FINDING",
-            f"post-run GC scan for plaintext marker: {len(remnants)} lingering str copies "
+            f"post-run GC scan of {scanned} tracked container(s) for the plaintext "
+            f"marker: {len(remnants)} lingering copy-location(s) "
+            f"{[r[:60] for r in remnants] if remnants else ''} "
             f"(CPython refcounting frees this path promptly; the enclave docstring's honest "
             f"caveat covers exception paths/analyzer-held refs, not this one)")
 
@@ -200,16 +231,39 @@ async def a5_key_lifecycle() -> None:
             f"— negligible within the per-user quota; risk is structural only if the quota is "
             f"raised or the seam above is used")
 
-    # rotation / re-key existence
-    from app.api import account, auth
+    # rotation / re-key paths (2026-09-28 audit rewrite: the old check
+    # reported "no password-change/rotate endpoint exists" as INFO even
+    # while PUT /account/password and POST /processing/rekey were already
+    # mounted — its verdict contradicted itself, and it never scanned the
+    # insights router where the rekey endpoint actually lives).
+    from app.api import account, auth, insights
 
     routes = {getattr(r, "path", "") for r in auth.router.routes}
     routes |= {getattr(r, "path", "") for r in account.router.routes}
-    has_rotation = any("password" in p or "rotate" in p or "rekey" in p for p in routes)
-    verdict(audit + ".no-rekey-path", "INFO" if not has_rotation else "BLOCKED",
-            f"no password-change/rotate endpoint exists ({sorted(routes)}): data key never "
-            f"changes for an account's lifetime; a compromised master secret has no recovery "
-            f"and a forgotten password is permanent data loss (documented design)")
+    routes |= {getattr(r, "path", "") for r in insights.router.routes}
+    has_password_change = "/account/password" in routes
+    has_rekey = "/processing/rekey" in routes
+    has_credential_rotate = "/account/credential" in routes
+    # Possession-probe guards (2026-09-28 audit M-1): both key-swapping
+    # account endpoints must demand a live X-Processing-Token session whose
+    # popped key AUTHENTICATES stored ciphertext before the swap — a stolen
+    # bearer alone must never brick the account. Source-checked so the
+    # summary below cannot drift from the code.
+    account_src = _inspect.getsource(account)
+    probe_guards = ("X-Processing-Token" in account_src
+                    and "envelope_key_mismatch" in account_src)
+    ok = has_password_change and has_rekey and probe_guards
+    verdict(audit + ".key-rotation-paths",
+            "BLOCKED" if ok else "FINDING",
+            f"password change PUT /account/password={has_password_change}, corpus rekey "
+            f"POST /processing/rekey={has_rekey}, login-credential rotation "
+            f"PUT /account/credential={has_credential_rotate}: a compromised master "
+            f"secret now has an in-band recovery and a v2 password change no longer "
+            f"costs O(corpus) re-encryption. Both key-swapping endpoints require a "
+            f"possession probe — a live owner-bound X-Processing-Token session whose "
+            f"popped key must AUTHENTICATE stored ciphertext (wrong key: 403 "
+            f"envelope_key_mismatch; guards found in endpoint source: {probe_guards}) "
+            f"— so a stolen bearer alone cannot lock the real user out")
 
 
 def a6_aad_corpus() -> None:

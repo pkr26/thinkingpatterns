@@ -116,16 +116,17 @@ export function decryptEntry(
   userId: string,
   clientEntryId: string,
   blobB64: string,
-  /** The server-declared content generation of this row. When present the
-   *  version-bound v2 AAD is tried first and the legacy three-part AAD is
-   *  the fallback for version 1 ONLY (audit fix M-2, tightened 2026-09-26
-   *  as M-M1: legacy rows are generation 1 by construction — the server
-   *  mints content_version 1 on first store and only this client's v2 AAD
-   *  exists from generation 2 on). For contentVersion >= 2 the versioned
-   *  AAD is the only attempt: a compromised server pairing a stale pre-v2
-   *  blob with a fresh version echo must fail closed (TamperError), not be
-   *  laundered through the legacy fallback. Omitted version → legacy
-   *  binding only (pre-2026-09-20 servers). */
+  /** The server-declared content generation of this row. The v2 AAD is
+   *  tried first and the legacy three-part AAD is the fallback for ANY
+   *  version (audit fix 2026-09-28): the server bumps content_version when
+   *  a legacy client edits while entries.py keeps the legacy blob bytes, so
+   *  legally-stored rows can carry version >= 2 with a legacy binding —
+   *  failing those closed made real entries vanish as TamperError. This
+   *  mirrors the server ladder crypto.entry_aad_candidates (v2 then v1 for
+   *  any version); a stale-blob-with-fresh-version-echo replay is still
+   *  caught by the per-id high-water marks in entryVersions.ts, which is
+   *  where the rollback protection actually lives. Omitted version →
+   *  legacy binding only (pre-2026-09-20 servers). */
   contentVersion?: number,
 ): EntryPayload {
   const blob = Buffer.from(blobB64, "base64");
@@ -133,12 +134,8 @@ export function decryptEntry(
   if (contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1) {
     try {
       plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId, String(contentVersion)));
-    } catch (err) {
-      if (contentVersion === 1) {
-        plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
-      } else {
-        throw err;
-      }
+    } catch {
+      plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
     }
   } else {
     plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));

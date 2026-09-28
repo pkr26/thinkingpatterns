@@ -192,7 +192,9 @@ def test_chosen_pattern_pid_filters_suppressed_and_duplicate_questions(monkeypat
     monkeypatch.setattr(
         questions,
         "render_pattern_questions",
-        lambda _: ["suppressed?", "same?", "same?"],
+        # 2026-09-28: the mirror threads the question LANGUAGE through
+        # (same parameter question_for_today uses).
+        lambda _, language="en": ["suppressed?", "same?", "same?"],
     )
     monkeypatch.setattr(questions, "GENERIC_QUESTIONS", ("same?", "generic?"))
     monkeypatch.setattr(questions, "user_rotation_offset", lambda _: 0)

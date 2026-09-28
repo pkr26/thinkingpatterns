@@ -143,6 +143,24 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     "\\b(?:solo\\s+)?quiero\\s+dormir\\s+para\\s+siempre\\b",
     "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
     "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
+    # --- 2026-09-28 deep audit (services HIGH): the Spanish block above
+    # covered only PRESENT-tense first person, so textbook disclosures
+    # matched NEITHER tier — past tense ("me corté" / "me cortaba"), the
+    # periphrastic future ("me voy a cortar"), the progressive ("me estoy
+    # haciendo daño"), the standard Spanish end-it-all idiom ("terminar
+    # con todo"), and the pointlessness/burden family ("no le veo sentido
+    # a la vida", "me siento un estorbo", "sería mejor si no estuviera").
+    # Unmatched text can be quoted back on pattern cards — the exact harm
+    # the crisis interlock exists to prevent. Accented spellings are
+    # written post-fold (é/á/í -> e/a/i normalization). --------------------
+    "\\bme\\s+cort(?:e|aba)\\b",
+    "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|matar)\\b",
+    "\\bme\\s+estoy\\s+(?:cortando|lastimando|quemando|ahogando|haciendo\\s+da[nñ]o)\\b",
+    "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo)\\s+terminar\\s+con\\s+todo\\b",
+    "\\bme\\s+har(?:e|ia)\\s+da[nñ]o\\b",
+    "\\bno\\s+le\\s+veo\\s+sentido\\s+a\\s+la\\s+vida\\b",
+    "\\b(?:me\\s+siento|soy)\\s+un\\s+estorbo\\b",
+    "\\bseria\\s+mejor\\s+si\\s+no\\s+estuviera\\b",
     # --- non-Latin scripts: plain substrings (\\b never fires next to
     #     CJK/Arabic/Devanagari in ECMAScript) --------------------------------
     "我想死",
@@ -158,7 +176,14 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     "मरना चाहती",
     # --- Turkish (Latin script; 2026-09-17 audit: ı/é parity pinned) --------
     "\\bintihar\\s+etmek\\s+istiyorum\\b",
-    "\\bcanını\\s+almak\\s+istiyorum\\b",
+    # Written POST-FOLD (2026-09-28 deep audit, services HIGH): the pattern
+    # used to carry the dotless ı, but the normalization pipeline folds
+    # ı->i in the TEXT — Python's IGNORECASE folded the pattern by accident
+    # while ECMAScript never did, so the correctly-spelled cry for help
+    # ("canını almak istiyorum") was silently missed by the mobile dialog
+    # tier. The folded spelling matches on BOTH engines; the misspelling
+    # ("canini…") still matches too.
+    "\\bcanini\\s+almak\\s+istiyorum\\b",
 )
 
 SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
@@ -193,6 +218,12 @@ SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
     "\\bno\\s+vale\\s+la\\s+pena\\b",
     "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
     "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b",
+    # --- 2026-09-28 deep audit: suppress-only counterparts for the new
+    # Spanish tense/idiom families — any person ("pensando en terminar con
+    # todo") and the reflexive infinitives, so non-first-person mentions of
+    # the same acts are never quoted back on pattern cards either. --------
+    "\\bterminar\\s+con\\s+todo\\b",
+    "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme)\\b",
 )
 
 # The effective suppression tier: dialog + suppress_extra (per the JSON).
@@ -349,6 +380,14 @@ _HOMOGLYPHS = str.maketrans(
         "\u03f2": "c",  # lunate sigma: crescent, impersonates "c"
         "\u0282": "s",  # ʂ s with hook (2026-09-26 audit L-2; no NFKC fold)
         "\u1d74": "s",  # ᵴ s with middle tilde (2026-09-26 audit L-2; no NFKC fold)
+        # 2026-09-28 deep audit: the small-capital Latin lookalikes that
+        # NFKC does NOT fold (each verified to have no decomposition) —
+        # social-media styling ("ꜱuicide", "kɪll myself", "kiʟʟ myself")
+        # previously read as broken fragments on BOTH engines.
+        "\ua731": "s",  # ꜱ latin letter small capital s
+        "\u1d1c": "u",  # ᴜ small capital u
+        "\u026a": "i",  # ɪ small capital i
+        "\u029f": "l",  # ʟ small capital l
     }
 )
 
@@ -374,6 +413,11 @@ _LEET = {
     "$": "s",
 }
 _LEET_RE = re.compile(r"([a-z])([0134578@!$])([a-z])")
+# Leading edge stays a SINGLE mapped char (2026-09-28 deep audit: a run
+# fold was considered for "51uicide"-class prefixes but maps to
+# "siuicide" — matching nothing either way; multi-char leet prefixes over
+# words that need a DIFFERENT expansion per position are an accepted
+# residual documented here, not fixable by a uniform run fold).
 _LEET_EDGE_RE = re.compile(r"(^|\s)([0134578@!$])([a-z])")
 # 2026-09-20 audit H-7: mapped digits also fold at a word's TRAILING edge
 # ("suicid3" -> "suicide"; "d13" -> "die" inside a phrase). The lookahead
@@ -399,7 +443,16 @@ def _leet_fold(text: str) -> str:
     # Loop until stable: "su1c1de" needs two passes (each replacement makes
     # the next digit newly adjacent to letters).
     while True:
-        folded = _LEET_RE.sub(lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), text)
+        # 2026-09-28 deep audit: "1" is contextually ambiguous — it is "i"
+        # in "k1ll" but "l" in "myse1f". The between-letters rule maps a "1"
+        # to "l" when the letter it feeds is "f" ("myse1f" -> "myself";
+        # "k1ll" keeps "kill" because its "1" feeds an "l", not an "f").
+        # Every other mapped char keeps its table value.
+        def _between(m: re.Match[str]) -> str:
+            mapped = "l" if (m.group(2) == "1" and m.group(3) == "f") else _LEET[m.group(2)]
+            return m.group(1) + mapped + m.group(3)
+
+        folded = _LEET_RE.sub(_between, text)
         folded = _LEET_EDGE_RE.sub(lambda m: m.group(1) + _LEET[m.group(2)] + m.group(3), folded)
         folded = _LEET_TRAIL_RE.sub(
             lambda m: m.group(1) + "".join(_LEET[c] for c in m.group(2)), folded
@@ -538,19 +591,29 @@ def _orphan_glue(tokens: list[str]) -> str:
 
 
 def _concat_join(tokens: list[str]) -> str:
-    """Evasion variant: every token joined with no separator at all.
-    Splits leave the fragments ("su icide"), and plain concatenation
-    ("killmyself"), as recoverable substrings; matched against
-    space-free copies of the tier patterns (see _concat_pattern)."""
-    return "".join(tokens)
+    """Evasion variant: tokens joined with a "|" sentinel MARK between
+    them (deep audit 2026-09-28). The channel used to join with no
+    separator at all, which made benign spaced text and true no-space
+    evasion indistinguishable: "weekend it all" and "i will endit all"
+    both contain the substring "enditall" once spaces are gone. Marking
+    the ORIGINAL token boundaries lets the concat twins (see
+    _concat_pattern) require a boundary at the phrase start while still
+    matching every no-separator spacing combo inside the phrase:
+      "killmyself"      -> "killmyself"          (evasion, one token)
+      "kill my self"    -> "kill|my|self"        (harmless: primary tier fires)
+      "weekend it all"  -> "weekend|it|all"      (no match — "end" is mid-word)
+      "rocky sunset"    -> "rocky|sunset"        (no match — mark breaks "kys")
+    The sentinel is "|" — a non-letter that can never appear inside a
+    token (tokens are letter runs), so it is unambiguous in this space."""
+    return "|".join(tokens)
 
 
 # Concat-pattern endings that must keep a trailing boundary: these words
-# extend into benign ones once the spaces are gone (die->diet,
+# extend into benign ones once the spacing is gone (die->diet,
 # dead->deadline, on->online, up->upon, out->outfield, cutting->cutting
-# board), so an unanchored substring match would fire on ordinary text.
-# Every other ending ("myself", "suicide", "everything", ...) has no
-# benign extension worth fearing, and the anchor would only create misses.
+# board), so an unanchored suffix would fire on ordinary text. Every other
+# ending ("myself", "suicide", "everything", ...) has no benign extension
+# worth fearing, and the anchor would only create misses.
 _CONCAT_ANCHORED_ENDINGS: tuple[str, ...] = (
     "die",
     "dead",
@@ -562,13 +625,94 @@ _CONCAT_ANCHORED_ENDINGS: tuple[str, ...] = (
 )
 
 
+def _interleave_optional_marks(src: str) -> str:
+    """Insert ``\\|?`` between adjacent literal characters of a twin so a
+    phrase SPLIT across tokens ("su icide" -> marked "su|icide") still
+    matches. Only at top level: nothing is inserted inside groups or
+    character classes (splits inside an alternation arm are exotic), only
+    at seams between literals and at group boundaries. Non-ASCII (CJK)
+    literals interleave too — a spaced "自 杀" was recoverable in the old
+    channel and stays recoverable now."""
+    out: list[str] = []
+    depth = 0
+    for i, ch in enumerate(src):
+        out.append(ch)
+        if ch in "([":
+            depth += 1
+            continue
+        if ch in ")]":
+            depth = max(0, depth - 1)
+            if depth == 0 and i + 1 < len(src):
+                nxt = src[i + 1]
+                if nxt == "(" or (
+                    (nxt.isascii() and nxt.isalnum()) or (not nxt.isascii() and nxt.isalpha())
+                ):
+                    out.append(r"\|?")
+            continue
+        if depth > 0 or i + 1 >= len(src):
+            continue
+        nxt = src[i + 1]
+        literal = (ch.isascii() and ch.isalnum()) or (not ch.isascii() and ch.isalpha())
+        next_is_open_or_literal = nxt == "(" or (
+            (nxt.isascii() and nxt.isalnum()) or (not nxt.isascii() and nxt.isalpha())
+        )
+        if literal and next_is_open_or_literal:
+            out.append(r"\|?")
+    return "".join(out)
+
+
+def _toplevel_literal_letters(pattern: str) -> int:
+    """Count literal ASCII letters outside groups/classes — the shortness
+    test for whether a twin may carry internal optional marks."""
+    depth = 0
+    count = 0
+    escaped = False
+    for ch in pattern:
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch in "([":
+            depth += 1
+            continue
+        if ch in ")]":
+            depth = max(0, depth - 1)
+            continue
+        if depth == 0 and "a" <= ch <= "z":
+            count += 1
+    return count
+
+
 def _concat_pattern(pattern: str) -> str:
-    """The space-free twin of a tier pattern: \\s+ and \\b removed (a
-    boundary can never fire inside concatenated text), plus a trailing
-    (?![a-z]) when the pattern's final literal word is extendable."""
-    src = pattern.replace(r"\s+", "").replace(r"\b", "")
+    """The marked-concatenation twin of a tier pattern (deep audit
+    2026-09-28): matched against _concat_join's "|" -marked text.
+
+    - every internal ``\\s+`` becomes an OPTIONAL mark so partially-spaced
+      evasion ("endit all") matches;
+    - LONG patterns additionally interleave ``\\|?`` between literal
+      letters, so word SPLIT evasion ("su icide") stays recoverable;
+    - SHORT patterns (<=4 literal letters: "kys") never take internal
+      marks — a 3-letter twin with optional marks inside would match the
+      "-ky"+"s-" word junction ("rocky sunset") again;
+    - the phrase start is pinned to a token boundary with ``(?:^|\\|)`` —
+      the fix for the systematic false positives where "end(?:ing)?itall"
+      matched mid-word inside any benign word ending in "-end" ("weekend
+      it all", "sending it all back") and "kys" matched any "-ky"+"s-"
+      junction ("rocky sunset", "lucky star");
+    - a trailing ``(?![a-z])`` is kept for extendable endings, as before.
+    """
+    src = pattern.replace(r"\s+", r"\|?").replace(r"\b", "")
+    # The extendable-ending test runs on the PRE-interleave src: after
+    # interleaving, the ending word is fragmented by \|? seams and a
+    # trailing [a-z]+ run no longer sees the whole word.
     m = re.search(r"([a-z]+)\)?$", src)
-    if m and m.group(1).endswith(_CONCAT_ANCHORED_ENDINGS):
+    anchored = bool(m and m.group(1).endswith(_CONCAT_ANCHORED_ENDINGS))
+    if _toplevel_literal_letters(pattern) > 4:
+        src = _interleave_optional_marks(src)
+    src = r"(?:^|\|)" + src
+    if anchored:
         src += "(?![a-z])"
     return src
 

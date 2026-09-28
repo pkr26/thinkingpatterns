@@ -47,7 +47,7 @@ from ..cache import (
 from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_user
 from ..locks import lifecycle_locks
-from ..models import ROLE_THERAPIST, TotpBackupCode, User, utcnow
+from ..models import KEY_SCHEME_V1, KEY_SCHEME_V2, ROLE_THERAPIST, TotpBackupCode, User, utcnow
 from ..schemas import (
     KeyEnvelopeResponse,
     LoginRequest,
@@ -94,9 +94,10 @@ SALT_BYTES = 16  # exactly — the decoy is 16 bytes too, so lengths cannot diff
 
 _b64_decode_error = (binascii.Error, ValueError)
 
-# v2 key scheme: the wrapped data-key envelope is exactly nonce(12) +
-# ct(32) + tag(16) = 60 decoded bytes (security.envelope pins the shape).
-WRAPPED_DATA_KEY_SIZE = 60
+# 2026-09-28 deep audit: import the pinned constant — the value used to be
+# redeclared here while account.py imported envelope's, so a future format
+# change would silently diverge the register path from the upgrade paths.
+from ..security.envelope import WRAPPED_DATA_KEY_BYTES as WRAPPED_DATA_KEY_SIZE  # noqa: E402
 
 
 def hash_verifier(auth_key: bytes, salt: bytes, n: int = SCRYPT_N) -> bytes:
@@ -199,7 +200,7 @@ def _issue(request: Request, user: User) -> TokenResponse:
         user_id=user.id,
         expires_in=settings.token_ttl_seconds,
         role=user.role,
-        key_scheme=user.key_scheme if user.key_scheme else "v1",
+        key_scheme=user.key_scheme if user.key_scheme else KEY_SCHEME_V1,
     )
 
 
@@ -300,7 +301,7 @@ async def register(
         salt=body.salt,
         verifier=verifier_hash,
         scrypt_salt=scrypt_server_salt,
-        key_scheme="v2" if wrapped_key_bytes is not None else "v1",
+        key_scheme=KEY_SCHEME_V2 if wrapped_key_bytes is not None else "v1",
         wrapped_data_key=wrapped_key_bytes,
         kdf_params=kdf_params_json,
     )
@@ -339,7 +340,7 @@ async def get_key_envelope(
     security/envelope.py; the server holds no input that can perform the
     unwrap, so serving the blob to the authenticated account leaks
     nothing an attacker with the bearer + the database does not already
-    have). v1 accounts answer key_scheme="v1" with null envelope fields —
+    have). v1 accounts answer key_scheme=KEY_SCHEME_V1 with null envelope fields —
     the legacy password-derived flow, and a hint that the client MAY
     offer the self-service upgrade (POST /account/key-envelope/upgrade).
 
@@ -353,18 +354,18 @@ async def get_key_envelope(
     "wrong password".
     """
     params = parse_kdf_params_json(user.kdf_params)
-    if user.key_scheme == "v2" and (params is None or user.wrapped_data_key is None):
+    if user.key_scheme == KEY_SCHEME_V2 and (params is None or user.wrapped_data_key is None):
         # Unreachable through the API (every v2 write path validates the
         # pair atomically); a hand-mangled row fails CLOSED with the flat
         # 404 instead of coaching an attacker about the account's state.
         raise ApiError(status_code=404, detail="account not found", code="not_found")
     return KeyEnvelopeResponse(
-        key_scheme=user.key_scheme or "v1",
+        key_scheme=user.key_scheme or KEY_SCHEME_V1,
         salt=user.salt,
         kdf_params=params,
         wrapped_data_key=(
             base64.b64encode(bytes(user.wrapped_data_key)).decode("ascii")
-            if user.key_scheme == "v2" and user.wrapped_data_key is not None
+            if user.key_scheme == KEY_SCHEME_V2 and user.wrapped_data_key is not None
             else None
         ),
     )

@@ -834,7 +834,8 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
+  // The dead `flex: { flex: 1 }` entry was deleted (audit 2026-09-28 INFO:
+  // MainShell's container replaced its only historical use).
   container: { flex: 1 },
   progressTrack: { height: 6, overflow: "hidden" },
   progressFill: { height: 6 },

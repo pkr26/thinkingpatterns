@@ -2,10 +2,13 @@
  * Cross-platform brain vectors (ported from mobile's brainVectors.test.ts):
  * the TS on-device engine against the same golden outputs the Python
  * engine generated (shared/brain_vectors.json —
- * backend/scripts/gen_brain_vectors.py). Sentiment scores must be EXACT
- * (same walk, same rounding points); statistics agree to 1e-9 (both are
- * double-precision math, but transcendental tails may differ in the last
- * ulp). The same standing as tests/crypto.test.ts holds for the crypto.
+ * backend/scripts/gen_brain_vectors.py). Sentiment scores agree to 1e-12
+ * (both engines accumulate left-to-right, but a pathological order can
+ * still differ in the last ulp — far beneath every rounding point the
+ * engine applies afterwards); statistics agree to 1e-9. The one row that
+ * EXISTS to pin the accumulation ORDER is asserted with float equality
+ * (see the E-7 case below). The same standing as tests/crypto.test.ts
+ * holds for the crypto.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -14,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import { sentimentComponents, sentimentScore } from "../src/brain/sentiment";
 import { erfc, fisherZDifferenceP, pearson } from "../src/brain/stats";
+import { LEXICON } from "../src/brain/lexicon";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "brain_vectors.json");
@@ -26,19 +30,46 @@ const vectors = JSON.parse(readFileSync(vectorsPath, "utf8")) as {
   };
 };
 
+/** E-7 (2026-09-26 audit follow-up): the one vector row that pins the
+ *  accumulation ORDER — both engines accumulate naively left-to-right, so
+ *  float equality HOLDS here and a regression back to Python 3.12+'s
+ *  Neumaier-compensated sum() (0.44999999999999996) fails on BOTH
+ *  platforms. Asserting only toBeCloseTo here was vacuous: the row cannot
+ *  drift within 1e-12 without the order itself changing (audit 2026-09-28,
+ *  MEDIUM — now a hard pin). */
+const SENTIMENT_SUM_ORDER_CASE = "smuggled opportunist stammerer wisdom regretfulness respected harmonising fearsome jw";
+
 describe("on-device brain: sentiment parity with the Python engine", () => {
   for (const { text, score, pa, na } of vectors.sentiment) {
     it(`scores ${JSON.stringify(text.slice(0, 48))} identically`, () => {
-      // Exact except the last ulp: Python's sum() and JS's reduce associate
-      // floating-point additions differently, so parity is 1e-12, not
-      // Object.is — a difference at that scale is far beneath every
-      // rounding point the engine applies afterwards.
-      expect(sentimentScore(text)).toBeCloseTo(score, 12);
+      if (text === SENTIMENT_SUM_ORDER_CASE) {
+        // The order pin: EXACT equality (see above).
+        expect(Object.is(sentimentScore(text), score)).toBe(true);
+      } else {
+        // Exact except the last ulp: Python's sum() and JS's reduce associate
+        // floating-point additions differently, so parity is 1e-12, not
+        // Object.is — a difference at that scale is far beneath every
+        // rounding point the engine applies afterwards.
+        expect(sentimentScore(text)).toBeCloseTo(score, 12);
+      }
       const [gotPa, gotNa] = sentimentComponents(text);
       expect(gotPa).toBeCloseTo(pa, 6);
       expect(gotNa).toBeCloseTo(na, 6);
     });
   }
+});
+
+describe("on-device brain: the lexicon artifact is pinned to shared/", () => {
+  it("the TS lexicon module equals shared/brain_lexicon.json exactly", () => {
+    // 2026-09-28 audit (MEDIUM, mobile parity): the TS module is
+    // REGENERATED from the shared JSON — a hand-edited drift between the
+    // two would silently fork the on-device engine from the server's
+    // lexicon, so the artifact is pinned by deep equality.
+    const shared = JSON.parse(
+      readFileSync(join(here, "..", "..", "shared", "brain_lexicon.json"), "utf8"),
+    );
+    expect(LEXICON).toEqual(shared);
+  });
 });
 
 describe("on-device brain: statistics parity", () => {

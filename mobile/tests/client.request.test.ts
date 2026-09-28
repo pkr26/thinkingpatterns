@@ -15,6 +15,7 @@ import {
   ENTRY_PAGE_BYTES,
   getBaseUrl,
   isInsecureHttpAllowed,
+  MEASURE_PAGE_BYTES,
   setBaseUrl,
   setUnauthorizedHandler,
 } from "../src/api/client";
@@ -145,6 +146,10 @@ describe("stored base URL policy", () => {
     expect(await api.getUsername()).toBeNull();
     // Origin-bound local state is wiped too: another server's salt/proof/
     // stamp/mood-log must never leak into the new origin's account.
+    // Audit 2026-09-28: the salt cache keys are now base64url-encoded per
+    // username (offlineQueue's scopeId discipline) — the purge covers BOTH
+    // the encoded form and any legacy raw-username key.
+    expect(await storage.getItem("@mindpattern/salt_YWxpY2U")).toBeNull();
     expect(await storage.getItem("@mindpattern/salt_alice")).toBeNull();
     expect(await storage.getItem("@mindpattern/last_recompute_user-1")).toBeNull();
     expect(await storage.getItem("@mindpattern/unlockproof_user-1")).toBeNull();
@@ -658,7 +663,10 @@ describe("persisted storage keys", () => {
 
   it("caches the KDF salt per username, bound to the origin it came from", async () => {
     await api.cacheSalt("alice", "c2FsdA==");
-    expect(await storage.getItem("@mindpattern/salt_alice")).not.toBe("c2FsdA=="); // origin-bound record
+    // Audit 2026-09-28: the key no longer embeds the raw username — it is
+    // base64url-encoded (offlineQueue's scopeId discipline).
+    expect(await storage.getItem("@mindpattern/salt_alice")).toBeNull();
+    expect(await storage.getItem("@mindpattern/salt_YWxpY2U")).not.toBe("c2FsdA=="); // origin-bound record
     expect(await api.getCachedSalt("alice")).toBe("c2FsdA==");
     expect(await api.getCachedSalt("bob")).toBeNull(); // per-username
 
@@ -681,8 +689,11 @@ describe("persisted storage keys", () => {
   it("migrates a legacy bare { o, s } salt record to the v1 envelope on read", async () => {
     await storage.setItem("@mindpattern/salt_carol", JSON.stringify({ o: DEFAULT_BASE_URL, s: "c2FsdA==" }));
     expect(await api.getCachedSalt("carol")).toBe("c2FsdA==");
-    // Read-through migration refreshed the record in place.
-    const migrated = JSON.parse((await storage.getItem("@mindpattern/salt_carol")) as string);
+    // Audit 2026-09-28: the read-through KEY migration moved the record to
+    // the encoded username key and retired the legacy raw-username one; the
+    // v1-envelope rewrite then refreshed it in place there.
+    expect(await storage.getItem("@mindpattern/salt_carol")).toBeNull();
+    const migrated = JSON.parse((await storage.getItem("@mindpattern/salt_Y2Fyb2w")) as string);
     expect(migrated).toEqual({ v: 1, o: DEFAULT_BASE_URL, s: "c2FsdA==" });
   });
 
@@ -694,8 +705,11 @@ describe("persisted storage keys", () => {
   it("a failed salt-migration rewrite never fails the read", async () => {
     await storage.setItem("@mindpattern/salt_eve", JSON.stringify({ o: DEFAULT_BASE_URL, s: "c2FsdA==" }));
     const originalSetItem = storage.setItem.bind(storage);
+    // Audit 2026-09-28: the key migration writes to the ENCODED key — the
+    // simulated disk failure must target that key for the rewrite to fail
+    // (the legacy read path below still serves the value honestly).
     (storage as { setItem: typeof storage.setItem }).setItem = async (key: string, value: string) => {
-      if (key === "@mindpattern/salt_eve") throw new Error("disk full");
+      if (key === "@mindpattern/salt_ZXZl") throw new Error("disk full");
       return originalSetItem(key, value);
     };
     try {
@@ -1100,10 +1114,14 @@ describe("measures paging (M-4/L-55)", () => {
 
   it("stops at the quota bound even if a lying server always answers full pages", async () => {
     await api.setSession("tok-1", "abababababababababababababababab", "alice");
+    // Audit 2026-09-28: listMeasures now sends page_bytes + revision
+    // pinning (the entries paging contract) — parse the offset out of the
+    // query instead of splitting on "offset=" (a suffix like
+    // "&page_bytes=…" used to make Number() answer NaN).
     vi.mocked(fetch).mockImplementation(
       (async (input: unknown) => {
-        const url = String(input);
-        const offset = Number(url.split("offset=")[1] ?? 0);
+        const url = new URL(String(input));
+        const offset = Number(url.searchParams.get("offset") ?? 0);
         return jsonResponse(pageOf(500, offset), 200);
       }) as unknown as typeof fetch,
     );
@@ -1111,5 +1129,84 @@ describe("measures paging (M-4/L-55)", () => {
     expect(rows).toHaveLength(2000);
     expect(new Set(rows.map((r) => r.id)).size).toBe(2000);
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
+  });
+
+  // --- Audit 2026-09-28 (LOW): the entries paging contract, mirrored ------
+  // listMeasuresPage/listMeasures used to ignore page_bytes and
+  // expected_revision — a byte-heavy page answered 413 instead of
+  // continuing, and a concurrent create shifted offset windows silently.
+
+  it("listMeasuresPage requests the 2 MiB opt-in and surfaces the measures paging headers", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(pageOf(2, 0), 200, DEFAULT_BASE_URL, {
+        "X-Next-Offset": "6",
+        "X-Measures-Revision": "9223372036854775807",
+      }),
+    );
+    await expect(api.listMeasuresPage({ limit: 7, offset: 4, expectedRevision: "9223372036854775807" })).resolves.toEqual(
+      {
+        measures: pageOf(2, 0),
+        nextOffset: 6, // offset + returned rows (the strict continuation rule)
+        revision: "9223372036854775807",
+      },
+    );
+    const [url] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      `${DEFAULT_BASE_URL}/api/v1/measures?limit=7&offset=4&page_bytes=${MEASURE_PAGE_BYTES}&expected_revision=9223372036854775807`,
+    );
+  });
+
+  it("listMeasuresPage refuses malformed revisions and a snapshot that does not echo the pin", async () => {
+    for (const revision of ["", "01", "-1", "1.5", "9223372036854775808"]) {
+      vi.mocked(fetch).mockResolvedValueOnce(
+        jsonResponse([], 200, DEFAULT_BASE_URL, { "X-Measures-Revision": revision }),
+      );
+      await expect(api.listMeasuresPage()).rejects.toMatchObject({
+        status: 0,
+        message: "invalid measure page response — refusing the response",
+      });
+    }
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse([], 200, DEFAULT_BASE_URL, { "X-Measures-Revision": "8" }),
+    );
+    await expect(api.listMeasuresPage({ expectedRevision: "7" })).rejects.toMatchObject({
+      status: 409,
+      code: "collection_changed",
+    });
+    // A pinned walk that loses the header mid-walk restarts, never mixes.
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse([]));
+    await expect(api.listMeasuresPage({ expectedRevision: "7" })).rejects.toMatchObject({
+      status: 409,
+      code: "collection_changed",
+    });
+  });
+
+  it("listMeasures pins aggregate paging to its first snapshot and restarts once after a 409", async () => {
+    await api.setSession("tok-1", "abababababababababababababababab", "alice");
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        jsonResponse(pageOf(1, 0), 200, DEFAULT_BASE_URL, {
+          "X-Next-Offset": "1",
+          "X-Measures-Revision": "5",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ detail: "changed", code: "collection_changed" }, 409))
+      .mockResolvedValueOnce(
+        jsonResponse(pageOf(1, 0), 200, DEFAULT_BASE_URL, {
+          "X-Next-Offset": "1",
+          "X-Measures-Revision": "6",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(pageOf(1, 1), 200, DEFAULT_BASE_URL, { "X-Measures-Revision": "6" }),
+      );
+
+    const rows = (await api.listMeasures()) as { id: string }[];
+    expect(rows.map((r) => r.id)).toEqual(["m-0", "m-1"]);
+    const urls = vi.mocked(fetch).mock.calls.map(([u]) => String(u));
+    expect(urls[0]).not.toContain("expected_revision=");
+    expect(urls[1]).toContain("expected_revision=5");
+    expect(urls[2]).not.toContain("expected_revision=");
+    expect(urls[3]).toContain("expected_revision=6");
   });
 });

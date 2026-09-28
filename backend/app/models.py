@@ -75,6 +75,17 @@ class Base(DeclarativeBase):
 ROLE_USER = "user"
 ROLE_THERAPIST = "therapist"
 
+# Canonical key-scheme and insight-kind literals (2026-09-28 deep audit,
+# models LOW): these strings were retyped by hand at every use site — a
+# typo compiles and fails only at runtime against DB rows or AAD
+# derivation (the insight kinds feed crypto.build_aad). Import these
+# instead of retyping.
+KEY_SCHEME_V1 = "v1"
+KEY_SCHEME_V2 = "v2"
+KIND_PATTERNS = "patterns"
+KIND_BRAIN = "brain"
+KIND_QUESTION = "question"
+
 
 class User(Base):
     __tablename__ = "users"

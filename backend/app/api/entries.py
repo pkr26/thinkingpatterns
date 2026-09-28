@@ -564,6 +564,11 @@ async def delete_entry(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
+    # Same malformed-id guard as get/replace (2026-09-28 deep audit: the
+    # DELETE skipped it for no reason — behavior identical, a malformed id
+    # matches no rows either way, but the three paths now read as one).
+    if _CLIENT_ENTRY_ID_RE.fullmatch(client_entry_id) is None:
+        raise ApiError(status_code=404, detail="entry not found", code="not_found")
     # Use the same fence as create/replace.  A set-based DELETE is atomic by
     # itself, but without this lock it can interleave with a replacement that
     # already loaded the ORM row and turn an ordinary edit/delete race into a

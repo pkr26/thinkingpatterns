@@ -190,7 +190,10 @@ describe("dual-variant matching + benign masking (2026-09-17)", () => {
     const [primary, orphan, concat] = matchVariants("k ill myself after that suicide squad movie");
     expect(primary).toBe("k ill myself after that movie");
     expect(orphan).toBe("kill myself after that movie"); // glued AND masked
-    expect(concat).toBe("killmyselfafterthatmovie"); // concatenated AND masked
+    // 2026-09-28: the concat variant is the MARKED ("|"-joined) token run —
+    // the orphan "k"+"ill" glue is NOT applied here (it has its own variant),
+    // and the masked compound is gone from all three.
+    expect(concat).toBe("k|ill|myself|after|that|movie");
     // The mask runs pre-punctuation-fold: a comma between the compound's
     // words is NOT the compound, so real ideation survives (audit pin).
     const [p2] = matchVariants("thinking about suicide, silence and pain");

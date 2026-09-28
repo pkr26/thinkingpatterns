@@ -31,6 +31,7 @@ const {
   encrypt_vectors: encryptVectors,
   wrap_vectors: wrapVectors,
   aad_edge_cases: edgeCases,
+  envelope_vectors: envelopeVectors,
 } = vectorsJson;
 // Fail CLOSED on EVERY section: a renamed/dropped/gutted key must not read
 // as "0 vectors verified" and exit 0. wrap_vectors and aad_edge_cases have
@@ -52,6 +53,15 @@ if (!Array.isArray(edgeCases) || edgeCases.length < 1) {
   console.error(`vectors.json: "aad_edge_cases" key missing or has ${edgeCases?.length ?? "no"} entries (expected >= 1, hand-maintained section with no generator)`);
   process.exit(1);
 }
+// envelope_vectors (2026-09-28 audit): the v2 entry AAD (4-part
+// content_version binding) and the v2 key-envelope wrap were pinned in
+// shared/vectors.json but this verifier never read the section — a
+// regression in either construction would have sailed through. Same
+// fail-closed shape as the other sections.
+if (!Array.isArray(envelopeVectors) || envelopeVectors.length < 4) {
+  console.error(`vectors.json: "envelope_vectors" key missing or has ${envelopeVectors?.length ?? "no"} entries (expected >= 4: entry-aad-v2 +/- tamper, key-envelope-wrap +/- tamper)`);
+  process.exit(1);
+}
 
 function b64(buf) {
   return Buffer.from(buf).toString("base64");
@@ -65,6 +75,7 @@ async function loadRealModules() {
     join(here, "..", "src", "crypto", "kdf.ts"),
     join(here, "..", "src", "crypto", "envelope.ts"),
     join(here, "..", "src", "crypto", "sharing.ts"),
+    join(here, "..", "src", "crypto", "keyEnvelope.ts"),
     "--module", "commonjs",
     "--target", "es2022",
     "--esModuleInterop",
@@ -84,7 +95,8 @@ async function loadRealModules() {
   const kdf = await import(join(buildDir, "kdf.js"));
   const envelope = await import(join(buildDir, "envelope.js"));
   const sharing = await import(join(buildDir, "sharing.js"));
-  return { kdf, envelope, sharing, mode: "REAL MODULES" };
+  const keyEnvelope = await import(join(buildDir, "keyEnvelope.js"));
+  return { kdf, envelope, sharing, keyEnvelope, mode: "REAL MODULES" };
 }
 
 async function loadReferenceFallback() {
@@ -309,6 +321,120 @@ for (const c of edgeCases) {
   }
 }
 
+// envelope_vectors (2026-09-28 audit): the v2 entry AAD (content_version
+// bound as the 4th part) and the v2 key-envelope wrap, replayed through the
+// same compiled modules as every other section. Entry vectors run in BOTH
+// modes (the fallback implements derive/buildAad/decrypt); the key-envelope
+// vectors exercise keyEnvelope.ts and are REAL MODULES only.
+for (const [i, v] of envelopeVectors.entries()) {
+  const salt = Buffer.from(v.salt, "base64");
+  if (v.kind === "entry-aad-v2" || v.kind === "entry-aad-v2-tampered") {
+    try {
+      const master = await impl.kdf.deriveMasterKey(v.password, salt, v.iterations);
+      const dataKey = await impl.kdf.deriveDataKey(master);
+      if (b64(dataKey) !== v.data_key) {
+        console.error(`envelope vector ${i} (${v.kind}): data_key MISMATCH`);
+        failures += 1;
+        continue;
+      }
+      const aad = await impl.envelope.buildAad(...v.aad_parts);
+      const blob = Buffer.from(v.blob, "base64");
+      if (v.expect === "tamper") {
+        try {
+          await impl.envelope.decrypt(dataKey, blob, aad);
+          console.error(`envelope vector ${i} (${v.kind}): tampered blob DECRYPTED — must fail closed`);
+          failures += 1;
+        } catch {
+          // expected: GCM authentication failure
+        }
+      } else {
+        const plaintext = await impl.envelope.decrypt(dataKey, blob, aad);
+        if (b64(plaintext) !== v.plaintext) {
+          console.error(`envelope vector ${i} (${v.kind}): plaintext MISMATCH`);
+          failures += 1;
+        }
+        // Re-encrypt with the pinned nonce: the blob must reproduce exactly,
+        // pinning the 4-part AAD on the ENCRYPT side too.
+        const nonce = Buffer.from(v.nonce, "base64");
+        const reBlob = await impl.envelope.encryptWithFixedNonce(dataKey, plaintext, aad, nonce);
+        if (b64(reBlob) !== v.blob) {
+          console.error(`envelope vector ${i} (${v.kind}): fixed-nonce re-encrypt blob MISMATCH`);
+          failures += 1;
+        }
+      }
+    } catch (err) {
+      console.error(`envelope vector ${i} (${v.kind}): ${err.message}`);
+      failures += 1;
+    }
+  } else if (v.kind === "key-envelope-wrap" || v.kind === "key-envelope-wrap-tampered") {
+    if (!impl.keyEnvelope) {
+      console.log(`note: webcrypto fallback cannot exercise ${v.kind} (keyEnvelope.ts is app code) — run \`npm install && node tools/verify_vectors.mjs\` for that`);
+      continue;
+    }
+    try {
+      const master = await impl.kdf.deriveMasterKey(v.password, salt, v.iterations);
+      if (b64(master) !== v.master_key) {
+        console.error(`envelope vector ${i} (${v.kind}): master_key MISMATCH`);
+        failures += 1;
+      }
+      // KEK = HKDF(master, salt, "mindpattern/envelope/v2") through the
+      // SHIPPING envelopeKek, then the OBJECT-shaped AAD through the
+      // shipping envelopeAad under the vector's kdf_params.
+      const kek = impl.keyEnvelope.envelopeKek(master, salt);
+      if (b64(kek) !== v.kek) {
+        console.error(`envelope vector ${i} (${v.kind}): kek MISMATCH`);
+        failures += 1;
+      }
+      const params = impl.keyEnvelope.validateKdfParams(v.kdf_params);
+      if (params == null) {
+        console.error(`envelope vector ${i} (${v.kind}): vector kdf_params rejected by validateKdfParams`);
+        failures += 1;
+        continue;
+      }
+      const aad = impl.keyEnvelope.envelopeAad(v.username, params);
+      if (b64(aad) !== v.aad) {
+        console.error(`envelope vector ${i} (${v.kind}): envelope AAD MISMATCH`);
+        failures += 1;
+      }
+      const wrapped = Buffer.from(v.wrapped, "base64");
+      if (v.expect === "tamper") {
+        try {
+          impl.keyEnvelope.unwrapDataKey(wrapped, kek, v.username, params);
+          console.error(`envelope vector ${i} (${v.kind}): tampered wrap UNWRAPPED — must fail closed`);
+          failures += 1;
+        } catch (err) {
+          if (!(err instanceof impl.keyEnvelope.TamperError) && !/auth/i.test(String(err))) {
+            console.error(`envelope vector ${i} (${v.kind}): unexpected failure shape: ${err.message}`);
+            failures += 1;
+          }
+        }
+      } else {
+        // Reproduce the pinned wrap bytes (fixed-nonce form), then unwrap
+        // them back to the data key through the shipping construction.
+        const nonce = Buffer.from(v.nonce, "base64");
+        const dataKey = Buffer.from(v.data_key, "base64");
+        const reWrapped = impl.keyEnvelope.wrapDataKeyWithFixedNonce(
+          dataKey, kek, v.username, params, nonce);
+        if (b64(reWrapped) !== v.wrapped) {
+          console.error(`envelope vector ${i} (${v.kind}): fixed-nonce re-wrap MISMATCH`);
+          failures += 1;
+        }
+        const back = impl.keyEnvelope.unwrapDataKey(wrapped, kek, v.username, params);
+        if (b64(back) !== v.data_key) {
+          console.error(`envelope vector ${i} (${v.kind}): unwrap did not return the data key`);
+          failures += 1;
+        }
+      }
+    } catch (err) {
+      console.error(`envelope vector ${i} (${v.kind}): ${err.message}`);
+      failures += 1;
+    }
+  } else {
+    console.error(`envelope vector ${i}: unknown kind ${JSON.stringify(v.kind)}`);
+    failures += 1;
+  }
+}
+
 if (impl.mode.startsWith("REAL")) rmSync(buildDir, { recursive: true, force: true });
 
 if (failures > 0) {
@@ -317,4 +443,5 @@ if (failures > 0) {
 }
 console.log(
   `all ${vectors.length} vectors + ${encryptVectors.length} encrypt vectors + ` +
-  `${wrapVectors.length} wrap vectors + ${edgeCases.length} AAD edge cases verified`);
+  `${wrapVectors.length} wrap vectors + ${edgeCases.length} AAD edge cases + ` +
+  `${envelopeVectors.length} envelope vectors verified`);

@@ -1,6 +1,6 @@
 {
  "v": 1,
- "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-17 audit): the matchers additionally test a whitespace-free copy of the text against space-free copies of the tier patterns (\\b and \\s+ removed; a trailing (?![a-z]) is re-added for patterns whose final word extends into a benign one — die/diet, dead/deadline, on/online, up, out, cutting, gone), closing every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself'). 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold. 2026-09-20 audit additions, identical in both engines: U+2065 joins the invisible set; mapped leet digits also fold at a word's TRAILING edge ('suicid3' -> 'suicide', 'd13' -> 'die'); a standalone '2' token folds to 'to' ('i want 2 die'); benign-compound masking covers the CJK/Spanish prevention campaigns as plain substrings. LETTER-DOUBLING CHANNEL (2026-09-20 audit H-7): the matchers additionally test a fourth set of variants in which same-letter runs collapse on BOTH sides — the folded text ('kiill myself' -> 'kil myself') is matched only against folded pattern twins ('kill(?:ed|ing)? myself' -> 'kil(?:ed|ing)? myself'), so a letter typed twice cannot bypass every tier while canonically double-lettered words ('kill', 'sleep', 'cannot') keep matching. 'off(?:ing)? myself' is EXEMPT from the folded tier because its fold ('of(?:ing)? myself') matches ordinary prose ('ashamed of myself'); benign compounds re-mask after folding with their own folded spellings ('suicide awareness' -> 'suicide awarenes'), so 'suiciide squaad' stays masked. 2026-09-26 full-codebase audit H-1: the EN worth-living family ('life is not worth living', 'life doesn't feel worth it'), 'no longer want to live', 'tired of living', first-person 'want to overdose' and 'suicidality' joined the dialog tier; the ES self-harm and hopelessness families joined both tiers — conjugated 'quitar(se) la vida' (me quiero/quisiera/me voy a), 'me quiero cortar/lastimar/quemar', 'quiero cortarme/matarme', present-tense 'me lastimo'/'me hago daño', 'quiero hacerme daño', 'no vale la pena vivir', 'la vida no vale la pena', 'no hay salida', 'quiero desaparecer', 'todos estarían mejor sin mí', 'no tengo ganas de vivir', 'harto de la vida', 'dormir para siempre', 'no puedo más'/'no aguanto más', 'no quiero despertar/seguir viviendo'; suppress_extra additionally gained 'not worth living', 'no vale la pena', 'quitar(le|me|se) la vida', 'hacer(le|me|se) daño'.",
+ "description": "Canonical cross-platform crisis-language phrase contract. Two tiers: 'dialog' (client-side, pre-encryption detection that triggers the gentle support dialog) and 'suppress_extra' (server + client suppression of crisis-adjacent content from pattern cards and questions; the effective suppress tier is dialog + suppress_extra). CONSUMERS MUST NORMALIZE TEXT BEFORE MATCHING (see normalize_crisis_text in both engines): NFKC + casefold, strip invisible/format characters (zero-width, bidi, soft hyphen), fold homoglyph lookalikes (Cyrillic/Greek) to Latin, fold leet digits between letters (0->o 1->i 3->e 4->a 5->s 7->t 8->b @->a !->i $->s), turn remaining punctuation into spaces, then join runs of >=4 single-letter tokens (catches 's.u.i.c.i.d.e' and 's u i c i d e' without eating ordinary prose like 'i am so sad'). DUAL-VARIANT MATCHING (2026-09-17): matchers additionally test an orphan-join variant in which a run of 1-3 single-letter tokens glues onto the FOLLOWING word ('k ill myself' -> 'kill myself'); ordinary prose cannot lose a match because the unjoined variant is always matched too. BENIGN-COMPOUND MASKING (2026-09-17): before either tier matches, the compounds in 'benign_compounds' (movie/band titles, prevention campaigns) are masked out of both variants — 'that movie was suicide squad' no longer fires the dialog tier; the mask runs on the PRE-punctuation-fold text and requires the compound's words to be joined by whitespace/hyphens only, so punctuation between the words ('thinking about suicide, silence and pain') is NOT the compound and real ideation adjacent to a masked word still fires. 'redteam_corpus' is the adversarial E1 corpus promoted from redteam/e_crisis.py: every row's dialog/suppress values are the REQUIRED contract (a miss is a suite failure on both platforms), not an observation. CONCAT VARIANT (2026-09-28 deep audit): the matchers additionally test a MARKED concatenation of the text — tokens joined with a '|' sentinel — against marked twins of the tier patterns. The twin pins the phrase start to a token boundary ('(?:^|\\|)'), turns every internal \\s+ and, for phrases longer than 4 literal letters, every letter seam into an OPTIONAL mark ('\\|?'), and keeps a trailing (?![a-z]) for patterns whose final word extends into a benign one (die/diet, dead/deadline, on/online, up, out, cutting, gone). This closes every residual split family ('su icide', 'ki ll myself', 'kill my self', 'end i t all', 'k y s') and plain concatenation ('killmyself') while structurally excluding the systematic false positives the unmarked channel produced: benign words ending in '-end' ('weekend it all', 'sending it all back', 'spend it all') and '-ky'+'s-' word junctions ('rocky sunset', 'lucky star') can no longer match. Short phrases (<=4 literal letters, e.g. 'kys') take NO internal marks: their junction false positives were exactly the mark-tolerant kind. 2026-09-17 audit normalization additions, applied identically in both engines: Cyrillic к/м and Turkish dotless ı join the homoglyph map; Latin diacritics fold to their base letter (é->e); a script boundary between ASCII and non-ASCII letters becomes a space (so \\b agrees between Python re and ECMAScript); variation selectors FE00-FE0F, U+034F and U+061C are stripped as invisibles; leet digits also fold at a word's leading edge ('5uicide'); Hangul syllables survive the punctuation fold. 2026-09-20 audit additions, identical in both engines: U+2065 joins the invisible set; mapped leet digits also fold at a word's TRAILING edge ('suicid3' -> 'suicide', 'd13' -> 'die'); a standalone '2' token folds to 'to' ('i want 2 die'); benign-compound masking covers the CJK/Spanish prevention campaigns as plain substrings. LETTER-DOUBLING CHANNEL (2026-09-20 audit H-7): the matchers additionally test a fourth set of variants in which same-letter runs collapse on BOTH sides — the folded text ('kiill myself' -> 'kil myself') is matched only against folded pattern twins ('kill(?:ed|ing)? myself' -> 'kil(?:ed|ing)? myself'), so a letter typed twice cannot bypass every tier while canonically double-lettered words ('kill', 'sleep', 'cannot') keep matching. 'off(?:ing)? myself' is EXEMPT from the folded tier because its fold ('of(?:ing)? myself') matches ordinary prose ('ashamed of myself'); benign compounds re-mask after folding with their own folded spellings ('suicide awareness' -> 'suicide awarenes'), so 'suiciide squaad' stays masked. 2026-09-26 full-codebase audit H-1: the EN worth-living family ('life is not worth living', 'life doesn't feel worth it'), 'no longer want to live', 'tired of living', first-person 'want to overdose' and 'suicidality' joined the dialog tier; the ES self-harm and hopelessness families joined both tiers — conjugated 'quitar(se) la vida' (me quiero/quisiera/me voy a), 'me quiero cortar/lastimar/quemar', 'quiero cortarme/matarme', present-tense 'me lastimo'/'me hago daño', 'quiero hacerme daño', 'no vale la pena vivir', 'la vida no vale la pena', 'no hay salida', 'quiero desaparecer', 'todos estarían mejor sin mí', 'no tengo ganas de vivir', 'harto de la vida', 'dormir para siempre', 'no puedo más'/'no aguanto más', 'no quiero despertar/seguir viviendo'; suppress_extra additionally gained 'not worth living', 'no vale la pena', 'quitar(le|me|se) la vida', 'hacer(le|me|se) daño'. 2026-09-28 deep audit additions, identical in both engines: the Spanish past/periphrastic-future/progressive self-harm and 'terminar con todo' end-it-all idioms plus the pointlessness/burden family joined the dialog tier ('me corte'/'me cortaba', 'me voy a cortar', 'me estoy haciendo dano', 'me hare dano', 'terminar con todo', 'no le veo sentido a la vida', 'me siento un estorbo', 'seria mejor si no estuviera' — accented spellings post-fold); suppress_extra additionally gained 'terminar con todo' (any person) and the reflexive infinitives (cortarme/lastimarme/quemarme/ahogarme/matarme). The Turkish pattern is written POST-FOLD ('canini almak istiyorum') — the old dotless-i spelling never matched the correctly-spelled input on the ECMAScript engine. The homoglyph map gained the small-capital Latin lookalikes NFKC does not fold: U+A731 (s), U+1D1C (u), U+026A (i), U+029F (l). Leet '1' maps contextually to 'l' when the letter it feeds is 'f' ('myse1f' -> 'myself'), keeping 'k1ll' -> 'kill'.",
  "regex_rules": "Every pattern must compile under BOTH Python re and ECMAScript RegExp. No lookahead/lookbehind. Consumers apply case-insensitive matching AFTER the shared normalization pipeline described in this file's description. \\s+ for whitespace, ['\\u2019]? for optional apostrophes, \\b word boundaries (Latin-script patterns only — \\b never fires next to CJK/Arabic/Devanagari in ECMAScript, so non-Latin patterns are plain substrings).",
  "dialog": [
   "\\bsuicid(?:e|al)\\b",
@@ -68,6 +68,14 @@
   "\\b(?:solo\\s+)?quiero\\s+dormir\\s+para\\s+siempre\\b",
   "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
   "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
+  "\\bme\\s+cort(?:e|aba)\\b",
+  "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|matar)\\b",
+  "\\bme\\s+estoy\\s+(?:cortando|lastimando|quemando|ahogando|haciendo\\s+da[nñ]o)\\b",
+  "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo)\\s+terminar\\s+con\\s+todo\\b",
+  "\\bme\\s+har(?:e|ia)\\s+da[nñ]o\\b",
+  "\\bno\\s+le\\s+veo\\s+sentido\\s+a\\s+la\\s+vida\\b",
+  "\\b(?:me\\s+siento|soy)\\s+un\\s+estorbo\\b",
+  "\\bseria\\s+mejor\\s+si\\s+no\\s+estuviera\\b",
   "我想死",
   "我想去死",
   "自杀",
@@ -80,7 +88,7 @@
   "मरना चाहता",
   "मरना चाहती",
   "\\bintihar\\s+etmek\\s+istiyorum\\b",
-  "\\bcanını\\s+almak\\s+istiyorum\\b"
+  "\\bcanini\\s+almak\\s+istiyorum\\b"
  ],
  "suppress_extra": [
   "\\bsuicid\\w+",
@@ -105,7 +113,9 @@
   "\\bnot\\s+worth\\s+living\\b",
   "\\bno\\s+vale\\s+la\\s+pena\\b",
   "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
-  "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b"
+  "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b",
+  "\\bterminar\\s+con\\s+todo\\b",
+  "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme)\\b"
  ],
  "fixtures": {
   "dialog_fires": [
@@ -200,7 +210,25 @@
    "no quiero despertar",
    "no quiero seguir viviendo",
    "ʂuicide",
-   "pienso en el ᵴuicidio"
+   "pienso en el ᵴuicidio",
+   "me corté",
+   "me cortaba",
+   "me voy a cortar",
+   "me voy a lastimar",
+   "quiero terminar con todo",
+   "voy a terminar con todo",
+   "me estoy haciendo daño",
+   "me haré daño",
+   "no le veo sentido a la vida",
+   "me siento un estorbo",
+   "sería mejor si no estuviera",
+   "canını almak istiyorum",
+   "ꜱuicide",
+   "kɪll myself",
+   "kiʟʟ myself",
+   "kill myse1f",
+   "k1ll myse1f",
+   "i will enditall now"
   ],
   "dialog_silent": [
    "This traffic is killing me",
@@ -242,7 +270,21 @@
    "no hay salida hacia el mar por esta carretera",
    "me lastimé el dedo jugando al fútbol",
    "siempre me lastimo la rodilla cuando corro",
-   "quiero desaparecer de la fiesta un rato"
+   "quiero desaparecer de la fiesta un rato",
+   "the weekend it all went fine",
+   "sending it all back tomorrow",
+   "we will send it all back",
+   "spend it all at once",
+   "i will tend it all tomorrow",
+   "please lend it all to me",
+   "i would bend it all back into shape",
+   "rocky sunset",
+   "spooky stories",
+   "a spooky september",
+   "the murky swamp",
+   "silky sheets",
+   "smoky sunset over the lake",
+   "i love this lucky star"
   ],
   "suppress_only_fires": [
    "this traffic is killing me",
@@ -1128,8 +1170,7 @@
    "intent": "benign",
    "dialog": false,
    "suppress": false
-  }
- ,
+  },
   {
    "technique": "homoglyph",
    "sample": "ʂuicide on my mind lately",

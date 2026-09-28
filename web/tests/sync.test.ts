@@ -69,6 +69,19 @@ describe("reconcileInsights funnels", () => {
     vault.lock();
     expect(await reconcileInsights()).toEqual({ kind: "locked" });
   });
+
+  it("2026-09-28 audit (LOW): a lock landing mid-fetch maps to locked, never a false credentialRotated", async () => {
+    // keys.dataKey was fetched BEFORE the insights round trip and is the
+    // vault's SHARED buffer — the lock zeroizes it during the await, and
+    // the decrypt then fails for a reason that is NOT "the key changed
+    // elsewhere". Pre-fix this mislabeled the locked funnel as S-8.
+    const blob = await insightsBlob(5);
+    stubFetch(() => {
+      vault.lock(); // the lock lands mid-flight
+      return jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob, state_seq: 5 });
+    });
+    expect(await reconcileInsights()).toEqual({ kind: "locked" });
+  });
 });
 
 describe("reconcile (the full pull)", () => {

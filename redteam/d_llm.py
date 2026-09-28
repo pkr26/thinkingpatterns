@@ -265,23 +265,32 @@ async def d2_egress() -> None:
                     "no LLM request captured — generation-limit check cannot run")
         else:
             sent = fake.requests[-1]["body"]
-            msgs = sent.get("messages", [])
-            user_msg = msgs[1]["content"] if len(msgs) > 1 else ""
-            leaked = "private therapy notes" in user_msg
-            missing_limits = ("max_tokens" not in sent and "temperature" not in sent)
+            # Egress detector (2026-09-28 audit): the seeded marker rides the
+            # entries JSON wherever the client library serializes it — the
+            # user message, a system prompt preamble, or any other nested
+            # field. Searching only msgs[1] would miss a prompt-shape change
+            # that moves the journal text elsewhere in the body.
+            serialized = json.dumps(sent, default=str)
+            leaked = "private therapy notes" in serialized
+            # Missing-limit detector (2026-09-28 audit): this used to be an
+            # AND over "both absent", so a payload carrying exactly one of
+            # the two limits read as compliant. Either one missing is a
+            # finding, and the summary names WHICH.
+            missing = [k for k in ("max_tokens", "temperature") if k not in sent]
             verdict("D2.plaintext-egress", "FINDING" if leaked else "BLOCKED",
                     f"consent-ON recompute ({r.status_code}): decrypted journal text "
-                    f"arrives at the endpoint verbatim (leaked={leaked}, {len(user_msg)} "
-                    f"chars of entries JSON, bearer auth={'ok' if fake.requests[-1]['auth'] else 'missing'}, "
+                    f"arrives at the endpoint verbatim (leaked={leaked}, full serialized "
+                    f"request body searched, bearer auth="
+                    f"{'ok' if fake.requests[-1]['auth'] else 'missing'}, "
                     f"model={sent.get('model')}) — this is the documented, consent-gated "
                     f"design; recorded because it is THE plaintext disclosure path")
-            verdict("D2.missing-generation-limits", "FINDING" if missing_limits else "BLOCKED",
+            verdict("D2.missing-generation-limits", "FINDING" if missing else "BLOCKED",
+                    (f"payload is missing generation limit(s): {', '.join(missing)} — "
+                     f"output length/sampling stay partly endpoint-controlled")
+                    if missing else
                     ("payload carries max_tokens=512 and temperature=0 (2026-09-16 "
                      "fix) — generation length and sampling are no longer "
-                     "endpoint-controlled")
-                    if not missing_limits else
-                    ("payload carries no max_tokens/temperature — output length and "
-                     "sampling are entirely endpoint-controlled"))
+                     "endpoint-controlled"))
 
         # -- endpoint controls what the user sees: injected label round trip ---
         fake.response = {"patterns": [{"kind": "temporal",

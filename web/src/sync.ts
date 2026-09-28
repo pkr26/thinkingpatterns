@@ -52,8 +52,17 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
   }
   let payload: InsightsPayload;
   try {
+    // 2026-09-28 audit (LOW): the data key was fetched BEFORE the insights
+    // round trip, and vault.get()'s buffers are SHARED — a lock landing
+    // during that await zeroizes them, and the decrypt below then fails
+    // for a reason that is NOT "the key changed elsewhere". Re-check the
+    // lock first so a post-lock failure maps to the locked funnel.
+    if (!vault.isUnlocked()) return { kind: "locked" };
     payload = await decryptInsights(keys.dataKey, owner, summary.blob);
   } catch {
+    // A lock during the decrypt itself is the same story: the shared key
+    // died mid-flight — locked, never a false credential-rotation funnel.
+    if (!vault.isUnlocked()) return { kind: "locked" };
     // The session is alive but the data key cannot open the blob: the
     // password was rotated on ANOTHER device and the corpus was rekeyed
     // (S-8). Fail closed with the actionable funnel — never loop.

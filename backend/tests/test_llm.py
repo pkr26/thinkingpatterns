@@ -266,12 +266,15 @@ def test_extract_returns_sanitized_patterns():
 
 
 def test_extract_slices_to_the_most_recent_max_entries():
+    from app.services.patterns import Pattern
+
     analyzer = _make_analyzer()
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
     corpus = [entry(i, f"day {i}") for i in range(LLMAnalyzer.MAX_ENTRIES + 40)]
     posted: list[dict] = []
     analyzer._post = lambda payload: posted.append(payload) or _llm_response([])
 
-    found = analyzer.extract_patterns(corpus)
+    found = analyzer.extract_patterns(corpus, findings=findings)
 
     payload = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
     assert len(payload) == LLMAnalyzer.MAX_ENTRIES
@@ -311,7 +314,10 @@ def test_the_model_cannot_mint_findings():
 
 
 def test_extract_respects_the_character_budget_and_slicing():
+    from app.services.patterns import Pattern
+
     analyzer = _make_analyzer()
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
     # 250 entries x 900 chars = 225k chars > MAX_TOTAL_CHARS: the loop must
     # stop adding entries once the budget is spent, and never send more than
     # MAX_ENTRIES entries.
@@ -319,7 +325,7 @@ def test_extract_respects_the_character_budget_and_slicing():
     posted: list[dict] = []
     analyzer._post = lambda payload: posted.append(payload) or _llm_response([])
 
-    analyzer.extract_patterns(corpus)
+    analyzer.extract_patterns(corpus, findings=findings)
 
     user_content = json.loads(posted[0]["messages"][1]["content"])
     assert isinstance(user_content, dict)  # {findings, recent_entries} (inversion)
@@ -330,14 +336,17 @@ def test_extract_respects_the_character_budget_and_slicing():
 
 
 def test_extract_failure_contributes_nothing_and_is_recorded():
+    from app.services.patterns import Pattern
+
     analyzer = _make_analyzer()
     corpus = [entry(i, "work was stressful and sad") for i in range(10)]
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
 
     def raising_post(payload):
         raise RuntimeError("endpoint down")
 
     analyzer._post = raising_post
-    assert analyzer.extract_patterns(corpus) == []
+    assert analyzer.extract_patterns(corpus, findings=findings) == []
     assert analyzer.last_error == "RuntimeError"
     # A later success clears the failure state (the response reports the
     # LAST call honestly).
@@ -347,24 +356,32 @@ def test_extract_failure_contributes_nothing_and_is_recorded():
 
 
 def test_extract_failure_when_model_output_is_not_json():
+    from app.services.patterns import Pattern
+
     analyzer = _make_analyzer()
     analyzer._post = lambda payload: {"choices": [{"message": {"content": "sure thing!"}}]}
-    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    # 2026-09-28 deep audit: a finding of a NARRATABLE kind must ride along
+    # or the (correct) no-narratable-findings early-return skips dispatch.
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
     assert analyzer.last_error == "JSONDecodeError"
 
 
 def test_extract_handles_missing_choices_and_patterns_keys():
+    from app.services.patterns import Pattern
+
     analyzer = _make_analyzer()
     analyzer._post = lambda payload: {}
-    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
+    assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
     assert analyzer.last_error == "KeyError"
     # A JSON-null body is a failure (TypeError), not an empty success —
     # but an EMPTY patterns list is a clean success.
     analyzer._post = lambda payload: _llm_response(None)  # type: ignore[arg-type]
-    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
     assert analyzer.last_error == "TypeError"
     analyzer._post = lambda payload: _llm_response([])
-    assert analyzer.extract_patterns([entry(0, "calm")]) == []
+    assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
     assert analyzer.last_error is None
 
 

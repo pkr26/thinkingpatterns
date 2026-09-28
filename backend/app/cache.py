@@ -369,8 +369,8 @@ def check_keyed_limit_without_count(request: Request, key: str, limit: int, wind
     result = counter.check(key, window)
     # Unlike ``make_rate_limiter()``, the failing action is recorded *after*
     # this preflight.  ``> limit`` therefore admitted one extra conflict:
-    # for a limit of three, counts 1..4 were recorded and only the sixth
-    # conflicting request was rejected.  At ``count == limit`` the budget is
+    # for a limit of three, counts 1..4 were recorded and only the FIFTH
+    # conflicting request was rejected (it observed count 4 > 3).  At ``count == limit`` the budget is
     # exhausted, so reject before doing another expensive verifier hash.
     if result.count >= limit:
         raise _limit_response(result.retry_after)

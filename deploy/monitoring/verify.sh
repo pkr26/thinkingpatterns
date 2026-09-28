@@ -53,16 +53,20 @@ if [ "$PRODUCTION" -eq 1 ]; then
       if [ -z "$image_ref" ]; then
         continue
       fi
-      case "$image_ref" in
-        *\$\{*:\?\ *|*\$\{*\:\?\ *|*\$\{*\:?*)
-          # required-env form (${VAR:?message}) — no mutable default to pin
-          ;;
-        *@sha256:[a-f0-9]*)
-          ;;
-        *)
-          fail "--production: $compose_file serves a mutable image ref: $image_ref (pin its digest; see the file's pinning notes)"
-          ;;
-      esac
+      # 2026-09-28 audit: the old `case` pattern's unquoted `?` was a GLOB
+      # wildcard, so ANY ${VAR:...} — including ${VAR:-mutable-default} —
+      # passed as "required-env form". Match a real regex instead:
+      # ^${VAR:? (required, shell-errors when unset) with a plain variable
+      # name, explicitly rejecting the :- mutable-default spelling; pinned
+      # digests stay the other accepted form.
+      if [[ "$image_ref" =~ ^\$\{[A-Za-z0-9_]+:\? ]] && [[ "$image_ref" != *':-'* ]]; then
+        # required-env form (${VAR:?message}) — no mutable default to pin
+        :
+      elif [[ "$image_ref" =~ @sha256:[a-f0-9]{12,}$ ]]; then
+        :
+      else
+        fail "--production: $compose_file serves a mutable image ref: $image_ref (pin its digest; see the file's pinning notes)"
+      fi
     done < <(grep -E '^[[:space:]]*image:' "$compose_file" || true)
   done
   if [ "$status" -eq 0 ]; then

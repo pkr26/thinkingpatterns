@@ -34,21 +34,39 @@ class ThresholdState:
 
 
 def count_active_days(dates: Iterable[date]) -> int:
-    """Number of distinct calendar days with at least one entry."""
+    """Number of distinct calendar days with at least one entry.
+
+    Future-dated entries COUNT (deliberate, pinned by
+    test_checklist_round2_threshold_sync): entries.py admits server-today
+    + 1 for UTC+14 clients, and for them that entry IS today — the grace
+    window must apply to the unlock the same way it applies to storage.
+    The STREAK anchor below is where the future-date handling matters
+    (2026-09-28 deep audit)."""
     return len({d for d in dates if d is not None})
 
 
 def current_streak(dates: Iterable[date], today: date | None = None) -> int:
-    """Consecutive-day writing streak ending today (or yesterday, with grace)."""
+    """Consecutive-day writing streak ending today (or yesterday, with grace).
+
+    The walk anchors at the latest date NOT in the future (2026-09-28 deep
+    audit): a single forward-grace entry (server-today + 1, admitted for
+    UTC+14 clients) used to become the anchor, and "tomorrow not in (today,
+    yesterday)" zeroed the streak of a user who had written every day."""
     distinct = sorted({d for d in dates if d is not None})
     if not distinct:
         return 0
     today = today or _utc_today()
-    day = distinct[-1]
+    anchor_candidates = [d for d in distinct if d <= today]
+    if not anchor_candidates:
+        return 0
+    day = anchor_candidates[-1]
     if day not in (today, today - timedelta(days=1)):
         return 0
     streak = 0
     index = len(distinct) - 1
+    # Skip any trailing future-dated entries so the walk starts at the anchor.
+    while index >= 0 and distinct[index] > today:
+        index -= 1
     while index >= 0 and distinct[index] == day:
         streak += 1
         day -= timedelta(days=1)

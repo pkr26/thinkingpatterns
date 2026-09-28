@@ -34,9 +34,20 @@ describe("language detection (brain heuristic port)", () => {
     expect(detectLanguage(ENGLISH_PARAGRAPH)).toBe("en");
   });
 
-  it("keeps the historical English default below the min-token floor", () => {
-    expect(detectLanguage("me siento fatal hoy")).toBe("en");
+  // 2026-09-28 audit (HIGH, brain parity): the historical min-token floor
+  // default was removed — the server (brain.py, 2026-09-26 statistical
+  // review item 9) applies the SAME share rule to short windows instead
+  // of defaulting to English. The old pin ("me siento fatal hoy" → "en")
+  // flipped: its ES share clears the floor and beats English, so it is
+  // honestly "es" now.
+  it("short windows apply the share rule — a short Spanish text is es, a short English one is en", () => {
+    expect(detectLanguage("me siento fatal hoy")).toBe("es");
     expect(detectLanguage("feeling great today")).toBe("en");
+  });
+
+  it("only the fully EMPTY corpus keeps the English default; unscoreable text is other", () => {
+    expect(detectLanguage("")).toBe("en");
+    expect(detectLanguage("🙂🙂")).toBe("other");
   });
 });
 

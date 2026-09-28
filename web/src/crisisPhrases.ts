@@ -44,9 +44,9 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bcut(?:ting)?\\s+myself\\b",
   "\\bno\\s+reason\\s+to\\s+(?:live|go\\s+on)\\b",
   "\\bnothing\\s+to\\s+live\\s+for\\b",
-  "\\b(?:can[\'\\u2019]?t|cannot)\\s+go\\s+on\\b",
+  "\\b(?:can['\\u2019]?t|cannot)\\s+go\\s+on\\b",
   "\\bbetter\\s+off\\s+without\\s+me\\b",
-  "\\b(?:don[\'\\u2019]?t|do\\s+not)\\s+want\\s+to\\s+(?:be\\s+here|live|exist|be\\s+alive|wake\\s+up)\\b",
+  "\\b(?:don['\\u2019]?t|do\\s+not)\\s+want\\s+to\\s+(?:be\\s+here|live|exist|be\\s+alive|wake\\s+up)\\b",
   "\\bwant(?:s|ed|ing)?\\s+to\\s+disappear\\b",
   "\\bend(?:ing)?\\s+everything\\b",
   "\\bno\\s+point\\s+(?:in\\s+)?going\\s+on\\b",
@@ -55,11 +55,11 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bkys\\b",
   "\\bno\\s+way\\s+out\\b",
   "\\bsleep\\s+forever\\b",
-  "\\b(?:can[\'\\u2019]?t|cannot)\\s+do\\s+this\\s+anymore\\b",
+  "\\b(?:can['\\u2019]?t|cannot)\\s+do\\s+this\\s+anymore\\b",
   "\\boff(?:ing)?\\s+myself\\b",
   "\\bput\\s+me\\s+out\\s+of\\s+my\\s+misery\\b",
-  "\\b(?:life|living)(?:[\'\\u2019]?s)?\\s+(?:(?:is|was|feels?|seems?|sounds?)\\s*)?(?:n[\'\\u2019]?t|not)\\s+worth\\s+(?:living|it)\\b",
-  "\\b(?:life|living)(?:[\'\\u2019]?s)?\\s+(?:do(?:es)?|did)n[\'\\u2019]?t\\s+(?:feel|seem|sound)\\s+worth\\s+(?:living|it)\\b",
+  "\\b(?:life|living)(?:['\\u2019]?s)?\\s+(?:(?:is|was|feels?|seems?|sounds?)\\s*)?(?:n['\\u2019]?t|not)\\s+worth\\s+(?:living|it)\\b",
+  "\\b(?:life|living)(?:['\\u2019]?s)?\\s+(?:do(?:es)?|did)n['\\u2019]?t\\s+(?:feel|seem|sound)\\s+worth\\s+(?:living|it)\\b",
   "\\bno\\s+longer\\s+want(?:s|ed|ing)?\\s+to\\s+(?:live|be\\s+here|be\\s+alive|exist|wake\\s+up)\\b",
   "\\btired\\s+of\\s+(?:living|life)\\b",
   "\\bwant(?:s|ed|ing)?\\s+to\\s+overdose\\b",
@@ -94,6 +94,14 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\b(?:solo\\s+)?quiero\\s+dormir\\s+para\\s+siempre\\b",
   "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
   "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
+  "\\bme\\s+cort(?:e|aba)\\b",
+  "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|matar)\\b",
+  "\\bme\\s+estoy\\s+(?:cortando|lastimando|quemando|ahogando|haciendo\\s+da[nñ]o)\\b",
+  "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo)\\s+terminar\\s+con\\s+todo\\b",
+  "\\bme\\s+har(?:e|ia)\\s+da[nñ]o\\b",
+  "\\bno\\s+le\\s+veo\\s+sentido\\s+a\\s+la\\s+vida\\b",
+  "\\b(?:me\\s+siento|soy)\\s+un\\s+estorbo\\b",
+  "\\bseria\\s+mejor\\s+si\\s+no\\s+estuviera\\b",
   "我想死",
   "我想去死",
   "自杀",
@@ -106,7 +114,7 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "मरना चाहता",
   "मरना चाहती",
   "\\bintihar\\s+etmek\\s+istiyorum\\b",
-  "\\bcanını\\s+almak\\s+istiyorum\\b",
+  "\\bcanini\\s+almak\\s+istiyorum\\b",
 ];
 
 /** The broader suppression tier's EXTRA patterns (the effective suppress
@@ -127,15 +135,17 @@ export const CRISIS_SUPPRESS_EXTRA_PATTERNS: readonly string[] = [
   "\\bstarv(?:e|ing|ed)\\s+myself\\b",
   "\\bmake\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b",
   "\\b(?:made|making)\\s+myself\\s+(?:throw\\s+up|puke|vomit)\\b",
-  "\\bdon[\'\\u2019]?t\\s+see\\s+(?:a\\s+|any\\s+)?future\\b",
+  "\\bdon['\\u2019]?t\\s+see\\s+(?:a\\s+|any\\s+)?future\\b",
   "\\bno\\s+future\\s+for\\s+me\\b",
-  "\\bhappier\\s+(?:if|when)\\s+(?:i[\'\\u2019]?m|i\\s+am|i\\s+was)\\s+gone\\b",
+  "\\bhappier\\s+(?:if|when)\\s+(?:i['\\u2019]?m|i\\s+am|i\\s+was)\\s+gone\\b",
   "\\bhappier\\s+without\\s+me\\b",
   "\\beveryone\\s+would\\s+be\\s+happier\\b",
   "\\bnot\\s+worth\\s+living\\b",
   "\\bno\\s+vale\\s+la\\s+pena\\b",
   "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
   "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b",
+  "\\bterminar\\s+con\\s+todo\\b",
+  "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme)\\b",
 ];
 
 /**
@@ -151,21 +161,9 @@ export const CRISIS_BENIGN_COMPOUNDS: readonly string[] = [
   "suicideboys",
   "suicide prevention",
   "suicide awareness",
-  // 2026-09-20 audit L-23: prevention-campaign masking beyond English —
-  // CJK and Spanish classroom mentions. Post-fold spellings (masking runs
-  // after Latin-mark folding).
   "自杀预防",
   "prevencion del suicidio",
   "prevencion de suicidio",
-  // 2026-09-26 audit follow-up (corpus false positives): the H-1
-  // additions fired the dialog tier on everyday Spanish — grooming
-  // ("me quiero cortar el pelo" = I want a haircut), building navigation
-  // ("no hay salida de emergencia" = no emergency exit), common sports
-  // injuries ("me lastimo la rodilla"), and colloquial slipping-away
-  // ("desaparecer de la fiesta"). Benign-compound masking is the
-  // engine's designed mechanism for this class ("suicide squad" has the
-  // same standing); enumerated body-part masks keep the recall of the
-  // bare self-harm phrasings. Post-fold spellings.
   "cortar el pelo",
   "cortarme el pelo",
   "cortar la barba",

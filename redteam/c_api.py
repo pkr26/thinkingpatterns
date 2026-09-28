@@ -13,6 +13,7 @@ import base64
 import json
 import os
 import resource
+import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -32,8 +33,15 @@ from common import (
 
 
 def _rss_mb() -> float:
-    # macOS ru_maxrss is KB
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0 / 1024.0
+    # ru_maxrss units differ by platform (2026-09-28 audit fix): macOS
+    # reports BYTES, Linux reports KiB — the old comment claimed KB on both
+    # and divided the macOS number by an extra 1024, printing peak RSS
+    # ~1000x too small (and would on a Linux runner read ~1000x too large
+    # if the bytes assumption were copied instead).
+    raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == "darwin":
+        return raw / 1024.0 / 1024.0
+    return raw / 1024.0
 
 
 async def c2_resource_exhaustion() -> None:
@@ -66,14 +74,30 @@ async def c2_resource_exhaustion() -> None:
         # ballooned past the per-op budget).
         rejected = sum(1 for c in codes if c == 503)
         unexpected = sorted({c for c in codes} - {201, 503})
-        capped = not unexpected and (rejected >= 1 or all(c == 201 for c in codes))
+        all_served = all(c == 201 for c in codes)
+        # RSS clause (implemented 2026-09-28 — the comment below always
+        # promised it, but the predicate never checked memory): when the
+        # limiter QUEUES instead of refusing, the run still counts as
+        # capped only while peak growth stays within the documented per-op
+        # scrypt budget — 128 MiB per concurrent burst (the figure
+        # docker-compose.yml's api memory-limit rationale documents for
+        # "scrypt login bursts"), i.e. at most 8 x 128 MiB here. All-201
+        # AND growth beyond that is a FINDING.
+        SCRYPT_BURST_BUDGET_MB = 128
+        growth = peak - before
+        ballooned = all_served and growth > len(codes) * SCRYPT_BURST_BUDGET_MB
+        capped = not unexpected and (rejected >= 1 or (all_served and not ballooned))
         verdict("C2.scrypt-amplification",
                 "BLOCKED" if capped else "FINDING",
                 f"8 concurrent registrations (64MiB scrypt each): {sorted(set(codes))} "
                 f"({rejected} x 503 refused, {codes.count(201)} x 201 served), "
-                f"{dt:.1f}s wall, RSS {before:.0f}->{peak:.0f}MB — bounded by the "
+                f"{dt:.1f}s wall, RSS {before:.0f}->{peak:.0f}MB (+{growth:.0f}MB against "
+                f"the {len(codes) * SCRYPT_BURST_BUDGET_MB}MB documented burst budget) — "
+                f"bounded by the "
                 f"CapacityLimiter(4)+auth rate limits; amplification exists but is capped"
-                + (f"; UNEXPECTED codes {unexpected}" if unexpected else ""))
+                + (f"; UNEXPECTED codes {unexpected}" if unexpected else "")
+                + ("; NOTHING refused while memory ballooned past the per-op budget"
+                   if ballooned else ""))
 
         # Deeply nested JSON -> must be 400, not a RecursionError 500.
         # Serialized by hand: httpx's own encoder would overflow client-side

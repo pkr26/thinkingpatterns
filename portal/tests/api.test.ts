@@ -557,13 +557,16 @@ describe("auth requests (no token)", () => {
     expect((await import("../src/api")).hasSession()).toBe(true);
     await api.me();
     await api.createNote("u1", { client_note_id: "n1", pattern_pid: "temporal:work", blob: "B==" });
-    await api.updateNote("n1", "B2==");
+    await api.updateNote("n1", "B2==", 3);
     let [url, init] = vi.mocked(fetch).mock.calls[1]! as [string, RequestInit];
     expect(url).toBe("https://api.example.com/api/v1/therapist/patients/u1/notes");
     expect(JSON.parse((init as { body: string }).body)).toMatchObject({ pattern_pid: "temporal:work" });
     [url, init] = vi.mocked(fetch).mock.calls[2]! as [string, RequestInit];
     expect(init.method).toBe("PATCH");
     expect(url).toBe("https://api.example.com/api/v1/therapist/notes/n1");
+    // Deep-audit 2026-09-28: base_version is REQUIRED by the server's
+    // optimistic-concurrency gate — a body without it 400s every edit.
+    expect(JSON.parse((init as { body: string }).body)).toEqual({ blob: "B2==", base_version: 3 });
     clearSession();
     expect((await import("../src/api")).hasSession()).toBe(false);
   });

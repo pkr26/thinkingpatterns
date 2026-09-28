@@ -106,6 +106,12 @@ class InMemoryKeyStore:
         forgot the binding would silently ship a cross-account primitive.
         Tests that do not care about binding pass an explicit sentinel.
         """
+        # Enforce what the docstring mandates: `owner: str` is only a type
+        # annotation at runtime, and `create(..., owner=None)` would store
+        # an unbound session any token-holder could pop (deep audit
+        # 2026-09-28 — the docstring said REQUIRED, the code never checked).
+        if not isinstance(owner, str) or not owner:
+            raise ValueError("owner is required (pass an explicit test sentinel to opt out)")
         if len(key) != KEY_SIZE:
             raise ValueError(f"key must be {KEY_SIZE} bytes")
         if ttl_seconds <= 0:

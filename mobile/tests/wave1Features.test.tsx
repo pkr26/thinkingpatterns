@@ -128,7 +128,9 @@ describe("prompt chips", () => {
 describe("native-feature seams", () => {
   it("the reminder capability degrades to unavailable without its native module", () => {
     expect(reminderCapability().available).toBe(false);
-    expect(reminderCapability().reason).toContain("notification module");
+    // Audit 2026-09-28 (LOW): the reason is a catalog KEY now — Settings
+    // resolves it through t() so the line localizes (was raw English prose).
+    expect(reminderCapability().reason).toBe("settings.reasonNotifModule");
     // 2026-09-26 audit LOW: biometricCapability() was deleted from the seam
     // — it probed react-native-biometrics (not a dependency) and had zero
     // callers; the biometric surface is biometricUnlock.ts over

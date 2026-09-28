@@ -598,4 +598,101 @@ describe("v2 key envelope (2026-09-26)", () => {
     expect(vault.isUnlocked()).toBe(false);
     expect(textOf(root)).toContain("key envelope could not be opened");
   });
+
+  it("2026-09-28 audit (LOW): a v2 envelope declaring NON-default iterations is unwrapped at THOSE params", async () => {
+    // Mobile keyScheme.ts parity: the params and the KEK come from one
+    // source. The envelope below was wrapped under the 800k master; the
+    // pre-fix unwrap always used the 600k login master and could never
+    // open it.
+    const saltBytes = fromBase64(SALT_B64);
+    const master800 = await deriveMasterKey(GOOD_PASSWORD, saltBytes, 800_000);
+    const envelope = await createRegistrationEnvelope(master800, saltBytes, "v2user", {
+      algorithm: "pbkdf2-sha256",
+      version: 1,
+      iterations: 800_000,
+    });
+    stubFetch((url) => {
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT_B64 });
+      if (url.endsWith("/auth/login")) return jsonResponse(tokenResponse({ key_scheme: "v2" }));
+      if (url.endsWith("/auth/key-envelope")) {
+        return jsonResponse({
+          key_scheme: "v2",
+          salt: SALT_B64,
+          kdf_params: envelope.kdfParams,
+          wrapped_data_key: envelope.wrappedDataKeyB64,
+        });
+      }
+      return jsonResponse({ detail: "unmatched route", code: "not_found" }, { status: 404 });
+    });
+    const onLogin = vi.fn();
+    const root = await render(<LoginView onSuccess={onLogin} />);
+    await typeInto(root, "Username", "v2user");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await press(root, "Sign in");
+    await settle();
+    expect(onLogin).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "v2user" });
+    expect(vault.isUnlocked()).toBe(true);
+    expect(toBase64(vault.get().dataKey)).toBe(toBase64(envelope.dataKey));
+  });
+
+  it("2026-09-28 audit (LOW): an argon2id envelope fails with the explicit unsupported-parameters error", async () => {
+    // This build derives PBKDF2 only (no native WebCrypto Argon2). The
+    // honest verdict names THAT — never a misleading envelope/generic
+    // invalid-credentials-shaped failure — and nothing is left behind.
+    stubFetch((url) => {
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT_B64 });
+      if (url.endsWith("/auth/login")) return jsonResponse(tokenResponse({ key_scheme: "v2" }));
+      if (url.endsWith("/auth/key-envelope")) {
+        return jsonResponse({
+          key_scheme: "v2",
+          salt: SALT_B64,
+          kdf_params: { algorithm: "argon2id", version: 1, iterations: 3, memory_kib: 65536, parallelism: 1 },
+          wrapped_data_key: toBase64(new Uint8Array(new ArrayBuffer(60))),
+        });
+      }
+      return jsonResponse({ detail: "unmatched route", code: "not_found" }, { status: 404 });
+    });
+    const onLogin = vi.fn();
+    const root = await render(<LoginView onSuccess={onLogin} />);
+    await typeInto(root, "Username", "argon");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await press(root, "Sign in");
+    await settle();
+    expect(onLogin).not.toHaveBeenCalled();
+    expect(hasSession()).toBe(false);
+    expect(vault.isUnlocked()).toBe(false);
+    expect(textOf(root)).toContain("this browser cannot derive");
+  });
+
+  it("2026-09-28 audit (LOW): a register response that does NOT echo key_scheme v2 keeps the DERIVED v1 key", async () => {
+    // The register response is the only authority on what was stored. A
+    // backend that ignored the envelope pair stored no wrapped_data_key —
+    // adopting the random key anyway would seal every entry under a key
+    // no unlock path can ever reproduce (the login path's documented
+    // ambiguity defense, mirrored).
+    let registerBody: Record<string, unknown> = {};
+    stubFetch((url, init) => {
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT_B64 });
+      if (url.endsWith("/auth/register")) {
+        registerBody = JSON.parse(String(init.body));
+        return jsonResponse(tokenResponse()); // NO key_scheme echo
+      }
+      return jsonResponse({ detail: "unmatched route", code: "not_found" }, { status: 404 });
+    });
+    const root = await render(<LoginView onSuccess={() => undefined} />);
+    await press(root, "Create an account");
+    await typeInto(root, "Username", "v1echo");
+    await typeInto(root, "Password", GOOD_PASSWORD);
+    await typeInto(root, "Confirm password", GOOD_PASSWORD);
+    await setCheckbox(root, "I am 18 or older", true);
+    await press(root, "Create journal");
+    await settle();
+    expect(vault.isUnlocked()).toBe(true);
+    // v1 semantics: the vault holds the password-DERIVED label — the
+    // envelope upload happened, but without the echo the random key the
+    // server never stored is discarded, not adopted.
+    const expected = await derivePatientKeys(await deriveMasterKey(GOOD_PASSWORD, fromBase64(String(registerBody.salt))));
+    expect(toBase64(vault.get().dataKey)).toBe(toBase64(expected.dataKey));
+    expect(registerBody.wrapped_data_key).toBeTruthy(); // the pair was still sent
+  });
 });

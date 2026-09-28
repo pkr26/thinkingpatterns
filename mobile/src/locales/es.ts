@@ -204,13 +204,6 @@ export const es: Record<string, string> = {
   // es un mensaje de contraseña incorrecta.
   "login.envelopeFailed":
     "Su contraseña fue aceptada, pero el sobre de llaves de esta cuenta no se pudo abrir en este servidor. No se cambió nada — inténtelo de nuevo, o contacte a soporte si se repite.",
-  // Re-auditoría 2026-09-27 (M): la cuenta v2 en línea cuyo sobre de llaves
-  // no pudo obtenerse NI del servidor NI de la caché caía antes a la
-  // semántica v1 — la bóveda se abría con la llave derivada v1 y las notas
-  // escritas en esa sesión quedaban ilegibles para siempre. Ahora la sesión
-  // se rechaza: honesto, sereno, y explícito en que no se cambió nada.
-  "login.envelopeUnavailable":
-    "No pudimos verificar su clave de cifrado con el servidor. Compruebe su conexión e inténtelo de nuevo — no se cambió nada.",
   "login.envelopeUnrecognized":
     "No pudimos verificar su clave de cifrado — el servidor envió una respuesta que esta aplicación no entiende. No se cambió nada; actualizar la aplicación puede ayudar.",
 
@@ -408,6 +401,12 @@ export const es: Record<string, string> = {
   "history.conflictOverwrite": "Reemplazar con la mía",
   "history.deletedElsewhereTitle": "Eliminada en otro dispositivo",
   "history.deletedElsewhereBody": "Esta entrada fue eliminada desde otro dispositivo, por lo que su edición no se guardó.",
+  // Auditoría 2026-09-28 (MEDIA): el botón atrás o Cancelar con ediciones
+  // sin guardar pide confirmación en lugar de descartarlas en silencio.
+  "history.discardEditTitle": "¿Descartar sus cambios?",
+  "history.discardEditBody": "Los cambios que hizo en esta entrada aún no se han guardado.",
+  "history.discardEditConfirm": "Descartar cambios",
+  "history.discardEditCancel": "Seguir editando",
 
   // --------------------------------------------------------------- insights
   "insights.tryAgainA11y": "Intentar cargar sus patrones de nuevo",
@@ -658,7 +657,6 @@ export const es: Record<string, string> = {
   "settings.deletedTitle": "Eliminado",
   "settings.deletedBody": "Su cuenta y sus datos fueron eliminados del servidor. Si algo no se pudo limpiar en este dispositivo, reinstalar la app quita los restos.",
   "settings.deleteFailedTitle": "Error al eliminar",
-  "settings.deleteFailedVerifier": "El servidor no aceptó esa contraseña. No se eliminó nada — revísela e inténtelo de nuevo.",
   "settings.deleteFailedSession": "La sesión expiró — vuelva a desbloquear. No se eliminó nada.",
   "settings.exportTitle": "Exportación no disponible en esta versión",
   "settings.exportBody":
@@ -763,6 +761,9 @@ export const es: Record<string, string> = {
   "settings.reminderTimeA11y": "Hora del recordatorio",
   "settings.reminderTimeOptionA11y": "Hora del recordatorio: {label}",
   "settings.reminderUnavailableNote": "{reason}. La preferencia se guarda y el aviso comenzará cuando esta versión incorpore las notificaciones.",
+  // Auditoría 2026-09-28 (BAJA): claves que devuelven los módulos de
+  // capacidades; la línea del motivo las resuelve con t() para localizarse.
+  "settings.reasonNotifModule": "El módulo de notificaciones no está incluido en esta versión",
   // --- Recordatorios de cuestionarios (2026-09-27) ------------------------
   "settings.measureReminderLabel": "RECORDATORIOS DE CUESTIONARIOS",
   "settings.measureReminderRow": "Recordatorios de cuestionarios",
@@ -779,6 +780,9 @@ export const es: Record<string, string> = {
   "settings.healthMirrorNote":
     "Cuando está activado, cada registro de ánimo explícito también se escribe en la app Salud de este dispositivo. MindPattern nunca lee nada de Salud. Al desactivarlo se detienen las futuras escrituras; lo que Salud ya guardó se queda ahí.",
   "settings.healthMirrorUnavailableNote": "{reason}. La preferencia se guarda y el reflejo comenzará cuando esta versión incorpore el módulo de Salud.",
+  "settings.reasonHealthModule": "El módulo de Salud no está incluido en esta versión",
+  "settings.reasonHealthIOS18": "Estado de Ánimo de Apple Salud requiere iOS 18 o posterior",
+  "settings.reasonHealthOldModule": "El módulo de Salud de esta versión es anterior a la función Estado de Ánimo",
   "settings.biometricLabel": "DESBLOQUEO BIOMÉTRICO",
   "settings.biometricRow": "Desbloquear con su rostro o su huella",
   "settings.biometricA11y": "Desbloqueo biométrico",
@@ -900,6 +904,12 @@ export const es: Record<string, string> = {
   "safetyplan.saved": "Guardado — cifrado, como siempre.",
   "safetyplan.saveFailedTitle": "No se pudo guardar",
   "safetyplan.saveFailedBody": "Su plan sigue en pantalla tal como lo escribió — inténtelo de nuevo.",
+  // Auditoría 2026-09-28 (MEDIA): volver atrás con ediciones sin guardar
+  // pide confirmación en lugar de descartarlas en silencio.
+  "safetyplan.discardTitle": "¿Descartar sus cambios?",
+  "safetyplan.discardBody": "Los cambios de su plan de seguridad no se han guardado.",
+  "safetyplan.discardConfirm": "Descartar cambios",
+  "safetyplan.discardCancel": "Seguir editando",
   "safetyplan.lockedTitle": "Bloqueado",
   "safetyplan.lockedBody":
     "Su plan de seguridad está cifrado con su llave — desbloquéelo para leerlo o editarlo. Los recursos de crisis siguen a un toque abajo, como siempre.",
@@ -933,6 +943,9 @@ export const es: Record<string, string> = {
     "No se pudo cargar con quién está compartiendo en este momento — revise su conexión y vuelva a abrir esta pantalla antes de confiar en esta lista.",
   "share.sharingSince": "Compartiendo desde {date}",
   "share.stoppedOn": "Detenido {date}",
+  // Auditoría 2026-09-28 (INFO): consentimientos no activos sin revoked_at
+  // (servidores antiguos) — el estado simple en vez de "Detenido " + fecha vacía.
+  "share.stopped": "Detenido",
   "share.addLabel": "Agregue a su terapeuta",
   "share.addBody": "Pida a su terapeuta un código de emparejamiento desde su portal y escríbalo aquí. Los códigos expiran después de 15 minutos.",
   // SAS (2026-09-26): fija la expectativa junto al campo del código — tras

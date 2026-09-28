@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 
+from datetime import date
+
 from httpx import ASGITransport, AsyncClient
 
 from tests.helpers import ClientEmulator
@@ -104,3 +106,28 @@ async def test_processing_sessions_rate_limited(client, settings):
         statuses.append(response.status_code)
     assert statuses[0] == 201
     assert statuses[-1] == 429
+
+
+async def test_entries_create_rate_limit_429s(client, monkeypatch):
+    """2026-09-28 deep audit (test-quality LOW): the entries-create bucket
+    was never 429-tested at ANY limit (conftest raises it to 1000 suite
+    wide); a units error specific to this bucket's window/limit would have
+    shipped silently while every other bucket had an exact 429 pin."""
+    settings = client._transport.app.state.settings  # noqa: SLF001
+    monkeypatch.setattr(settings, "entries_rate_limit", 3, raising=False)
+    monkeypatch.setattr(settings, "entries_rate_window", 60, raising=False)
+    emu = ClientEmulator("rateentries", "p")
+    await emu.register(client)
+    codes = []
+    for i in range(4):
+        resp = await client.post(
+            "/api/entries",
+            headers=emu.headers,
+            json={
+                "client_entry_id": f"e-rate-{i}",
+                "blob": emu.encrypt_entry("calm text", date.today(), f"e-rate-{i}"),
+                "entry_date": date.today().isoformat(),
+            },
+        )
+        codes.append(resp.status_code)
+    assert codes == [201, 201, 201, 429], codes

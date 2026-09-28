@@ -139,6 +139,18 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         if (generation.current !== run) return;
         revision = result.revision;
         for (const row of result.measures) {
+          // 2026-09-28 audit (LOW): re-check the lock inside the per-row
+          // loop — keys.dataKey is the vault's SHARED buffer, and a lock
+          // landing mid-walk zeroizes it, so every remaining row would
+          // fail GCM and be skipped as tampered/foreign. A locked vault
+          // stops the walk with the honest locked message instead; the
+          // rows already decrypted still render.
+          if (!vault.isUnlocked()) {
+            decoded.sort((a, b) => a.date.localeCompare(b.date));
+            setHistory(decoded);
+            setError(t("common.sessionLocked"));
+            return;
+          }
           try {
             let plain: Bytes | null = null;
             try {

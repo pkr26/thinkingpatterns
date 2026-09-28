@@ -51,9 +51,11 @@ describe("healthKitCapability (fail-closed)", () => {
     // The sync require probe cannot resolve the module under a node test
     // build even with vi.mock registered (vi.mock intercepts import(),
     // not require()) — which is exactly the "not linked" production state.
+    // Audit 2026-09-28 (LOW): the reason is a catalog KEY now — Settings
+    // resolves it through t() so the line localizes (was raw English prose).
     expect(healthKitCapability()).toEqual({
       available: false,
-      reason: "health module not linked in this build",
+      reason: "settings.reasonHealthModule",
     });
   });
 

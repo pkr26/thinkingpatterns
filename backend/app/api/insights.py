@@ -14,8 +14,8 @@ the honest scope. Sessions are single-use: the key is destroyed the
 moment a recompute consumes it.
 
 Two encrypted insight rows come out of a recompute:
-  * kind="brain"    — the mini-brain's persistent state (carried forward),
-  * kind="patterns" — the surfaced-pattern payload clients decrypt/render.
+  * kind=KIND_BRAIN    — the mini-brain's persistent state (carried forward),
+  * kind=KIND_PATTERNS — the surfaced-pattern payload clients decrypt/render.
 
 Threshold honesty (this is the claim the old code broke): while the account
 is in the baseline phase NOTHING is decrypted — no key is required, no
@@ -52,7 +52,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..cache import make_rate_limiter
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
-from ..models import Consent, Entry, Insight, Measure, RekeyJournal, User, new_id, utcnow
+from ..models import (
+    KIND_BRAIN,
+    KIND_PATTERNS,
+    KIND_QUESTION,
+    Consent,
+    Entry,
+    Insight,
+    Measure,
+    RekeyJournal,
+    User,
+    new_id,
+    utcnow,
+)
 from ..schemas import (
     InsightsResponse,
     LocalRecomputeRequest,
@@ -836,6 +848,25 @@ _ENTRY_MALFORMED = (
 _TAMPER_OR_MALFORMED = (TamperError, *_ENTRY_MALFORMED)
 
 
+def _parse_inner_date(raw: object) -> date_type:
+    """created_at arrives in two wire shapes: a date-only string (legacy
+    clients and the test harness) and the FULL ISO timestamp every current
+    client writes (mobile EntryScreen, web Entry — pinned as the canonical
+    cross-platform payload in shared/interop_fixtures.json). Plain
+    date.fromisoformat rejects the timestamp form, which made every
+    recompute 400 entry_payload_malformed for accounts whose entries were
+    saved from the real clients — invisible to the backend suite because
+    its helpers build the date-only shape. The timestamp contributes only
+    its calendar date; the ±1-day tolerance at the call site absorbs the
+    client-vs-server timezone skew."""
+    if not isinstance(raw, str):
+        raise ValueError("created_at must be a string")
+    try:
+        return date_type.fromisoformat(raw)
+    except ValueError:
+        return datetime.fromisoformat(raw).date()
+
+
 def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> list[JournalEntry]:
     entries: list[JournalEntry] = []
     for raw, outer in zip(plains, outer_dates):
@@ -858,7 +889,7 @@ def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> lis
             ):
                 raise ValueError("sentiment must be a finite number")
             sentiment = max(-1.0, min(1.0, float(sentiment)))
-        inner = date_type.fromisoformat(payload["created_at"])
+        inner = _parse_inner_date(payload["created_at"])
         if abs((inner - outer).days) > INNER_DATE_TOLERANCE_DAYS:
             raise ValueError("created_at does not match entry_date")
         # --- structured channels (payload v2, 2026-09-17). All optional;
@@ -925,13 +956,18 @@ def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> lis
     return entries
 
 
-def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str | None:
+def _chosen_pattern_pid(
+    today: date_type, patterns: list, user_id: str, language: str = "en"
+) -> str | None:
     """The pid of the pattern whose question was selected for today.
 
     Deterministic re-derivation of the same choice questions.question_for_today
     made (same pool, same rotation): build_pool's ordering is stable, so the
     pool index maps back to its pattern. Falls back to None when the day's
-    question is generic.
+    question is generic. ``language`` must be the SAME language the served
+    question was chosen in (2026-09-28 deep audit: the mirror used to build
+    from the EN pool while the real question came from the ES pool — correct
+    today only because the pools are positionally parallel).
     """
     from ..services import questions as question_engine
 
@@ -949,10 +985,17 @@ def _chosen_pattern_pid(today: date_type, patterns: list, user_id: str) -> str |
     rendered: list[str] = []
     owners: list[str | None] = []
     for p in pool_patterns:
-        for q in question_engine.render_pattern_questions(p):
+        for q in question_engine.render_pattern_questions(p, language):
             rendered.append(q)
             owners.append(p.detail.get("pattern_pid") if isinstance(p.detail, dict) else None)
-    generic = list(question_engine.GENERIC_QUESTIONS)
+    # The generic pool is language-selected exactly as build_pool does
+    # (questions.py:560-572) — positionally parallel today, mirrored by
+    # construction rather than by accident.
+    generic = list(
+        question_engine.GENERIC_QUESTIONS_ES
+        if language == "es"
+        else question_engine.GENERIC_QUESTIONS
+    )
     rendered.extend(generic)
     owners.extend([None] * len(generic))
     # Mirror build_pool's dedupe + suppression filters.
@@ -1334,7 +1377,7 @@ async def recompute(
                 # The brain's memory from the previous recompute travels INTO
                 # the secure context as one more encrypted item and comes back
                 # out updated.
-                prior = await _latest_insight(session, user.id, "brain")
+                prior = await _latest_insight(session, user.id, KIND_BRAIN)
                 prior_seq = prior.state_seq if prior is not None else 0
                 # Pin-on-first-write for the daily question (2026-09-20 audit
                 # fix H-12): "one question per day, stable within the day" is
@@ -1351,7 +1394,7 @@ async def recompute(
                         select(Insight.id)
                         .where(
                             Insight.user_id == user.id,
-                            Insight.kind == "question",
+                            Insight.kind == KIND_QUESTION,
                             Insight.for_date == today,
                         )
                         .limit(1)
@@ -1371,7 +1414,7 @@ async def recompute(
                     for row in rows
                 ]
                 state_item = (
-                    (crypto.build_aad("insights", user.id, "brain"), bytes(prior.blob))
+                    (crypto.build_aad("insights", user.id, KIND_BRAIN), bytes(prior.blob))
                     if prior
                     else None
                 )
@@ -1582,12 +1625,12 @@ async def recompute(
             blob = crypto.encrypt(
                 data_key,
                 json.dumps(insights_payload).encode("utf-8"),
-                crypto.build_aad("insights", user.id, "patterns"),
+                crypto.build_aad("insights", user.id, KIND_PATTERNS),
             )
             state_blob = crypto.encrypt(
                 data_key,
                 brain.dump_state(result.new_state),
-                crypto.build_aad("insights", user.id, "brain"),
+                crypto.build_aad("insights", user.id, KIND_BRAIN),
             )
             question_blob = None
             if merged and not question_pinned:
@@ -1613,7 +1656,9 @@ async def recompute(
                     # The chosen pattern's stable id (when the question came
                     # from a pattern): routes the "did this land?" taps back
                     # to the right brain record. Absent for generic days.
-                    "pattern_pid": _chosen_pattern_pid(today, merged, user.id),
+                    "pattern_pid": _chosen_pattern_pid(
+                        today, merged, user.id, language=question_language
+                    ),
                 }
                 question_blob = crypto.encrypt(
                     data_key,
@@ -1705,7 +1750,7 @@ async def recompute(
                     await session.execute(
                         delete(Insight).where(
                             Insight.user_id == user.id,
-                            Insight.kind == "question",
+                            Insight.kind == KIND_QUESTION,
                             Insight.for_date < today - timedelta(days=QUESTION_RETENTION_DAYS),
                         )
                     )
@@ -1764,7 +1809,11 @@ async def recompute(
                 # endpoint contributed nothing — the response must not
                 # claim it ran).
                 analyzer=(
-                    "llm" if enricher is not None and enricher.last_error is None else "brain"
+                    "llm"
+                    if enricher is not None
+                    and enricher.last_error is None
+                    and getattr(enricher, "requests_made", 0) > 0
+                    else "brain"
                 ),
                 # Lifecycle counters are recomputed over the FINAL STORED
                 # list (2026-09-20 audit fix M-5): the brain's own counters
@@ -2014,7 +2063,7 @@ async def get_question_today(
                 select(Insight)
                 .where(
                     Insight.user_id == user.id,
-                    Insight.kind == "question",
+                    Insight.kind == KIND_QUESTION,
                     Insight.for_date == today,
                 )
                 .order_by(Insight.created_at.desc(), Insight.id.desc())

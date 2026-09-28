@@ -29,10 +29,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import qcrypto from "react-native-quick-crypto";
+import qcrypto from "react-native-quick-crypto"; // registers the Buffer global used below
 import { api, ApiError, getBaseUrl } from "../api/client";
 import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
+import { engine } from "../crypto/engine";
 import { KDF_ITERATIONS, zeroize } from "../crypto/kdf";
 import { buildRegistrationEnvelope, cachedEnvelope, cacheEnvelope, fetchEnvelope, unwrapSessionDataKey, type EnvelopeInfo } from "../keyScheme";
 import { vault } from "../vault";
@@ -170,7 +171,11 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       if (mode === "register") {
         // Buffer.from() copies: quick-crypto's Buffer type differs from
         // node's in the .d.ts, but the bytes are identical.
-        const salt = Buffer.from(qcrypto.randomBytes(16));
+        // Audit 2026-09-28 (LOW): the registration salt entropy now comes
+        // from the app's CSPRNG seam (engine.randomBytes — the same seam
+        // rotation.ts's freshSalt uses) instead of a direct quick-crypto
+        // call, so the vitest suite executes the real shipping path.
+        const salt = Buffer.from(engine.randomBytes(16));
         // Async derivation: no 100–400ms JS-thread freeze mid-flow.
         derived = await deriveKeysAsync(password, salt);
         // v2 KEY ENVELOPE (2026-09-26) — the default for every NEW account:

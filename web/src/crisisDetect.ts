@@ -98,6 +98,14 @@ const HOMOGLYPHS: Record<string, string> = {
   // client dialog. Pinned by the shared dialog_fires fixtures.
   "\u0282": "s",                // ʂ s with hook
   "\u1d74": "s",                // ᵴ s with middle tilde
+  // 2026-09-28 deep audit: the small-capital Latin lookalikes NFKC does
+  // NOT fold — social-media styling ("ꜱuicide", "kɪll myself", "kiʟʟ
+  // myself") read as broken fragments without these. Pinned by the
+  // shared dialog_fires fixtures.
+  "\ua731": "s",                // ꜱ latin letter small capital s
+  "\u1d1c": "u",                // ᴜ small capital u
+  "\u026a": "i",                // ɪ small capital i
+  "\u029f": "l",                // ʟ small capital l
 };
 
 /** Leet substitutions applied ONLY between two letters ("k1ll" -> "kill"
@@ -136,7 +144,15 @@ function leetFold(text: string): string {
   // Loop until stable: "su1c1de" needs two passes (each replacement makes
   // the next digit newly adjacent to letters).
   for (;;) {
-    let folded = text.replace(LEET_RE, (_m, a: string, d: string, b: string) => a + LEET[d] + b);
+    // 2026-09-28 deep audit: "1" is contextually ambiguous — "i" in
+    // "k1ll" but "l" in "myse1f". The between-letters rule maps a "1" to
+    // "l" when the letter it feeds is "f"; every other mapped char keeps
+    // its table value.
+    let folded = text.replace(
+      LEET_RE,
+      (_m, a: string, d: string, b: string) =>
+        a + (d === "1" && b === "f" ? "l" : LEET[d]) + b,
+    );
     folded = folded.replace(LEET_EDGE_RE, (_m, ws: string, d: string, c: string) => ws + LEET[d] + c);
     folded = folded.replace(
       LEET_TRAIL_RE,
@@ -185,7 +201,7 @@ function normalizePrePunct(text: string): string {
   let out = text
     .toLowerCase()
     .replace(INVISIBLE, "")
-    .replace(/[\u0131\u0250-\u02ff\u1d00-\u1d7f\u0370-\u052f]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
+    .replace(/[\u0131\u0250-\u02ff\u1d00-\u1d7f\u0370-\u052f\ua731]/g, (ch) => HOMOGLYPHS[ch] ?? ch)
     // 2026-09-26 audit follow-up (N-4): the lookup class must cover the
 // Phonetic Extensions block (U+1D00-1D7F) - U+1D74 sat in the map
 // but outside the class, so the entry could never fire.
@@ -271,31 +287,117 @@ function orphanGlue(tokens: string[]): string {
   return out.join(" ").trim();
 }
 
-/** Evasion variant: every token joined with no separator at all. Splits
- *  leave the fragments ("su icide"), and plain concatenation
- *  ("killmyself"), as recoverable substrings; matched against space-free
- *  copies of the tier patterns (see concatPattern). */
+/** Evasion variant (2026-09-28 deep audit): tokens joined with a "|"
+ *  sentinel MARK between them. The channel used to join with no separator
+ *  at all, which made benign spaced text and true no-space evasion
+ *  indistinguishable ("weekend it all" and "i will endit all" both contain
+ *  "enditall" once spaces are gone). Marking the ORIGINAL token boundaries
+ *  lets the concat twins (see concatPattern) require a boundary at the
+ *  phrase start while still matching every no-separator spacing combo
+ *  inside the phrase. The sentinel is "|" — a non-letter that can never
+ *  appear inside a token. MUST mirror the backend's _concat_join. */
 function concatJoin(tokens: string[]): string {
-  return tokens.join("");
+  return tokens.join("|");
 }
 
 /** Concat-pattern endings that must keep a trailing boundary: these words
- *  extend into benign ones once the spaces are gone (die->diet,
+ *  extend into benign ones once the spacing is gone (die->diet,
  *  dead->deadline, on->online, up->upon, out->outfield, cutting->cutting
- *  board), so an unanchored substring match would fire on ordinary text.
- *  Every other ending ("myself", "suicide", ...) has no benign extension
- *  worth fearing, and the anchor would only create misses. */
+ *  board), so an unanchored suffix would fire on ordinary text. Every
+ *  other ending ("myself", "suicide", ...) has no benign extension worth
+ *  fearing, and the anchor would only create misses. */
 const CONCAT_ANCHORED_ENDINGS = ["die", "dead", "cutting", "gone", "on", "up", "out"];
 
-/** The space-free twin of a tier pattern: \s+ and \b removed (a boundary
- *  can never fire inside concatenated text), plus a trailing (?![a-z])
- *  when the pattern's final literal word is extendable. MUST mirror the
- *  backend's _concat_pattern. */
+const isLiteralChar = (ch: string): boolean =>
+  /^[0-9a-z]$/.test(ch) || (ch > "\u007f" && /\p{L}/u.test(ch));
+
+/** Insert "\|?" between adjacent literal characters of a twin so a phrase
+ *  SPLIT across tokens ("su icide" -> marked "su|icide") still matches.
+ *  Only at top level: nothing is inserted inside groups or character
+ *  classes, only at seams between literals and at group boundaries.
+ *  Non-ASCII (CJK) literals interleave too — a spaced "自 杀" was
+ *  recoverable in the old channel and stays recoverable now. MUST mirror
+ *  the backend's _interleave_optional_marks. */
+function interleaveOptionalMarks(src: string): string {
+  const out: string[] = [];
+  let depth = 0;
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i]!;
+    out.push(ch);
+    if (ch === "(" || ch === "[") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")" || ch === "]") {
+      depth = Math.max(0, depth - 1);
+      const nxt = src[i + 1];
+      if (depth === 0 && nxt !== undefined && (nxt === "(" || isLiteralChar(nxt))) {
+        out.push("\\|?");
+      }
+      continue;
+    }
+    if (depth > 0) continue;
+    const nxt = src[i + 1];
+    if (nxt !== undefined && isLiteralChar(ch) && (nxt === "(" || isLiteralChar(nxt))) {
+      out.push("\\|?");
+    }
+  }
+  return out.join("");
+}
+
+/** Count literal ASCII letters outside groups/classes — the shortness test
+ *  for whether a twin may carry internal optional marks. MUST mirror the
+ *  backend's _toplevel_literal_letters. */
+function toplevelLiteralLetters(pattern: string): number {
+  let depth = 0;
+  let count = 0;
+  let escaped = false;
+  for (const ch of pattern) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === "(" || ch === "[") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")" || ch === "]") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0 && ch >= "a" && ch <= "z") count += 1;
+  }
+  return count;
+}
+
+/** The marked-concatenation twin of a tier pattern (2026-09-28 deep
+ *  audit), matched against concatJoin's "|" -marked text: every internal
+ *  \s+ becomes an OPTIONAL mark; LONG patterns additionally interleave
+ *  "\|?" between literal letters (word-split evasion stays recoverable);
+ *  SHORT patterns (<=4 literal letters: "kys") never take internal marks
+ *  (a 3-letter mark-tolerant twin would match the "rocky sunset"
+ *  "-ky"+"s-" junction again); the phrase start is pinned to a token
+ *  boundary ("(?:^|\|)") — the fix for the "-end"-word false positives
+ *  ("weekend it all"); a trailing (?![a-z]) is kept for extendable
+ *  endings. MUST mirror the backend's _concat_pattern. */
 function concatPattern(pattern: string): string {
-  let src = pattern.split("\\s+").join("").split("\\b").join("");
+  let src = pattern.split("\\s+").join("\\|?");
+  src = src.split("\\b").join("");
+  // The extendable-ending test runs on the PRE-interleave src: after
+  // interleaving, the ending word is fragmented by \|? seams.
   const m = src.match(/([a-z]+)\)?$/);
   const lastWord = m?.[1];
-  if (lastWord !== undefined && CONCAT_ANCHORED_ENDINGS.some((e) => lastWord.endsWith(e))) {
+  const anchored =
+    lastWord !== undefined && CONCAT_ANCHORED_ENDINGS.some((e) => lastWord.endsWith(e));
+  if (toplevelLiteralLetters(pattern) > 4) {
+    src = interleaveOptionalMarks(src);
+  }
+  src = "(?:^|\\|)" + src;
+  if (anchored) {
     src += "(?![a-z])";
   }
   return src;

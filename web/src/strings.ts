@@ -71,6 +71,17 @@ function resolveLocale(pref: LanguagePref): Locale {
 let languagePref: LanguagePref = storedLanguagePref();
 let currentLocale: Locale = resolveLocale(languagePref);
 
+/** 2026-09-28 audit (INFO): the document's own language tag follows the
+ *  active locale (applyLanguagePref, and the module boot below) so
+ *  screen readers and translation tooling see the language the UI is
+ *  actually rendering. Guarded — the module also loads in DOM-less
+ *  runtimes (node tests) where `document` does not exist. */
+function announceLocale(): void {
+  const doc = (globalThis as { document?: { documentElement?: { lang: string } } }).document;
+  if (doc?.documentElement) doc.documentElement.lang = currentLocale;
+}
+announceLocale();
+
 type LanguageListener = () => void;
 const languageListeners = new Set<LanguageListener>();
 
@@ -84,6 +95,7 @@ export function applyLanguagePref(pref: LanguagePref): void {
   languagePref = pref;
   writeLanguagePref(pref);
   currentLocale = resolveLocale(pref);
+  announceLocale();
   notifyLanguageChanged();
 }
 
@@ -101,18 +113,19 @@ export function subscribeLanguage(listener: LanguageListener): () => void {
   };
 }
 
-export function setLocale(locale: Locale): void {
-  currentLocale = locale;
-}
-
 export function getLocale(): Locale {
   return currentLocale;
 }
 
 /** Test seam: pin the locale for the suite (tests run deterministic under
- *  "en" regardless of the machine running them; i18n tests flip it). */
+ *  "en" regardless of the machine running them; i18n tests flip it).
+ *  2026-09-28 audit (INFO): the old setLocale() export was a test-only
+ *  backdoor that bypassed notify/persist — production code must go
+ *  through applyLanguagePref, so the seam is folded here (with the
+ *  documentElement tag kept in step like every other path). */
 export function __setLocaleForTests(locale: Locale): void {
   currentLocale = locale;
+  announceLocale();
 }
 
 const catalogs: Record<Locale, Record<string, string>> = { en, es };

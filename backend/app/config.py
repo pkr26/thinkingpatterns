@@ -543,6 +543,15 @@ class Settings:
             ):
                 if explicit.strip() and len(explicit.strip()) < 32:
                     raise RuntimeError(f"{name} must be at least 32 characters")
+            # 2026-09-28 deep audit: the metrics bearer token gates /metrics
+            # in production and previously booted with any value (a 1-char
+            # token met the same brute-force analysis as a 3-char signing
+            # secret). Same floor as every other credential-bearing setting.
+            if self.metrics_token.strip() and len(self.metrics_token.strip()) < 32:
+                raise RuntimeError(
+                    "MINDPATTERN_METRICS_TOKEN must be at least 32 characters "
+                    f"in environment {self.environment!r}"
+                )
         # scrypt N: a power of two within [2^15, 2^20]. A non-power-of-two N
         # is legal for hashlib but has no analyzed cost profile, and a
         # typo'd order of magnitude must fail at boot, not as a login
@@ -831,13 +840,17 @@ class Settings:
             ops_rate_window=_int_env("MINDPATTERN_OPS_RATE_WINDOW", 60),
             access_log_retention_days=_int_env("MINDPATTERN_ACCESS_LOG_RETENTION_DAYS", 730),
             llm_url=os.getenv("MINDPATTERN_LLM_URL", ""),
-            llm_api_key=os.getenv("MINDPATTERN_LLM_API_KEY", ""),
+            # 2026-09-28 deep audit: file-mount resolution like every other
+            # credential-bearing secret — these two were the last still
+            # plain-env-only, readable via `docker inspect` despite the
+            # comment above claiming the class was closed.
+            llm_api_key=_secret_env("MINDPATTERN_LLM_API_KEY"),
             llm_model=os.getenv("MINDPATTERN_LLM_MODEL", "gpt-4o-mini"),
             llm_provider_name=os.getenv("MINDPATTERN_LLM_PROVIDER_NAME", ""),
             llm_data_retention=os.getenv("MINDPATTERN_LLM_DATA_RETENTION", ""),
             llm_policy_version=os.getenv("MINDPATTERN_LLM_POLICY_VERSION", "v1"),
             therapist_sharing_enabled=_optional_bool_env("MINDPATTERN_THERAPIST_SHARING_ENABLED"),
-            therapist_enrollment_token=os.getenv("MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN", ""),
+            therapist_enrollment_token=_secret_env("MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN"),
             cors_origins=_cors_origins(),
             trust_proxy_headers=_bool_env("MINDPATTERN_TRUST_PROXY_HEADERS"),
             trusted_proxy_ips=_trusted_proxy_ips(),

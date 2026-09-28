@@ -465,14 +465,30 @@ if (tracked.status !== 0) {
   fail("git keystore hygiene", "`git ls-files` could not run (not a git checkout?)");
 } else {
   const files = tracked.stdout.split("\n");
-  const badKeystores = files.filter((f) => /keystore\.(properties|jks|keystore|p12|pfx)$/i.test(f) && !f.endsWith(".example"));
-  const committedReleaseKey = files.filter((f) => f.endsWith("keystore.properties"));
-  if (badKeystores.length === 0 && committedReleaseKey.length === 0) {
-    pass("git keystore hygiene", "only the .example template and debug.keystore are tracked");
+  // 2026-09-28 audit: the old pattern only matched files literally NAMED
+  // "keystore.*" — `release-signing.jks`, `prod.p12`, `client.keystore`
+  // or a provisioning profile all sailed through. Any key-material
+  // EXTENSION is now matched, with the reviewed debug/example allowlist
+  // carved out explicitly.
+  const KEY_MATERIAL = /\.(jks|keystore|p12|pfx|mobileprovision)$/i;
+  const KEY_DEBUG_ALLOWLIST = new Set([
+    // The RN Android template's public debug keystore (password "android",
+    // shipped by the template itself — zero release value).
+    join("android", "app", "debug.keystore"),
+  ]);
+  const badKeystores = files.filter((f) =>
+    (KEY_MATERIAL.test(f) || f.endsWith("keystore.properties"))
+    && !f.endsWith(".example")
+    && !KEY_DEBUG_ALLOWLIST.has(f));
+  if (badKeystores.length === 0) {
+    pass(
+      "git keystore hygiene",
+      "no *.jks|*.keystore|*.p12|*.pfx|*.mobileprovision or keystore.properties outside the debug/example allowlist is tracked",
+    );
   } else {
     fail(
       "git keystore hygiene",
-      `release keystore material must never be tracked: ${[...new Set([...badKeystores, ...committedReleaseKey])].join(", ")}`,
+      `release keystore/provisioning material must never be tracked: ${[...new Set(badKeystores)].join(", ")}`,
     );
   }
 }

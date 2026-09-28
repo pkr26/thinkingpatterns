@@ -3583,7 +3583,9 @@ def _phrase_clusters(window: list[JournalEntry]) -> list[phrase_miner.PhraseClus
 
 
 def _detect_phrases(
-    clusters: list[phrase_miner.PhraseCluster], allow_rumination: bool = True
+    clusters: list[phrase_miner.PhraseCluster],
+    allow_rumination: bool = True,
+    language: str | None = None,
 ) -> list[_Signal]:
     """Near-duplicate clusters; negative ones surface as rumination.
 
@@ -3605,9 +3607,18 @@ def _detect_phrases(
     for cluster in clusters:
         days = sorted({ref.day for ref in cluster.members})
         variants = sorted({ref.text for ref in cluster.members})
-        member_sentiments = [sentiment_score(ref.text.split()) for ref in cluster.members]
+        # Language-threaded (2026-09-28 deep audit): these used to score
+        # with the EN-winning merge and the negator UNION even when the
+        # corpus detected Spanish — muted weights on the exact 14 EN/ES
+        # collision words the per-language selectors exist to fix, and a
+        # negativity detail inconsistent with the corpus's own mood
+        # scoring two functions up.
+        member_sentiments = [
+            sentiment_score(ref.text.split(), language) for ref in cluster.members
+        ]
         member_negators = [
-            sum(1 for t in ref.text.split() if t in NEGATORS) for ref in cluster.members
+            sum(1 for t in ref.text.split() if t in _negators_for(language))
+            for ref in cluster.members
         ]
         negativity = sum(member_sentiments) / len(member_sentiments)
         negators = sum(member_negators) / len(member_negators)
@@ -3772,7 +3783,7 @@ def _detect_cadence(entry_days: set[date], today: date) -> list[_Signal]:
     their skew), failing closed on degenerate windows.
 
     n_eff deflation (2026-09-26 statistical review, item 6 — mirrors the
-    instability detector's brain.py:3057 machinery): ADJACENT inter-writing
+    instability detector's n_eff machinery around brain.py:3498): ADJACENT inter-writing
     gaps share a calendar day by construction (gap_i ends where gap_{i+1}
     begins), so the two sides' gap series are structurally dependent — a
     one-day skip moves BOTH neighbouring gaps in opposite directions.
@@ -4872,7 +4883,9 @@ def update(
         signals.extend(
             _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1)
         )
-        signals.extend(_detect_phrases(clusters, allow_rumination=language_ok))
+        signals.extend(
+            _detect_phrases(clusters, allow_rumination=language_ok, language=language)
+        )
         # EWMA baseline re-anchor: once a stored shift is established, the
         # chart re-learns the new normal from post-shift data only.
         anchor = _mood_reanchor_day(store, today)
@@ -4961,7 +4974,17 @@ def update(
     # statement than "your words mentioned it", and the card copy can be
     # honest about which.
     for signal in signals:
-        if signal.label in tag_vocab:
+        # 2026-09-28 deep audit (LOW): the tag mark used to fire on label
+        # membership alone — a text-mined topic sharing a name with a tag
+        # used elsewhere claimed "you tagged it" with zero tag evidence on
+        # its own days. The mark now requires at least one evidence day
+        # that actually carried the tag.
+        tag_days = tag_distinct_days.get(signal.label)
+        if (
+            signal.label in tag_vocab
+            and tag_days is not None
+            and any(day in tag_days for day in signal.evidence_days)
+        ):
             signal.detail["source"] = "tag"
         if signal.label in person_names:
             signal.detail["source"] = "person"

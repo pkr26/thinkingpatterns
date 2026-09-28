@@ -9,10 +9,11 @@
  * from every screen, matching the navigation contract in
  * src/navigation.tsx).
  *
- * With no icon library available, hierarchy stays typographic (matching
- * NavRow's approach): the active destination carries the accent color and
- * a heavier weight; "Get help" keeps its distinct help surface. Labels
- * cap their font multiplier so large text cannot break the row.
+ * With no icon library available, hierarchy stays typographic: the active
+ * destination carries the accent color and a heavier weight; "Get help"
+ * keeps its distinct help surface. Labels cap their font multiplier so
+ * large text cannot break the row. (The retired NavRow this replaced was
+ * deleted — audit 2026-09-28 INFO.)
  */
 import React from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";

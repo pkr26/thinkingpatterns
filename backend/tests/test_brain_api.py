@@ -305,7 +305,7 @@ async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(
     await seed(client, emu, days=70)
     # Two recomputes at the replication cadence: statistical kinds surface
     # only on the second observation, so the model's SECOND call receives
-    # non-empty findings to narrate.
+    # non-empty findings to narrate. The FIRST pass surfaces no
     first = await emu.recompute(client)
     assert first["analyzer"] == "llm"
     await seed_extra_day(client, emu)

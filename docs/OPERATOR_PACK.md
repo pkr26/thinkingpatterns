@@ -2,7 +2,7 @@
 
 Everything an operator needs to review, complete, and sign before
 serving this product to the public. Each document states what the
-PRODUCT already does (verified against the tree, 2026-09-26) and what
+PRODUCT already does (verified against the tree, 2026-09-28) and what
 the OPERATOR must decide, fill, or sign. Items marked `OPERATOR-FILL`
 or `LEGAL-REVIEW` are deliberately incomplete: inventing a controller
 identity or a legal determination in source control would be worse
@@ -26,7 +26,7 @@ this safely?) → DATA_RETENTION_SCHEDULE + SUBPROCESSOR_BAA_REGISTER
 (fill the contacts, rehearse the restore).
 
 Product-side facts these documents rely on (all code-verified
-2026-09-26): client-side AES-256-GCM everywhere, random data-key
+2026-09-28): client-side AES-256-GCM everywhere, random data-key
 envelope v2 (v1 legacy supported), server-side scrypt N=2¹⁷ verifiers,
 purpose-split server secrets, exact sliding-window rate limits, forward
 hash-chained access audit log, hard cascade account deletion with a

@@ -143,6 +143,27 @@ async def test_logout_revokes_only_the_presented_token(client):
     ok = await client.get("/api/entries", headers={"Authorization": f"Bearer {relogged['token']}"})
     assert ok.status_code == 200
 
+    # 2026-09-28 deep audit (test-quality LOW): the discriminating pin the
+    # body previously lacked — a SIBLING token from a different login must
+    # survive this token's logout (jti revocation, not the old kill-all
+    # epoch bump). Without this, a regression back to epoch-bump semantics
+    # passed this test silently. emu.headers tracks the NEWEST login, so
+    # the acting bearer and the sibling must be captured explicitly.
+    acting_login = await emu.login(client)
+    acting = acting_login["token"]
+    sibling_login = await emu.login(client)
+    sibling = sibling_login["token"]
+    response = await client.post(
+        "/api/auth/logout", headers={"Authorization": f"Bearer {acting}"}
+    )
+    assert response.status_code == 204
+    sibling_alive = await client.get(
+        "/api/entries", headers={"Authorization": f"Bearer {sibling}"}
+    )
+    assert sibling_alive.status_code == 200, (
+        "logout killed a sibling token — kill-all semantics regressed"
+    )
+
 
 async def test_protected_routes_require_token(client):
     for method, path in [

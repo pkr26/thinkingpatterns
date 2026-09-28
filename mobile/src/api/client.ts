@@ -26,12 +26,50 @@ const USERNAME_KEY = "@mindpattern/username";
 /** Per-username KDF salt cache key. The salt itself is a PUBLIC value (the
  *  server hands it to anyone who asks) — but WHICH server it came from is
  *  not: a cached salt is stored origin-bound so one server's salt can never
- *  be replayed as another's (cross-origin KDF poisoning). */
-const saltKey = (username: string): string => `@mindpattern/salt_${username}`;
+ *  be replayed as another's (cross-origin KDF poisoning).
+ *
+ *  Audit 2026-09-28 (LOW): the username part is base64url-encoded — the
+ *  same scopeId discipline offlineQueue.ts applies — so the AsyncStorage
+ *  key space no longer embeds a readable account name (keys are observable
+ *  metadata on a device, e.g. in backups). Encoded, not encrypted: the
+ *  VALUE is unchanged. Reads migrate any legacy raw-username key across
+ *  (see readThroughMigrate). */
+const scopeUser = (username: string): string => Buffer.from(username, "utf8").toString("base64url");
+const saltKey = (username: string): string => `@mindpattern/salt_${scopeUser(username)}`;
+const legacySaltKey = (username: string): string => `@mindpattern/salt_${username}`;
 
-/** Per-username key-envelope cache key (the same origin-bound discipline;
- *  see api.cacheKeyEnvelope). */
-const envelopeKey = (username: string): string => `@mindpattern/keyenvelope_${username}`;
+/** Per-username key-envelope cache key (the same origin-bound discipline
+ *  and the same encoded-name form; see api.cacheKeyEnvelope). */
+const envelopeKey = (username: string): string => `@mindpattern/keyenvelope_${scopeUser(username)}`;
+const legacyEnvelopeKey = (username: string): string => `@mindpattern/keyenvelope_${username}`;
+
+/** Read-through key migration (audit 2026-09-28): when the encoded key is
+ *  absent but the legacy raw-username key holds a value, move it across and
+ *  retire the old key. Best-effort by constraint — if the rewrite fails the
+ *  legacy value is still SERVED (a read must never fail because a cleanup
+ *  could not complete); the next read retries the migration. */
+async function readThroughMigrate(legacy: string, next: string): Promise<string | null> {
+  let value: string | null = null;
+  try {
+    value = await AsyncStorage.getItem(next);
+  } catch {
+    value = null;
+  }
+  if (value !== null) return value;
+  try {
+    const old = await AsyncStorage.getItem(legacy);
+    if (old === null) return null;
+    await AsyncStorage.setItem(next, old);
+    await AsyncStorage.removeItem(legacy);
+    return old;
+  } catch {
+    try {
+      return await AsyncStorage.getItem(legacy);
+    } catch {
+      return null;
+    }
+  }
+}
 
 /** The cached envelope record: what a v2 (or v1-marker) offline unlock
  *  needs. v2 records carry the wrapped data key + the kdf_params blob the
@@ -82,6 +120,11 @@ const MAX_LIST_SNAPSHOT_RESTARTS = 1;
  * Sending it on every modern list request opts into continuation headers,
  * rather than treating a byte-short response as end-of-history. */
 export const ENTRY_PAGE_BYTES = 2 * 1024 * 1024;
+/** The measures twin (backend MEASURE_PAGE_BLOB_BYTES): the same 2 MiB
+ *  encrypted-blob page budget, opt-in via page_bytes. Audit 2026-09-28
+ *  (LOW): the client used to omit it and count rows only — a byte-heavy
+ *  page over the server's budget answered 413 instead of continuing. */
+export const MEASURE_PAGE_BYTES = 2 * 1024 * 1024;
 /** Entry ids this client generates are [A-Za-z0-9_-]; anything else in this
  *  position is at-rest tampering and must never reach the URL path. The
  *  1-64 length band matches the backend exactly (backend/app/schemas.py
@@ -274,6 +317,13 @@ function isOriginBoundKey(key: string): boolean {
     key.startsWith("@mindpattern/question_feedback.") ||
     key.startsWith("mindpattern.moodlog.") ||
     key.startsWith("@mindpattern/crisis_dialog_") ||
+    // Audit 2026-09-28 (LOW): the pending-measure draft (pendingMeasure.ts)
+    // and the safety plan (safetyPlan.ts) are per-account local state in the
+    // same class as the mood log — a draft keyed under origin A's account
+    // must not survive into origin B's fresh session. Same literal-prefix
+    // idiom as the mood log above (neither module exports its constant).
+    key.startsWith("@mindpattern/pending_measure_") ||
+    key.startsWith("@mindpattern/safety_plan_") ||
     // M-1/M-2 (2026-09-20): both rollback guards fail closed once a mark
     // exists — a mark remembered against origin A must never judge origin
     // B's (perfectly honest, lower) generations.
@@ -452,6 +502,20 @@ export const API_ERROR_CODES = [
   // sharing consent cannot cover a measures read; TherapistShareScreen
   // branches on it to show the calm "sharing terms updated" state.
   "disclosure_outdated",
+  // Audit 2026-09-28 (code drift): each verified against backend/app —
+  // sanitizeCode erased these to undefined before, degrading every branch
+  // that keys on them to status-only matching.
+  // auth.py: 401 wrong verifier (vs a dead session's plain "unauthorized").
+  "invalid_credentials",
+  // auth.py/account.py: the account's TOTP second factor states.
+  "totp_required",
+  "totp_code_invalid",
+  // deps.py DEFAULT_ERROR_CODES[400] + middleware/insights explicit uses.
+  "bad_request",
+  // deps.py DEFAULT_ERROR_CODES[503] + explicit maintenance paths.
+  "service_unavailable",
+  // account.py: the LLM recompute provider is down (surfaces as retryable).
+  "llm_unavailable",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -624,7 +688,25 @@ async function request(
     }
   }
   if (response.status === 204) return opts.includeResponse ? { data: null, response } : null;
-  const data = await response.json().catch(() => ({}));
+  // BODY-READ TIMEOUT (audit 2026-09-28): the headers-phase timer above is
+  // cleared the moment fetch() resolves — i.e. when the response HEADERS
+  // arrived — which left the body read below unbounded: a server that
+  // trickles its body could park the caller forever. Re-arm the SAME
+  // controller for the read; an abort during it must surface as the typed
+  // timeout, never fall through to the malformed-JSON {} fallback (an
+  // empty payload that looks like success).
+  const bodyTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    if (controller.signal.aborted) {
+      throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    data = {};
+  } finally {
+    clearTimeout(bodyTimer);
+  }
   if (!response.ok) {
     // Audit 2026-09-25: a 410 only means account death when the server says
     // so in its code (account_deleted/gone, exactly the web client's gate).
@@ -685,6 +767,14 @@ function entriesRevisionConflict(): ApiError {
   return new ApiError(409, "entries changed while paging; retry the request", "collection_changed");
 }
 
+/** The measures twin (audit 2026-09-28): the backend answers 409
+ *  collection_changed on a stale X-Measures-Revision, and a client-side pin
+ *  mismatch maps to the same retryable shape — one-restart semantics,
+ *  exactly the entries contract. */
+function measuresRevisionConflict(): ApiError {
+  return new ApiError(409, "measures changed while paging; retry the request", "collection_changed");
+}
+
 /** One entry row as the backend serializes it (EntryOut). The server is
  *  untrusted — this types the shape for callers, it is not a guarantee, and
  *  unknown extra fields (e.g. a future "sensitive" flag) pass through
@@ -705,6 +795,10 @@ export interface ListedEntry {
  * this as a string: the backend permits the full signed-64-bit range, which
  * JavaScript Numbers cannot represent exactly. */
 export type EntriesRevision = string;
+
+/** The measures snapshot marker (X-Measures-Revision): the identical wire
+ *  grammar as EntriesRevision — an opaque decimal token, never a Number. */
+export type MeasuresRevision = EntriesRevision;
 
 /** A byte-bounded entry response. `nextOffset` is present only when the
  * server has more rows, and is validated before callers can act on it.
@@ -727,49 +821,85 @@ export interface ListEntriesPageOptions {
   expectedRevision?: EntriesRevision;
 }
 
-function invalidEntryPageResponse(): never {
-  throw new ApiError(0, "invalid entry page response — refusing the response");
+/** One measure row as the backend serializes it (MeasureOut). Same
+ *  untrusted-server posture as ListedEntry: unknown fields pass through. */
+export interface ListedMeasure {
+  id: string;
+  client_measure_id: string;
+  blob: string;
+  measure_date: string;
+  received_at: string;
+}
+
+/** A byte-bounded measures response — the same contract shape as
+ *  ListedEntriesPage (audit 2026-09-28). */
+export interface ListedMeasuresPage {
+  measures: ListedMeasure[];
+  nextOffset: number | null;
+  revision: MeasuresRevision | null;
+}
+
+export interface ListMeasuresPageOptions {
+  limit?: number;
+  offset?: number;
+  pageBytes?: number;
+  /** A revision returned by a preceding page (the wire name is
+   *  `expected_revision`); a changed collection answers 409 instead of
+   *  silently mixing two snapshots. */
+  expectedRevision?: MeasuresRevision;
+}
+
+function invalidPageResponse(collection: "entry" | "measure"): never {
+  throw new ApiError(0, `invalid ${collection} page response — refusing the response`);
 }
 
 /** Parse the paging signal as a strict, non-ambiguous integer. The modern
- * server promises offset + returned-row-count, so accepting a guessed or
- * malformed offset could skip history or create an unbounded sync loop. An
- * older server ignores `page_bytes` and has no header; its only safe fallback
- * is the legacy rule that an exactly-full requested page has another page. */
-function entryNextOffset(header: string | null, offset: number, entries: ListedEntry[], limit: number): number | null {
-  if (entries.length > limit) invalidEntryPageResponse();
-  const expected = offset + entries.length;
-  if (!Number.isSafeInteger(expected)) invalidEntryPageResponse();
-  if (header === null) return entries.length === limit ? expected : null;
-  if (!/^(?:0|[1-9][0-9]*)$/.test(header)) invalidEntryPageResponse();
+ *  server promises offset + returned-row-count, so accepting a guessed or
+ *  malformed offset could skip history or create an unbounded sync loop. An
+ *  older server ignores `page_bytes` and has no header; its only safe fallback
+ *  is the legacy rule that an exactly-full requested page has another page.
+ *  Shared by the entries and measures walks (audit 2026-09-28). */
+function pageNextOffset(
+  collection: "entry" | "measure",
+  header: string | null,
+  offset: number,
+  rows: readonly unknown[],
+  limit: number,
+): number | null {
+  if (rows.length > limit) invalidPageResponse(collection);
+  const expected = offset + rows.length;
+  if (!Number.isSafeInteger(expected)) invalidPageResponse(collection);
+  if (header === null) return rows.length === limit ? expected : null;
+  if (!/^(?:0|[1-9][0-9]*)$/.test(header)) invalidPageResponse(collection);
   const nextOffset = Number(header);
   if (
     !Number.isSafeInteger(nextOffset) ||
-    entries.length === 0 ||
+    rows.length === 0 ||
     nextOffset !== expected
   ) {
-    invalidEntryPageResponse();
+    invalidPageResponse(collection);
   }
   return nextOffset;
 }
 
-/** The backend's canonical nonnegative signed-64-bit decimal grammar. Do
- * not use Number() here: revisions above Number.MAX_SAFE_INTEGER would be
- * rounded and could turn a valid snapshot token into a different request. */
-const ENTRY_REVISION_PATTERN = /^(?:0|[1-9][0-9]{0,18})$/;
-const MAX_ENTRY_REVISION = "9223372036854775807";
+/** The backend's canonical nonnegative signed-64-bit decimal grammar (the
+ * entries AND measures snapshot markers share it). Do not use Number()
+ * here: revisions above Number.MAX_SAFE_INTEGER would be rounded and could
+ * turn a valid snapshot token into a different request. */
+const COLLECTION_REVISION_PATTERN = /^(?:0|[1-9][0-9]{0,18})$/;
+const MAX_COLLECTION_REVISION = "9223372036854775807";
 
-function isEntriesRevision(value: unknown): value is EntriesRevision {
+function isCollectionRevision(value: unknown): value is EntriesRevision {
   return (
     typeof value === "string" &&
-    ENTRY_REVISION_PATTERN.test(value) &&
-    (value.length < MAX_ENTRY_REVISION.length || value <= MAX_ENTRY_REVISION)
+    COLLECTION_REVISION_PATTERN.test(value) &&
+    (value.length < MAX_COLLECTION_REVISION.length || value <= MAX_COLLECTION_REVISION)
   );
 }
 
-function entryRevision(header: string | null): EntriesRevision | null {
+function pageRevision(collection: "entry" | "measure", header: string | null): EntriesRevision | null {
   if (header === null) return null; // headerless servers retain legacy paging
-  if (!isEntriesRevision(header)) invalidEntryPageResponse();
+  if (!isCollectionRevision(header)) invalidPageResponse(collection);
   return header;
 }
 
@@ -875,7 +1005,7 @@ export const api = {
   /** The last server-known salt for this username FROM THE CURRENT SERVER,
    *  or null. Enables offline vault unlock without cross-origin replay. */
   getCachedSalt: async (username: string) => {
-    const raw = await AsyncStorage.getItem(saltKey(username));
+    const raw = await readThroughMigrate(legacySaltKey(username), saltKey(username));
     // Stryker disable next-line ConditionalExpression: with the guard skipped, JSON.parse of a falsy raw ("" / null) throws or yields null inside the try below, and the catch returns the same null
     if (!raw) return null;
     try {
@@ -901,7 +1031,10 @@ export const api = {
     }
   },
   clearCachedSalt: async (username: string) => {
+    // Both forms: a clear must be complete whether or not a read ever got
+    // to migrate the legacy key across (audit 2026-09-28).
     await AsyncStorage.removeItem(saltKey(username));
+    await AsyncStorage.removeItem(legacySaltKey(username));
   },
   /** v2 key-envelope cache (2026-09-26): the last server-known envelope for
    *  this username FROM THE CURRENT SERVER. The wrapped data key is
@@ -918,7 +1051,7 @@ export const api = {
     );
   },
   getCachedKeyEnvelope: async (username: string): Promise<KeyEnvelopeCacheRecord | null> => {
-    const raw = await AsyncStorage.getItem(envelopeKey(username));
+    const raw = await readThroughMigrate(legacyEnvelopeKey(username), envelopeKey(username));
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as { v?: unknown; o?: unknown } & Partial<KeyEnvelopeCacheRecord>;
@@ -940,7 +1073,9 @@ export const api = {
     }
   },
   clearCachedKeyEnvelope: async (username: string) => {
+    // Both forms (same completeness constraint as clearCachedSalt).
     await AsyncStorage.removeItem(envelopeKey(username));
+    await AsyncStorage.removeItem(legacyEnvelopeKey(username));
   },
   login: (username: string, authKeyB64: string) =>
     // noBearer: a login 401 means the VERIFIER was wrong (wrong password),
@@ -978,38 +1113,118 @@ export const api = {
       `${API_PREFIX}/measures`,
       { client_measure_id: clientMeasureId, blob: blobB64, measure_date: measureDate },
     ),
-  /** One offset page of the patient's own measures, newest first (the
-   *  server orders by (measure_date, received_at, id) DESC — a
-   *  deterministic total order, so offset pages tile cleanly). */
-  listMeasuresPage: (limit: number, offset: number) => {
-    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return request("GET", `${API_PREFIX}/measures?${params.toString()}`);
+  /** One bounded ciphertext page of the patient's own measures, newest
+   *  first (the server orders by (measure_date, received_at, id) DESC — a
+   *  deterministic total order, so offset pages tile cleanly).
+   *  Audit 2026-09-28 (LOW): the entries paging contract, mirrored — sends
+   *  page_bytes so a byte-heavy page continues via X-Next-Offset instead of
+   *  answering 413, and pins the X-Measures-Revision snapshot the server
+   *  serves (backend measures.py) so a concurrent create answers 409
+   *  collection_changed rather than silently shifting offset windows. */
+  listMeasuresPage: async (options: ListMeasuresPageOptions = {}): Promise<ListedMeasuresPage> => {
+    const limit = options.limit ?? 100;
+    const offset = options.offset ?? 0;
+    const pageBytes = options.pageBytes ?? MEASURE_PAGE_BYTES;
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 500 ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      !Number.isInteger(pageBytes) ||
+      pageBytes < 1 ||
+      pageBytes > MEASURE_PAGE_BYTES ||
+      (options.expectedRevision !== undefined && !isCollectionRevision(options.expectedRevision))
+    ) {
+      throw new ApiError(0, "invalid measure page request — refusing the request");
+    }
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+      page_bytes: String(pageBytes),
+    });
+    if (options.expectedRevision !== undefined) params.set("expected_revision", options.expectedRevision);
+    const result = (await request(
+      "GET",
+      `${API_PREFIX}/measures?${params.toString()}`,
+      undefined,
+      {},
+      { includeResponse: true },
+    )) as { data: unknown; response: Response };
+    if (!Array.isArray(result.data)) invalidPageResponse("measure");
+    const measures = result.data as ListedMeasure[];
+    const nextOffsetHeader =
+      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Next-Offset") : null;
+    const revisionHeader =
+      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Measures-Revision") : null;
+    const revision = pageRevision("measure", revisionHeader);
+    // Same snapshot-echo rule as entries: a pinned walk that sees a
+    // different revision treats it as the retryable conflict, never a mixed
+    // history. Headerless legacy servers never send expected_revision.
+    if (options.expectedRevision !== undefined && revision !== options.expectedRevision) {
+      throw measuresRevisionConflict();
+    }
+    return { measures, nextOffset: pageNextOffset("measure", nextOffsetHeader, offset, measures, limit), revision };
   },
   /** All stored measures, newest first. M-4/L-55 (2026-09-20): the write
    *  quota is 2000 but a single unpaged GET returned only the server's
    *  default page of 100 — everything older was stored and quota-charged
-   *  yet invisible to the patient. Walk offset pages of the server cap
-   *  (500) until a short page, dedup by id (a concurrent insert shifts
-   *  offset windows by one), and stop at the quota bound so a lying
-   *  server cannot keep the app paging forever. */
+   *  yet invisible to the patient. Walk byte-bounded pages via
+   *  listMeasuresPage (audit 2026-09-28: page_bytes + X-Next-Offset + the
+   *  revision pin, exactly the entries walk), dedup by id (a concurrent
+   *  insert shifts offset windows by one), and stop at the quota bound so a
+   *  lying server cannot keep the app paging forever. One clean restart on
+   *  a revision conflict obtains a fresh snapshot; a second is surfaced. */
   listMeasures: async (): Promise<any[]> => {
-    const PAGE_SIZE = 500;
-    const MAX_MEASURES = 2000; // mirrors the server's per-user quota
-    const rows: any[] = [];
-    const seen = new Set<string>();
-    for (let offset = 0; offset < MAX_MEASURES; offset += PAGE_SIZE) {
-      const page = (await request("GET", `${API_PREFIX}/measures?limit=${PAGE_SIZE}&offset=${offset}`)) as any[];
-      if (!Array.isArray(page)) return rows;
-      for (const row of page) {
-        if (row && typeof row.id === "string") {
-          if (seen.has(row.id)) continue;
-          seen.add(row.id);
+    for (let attempt = 0; attempt <= MAX_LIST_SNAPSHOT_RESTARTS; attempt += 1) {
+      try {
+        const rows: any[] = [];
+        const seen = new Set<string>();
+        const pageSize = 500;
+        const MAX_MEASURES = 2000; // mirrors the server's per-user quota
+        let offset = 0;
+        let revision: MeasuresRevision | null = null;
+        let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
+        const getPage = async (pageOffset: number): Promise<ListedMeasuresPage> => {
+          const result = await api.listMeasuresPage({
+            limit: pageSize,
+            offset: pageOffset,
+            pageBytes: MEASURE_PAGE_BYTES,
+            ...(revisionMode === "snapshot" && revision !== null ? { expectedRevision: revision } : {}),
+          });
+          const receivedRevision = result.revision ?? null;
+          if (revisionMode === "unknown") {
+            revisionMode = receivedRevision === null ? "legacy" : "snapshot";
+            revision = receivedRevision;
+          } else if (
+            (revisionMode === "snapshot" && receivedRevision !== revision) ||
+            (revisionMode === "legacy" && receivedRevision !== null)
+          ) {
+            // A load-balanced deployment changed protocol modes during one
+            // walk — restart rather than mix unpinned and pinned pages.
+            throw measuresRevisionConflict();
+          }
+          return result;
+        };
+        for (; offset < MAX_MEASURES; ) {
+          const result = await getPage(offset);
+          for (const row of result.measures) {
+            if (row && typeof row.id === "string") {
+              if (seen.has(row.id)) continue; // page-boundary drift
+              seen.add(row.id);
+            }
+            rows.push(row);
+          }
+          if (result.nextOffset === null) break;
+          offset = result.nextOffset;
         }
-        rows.push(row);
+        return rows;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409 && attempt < MAX_LIST_SNAPSHOT_RESTARTS) continue;
+        throw err;
       }
-      if (page.length < PAGE_SIZE) break;
     }
-    return rows;
+    throw new ApiError(0, "could not obtain a stable measures history snapshot");
   },
   /** Offline-queue upload. Identical to createEntry but pinned to the origin
    *  the queue is scoped to: the request refuses to ship (OriginPinnedError,
@@ -1076,7 +1291,7 @@ export const api = {
       !Number.isInteger(pageBytes) ||
       pageBytes < 1 ||
       pageBytes > ENTRY_PAGE_BYTES ||
-      (options.expectedRevision !== undefined && !isEntriesRevision(options.expectedRevision))
+      (options.expectedRevision !== undefined && !isCollectionRevision(options.expectedRevision))
     ) {
       throw new ApiError(0, "invalid entry page request — refusing the request");
     }
@@ -1094,13 +1309,13 @@ export const api = {
       {},
       { includeResponse: true },
     )) as { data: unknown; response: Response };
-    if (!Array.isArray(result.data)) invalidEntryPageResponse();
+    if (!Array.isArray(result.data)) invalidPageResponse("entry");
     const entries = result.data as ListedEntry[];
     const nextOffsetHeader =
       typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Next-Offset") : null;
     const revisionHeader =
       typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Entries-Revision") : null;
-    const revision = entryRevision(revisionHeader);
+    const revision = pageRevision("entry", revisionHeader);
     // A modern server must echo the exact snapshot on every successful page.
     // Treat a missing/different header as a retryable conflict rather than
     // allowing a mixed history to reach the decrypting UI. Headerless legacy
@@ -1108,7 +1323,7 @@ export const api = {
     if (options.expectedRevision !== undefined && revision !== options.expectedRevision) {
       throw entriesRevisionConflict();
     }
-    return { entries, nextOffset: entryNextOffset(nextOffsetHeader, offset, entries, limit), revision };
+    return { entries, nextOffset: pageNextOffset("entry", nextOffsetHeader, offset, entries, limit), revision };
   },
   /** Paginates through every byte-bounded page (server caps each request at
    * 500 entries and 2 MiB of encrypted blobs). Modern servers issue a

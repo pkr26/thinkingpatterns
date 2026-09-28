@@ -63,12 +63,35 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         # staged journal entries once the request handler has finished.
         # Best-effort and no-op unless an audit row was appended AND the
         # journal path is configured.
+        #
+        # Deep audit 2026-09-28 (C-1): "committed" is sticky — require_user
+        # commits its auth read on EVERY authenticated request, and a
+        # handler that fails without an explicit rollback() is rolled back
+        # by the session close WITHOUT firing after_rollback. The old
+        # `committed and not rolled_back` guard therefore flushed staged
+        # lines for rows that never committed (e.g. a therapist read whose
+        # audit row was appended just before a 413 refusal), and the daily
+        # sweep then read the phantom journal-ahead state as "tail
+        # truncation" tamper evidence. The fix snapshots the staged-line
+        # count at each COMMIT: at request end only the prefix that rode a
+        # committed transaction is flushed; anything staged after the last
+        # commit belongs to a transaction that never committed and is
+        # dropped. A dropped committed line (explicit rollback after a
+        # later commit) leaves the journal BEHIND the DB head, which
+        # verification treats as benign crash-window semantics.
         committed = False
         rolled_back = False
+        staged_at_commit = 0
+
+        def _pending_count() -> int:
+            info = getattr(session, "info", None)
+            pending = (info or {}).get("mindpattern_audit_journal_pending")
+            return len(pending) if pending else 0
 
         def _mark_commit(_session=None) -> None:
-            nonlocal committed
+            nonlocal committed, staged_at_commit
             committed = True
+            staged_at_commit = _pending_count()
 
         def _mark_rollback(_session=None) -> None:
             nonlocal rolled_back
@@ -80,6 +103,13 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
             yield session
         finally:
             if committed and not rolled_back:
+                info = getattr(session, "info", None)
+                pending = (info or {}).get("mindpattern_audit_journal_pending") if info else None
+                if info is not None and pending is not None and len(pending) > staged_at_commit:
+                    # Uncommitted tail (staged after the last commit, never
+                    # committed — the silent close-rollback path): keep only
+                    # the prefix that rode a committed transaction.
+                    info["mindpattern_audit_journal_pending"] = pending[:staged_at_commit]
                 try:
                     await flush_audit_journal(
                         session, request.app.state.settings.audit_journal_path

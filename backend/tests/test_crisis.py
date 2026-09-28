@@ -231,7 +231,7 @@ class TestLetterDoublingFold:
         assert crisis._match_variants("kiill myself") == (
             "kiill myself",
             "kiill myself",
-            "kiillmyself",
+            "kiill|myself",
         )
 
 
@@ -301,14 +301,25 @@ class TestAuditRemediation2026_09_17:
             assert not crisis.matches_dialog(text), f"concat FP on {text!r}"
             assert not crisis.matches_suppress(text), f"concat FP on {text!r}"
 
-    def test_concat_patterns_are_the_space_free_twins(self):
-        # The transformation itself, pinned: \b and \s+ removed, trailing
-        # boundary re-added only for extendable endings.
-        assert crisis._concat_pattern(r"\bkill(?:ing)?\s+myself\b") == "kill(?:ing)?myself"
-        assert crisis._concat_pattern(r"\bwanna\s+(?:to\s+)?die\b") == r"wanna(?:to)?die(?![a-z])"
+    def test_concat_patterns_are_the_marked_twins(self):
+        # The transformation itself, pinned (2026-09-28 deep audit): the
+        # concat channel matches the "|"-marked token join — phrase start
+        # pinned to a token boundary (kills the "-end"/"-ky" junction false
+        # positives), internal \s+ and, for long phrases, letter seams
+        # become OPTIONAL marks (splits like "su icide" and spacing combos
+        # like "endit all" stay recoverable), trailing boundary re-added
+        # only for extendable endings.
+        assert (
+            crisis._concat_pattern(r"\bkill(?:ing)?\s+myself\b")
+            == r"(?:^|\|)k\|?i\|?l\|?l\|?(?:ing)?\|?m\|?y\|?s\|?e\|?l\|?f"
+        )
+        assert (
+            crisis._concat_pattern(r"\bwanna\s+(?:to\s+)?die\b")
+            == r"(?:^|\|)w\|?a\|?n\|?n\|?a\|?(?:to\|?)?d\|?i\|?e(?![a-z])"
+        )
         assert (
             crisis._concat_pattern(r"\bno\s+reason\s+to\s+(?:live|go\s+on)\b")
-            == r"noreasonto(?:live|goon)(?![a-z])"
+            == r"(?:^|\|)n\|?o\|?r\|?e\|?a\|?s\|?o\|?n\|?t\|?o\|?(?:live|go\|?on)(?![a-z])"
         )
 
 

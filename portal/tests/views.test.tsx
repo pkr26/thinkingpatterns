@@ -1058,13 +1058,13 @@ describe("PatientView 2026-09-17 wave", () => {
   it("note editing round-trips through the PATCH endpoint", async () => {
     mockedApi.notes.mockResolvedValueOnce({
       notes: [
-        { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+        { id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z", version: 4 },
       ],
       nextOffset: null,
     });
     mockedApi.updateNote.mockResolvedValueOnce({
       id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b",
-      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-17T00:00:00Z",
+      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-17T00:00:00Z", version: 5,
     });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
@@ -1073,7 +1073,9 @@ describe("PatientView 2026-09-17 wave", () => {
     await typeTextarea(root, "Editing note…", "Edited session note.");
     await press(root, "Save edit");
     await flush();
-    expect(mockedApi.updateNote).toHaveBeenCalledWith("n0", "SEALEDNOTE==");
+    // Deep-audit 2026-09-28: the edit must carry the version it was based
+    // on — the server 400s a body without base_version.
+    expect(mockedApi.updateNote).toHaveBeenCalledWith("n0", "SEALEDNOTE==", 4);
     expect(textOf(root)).toContain("Edited session note.");
   });
 

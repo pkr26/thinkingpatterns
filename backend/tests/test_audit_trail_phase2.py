@@ -36,7 +36,9 @@ async def test_patient_sees_who_accessed_their_data(client):
         await client.get(
             f"/api/therapist/patients/{patient.user_id}/insights", headers=therapist.headers
         )
-    ).status_code in (200, 204)
+    ).status_code == 200  # exact pin (2026-09-28): rows exist; the endpoint
+        # answers 204 only for a patient with no insight rows at all —
+        # the old (200, 204) bucket hid which shape this fixture produces.
     assert (
         await client.get(
             f"/api/therapist/patients/{patient.user_id}/entries", headers=therapist.headers

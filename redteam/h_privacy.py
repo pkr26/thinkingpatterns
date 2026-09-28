@@ -127,7 +127,11 @@ async def h3_erasure() -> None:
                 Entry.user_id == u["user_id"]))).scalars().all()
             insights = (await s.execute(select(Insight).where(
                 Insight.user_id == u["user_id"]))).scalars().all()
-        keys_held = len(getattr(app.state.key_store, "_keys", {}))
+        # Hard attribute access on purpose (2026-09-28 audit): a getattr
+        # default of {} would silently report "0 keys held" forever after a
+        # keystore rename — the crash into an ERROR verdict is the honest
+        # failure mode for a drifted probe.
+        keys_held = len(app.state.key_store._keys)
         # keys_held gates the verdict too (2026-09-19 audit, M-34): a
         # keystore still holding the deleted user's data key after 204 is
         # a FINDING even when every DB row is gone — the old gate printed

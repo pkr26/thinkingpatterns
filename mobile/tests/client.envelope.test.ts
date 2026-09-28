@@ -114,8 +114,14 @@ describe("key-envelope endpoint and cache", () => {
     await api.clearCachedKeyEnvelope("alice");
     expect(await api.getCachedKeyEnvelope("alice")).toBeNull();
 
+    // Audit 2026-09-28: seeding the LEGACY raw-username key — the
+    // read-through migration moves it to the encoded key before parsing
+    // (which refuses this half-v2 record).
     storage.setItem("@mindpattern/keyenvelope_alice", JSON.stringify({ v: 1, o: DEFAULT_BASE_URL, scheme: "v2", saltB64: "c2FsdA==" }));
     expect(await api.getCachedKeyEnvelope("alice")).toBeNull(); // no wrapped key: refuse
+    // The migration retired the legacy key (the record lives under the
+    // encoded name now, refused or not).
+    expect(await storage.getItem("@mindpattern/keyenvelope_alice")).toBeNull();
   });
 
   it("an origin switch wipes cached envelopes with the other origin-bound state", async () => {
@@ -124,6 +130,10 @@ describe("key-envelope endpoint and cache", () => {
     await setBaseUrl("https://real.example.test");
     await api.cacheKeyEnvelope("alice", { scheme: "v2", saltB64: "c2FsdA==", kdfParams: PARAMS, wrappedB64: WRAPPED_60_B64 });
     await setBaseUrl("https://phish.example.test");
+    // Audit 2026-09-28: the encoded-username key (base64url, the offlineQueue
+    // scopeId discipline) — and its legacy raw-username twin is covered by
+    // the same prefix purge.
+    expect(await storage.getItem("@mindpattern/keyenvelope_YWxpY2U")).toBeNull();
     expect(await storage.getItem("@mindpattern/keyenvelope_alice")).toBeNull();
   });
 });

@@ -120,12 +120,12 @@ async def _prune_access_log_once(app: FastAPI) -> None:
     test-only helper."""
     from datetime import timedelta
 
-    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import delete as sa_delete, select as sa_select
     from sqlalchemy import select
 
     from .api._audit import verify_access_log_chain
     from .api.therapist import PAIRING_RETENTION, access_log_prune_statement
-    from .models import AccessLog, PairingCode, TokenRevocation, utcnow
+    from .models import AccessLog, PairingCode, RekeyJournal, TokenRevocation, User, utcnow
 
     now = utcnow()
     settings = app.state.settings
@@ -135,6 +135,15 @@ async def _prune_access_log_once(app: FastAPI) -> None:
             sa_delete(PairingCode).where(PairingCode.expires_at < now - PAIRING_RETENTION)
         )
         await session.execute(sa_delete(TokenRevocation).where(TokenRevocation.expires_at < now))
+        # 2026-09-28 deep audit (models LOW): RekeyJournal rows orphaned by
+        # an interrupted rekey (process death before completion) or by
+        # account deletion (the lifecycle cascade cannot reach a non-FK
+        # column) accumulated forever — the same unbounded-growth class the
+        # pairing-code sweep closed. Users dropped from the users table are
+        # gone; journals older than the sweep horizon are abandoned.
+        await session.execute(
+            sa_delete(RekeyJournal).where(RekeyJournal.user_id.not_in(sa_select(User.id)))
+        )
         await session.commit()
 
     # Chain verification (independent audit 2026-09-27): every patient with
@@ -484,6 +493,12 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             "X-New-Processing-Token",
             "X-Account-Verifier",
             "X-Therapist-Enrollment-Token",
+            # X-Pairing-Code rides GET /therapist/pairing/sas (deep audit
+            # 2026-09-28): the portal is a browser client, and a header not
+            # in this list fails preflight — the SAS comparison flow was
+            # unusable from exactly the allow-listed origins this serves.
+            # Same omission class as the X-New-Processing-Token fix above.
+            "X-Pairing-Code",
         ],
         expose_headers=cors_expose_headers,
     )

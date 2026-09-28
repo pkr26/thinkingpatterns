@@ -203,13 +203,6 @@ export const en: Record<string, string> = {
   // wrong-password message.
   "login.envelopeFailed":
     "Your password was accepted, but this account's key envelope could not be unlocked on this server. Nothing was changed — try again, or contact support if it repeats.",
-  // Re-audit 2026-09-27 (M): the online v2 account whose envelope can be
-  // NEITHER fetched nor read from cache used to fall through to v1
-  // semantics — the vault unlocked on the v1-derived key and entries
-  // written that session became permanently unreadable. The session is now
-  // REFUSED: honest, calm, and explicit that nothing was changed.
-  "login.envelopeUnavailable":
-    "We couldn't verify your encryption key with the server. Check your connection and try again — nothing was changed.",
   "login.envelopeUnrecognized":
     "We couldn't verify your encryption key — the server sent a response this app doesn't understand. Nothing was changed; updating the app may help.",
 
@@ -404,6 +397,12 @@ export const en: Record<string, string> = {
   "history.conflictOverwrite": "Overwrite with mine",
   "history.deletedElsewhereTitle": "Deleted on another device",
   "history.deletedElsewhereBody": "This entry was deleted from another device, so your edit was not saved.",
+  // Audit 2026-09-28 (MEDIUM): hardware back / Cancel with unsaved edits
+  // confirms the discard instead of discarding silently.
+  "history.discardEditTitle": "Discard your changes?",
+  "history.discardEditBody": "The edits you made to this entry have not been saved.",
+  "history.discardEditConfirm": "Discard changes",
+  "history.discardEditCancel": "Keep editing",
 
   // --------------------------------------------------------------- insights
   "insights.tryAgainA11y": "Try loading your patterns again",
@@ -653,7 +652,6 @@ export const en: Record<string, string> = {
   "settings.deletedBody":
     "Your account and data were deleted from the server. If anything failed to clear on this device, reinstalling the app removes the remnants.",
   "settings.deleteFailedTitle": "Delete failed",
-  "settings.deleteFailedVerifier": "The server didn't accept that password. Nothing was deleted — check it and try again.",
   "settings.deleteFailedSession": "Session expired — please unlock again. Nothing was deleted.",
   "settings.exportTitle": "Export unavailable in this build",
   "settings.exportBody":
@@ -758,6 +756,9 @@ export const en: Record<string, string> = {
   "settings.reminderTimeA11y": "Reminder time",
   "settings.reminderTimeOptionA11y": "Reminder time: {label}",
   "settings.reminderUnavailableNote": "{reason}. The preference is saved and the nudge starts once this build links notifications.",
+  // Audit 2026-09-28 (LOW): the capability seams return these KEYS; the
+  // reason line resolves them through t() so it localizes.
+  "settings.reasonNotifModule": "The notification module is not linked in this build",
   // --- MBC check-in reminders (2026-09-27) -------------------------------
   "settings.measureReminderLabel": "CHECK-IN REMINDERS",
   "settings.measureReminderRow": "Check-in reminders",
@@ -774,6 +775,9 @@ export const en: Record<string, string> = {
   "settings.healthMirrorNote":
     "When on, each explicit mood check-in is also written to the Health app on this device. MindPattern never reads anything from Health. Turning this off stops future writes; what the Health app already holds stays there.",
   "settings.healthMirrorUnavailableNote": "{reason}. The preference is saved and mirroring starts once this build links the Health module.",
+  "settings.reasonHealthModule": "The Health module is not linked in this build",
+  "settings.reasonHealthIOS18": "Apple Health State of Mind requires iOS 18 or later",
+  "settings.reasonHealthOldModule": "This build's Health module predates State of Mind support",
   "settings.biometricLabel": "BIOMETRIC UNLOCK",
   "settings.biometricRow": "Unlock with your face or fingerprint",
   "settings.biometricA11y": "Biometric unlock",
@@ -900,6 +904,12 @@ export const en: Record<string, string> = {
   "safetyplan.saved": "Saved — encrypted, as always.",
   "safetyplan.saveFailedTitle": "Could not save",
   "safetyplan.saveFailedBody": "Your plan is still on screen exactly as you typed it — try again.",
+  // Audit 2026-09-28 (MEDIUM): back with unsaved plan edits confirms the
+  // discard instead of discarding silently.
+  "safetyplan.discardTitle": "Discard your changes?",
+  "safetyplan.discardBody": "Your safety plan changes have not been saved.",
+  "safetyplan.discardConfirm": "Discard changes",
+  "safetyplan.discardCancel": "Keep editing",
   "safetyplan.lockedTitle": "Locked",
   "safetyplan.lockedBody":
     "Your safety plan is encrypted with your key — unlock to read or edit it. The crisis resources stay one tap away below, as always.",
@@ -937,6 +947,9 @@ export const en: Record<string, string> = {
     "Couldn’t load who you are sharing with just now — check your connection and reopen this screen before relying on this list.",
   "share.sharingSince": "Sharing since {date}",
   "share.stoppedOn": "Stopped {date}",
+  // Audit 2026-09-28 (INFO): non-active consent rows with no revoked_at
+  // (older servers) — the bare status instead of "Stopped " + empty date.
+  "share.stopped": "Stopped",
   "share.addLabel": "Add your therapist",
   "share.addBody": "Ask your therapist for a pairing code from their portal, then enter it here. Codes expire after 15 minutes.",
   // SAS (2026-09-26): sets the expectation beside the pairing-code input —

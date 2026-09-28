@@ -109,12 +109,15 @@ mkdir -p "$ASSET_DIR"
 gh release download "$TAG" --repo "$REPOSITORY" --dir "$ASSET_DIR" \
   --pattern "mindpattern-portal-${TAG}.tar.gz" \
   --pattern "mindpattern-portal-${TAG}.tar.gz.sha256" \
+  --pattern "mindpattern-web-${TAG}.tar.gz" \
+  --pattern "mindpattern-web-${TAG}.tar.gz.sha256" \
   --pattern "mindpattern-release-${TAG}.env" \
   --pattern "mindpattern-release-${TAG}.env.sha256"
 
 (
   cd "$ASSET_DIR"
   sha256sum -c "mindpattern-portal-${TAG}.tar.gz.sha256"
+  sha256sum -c "mindpattern-web-${TAG}.tar.gz.sha256"
   sha256sum -c "mindpattern-release-${TAG}.env.sha256"
 )
 
@@ -254,7 +257,9 @@ nginx -t && systemctl reload nginx
 ```
 
 For later releases, use a clean checkout of that exact tag, download and
-verify that tag's four release assets again, and repeat the same digest checks.
+verify that tag's six release assets again (portal + web archives, the
+release env fragment, and each one's SHA-256 file), and repeat the same
+digest checks.
 Use an atomic static-content promotion procedure if the site cannot tolerate
 replacing `portal/dist` in place; do not rebuild the portal on production.
 

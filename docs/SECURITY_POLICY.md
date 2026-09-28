@@ -2,7 +2,7 @@
 
 What the CODE enforces (so the operator does not have to), and what
 the OPERATING ORGANIZATION must own. Adopt, adapt to your
-organization's names, and sign. Verified against the tree 2026-09-26.
+organization's names, and sign. Verified against the tree 2026-09-28.
 
 ## Enforced by the codebase (verify, then trust the CI)
 
@@ -43,9 +43,15 @@ organization's names, and sign. Verified against the tree 2026-09-26.
 
 1. **Secrets custody.** `MINDPATTERN_TOKEN_SECRET` (and the three
    purpose-split secrets + `MINDPATTERN_DECOY_SECRET` +
-   `POSTGRES_PASSWORD` + `BACKUP_KEY`) live only in the owner-only
-   secrets file (`/etc/mindpattern/secrets.env`, mode 0600) and your
-   secret manager. BACKUP_KEY needs a documented second-location
+   `MINDPATTERN_AUDIT_MAC_SECRET` + `POSTGRES_PASSWORD` + `BACKUP_KEY`)
+   live only in the owner-only secrets file
+   (`/etc/mindpattern/secrets.env`, mode 0600) and your
+   secret manager. `MINDPATTERN_AUDIT_MAC_SECRET` seals the audit
+   chain's keyed MAC: 32 bytes of hex (64 chars) when set — also
+   readable from a mounted file via `MINDPATTERN_AUDIT_MAC_SECRET_FILE`
+   — and when unset it is HKDF-derived from the token secret, so
+   rotating the token secret rotates the MAC key by construction.
+   BACKUP_KEY needs a documented second-location
    custody procedure (the runbook's sealed-envelope / break-glass /
    split-knowledge options) — rehearse it quarterly.
 2. **Rotation.** Token-secret rotation is a documented multi-step

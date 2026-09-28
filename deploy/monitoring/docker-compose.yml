@@ -59,6 +59,17 @@ services:
     mem_limit: 192M
     cpus: 0.5
     pids_limit: 128
+    # 2026-09-28 audit: readiness surfaces in `docker compose ps` (HEALTHY)
+    # instead of a silently wedged process with restart: unless-stopped
+    # masking it. /-/ready is alertmanager's own readiness endpoint (it
+    # answers 200 only once the config loaded and the UI is servable);
+    # wget is the busybox binary the image ships.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9093/-/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     # UI intentionally not published (same rule as prometheus): SSH tunnel
     # or a temporary loopback publish to inspect silences at 127.0.0.1:9093.
 
@@ -112,6 +123,16 @@ services:
     # Single top-level limit form only (re-audit 2026-09-27: the duplicate
     # deploy.resources block was removed — same rule as the production file).
     pids_limit: 256
+    # 2026-09-28 audit: /-/healthy is Prometheus's own liveness endpoint —
+    # TSDB corruption and config-reload wedges answer 500 there while the
+    # process still runs (restart: unless-stopped would otherwise hide it
+    # only until the process itself dies, which may be never).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     # The Prometheus UI is intentionally NOT published. To look at it, use
     # an SSH tunnel to the host and a temporary loopback publish, e.g.
     #   ports: ["127.0.0.1:9090:9090"]
@@ -167,6 +188,15 @@ services:
     mem_limit: 512M
     cpus: 0.5
     pids_limit: 256
+    # 2026-09-28 audit: /api/health is Grafana's documented health endpoint
+    # (no auth required, answers {"database":"ok"}). wget, not curl — the
+    # Ubuntu-based image ships no curl.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   blackbox:
     # Uptime probe of /readyz (default-on — see the profile note below) AND
@@ -206,6 +236,15 @@ services:
     mem_limit: 96M
     cpus: 0.5
     pids_limit: 256
+    # 2026-09-28 audit: the exporter's own landing page on :9111 — if the
+    # probe process itself is wedged, Prometheus's probe_success failures
+    # should read alongside a red `docker compose ps`, not instead of it.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9111/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   node-exporter:
     # OPTIONAL host-level metrics (disk, the one failure class the API's
@@ -248,6 +287,14 @@ services:
     mem_limit: 96M
     cpus: 0.5
     pids_limit: 256
+    # 2026-09-28 audit: /metrics on :9100 (the port Prometheus scrapes) —
+    # a wedged exporter otherwise shows up only as a scrape gap.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9100/metrics || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
   # The production stack's default compose network, joined as external so

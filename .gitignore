@@ -79,6 +79,17 @@ mobile/android/keystore.properties
 *.keystore
 !mobile/android/app/debug.keystore
 
+# Key-material net (2026-09-28 audit): private keys, PKCS#12 bundles and
+# keystores must never enter version control by accident. Nothing matching
+# these patterns is currently tracked (verified against git ls-files), so
+# there are NO re-includes; if a legitimate reviewed fixture ever needs to
+# be committed, re-include it explicitly here with a written reason.
+*.pem
+*.key
+*.p12
+*.jks
+id_rsa*
+
 # ZCode local session artifacts
 .zcode/
 

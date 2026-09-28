@@ -102,7 +102,9 @@ async def test_therapist_reads_measures_only_with_active_consent(client):
     before = await client.get(
         f"/api/therapist/patients/{patient.user_id}/measures", headers=th.headers
     )
-    assert before.status_code in (403, 404)
+    # 2026-09-28: exact pin — an ungranted therapist read is 404 (the
+    # no-consent-oracle shape test_therapist_api pins for revoked reads).
+    assert before.status_code == 404
 
     # Grant (the emulator's full happy path).
     code = await th.create_pairing_code(client)
@@ -145,7 +147,8 @@ async def test_therapist_reads_measures_only_with_active_consent(client):
     post = await client.get(
         f"/api/therapist/patients/{patient.user_id}/measures", headers=th.headers
     )
-    assert post.status_code in (403, 404)
+    # Exact pin (2026-09-28): revoked → 404, matching the sibling test.
+    assert post.status_code == 404
 
 
 async def test_patient_routes_reject_therapist_tokens(client):

@@ -91,14 +91,22 @@ if (keystorePropertiesFile.exists()) {
  * The preferred build flavor of JavaScriptCore (JSC)
  *
  * For example, to use the international variant, you can use:
- * `def jscFlavor = io.github.react-native-community:jsc-android-intl:2026004.+`
+ * `def jscFlavor = io.github.react-native-community:jsc-android-intl:2026004.0.1`
  *
  * The international variant includes ICU i18n library and necessary data
- * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
- * give correct results when using with locales other than en-US. Note that
+ * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare`
+ * that give correct results when using locales other than en-US. Note that
  * this variant is about 6MiB larger per architecture than default.
+ *
+ * 2026-09-28 audit LOW: pinned to the exact version (was `2026004.+` — a
+ * dynamic version resolved to whatever Maven served at build time, so two
+ * builds of the same commit could ship different JS engines).
+ * 2026004.0.1 is the current latest release of the 2026004 line, verified
+ * against Maven Central's maven-metadata.xml (this repo's CI does no
+ * device builds, so no local gradle cache had the resolution). Bump
+ * DELIBERATELY when upgrading, the same as every other pinned dependency.
  */
-def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.0.1'
 
 android {
     ndkVersion rootProject.ext.ndkVersion

@@ -322,16 +322,20 @@ export function sentimentComponents(text: string, language?: string): [number, n
 /** brain's language-detection heuristic (L-3 follow-up, 2026-09-26):
  *  shares of scored tokens (len >= 3) against the EN/ES detection sets;
  *  "es" only when its share clears the floor AND beats English, "en"
- *  when English clears the floor, otherwise "other". Below min-tokens
- *  the server keeps the historical English default — mirrored here by
- *  returning "en" so the walk falls back to the pinned default tables
- *  exactly like a language-neutral caller. The server applies this per
- *  CORPUS window; the on-device estimate classifies the single text,
- *  which converges to the same answer for monolingual journals. */
+ *  when English clears the floor, otherwise "other". The share rule runs
+ *  whenever ANY token scored (audit 2026-09-28, brain parity HIGH): the
+ *  server's 2026-09-26 statistical review retired the min-token English
+ *  default because short Spanish windows (nearly all journal entries)
+ *  then scored with EN weights and SIGN-FLIPPED against the corpus
+ *  verdict ("nunca estoy bien": EN default +0.40, ES share rule -0.296).
+ *  Only a corpus where NOTHING scored keeps the historical English
+ *  default — exactly the server's empty-corpus branch. The server applies
+ *  this per CORPUS window; the on-device estimate classifies the single
+ *  text, which converges to the same answer for monolingual journals. */
 export function detectLanguage(text: string): "en" | "es" | "other" {
   const scored = tokenize(text).filter((t) => t.length >= 3);
   const det = T().languageDetection;
-  if (scored.length < det.minTokens) return "en";
+  if (scored.length === 0) return "en";
   let enHits = 0;
   let esHits = 0;
   for (const t of scored) {

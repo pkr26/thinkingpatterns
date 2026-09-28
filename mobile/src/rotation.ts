@@ -122,7 +122,8 @@ async function newKeyReadsJournal(userId: string, newDataKey: Buffer): Promise<b
         return false;
       }
     }
-    const measures = (await api.listMeasuresPage(1, 0)) as Array<{
+    const measuresPage = await api.listMeasuresPage({ limit: 1, offset: 0 });
+    const measures = measuresPage.measures as Array<{
       blob?: unknown;
       client_measure_id?: unknown;
     }>;
@@ -503,7 +504,6 @@ export async function rotatePassword(input: {
     }
     // --- 3. rekey every stored blob old -> new -----------------------------
     let counts = { entries: 0, insights: 0, measures: 0 };
-    let alreadyRekeyed = false;
     try {
       const oldToken = (await api.openProcessingSession(oldKeys!.dataKey.toString("base64"))).session_token;
       const newToken = (await api.openProcessingSession(newKeys!.dataKey.toString("base64"))).session_token;
@@ -530,14 +530,15 @@ export async function rotatePassword(input: {
               "the stored data was already re-keyed by an earlier attempt, but the new password cannot read it — it was rotated to a different new password",
           };
         }
-        alreadyRekeyed = true;
+        // Audit 2026-09-28: the local flag that used to live here was dead —
+        // the newKeyReadsJournal verification above is the gate; nothing
+        // downstream needed to know which branch rekeyed.
       } else if (err instanceof ApiError && err.status === 403) {
         return { ok: false, stage: "rekey", reason: "wrong-password", detail: err.message };
       } else {
         return { ok: false, stage: "rekey", reason: err instanceof ApiError ? "server" : "offline", detail: err instanceof ApiError ? err.message : undefined };
       }
     }
-    void alreadyRekeyed; // (kept for clarity; verification above was the gate)
 
     // --- 4. re-wrap every ACTIVE therapist grant to the new key ------------
     const rewrapFailures: string[] = [];
@@ -576,10 +577,13 @@ export async function rotatePassword(input: {
       // 2026-09-26 v2 key scheme: the OLD endpoint refuses v2 accounts with
       // 409 key_scheme_conflict — the account was upgraded (this device's
       // scheme fetch said v1, another device said otherwise mid-flow).
-      // NOTHING moved yet at this stage (the rekey at stage 3 targeted the
-      // v1 ladder's own keys), but the honest next step is the v2 flow, so
-      // say so instead of a generic conflict.
+      // Audit 2026-09-28: stage 3 (api.rekeyStoredData) ALREADY committed the
+      // rekey before this stage runs, so the OLD data key this vault holds is
+      // dead for every stored blob — the same F-4 self-clean the generic
+      // branch below applies (lock first, then best-effort wrap removal).
       if (err instanceof ApiError && err.code === "key_scheme_conflict") {
+        vault.lock();
+        await disableBiometricUnlock(userId).catch(() => {});
         return {
           ok: false,
           stage: "credential",

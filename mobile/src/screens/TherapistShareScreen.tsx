@@ -93,12 +93,18 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
    * that prevents an old/misconfigured server from presenting a pairing flow
    * which will only fail later with a confusing 404/403. */
   const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
+  /** Audit 2026-09-28 (MEDIUM): `null` also covers the INITIAL fetch, so the
+   *  "Can't reach the server" error card used to flash before the first
+   *  answer arrived. This flag keeps "still checking" distinct from "the
+   *  check failed" — the error card renders only after a real failure. */
+  const [metaPending, setMetaPending] = useState(true);
   /** M-25: the server's disclosure version differs from the one this app's
    * copy represents. No new grant is offered while true; existing consents
    * and revoking stay fully available. */
   const [disclosureStale, setDisclosureStale] = useState(false);
 
   const refresh = useCallback(() => {
+    setMetaPending(true);
     api.meta()
       .then((meta) => {
         const enabled = meta?.sharing_available === true;
@@ -129,7 +135,8 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         setSharingAvailable(null);
         setConsents([]);
         setConsentsFailed(false);
-      });
+      })
+      .finally(() => setMetaPending(false));
   }, []);
   useEffect(refresh, [refresh]);
 
@@ -294,7 +301,9 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         </View>
       )}
 
-      {sharingAvailable === null && (
+      {/* Audit 2026-09-28: only AFTER the availability check actually failed
+          — never during the initial fetch (the flash read as an outage). */}
+      {sharingAvailable === null && !metaPending && (
         <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]} accessibilityRole="alert">
           <Text style={[styles.cardTitle, { color: t.colors.text }]}>{tr("share.unreachableTitle")}</Text>
           <Text style={themed.footnote}>{tr("share.unreachableBody")}</Text>
@@ -321,7 +330,12 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
             <Text style={themed.footnote}>
               {consent.status === "active"
                 ? tr("share.sharingSince", { date: dayOf(consent.granted_at) })
-                : tr("share.stoppedOn", { date: consent.revoked_at ? dayOf(consent.revoked_at) : "" })}
+                : // Audit 2026-09-28 (INFO): a non-active row with no
+                  // revoked_at (older servers) rendered "Stopped " with a
+                  // dangling empty date — render the bare status instead.
+                  consent.revoked_at
+                  ? tr("share.stoppedOn", { date: dayOf(consent.revoked_at) })
+                  : tr("share.stopped")}
             </Text>
           </Text>
           {consent.status === "active" && (

@@ -1,7 +1,9 @@
 /**
  * Shared UI components: the calm error-copy mapper (no raw server text in
  * dialogs), the button family (roles, states, ≥44pt targets), the transient
- * inline status, and the nav row with its unmistakable help action.
+ * inline status, and the crisis-help action with its unmistakable surface.
+ * (The dead NavRow component and its block were deleted — audit 2026-09-28
+ * INFO: it was referenced only by this file; BottomNav superseded it.)
  */
 import { describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -11,7 +13,6 @@ const { ApiError } = await import("../src/api/client");
 const { requestFailureCopy, calmFallbackCopy } = await import("../src/components/errors");
 const { PrimaryButton, GhostButton, CrisisHelpButton } = await import("../src/components/buttons");
 const { InlineStatus, NoticeChip } = await import("../src/components/InlineStatus");
-const { NavRow } = await import("../src/components/NavRow");
 const { render, textOf, pressLabel, touchableByLabel } = await import("./helpers/rtr");
 
 describe("requestFailureCopy", () => {
@@ -141,33 +142,6 @@ describe("NoticeChip", () => {
   });
 });
 
-describe("NavRow", () => {
-  it("renders every item, distinguishes help, and caps label scaling", async () => {
-    const nav = { a: vi.fn(), b: vi.fn() };
-    const root = await render(
-      <NavRow
-        items={[
-          { label: "Patterns", onPress: nav.a },
-          { label: "Get help", onPress: nav.b, tone: "help", accessibilityLabel: "Get help — crisis resources" },
-        ]}
-      />,
-    );
-    await pressLabel(root, "Patterns");
-    expect(nav.a).toHaveBeenCalledTimes(1);
-    await pressLabel(root, "Get help");
-    expect(nav.b).toHaveBeenCalledTimes(1);
-
-    const labels = root.root.findAllByType(Text);
-    for (const label of labels) expect(label.props.maxFontSizeMultiplier).toBe(1.3);
-    const helpBtn = touchableByLabel(root, "Get help");
-    expect(helpBtn.props.accessibilityLabel).toBe("Get help — crisis resources");
-    const helpStyle = (helpBtn.props.style as unknown[]).flat() as Record<string, unknown>[];
-    expect(helpStyle.some((s) => s.backgroundColor === "#242a38")).toBe(true);
-    const helpText = labels.find((l) => l.props.children === "Get help");
-    expect(helpText.props.style).toMatchObject({ fontWeight: "700" });
-  });
-});
-
 describe("keyConsent persistence", () => {
   it("records, reads and clears the per-account acknowledgment", async () => {
     const storage = (await import("./helpers/storageMock")).default;
@@ -186,7 +160,7 @@ describe("keyConsent persistence", () => {
 });
 
 describe("components under the light theme", () => {
-  it("buttons and nav render the light palette (useColorScheme honored)", async () => {
+  it("buttons render the light palette (useColorScheme honored)", async () => {
     const { useColorScheme } = await import("react-native");
     vi.mocked(useColorScheme).mockReturnValue("light");
     try {
@@ -194,7 +168,9 @@ describe("components under the light theme", () => {
       const root = await render(
         <View>
           <PrimaryButton label="Go" onPress={() => {}} />
-          <NavRow items={[{ label: "Get help", onPress: () => {}, tone: "help" }]} />
+          {/* NavRow was deleted (audit 2026-09-28); CrisisHelpButton carries
+              the same helpBg surface for the light-palette pin. */}
+          <CrisisHelpButton onPress={() => {}} />
         </View>,
       );
       const { allStyles } = await import("./helpers/rtr");

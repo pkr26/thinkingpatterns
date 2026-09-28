@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, sessionUsername, type ListedConsent } from "../api/client";
 import { decrypt, deriveMasterKey, toBase64, fromBase64, zeroize, type Bytes } from "../crypto/core";
 import { buildAad } from "../crypto/aad";
-import { KDF_PARAMS_DEFAULT, rewrapDataKey } from "../crypto/envelope";
+import { KDF_PARAMS_DEFAULT, rewrapDataKey, validateKdfParams, type KdfParams } from "../crypto/envelope";
 import { decryptEntry } from "../crypto/patient";
 import { wrapDataKeyForTherapist } from "../crypto/sharing";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
@@ -109,6 +109,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const [llmLoad, setLlmLoad] = useState<"loading" | "known" | "unknown">("loading");
   const [accessRows, setAccessRows] = useState<{ at: string; action: string; actor: string }[] | null>(null);
   const [accessCursor, setAccessCursor] = useState<string | null>(null);
+  // 2026-09-28 audit (INFO): a failed page-2 fetch surfaces here instead
+  // of wiping the rows already on screen.
+  const [accessError, setAccessError] = useState("");
   const [queued, setQueued] = useState<number | null>(null);
   const [rejected, setRejected] = useState<number>(0);
   const [newPassword, setNewPassword] = useState("");
@@ -130,6 +133,14 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const [status, setStatus] = useState<string | null>(null);
   const generation = useRef(0);
 
+  /** The account's CURRENT validated kdf_params as the mount-time envelope
+   *  read reported them (2026-09-28 audit): null for v1 accounts (the
+   *  upgrade card's only audience) and any backend that predates params —
+   *  those keep the pinned 600k default. A v2 account's declared params
+   *  ride here so the flows below never re-wrap under params the stored
+   *  AAD does not declare. */
+  const envelopeParams = useRef<KdfParams | null>(null);
+
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
     generation.current = run;
@@ -141,13 +152,30 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       api.getLlmConsent().catch(() => null),
       api.keyEnvelope().then(
         (body) => body,
-        (err: unknown) => (err instanceof ApiError && err.status === 404 ? { key_scheme: "v1" } : null),
+        (err: unknown) => (err instanceof ApiError && err.status === 404
+          // A 404 means the backend predates the endpoint (v1-only world):
+          // the full v1-shaped answer, no envelope fields.
+          ? { key_scheme: "v1", salt: "", kdf_params: null, wrapped_data_key: null }
+          : null),
       ),
     ]);
     if (generation.current !== run) return;
     if (envelope) {
       setKeyScheme(envelope.key_scheme === "v2" ? "v2" : "v1");
       setSchemeUnknown(false);
+      // 2026-09-28 audit: remember the DECLARED params when they parse —
+      // an invalid echo (hostile/buggy server) leaves null, which every
+      // consumer below treats as the pinned default for v1-shaped state;
+      // the v2 rotation re-validates FRESH at press time regardless.
+      if (envelope.kdf_params == null) {
+        envelopeParams.current = null;
+      } else {
+        try {
+          envelopeParams.current = validateKdfParams(envelope.kdf_params);
+        } catch {
+          envelopeParams.current = null;
+        }
+      }
     } else {
       setKeyScheme(null);
       setSchemeUnknown(true);
@@ -173,9 +201,19 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       const page = await api.accessLogPage(cursor);
       setAccessRows((current) => (cursor && current ? [...current, ...page.rows] : page.rows));
       setAccessCursor(page.nextCursor);
+      setAccessError("");
     } catch {
-      setAccessRows([]);
-      setAccessCursor(null);
+      // 2026-09-28 audit (INFO): a page-2 failure must not WIPE the rows
+      // already on screen — the fetched pages were true when fetched and
+      // the next press retries the cursor. Keep them, surface the honest
+      // banner; only a FRESH load failure may reset to the empty state.
+      if (cursor) {
+        setAccessError(t("settings.accessLoadFailedWeb"));
+      } else {
+        setAccessRows([]);
+        setAccessCursor(null);
+        setAccessError("");
+      }
     }
   }, []);
 
@@ -474,33 +512,74 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     const old = vault.get();
     let newKeys: PatientKeys | null = null;
     let newSalt: Bytes | null = null;
+    // 2026-09-28 audit (LOW, the moodLog/Entry M-3 idiom): snapshot BOTH
+    // vault buffers BEFORE the awaits — vault.get()'s buffers are SHARED,
+    // and a lock landing mid-flow zeroizes them, so the re-wrap and the
+    // verifier below would otherwise run under all-zero bytes. The copies
+    // die in the finally.
+    const dataKey = new Uint8Array(new ArrayBuffer(old.dataKey.length));
+    dataKey.set(old.dataKey);
+    const authKey = new Uint8Array(new ArrayBuffer(old.authKey.length));
+    authKey.set(old.authKey);
     try {
       // M-4 (2026-09-28 audit): lock every other signed-in tab down before
       // the credential swap kills its bearer mid-write (the v2 corpus key
       // never rotates, but a mid-flight save under a dying session is its
       // own honest-loss window).
       broadcastTabLockdown("rotation");
+      // 2026-09-28 audit (MEDIUM, mobile rotation.ts parity): the re-wrap
+      // KEEPS the account's CURRENT kdf_params. The server retains the
+      // stored params blob when new_kdf_params is absent, so deriving and
+      // wrapping under the 600k DEFAULT would desynchronize the blob from
+      // the AAD and brick the next unlock of any non-default-params
+      // account (the server accepts 100k-10M). The params and the KEK now
+      // come from one source: the account's own envelope, fetched FRESH at
+      // press time and validated. A params change is a separate future
+      // action, deliberately not smuggled into a password change.
+      const envelope = await api.keyEnvelope();
+      const params = envelope.kdf_params == null ? KDF_PARAMS_DEFAULT : validateKdfParams(envelope.kdf_params);
+      if (params.algorithm !== "pbkdf2-sha256") {
+        // This build derives PBKDF2 only (no native WebCrypto Argon2):
+        // refuse BEFORE any server step rather than minting an envelope
+        // under params it can never reproduce. Honest, localized, no
+        // partial state.
+        setError(t("settings.kdfUnsupportedWeb"));
+        return;
+      }
+      // A lock during the envelope fetch: nothing has moved yet — abort
+      // honestly instead of opening a session under a dead key.
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
       // M-1 (2026-09-28 audit): open a processing session with the CURRENT
       // data key FIRST — the server's possession probe authorizes the
       // envelope swap on every v2 password change (the verifier alone
       // proves the credential, not the key). Failure here surfaces the
       // honest retry error; there is no tokenless fallback.
-      const dataKeyCopy = new Uint8Array(new ArrayBuffer(old.dataKey.length));
-      dataKeyCopy.set(old.dataKey);
-      let processingToken: string;
-      try {
-        processingToken = (await api.openProcessingSession(toBase64(dataKeyCopy))).session_token;
-      } finally {
-        zeroize(dataKeyCopy);
+      const processingToken = (await api.openProcessingSession(toBase64(dataKey))).session_token;
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
       }
       newSalt = randomBytes(16);
-      newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt));
-      const wrappedDataKeyB64 = await rewrapDataKey(old.dataKey, newKeys.masterKey, newSalt, username);
+      // The KEK derives at the account's OWN iteration count (see above):
+      // the params and the derivation are one decision now.
+      newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt, params.iterations));
+      const wrappedDataKeyB64 = await rewrapDataKey(dataKey, newKeys.masterKey, newSalt, username, params);
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
       await api.changePassword({
-        verifierB64: toBase64(old.authKey),
+        verifierB64: toBase64(authKey),
         newSaltB64: toBase64(newSalt),
         newVerifierB64: toBase64(newKeys.authKey),
         wrappedDataKeyB64,
+        // Declared EXPLICITLY equal to the account's current params — the
+        // server would retain them anyway, but the body now says what the
+        // bytes bind to (a tampered AAD echo cannot smuggle a change in).
+        newKdfParams: params as unknown as Record<string, unknown>,
         processingToken,
       });
       // No local rewrap of anything: the data key did not change. The
@@ -509,6 +588,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     } catch (err) {
       setError(err instanceof Error ? err.message : t("settings.rotateFailed"));
     } finally {
+      zeroize(dataKey, authKey);
       if (newKeys) zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
       if (newSalt) zeroize(newSalt);
       setBusy(false);
@@ -538,17 +618,45 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     setStatus(null);
     let typedKeys: PatientKeys | null = null;
     let saltBytes: Bytes | null = null;
+    // 2026-09-28 audit (LOW, the moodLog/Entry M-3 idiom): snapshot the
+    // data key BEFORE the awaits — vault.get()'s buffers are SHARED, and a
+    // lock landing during the session open or the re-wrap zeroizes them,
+    // so the wrap (and the upload) would otherwise run under all-zero
+    // bytes. The copy dies in the finally.
+    const dataKey = new Uint8Array(new ArrayBuffer(vault.get().dataKey.length));
+    dataKey.set(vault.get().dataKey);
     try {
       const { salt } = await auth.saltFor(username);
       saltBytes = fromBase64(salt);
-      typedKeys = await derivePatientKeys(await deriveMasterKey(upgradePassword, saltBytes));
+      // 2026-09-28 audit (LOW): derive and re-wrap under the account's
+      // DECLARED params (the mount-time envelope read), not an implicit
+      // 600k default — v1 accounts declare none, so the default holds
+      // byte-for-byte there, but a params-bearing account must never have
+      // its blob re-wrapped under params the stored AAD does not declare.
+      const params = envelopeParams.current ?? KDF_PARAMS_DEFAULT;
+      if (params.algorithm !== "pbkdf2-sha256") {
+        // This build derives PBKDF2 only: refuse BEFORE any server step.
+        setError(t("settings.kdfUnsupportedWeb"));
+        return;
+      }
+      typedKeys = await derivePatientKeys(await deriveMasterKey(upgradePassword, saltBytes, params.iterations));
       const verifierB64 = toBase64(typedKeys.authKey);
-      const dataKey = vault.get().dataKey;
       const session = await api.openProcessingSession(toBase64(dataKey));
-      const wrappedDataKeyB64 = await rewrapDataKey(dataKey, typedKeys.masterKey, saltBytes, username);
+      if (!vault.isUnlocked()) {
+        // A lock during the session open: nothing has moved server-side —
+        // abort honestly instead of uploading an envelope under a dead
+        // session's authorization.
+        setError(t("common.sessionLocked"));
+        return;
+      }
+      const wrappedDataKeyB64 = await rewrapDataKey(dataKey, typedKeys.masterKey, saltBytes, username, params);
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
       await api.upgradeKeyEnvelope(
         wrappedDataKeyB64,
-        KDF_PARAMS_DEFAULT as unknown as Record<string, unknown>,
+        params as unknown as Record<string, unknown>,
         session.session_token,
         verifierB64,
       );
@@ -561,6 +669,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         setError(err instanceof Error ? err.message : t("settings.upgradeFailedNote"));
       }
     } finally {
+      zeroize(dataKey);
       if (typedKeys) zeroize(typedKeys.masterKey, typedKeys.authKey, typedKeys.dataKey);
       if (saltBytes) zeroize(saltBytes);
       setUpgradePassword("");
@@ -715,6 +824,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       <Card title={t("settings.accessTitle")}>
         {accessRows === null && <Note role="status">{t("common.loading")}</Note>}
         {accessRows?.length === 0 && <Note>{t("settings.accessEmpty")}</Note>}
+        {/* 2026-09-28 audit (INFO): a failed "Show more" keeps the rows
+            already fetched and says so — never a silent wipe. */}
+        {accessError && <Note tone="warn">{accessError}</Note>}
         {accessRows && accessRows.length > 0 && (
           <div className="timeline">
             {accessRows.map((row, index) => (

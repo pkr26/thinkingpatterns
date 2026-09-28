@@ -141,7 +141,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [keyScheme, setKeyScheme] = useState<KeyScheme | null>(null);
 
   React.useEffect(() => {
-    getBaseUrl().then(setUrl);
+    // Audit 2026-09-28 (INFO): a storage failure in getBaseUrl left an
+    // unhandled rejection; the field simply stays empty.
+    getBaseUrl().then(setUrl).catch(() => {});
     api.meta()
       .then((m) => {
         // Stryker disable next-line OptionalChaining: a null/undefined meta makes m.llm_available throw inside this .then, and the chained .catch(() => {}) swallows it — llmAvailable stays false exactly as with the chain
@@ -274,13 +276,24 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // the foregrounded unlocked session (M-4).
         const userId = await api.getUserId().catch(() => null);
         if (!userId) {
-          Alert.alert(tr("common.reauthNoAccount"));
+          // Audit 2026-09-28 (INFO): two-argument Alert with a proper title
+          // (the single-argument form rendered the body as a title-only
+          // alert on Android).
+          Alert.alert(tr("common.couldNotVerifyTitle"), tr("common.reauthNoAccount"));
           retry();
           return;
         }
         await enableBiometricWrap(userId);
       } else if (pending.kind === "upgrade") {
-        await runUpgrade(password, reauth.verifierB64);
+        // Audit 2026-09-28 (LOW): runUpgrade returns true when the typed
+        // password was rejected server-side and the card must STAY UP for a
+        // corrected retry — the same retry contract the verifier-rejection
+        // paths honor. done() unconditionally cleared it, so a wrong
+        // password dismissed the card instead of waiting for the fix.
+        if (await runUpgrade(password, reauth.verifierB64)) {
+          retry();
+          return;
+        }
       } else {
         await deleteAccountOnServer(reauth.verifierB64);
       }
@@ -336,6 +349,18 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           await disableBiometricUnlock(userId); // and the biometric data-key wrap
           await cancelDailyReminder().catch(() => {}); // a deleted account must not be nudged
           await cancelMeasureReminder().catch(() => {}); // on either schedule
+          // Audit 2026-09-28 (LOW): three per-account locals the purge used
+          // to miss — the pending-measure draft (data-key-sealed, useless
+          // under the deleted account), the entry-version rollback marks,
+          // and the stateSeq/analysis-generation marks. A leftover mark
+          // would judge a RECREATED account's honest early generations as
+          // rolled-back/tampered.
+          const { clearPendingMeasure } = await import("../pendingMeasure");
+          await clearPendingMeasure(userId);
+          const { forgetAllEntryVersions } = await import("../entryVersions");
+          await forgetAllEntryVersions(userId);
+          const { forgetAnalysisGeneration } = await import("../stateSeqGuard");
+          await forgetAnalysisGeneration(userId);
         }
         if (username) {
           await api.clearCachedSalt(username);
@@ -505,7 +530,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     if (busy || !rotateCurrentPassword || !newPassword) return;
     const policyError = passwordPolicyError(newPassword);
     if (policyError) {
-      Alert.alert(tr("login.policyVarietyTitle"), policyError);
+      // Audit 2026-09-28 (INFO): pick the title like LoginScreen's policy
+      // alert does — short-password failures say "too short", variety
+      // failures say the variety title (the fixed variety title mislabeled
+      // a 8-character attempt).
+      Alert.alert(
+        newPassword.length < 12 ? tr("login.policyShortTitle") : tr("login.policyVarietyTitle"),
+        policyError,
+      );
       return;
     }
     setBusy(true);
@@ -897,7 +929,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         )}
         {!reminders.available && (
           <Text style={themed.footnote}>
-            {tr("settings.reminderUnavailableNote", { reason: reminders.reason ?? "" })}
+            {/* Audit 2026-09-28 (LOW): the reason is a catalog KEY from the
+                capability seam — resolve it through tr() so the line speaks
+                the app language, never raw English prose. */}
+            {tr("settings.reminderUnavailableNote", { reason: reminders.reason ? tr(reminders.reason) : "" })}
           </Text>
         )}
       </View>
@@ -950,7 +985,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         )}
         {!reminders.available && (
           <Text style={themed.footnote}>
-            {tr("settings.reminderUnavailableNote", { reason: reminders.reason ?? "" })}
+            {tr("settings.reminderUnavailableNote", { reason: reminders.reason ? tr(reminders.reason) : "" })}
           </Text>
         )}
       </View>
@@ -974,7 +1009,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         <Text style={themed.footnote}>{tr("settings.healthMirrorNote")}</Text>
         {!health.available && (
           <Text style={themed.footnote}>
-            {tr("settings.healthMirrorUnavailableNote", { reason: health.reason ?? "" })}
+            {/* Same reason-KEY resolution as the reminder note above
+                (audit 2026-09-28). */}
+            {tr("settings.healthMirrorUnavailableNote", { reason: health.reason ? tr(health.reason) : "" })}
           </Text>
         )}
       </View>

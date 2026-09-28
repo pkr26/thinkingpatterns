@@ -201,7 +201,11 @@ async def _increment_notes_revision(session: AsyncSession, therapist: User) -> i
     return therapist.notes_revision
 
 
-def access_log_prune_statement(now, retention_days: int = ACCESS_LOG_RETENTION.days):
+def access_log_prune_statement(now, retention_days: int):
+    # 2026-09-28 deep audit: the argument is REQUIRED — a hardcoded default
+    # silently pruned at 730 days if a future call site omitted it while
+    # the operator-tunable setting said otherwise. Both live call sites
+    # pass settings.access_log_retention_days explicitly.
     """DELETE for audit rows past the retention window. THE one statement
     for both call sites — the opportunistic prune in POST /therapist/
     pairing-codes below and the lifespan's daily sweep (main.py): a

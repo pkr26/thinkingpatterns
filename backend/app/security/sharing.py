@@ -22,11 +22,15 @@ consent rows without the portal detecting tampering — the same
 relocation-defense the entry blobs carry.
 
 The server itself runs only the VALIDATION half of this module (parsing
-therapist-registered public keys and grant-time ephemeral keys). Wrap runs
-on the patient's device; unwrap runs in the therapist's browser. The wrap
-and unwrap functions here exist so the cross-platform test vectors in
-shared/vectors.json are generated and verified against a third, independent
-implementation (the same standing the AES-GCM envelope module has).
+therapist-registered public keys and grant-time ephemeral keys), with ONE
+documented exception: ``wrap_summary_payload`` — the caseload-summary wrap
+executed server-side inside the recompute request path (api/insights.py)
+over the therapist-registered public key, under the same construction the
+device uses. All OTHER wrap runs on the patient's device; unwrap runs in
+the therapist's browser. The wrap and unwrap functions here exist so the
+cross-platform test vectors in shared/vectors.json are generated and
+verified against a third, independent implementation (the same standing
+the AES-GCM envelope module has).
 """
 
 from __future__ import annotations
@@ -84,16 +88,27 @@ _BACKUP_DIGEST_INFO = b"mindpattern/totp-backup-digest/v1"
 
 # --- SAS out-of-band pairing verification (2026-09-26 remediation) -------------
 #
-# The server relays the therapist's wrap public key during pairing, so an
-# actively dishonest server could substitute its OWN key and silently read
-# the grant (the documented v1 residual). The SAS closes the human side of
-# that hole: both screens display a short authentication string derived
-# from the EXACT key bytes the server handed out, and the two humans
-# compare it out of band (in the room, on the phone) before the patient
-# confirms the grant. A substituted key changes the SAS; a substituted
-# SAS is impossible without also colliding the HMAC (2^-50-ish per
-# comparison for a 6-digit code, and each retry needs a fresh live
-# pairing session the patient must again mistype).
+# HONEST SCOPE (deep audit 2026-09-28): the SAS is a tamper check against
+# adversaries who CANNOT compute both displayed values — it is NOT a check
+# against the server itself. The server mints the pairing code and serves
+# BOTH SAS displays (the patient's lookup response and the therapist's
+# /therapist/pairing/sas read), so a dishonest server that substitutes its
+# own wrap key simply serves MATCHING SAS values computed over the
+# substituted key and the human comparison detects nothing. The control
+# that actually binds the pairing against server substitution is the
+# LOCALLY-computed wrap-key fingerprint cross-check each endpoint renders
+# next to the SAS (mobile: therapistKeyFingerprint over the key bytes the
+# device received; portal: serverWrapKeyFingerprint over its session key) —
+# see portal/src/views/PatientsView.tsx's own note. Never remove the
+# fingerprint displays as "redundant with the SAS"; they are the load-
+# bearing half of this construction.
+#
+# What the SAS does add: an independent, code-keyed confirmation that both
+# humans are looking at the same (key, patient) triple as the code they
+# already share out of band. A substituted SAS without colliding the HMAC
+# succeeds with probability ~2^-20 per comparison (six decimal digits);
+# each retry needs a fresh live pairing session the patient must again
+# mistype.
 #
 # Construction (pinned by shared/vectors.json via scripts/generate_vectors):
 #     SAS = "123 456" — first six decimal digits of
@@ -106,12 +121,11 @@ _BACKUP_DIGEST_INFO = b"mindpattern/totp-backup-digest/v1"
 #             — the coarse, non-secret key identity both screens also show,
 #               matching the fingerprint format the portal already renders.
 #
-# The PAIRING CODE is the HMAC key (not a server secret): it is the one
-# value both humans already share out of band — the therapist's screen
-# displayed it and the patient typed it — so a server that does not know
-# a live code cannot precompute the SAS for a substituted key, and any
-# code rotation (single-use burn, expiry, re-issue) inherently rotates
-# the SAS with it.
+# The PAIRING CODE is the HMAC key (not a server secret in the DB-leak
+# sense — only its digest is stored): it is the one value both humans
+# already share out of band, so a party that does not know a live code
+# cannot precompute the SAS for a given key, and any code rotation
+# (single-use burn, expiry, re-issue) inherently rotates the SAS with it.
 SAS_DIGITS = 6
 SAS_FORMAT = "{0} {1}"  # "123 456"
 WRAP_KEY_FINGERPRINT_HEX_CHARS = 16

@@ -11,6 +11,7 @@
 #   mindpattern_recompute_seconds_count / mindpattern_recompute_seconds_sum
 #   mindpattern_llm_calls_total{outcome="success"|"failure"}        counter
 #   mindpattern_keystore_sessions                                   gauge
+#   mindpattern_audit_chain_failures                                counter
 #
 # plus Prometheus' own `up` (and `probe_success` if the blackbox job is
 # enabled), and — ONLY inside the commented optional sections at the
@@ -124,6 +125,26 @@ groups:
         annotations:
           summary: "More than 25% of LLM calls failing for 15m"
           runbook: "docs/INCIDENT_RUNBOOK.md — S3 (provider degraded); the S1 LLM path is about exposure, not failure ratio"
+
+      # S2 — audit-chain verification failure (2026-09-28 audit gap: the
+      # counter existed but no alert read it). The daily sweep verifies the
+      # access log's forward hash chain + the journal tail anchor and
+      # increments this counter per FAILED patient chain (not per row —
+      # one tampered trail is one signal however many rows it has). ANY
+      # increase inside an hour means the tamper-evidence guarantee over
+      # who accessed what is broken: the chain is evidence for breach
+      # notification, so its own integrity loss is service-unusable class,
+      # not a background hiccup. The counter only moves on verification
+      # runs, so a quiet hour on a healthy instance is correctly silent.
+      - alert: MindPatternAuditChainFailures
+        expr: |
+          increase(mindpattern_audit_chain_failures[1h]) > 0
+        for: 0m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Audit-chain verification failed for at least one patient trail in the last hour"
+          runbook: "docs/INCIDENT_RUNBOOK.md — S2; the breach-assessment section names the chain verification as evidence — preserve the verification output and treat the tampered window as potentially-accessed until reconciled"
 
   # DEFAULT-ON (2026-09-26 infra audit): the /readyz probe alert ships
   # enabled — the blackbox exporter is part of the default stack now

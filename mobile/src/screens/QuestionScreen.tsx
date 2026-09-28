@@ -60,7 +60,11 @@ function failureCopy(err: unknown): string {
 
 export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
-  const { touchActivity } = useSession();
+  // Audit 2026-09-28 (INFO): unlockDays rides along for the baseline
+  // caption's fallback (below) — the store's sanitized server value, not a
+  // hardcoded 30 (a server configured for a different threshold rendered
+  // the wrong count whenever dayProgress had not loaded yet).
+  const { touchActivity, unlockDays } = useSession();
   // Stryker disable next-line StringLiteral: "unknown" is never rendered or compared — only phase === "baseline" is ever tested, and "" fails that test identically
   const [phase, setPhase] = useState<"unknown" | "baseline" | "insight">("unknown");
   /** True when the phase is ASSUMED because the server was unreachable
@@ -328,7 +332,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, lineHeight: 17 }}>
             {phaseAssumedOffline
               ? tr("question.captionOffline")
-              : tr("question.baselineCaption", { days: dayProgress?.total ?? 30 })}
+              : tr("question.baselineCaption", { days: dayProgress?.total ?? unlockDays })}
           </Text>
           {dayProgress && (
             <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>

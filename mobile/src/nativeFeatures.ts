@@ -36,7 +36,9 @@ import { t } from "./strings";
 
 export interface NativeCapability {
   available: boolean;
-  /** Why not (rendered once, in Settings, when unavailable). */
+  /** Why not (rendered once, in Settings, when unavailable). A LOCALE KEY
+   *  (audit 2026-09-28, LOW) — Settings resolves it through tr(); raw
+   *  English prose here leaked into the localized reason line. */
   reason?: string;
 }
 
@@ -70,7 +72,9 @@ export function reminderCapability(): NativeCapability {
   if (mod === null) {
     return {
       available: false,
-      reason: "notification module not linked in this build",
+      // Audit 2026-09-28 (LOW): a catalog KEY (resolved via tr() in
+      // Settings), never raw English prose.
+      reason: "settings.reasonNotifModule",
     };
   }
   return { available: true };

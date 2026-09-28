@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 
 from common import RESULTS, guard, run, section, verdict
@@ -21,16 +22,37 @@ VENV_PY = ROOT / ".venv" / "bin" / "python"
 
 def g1_backups() -> None:
     section("G1: backup vs deletion + dump contents")
-    compose = (ROOT / "docker-compose.yml").read_text()
-    has_backup = "pg_dump" in compose and "backups" in compose
-    retention = "35" in compose
-    encrypted = "openssl enc -aes-256-cbc" in compose and "BACKUP_KEY:?set" in compose
+    compose_lines = (ROOT / "docker-compose.yml").read_text().splitlines()
+    has_backup = any("pg_dump" in ln for ln in compose_lines) and any(
+        "/backups" in ln or ln.strip() == "- /backups" for ln in compose_lines)
+    retention = "35" in "\n".join(compose_lines)
+    # 2026-09-28 audit: this used to grep the literal "BACKUP_KEY:?set",
+    # which the secrets-as-files migration removed — a stale substring that
+    # false-FINDINGed every run. The CURRENT contract (docker-compose.yml
+    # backup service): the key arrives as the mounted secret FILE
+    # (BACKUP_KEY_FILE=/run/secrets/backup_key) with the plain env var kept
+    # only as the empty dev-overlay fallback, and the encryptor is pinned to
+    # openssl AES-256-CBC with PBKDF2 at exactly 600k iterations. Match each
+    # piece against its own line so a similar-looking string elsewhere in
+    # the file cannot satisfy the check.
+    env_fallback = any(
+        re.search(r"^\s*BACKUP_KEY:\s*\$\{BACKUP_KEY:-\}\s*$", ln) for ln in compose_lines)
+    key_file_mount = any(
+        re.search(r"^\s*BACKUP_KEY_FILE:\s*/run/secrets/backup_key\s*$", ln)
+        for ln in compose_lines)
+    secret_mounted = any(
+        re.search(r"^\s*-\s*backup_key\s*$", ln) for ln in compose_lines)
+    iter_pinned = any(
+        "openssl enc -aes-256-cbc" in ln and "-iter 600000" in ln for ln in compose_lines)
+    encrypted = env_fallback and key_file_mount and secret_mounted and iter_pinned
     verdict("G1.backup-profile-config",
             "BLOCKED" if encrypted else "FINDING",
             f"compose backup profile: pg_dump={has_backup}, 35-day "
-            f"retention={'yes' if retention else 'no'}, AES-256-CBC dump "
-            f"encryption with a REQUIRED BACKUP_KEY={'yes' if encrypted else 'NO'} "
-            f"(2026-09-16 fix — a stolen backup volume is ciphertext at rest). "
+            f"retention={'yes' if retention else 'no'}, AES-256-CBC/PBKDF2-600k dump "
+            f"encryption with the key REQUIRED via the mounted secret file "
+            f"(env-fallback line={env_fallback}, BACKUP_KEY_FILE mount={key_file_mount}, "
+            f"secrets: entry={secret_mounted}, -iter pin={iter_pinned}) — a stolen backup "
+            f"volume is ciphertext at rest and a missing key refuses the dump outright. "
             f"Residual by design: dumps taken before a deletion still hold the "
             f"user's rows until retention expires; the README states this as "
             f"the deletion-and-retention scope")
@@ -198,12 +220,23 @@ def g3_config_and_hygiene() -> None:
     # `export NODE_BINARY=$(command -v node)` line, no secret — same
     # allowlist decision as .gitleaks.toml's entry for it.
     ALLOWED_ENV_PATHS = {"mobile/ios/.xcode.env"}
-    bad = [f for f in tracked
-           if (f.endswith((".env", ".pem", ".key", ".db", ".sqlite3"))
-               or f.startswith(".env"))
-           and f not in ALLOWED_ENV_PATHS]
+    # 2026-09-28 audit: the net matched suffixes over the WHOLE path, so a
+    # tracked `foo.env` in a directory named e.g. `.envish/` dodged the
+    # basename intent, and keystore/cert containers (.p12/.pfx/.crt) were
+    # missing entirely. Match the .env* family on the BASENAME (a name
+    # starting with ".env" or ending ".env") and add the PKCS#12/cert
+    # containers. (mobile/android/app/debug.keystore deliberately stays
+    # outside this net: the RN template's public debug keystore, matched by
+    # verify_native_release.mjs's own allowlist instead.)
+    def _secretish(path: str) -> bool:
+        base = os.path.basename(path)
+        return (base.startswith(".env") or base.endswith(".env")
+                or base.endswith((".pem", ".key", ".db", ".sqlite3",
+                                  ".p12", ".pfx", ".crt")))
+
+    bad = [f for f in tracked if _secretish(f) and f not in ALLOWED_ENV_PATHS]
     verdict("G3.tracked-secrets", "BLOCKED" if not bad else "FINDING",
-            f"git-tracked secret/db files: {bad or 'none'} "
+            f"git-tracked secret/db/keystore files: {bad or 'none'} "
             f"(+ {len(ALLOWED_ENV_PATHS)} reviewed RN template shim) "
             f"({len(tracked)} files tracked)")
 

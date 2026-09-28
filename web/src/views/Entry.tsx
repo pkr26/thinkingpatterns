@@ -46,6 +46,13 @@ import { Button, Card, Chip, DotScale, BarScale, ErrorBanner, Icon, MoodScale, N
 
 export type SaveResult = "sent" | "queued";
 
+/** The client-side entry length cap (2026-09-28 audit MEDIUM): the
+ *  server's blob ceiling is far higher, so without a client gate a
+ *  pathological paste could park a megabyte of ciphertext in the queue
+ *  and silently die against entryDraft.ts's 100k parse bound. Mobile's
+ *  EntryScreen.tsx contract — the same constant, the same honest copy. */
+const MAX_ENTRY_CHARS = 100_000;
+
 function greetingKey(hour: number): string {
   if (hour < 12) return "entry.greetingMorning";
   if (hour < 18) return "entry.greetingAfternoon";
@@ -127,6 +134,14 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
   const save = async (): Promise<void> => {
     if (!text.trim()) {
       setError(t("entry.empty"));
+      return;
+    }
+    // 2026-09-28 audit MEDIUM: the editor itself enforces the entry cap —
+    // mobile EntryScreen parity. entryDraft.ts silently rejects a sealed
+    // draft over 100k, so an over-cap save would pass the server and then
+    // lose its own lock-time draft; the cap keeps both sides consistent.
+    if (text.trim().length > MAX_ENTRY_CHARS) {
+      setError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }));
       return;
     }
     const owner = vault.ownerUserId();

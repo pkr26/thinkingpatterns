@@ -167,7 +167,13 @@ describe("SettingsView branches", () => {
         return jsonResponse({ detail: "no provider configured", code: "llm_unavailable" }, { status: 409 });
       }
       if (url.endsWith("/account/export")) return (extra?.export ?? (() => new Response("{}", { status: 200 })))();
-      if (url.endsWith("/access-log")) {
+      // 2026-09-28 audit note: this used to be endsWith("/access-log"),
+      // which silently MISSED the cursor'd page-2 URL (…/access-log?
+      // cursor=cur-1) — every "Show more" press 404'd into the catch, so
+      // the paging test below only passed because the old failure path
+      // wiped the rows and the cursor. Match the path prefix so the stub
+      // means what it always said it did.
+      if (url.includes("/account/access-log")) {
         const cursor = new URL(url, ORIGIN).searchParams.get("cursor") ?? undefined;
         return (extra?.access ?? ((c) => jsonResponse(c ? [] : [{ at: "2026-09-25T10:00:00Z", action: "entry.create", actor: "self" }], c ? {} : { headers: { "X-Next-Cursor": "cur-1" } })))(cursor);
       }
@@ -197,6 +203,22 @@ describe("SettingsView branches", () => {
     await press(root, "Show more");
     await settle(40, 3);
     expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Show more")).toBe(false);
+  });
+
+  it("2026-09-28 audit (INFO): a FAILED page-2 fetch keeps the rows already on screen and surfaces the banner", async () => {
+    // Pre-fix shape: any page-2 failure (offline, 5xx) wiped the fetched
+    // rows and the cursor — the log the user was reading vanished on a
+    // retryable blip. Now: rows kept, honest banner, cursor kept for the
+    // next press.
+    coreStubs({ access: (cursor) => (cursor ? jsonResponse({ detail: "blip" }, { status: 503 }) : jsonResponse([{ at: "2026-09-25T10:00:00Z", action: "entry.create", actor: "self" }], { headers: { "X-Next-Cursor": "cur-1" } })) });
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("entry.create");
+    await press(root, "Show more");
+    await settle(40, 3);
+    expect(textOf(root)).toContain("entry.create"); // the fetched page survived
+    expect(textOf(root)).toContain("Could not load more of the access log");
+    expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Show more")).toBe(true); // retry stays available
   });
 
   it("queue recovery re-queues rejected entries", async () => {

@@ -240,8 +240,13 @@ VADER_BASE_ES: dict[str, float] = {
     "abatida": -2.6,
     "apagado": -2.2,
     "apagada": -2.2,
-    "solo": -1.8,
-    "sola": -1.8,
+    # 2026-09-28 deep audit: bare "solo"/"sola" REMOVED — "solo" is the
+    # RAE-preferred spelling of the ADVERB "only/just" ("solo fui al
+    # supermercado" scored -0.45 before this), and "sola" carries the same
+    # ambiguity ("una sola vez"). Both are simultaneously classified as
+    # function words in LANGUAGE_FUNCTION_WORDS_ES. The module's curation
+    # contract is "ambiguous words are omitted rather than guessed"; the
+    # unambiguous loneliness family below still carries the signal.
     "soledad": -2.8,
     "solitario": -2.4,
     "solitaria": -2.4,

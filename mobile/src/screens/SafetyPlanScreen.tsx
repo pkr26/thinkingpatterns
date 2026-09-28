@@ -16,7 +16,7 @@
  * the one part of a safety plan the app can honestly contribute itself.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, BackHandler, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { api } from "../api/client";
 import { vault } from "../vault";
 import { useSession } from "../store";
@@ -28,7 +28,7 @@ import {
   type SafetyPlan,
 } from "../safetyPlan";
 import { useTheme } from "../theme";
-import { PrimaryButton, GhostButton } from "../components/buttons";
+import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
 import { t as tr } from "../strings";
 
@@ -44,6 +44,37 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Live mirrors for the BackHandler subscription (audit 2026-09-28): a
+   *  native-event listener outlives renders, so it must read refs, not the
+   *  state captured when the listener was attached. */
+  const planRef = useRef<SafetyPlan>(emptySafetyPlan());
+  /** The last SAVED/LOADED plan — the baseline for "unsaved changes". */
+  const savedPlanRef = useRef<SafetyPlan>(emptySafetyPlan());
+
+  const updatePlan = (next: SafetyPlan) => {
+    planRef.current = next;
+    setPlan(next);
+  };
+
+  /** Audit 2026-09-28 (MEDIUM): leaving the editor with any field differing
+   *  from the loaded/saved plan used to discard SILENTLY (hardware back or
+   *  the on-screen Back). A CONFIRM was chosen over silent auto-persistence
+   *  by constraint: the plan is intimate, user-authored content whose only
+   *  write path is the explicit Save — persisting half-finished or
+   *  reconsidered text without consent would betray that contract, and a
+   *  deliberate "Discard" answer keeps the user's intent explicit. */
+  const planIsDirty = () => SAFETY_PLAN_FIELDS.some((field) => planRef.current[field] !== savedPlanRef.current[field]);
+
+  const confirmDiscardPlan = (leave: () => void) => {
+    if (!planIsDirty()) {
+      leave();
+      return;
+    }
+    Alert.alert(tr("safetyplan.discardTitle"), tr("safetyplan.discardBody"), [
+      { text: tr("safetyplan.discardCancel"), style: "cancel" },
+      { text: tr("safetyplan.discardConfirm"), style: "destructive", onPress: leave },
+    ]);
+  };
 
   const showStatus = (message: string, tone: InlineStatusTone) => {
     if (statusTimer.current) clearTimeout(statusTimer.current);
@@ -64,12 +95,16 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
         const stored = await loadSafetyPlan(vault.get().dataKey, userId);
         if (cancelled) return;
         if (stored !== null) {
-          setPlan(stored);
+          savedPlanRef.current = stored;
+          updatePlan(stored);
         } else {
           // A NEW plan starts with the built-in crisis lines already in
           // the professionals field — the app's one honest contribution;
-          // the user edits or replaces them freely.
-          setPlan({ ...emptySafetyPlan(), professionals: tr("safetyplan.prefillProfessionals") });
+          // the user edits or replaces them freely. It is still the SAVED
+          // baseline for the discard check until the user changes it.
+          const prefilled = { ...emptySafetyPlan(), professionals: tr("safetyplan.prefillProfessionals") };
+          savedPlanRef.current = prefilled;
+          updatePlan(prefilled);
         }
       } catch {
         if (!cancelled) setLocked(true);
@@ -82,6 +117,21 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
       if (statusTimer.current) clearTimeout(statusTimer.current);
     };
   }, []);
+
+  // Android hardware back (audit 2026-09-28): while the editor is up with
+  // unsaved changes, back is a DISCARD — confirm it like the on-screen Back
+  // button. A clean plan (or the locked/loading views) lets the navigator
+  // pop normally.
+  useEffect(() => {
+    const onBack = () => {
+      if (loading || locked || !planIsDirty()) return false;
+      confirmDiscardPlan(() => navigation.goBack());
+      return true;
+    };
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+    return () => sub.remove();
+    // Stryker disable next-line ArrayDeclaration: the handlers read refs (planRef/savedPlanRef) and stable closures; loading/locked alone gate the listener — re-running for other renders only re-attaches an identical listener
+  }, [loading, locked, navigation]);
 
   const save = async () => {
     if (busy) return;
@@ -99,6 +149,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
         return;
       }
       await saveSafetyPlan(vault.get().dataKey, userId, plan);
+      savedPlanRef.current = plan; // the discard baseline moved with the save
       showStatus(tr("safetyplan.saved"), "ok");
     } catch {
       // Nothing was lost: the fields are still on screen exactly as typed.
@@ -151,7 +202,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
                 value={plan[field]}
                 onChangeText={(text) => {
                   touchActivity();
-                  setPlan((previous) => ({ ...previous, [field]: text }));
+                  updatePlan({ ...plan, [field]: text });
                 }}
                 multiline
                 accessibilityLabel={tr(`safetyplan.field.${field}`)}
@@ -163,7 +214,12 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           <InlineStatus message={status} tone={statusTone} />
         </>
       )}
-      <GhostButton label={tr("common.back")} onPress={() => navigation.goBack()} center={false} />
+      {/* Audit 2026-09-28 (MEDIUM): Back with unsaved changes confirms the
+          discard (see confirmDiscardPlan for why confirm, not persistence). */}
+      <GhostButton label={tr("common.back")} onPress={() => confirmDiscardPlan(() => navigation.goBack())} center={false} />
+      {/* Audit 2026-09-28 (INFO): the crisis affordance every other screen
+          carries — a safety-plan editor is exactly where it belongs. */}
+      <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
     </ScrollView>
   );
 }

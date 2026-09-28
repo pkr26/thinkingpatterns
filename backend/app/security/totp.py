@@ -109,7 +109,12 @@ def verify_code(
     if at is None:
         at = time.time()
     normalized = code.strip()
-    if len(normalized) != DIGITS or not normalized.isdigit():
+    # isascii() gates the compare: str.isdigit() is True for non-ASCII
+    # decimal digits (Arabic-Indic, superscripts), and hmac.compare_digest
+    # raises TypeError on non-ASCII strings — a user with a non-Latin
+    # numeric keypad could 500 the auth path. Same guard as
+    # sharing.normalize_pairing_code.
+    if len(normalized) != DIGITS or not normalized.isascii() or not normalized.isdigit():
         return None
     current = int(at // STEP_SECONDS)
     # Past-and-current only (see ALLOWED_DRIFT): the upper bound is the
@@ -127,8 +132,8 @@ def otpauth_uri(secret_b32: str, username: str, issuer: str = "MindPattern") -> 
     from urllib.parse import quote
 
     return (
-        f"otpauth://totp/{quote(issuer)}:{quote(username)}"
-        f"?secret={secret_b32}&issuer={quote(issuer)}"
+        f"otpauth://totp/{quote(issuer, safe='')}:{quote(username, safe='')}"
+        f"?secret={secret_b32}&issuer={quote(issuer, safe='')}"
         f"&algorithm=SHA1&digits={DIGITS}&period={STEP_SECONDS}"
     )
 

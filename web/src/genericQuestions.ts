@@ -133,7 +133,7 @@ export const GENERIC_QUESTIONS_ES: readonly string[] = [
   "¿Qué tres cosas salieron más o menos bien hoy?",
   "¿Quién hizo su día un poco más ligero hoy?",
   "¿Hay algo que espera con ilusión?",
-  "¿Qué la confortó hoy?",
+  "¿Qué le confortó hoy?",
   "¿Qué vale la pena conservar de hoy?",
   "¿Qué fue lo que más le importó hoy?",
   "¿Cuándo sintió que hoy tenía sentido?",

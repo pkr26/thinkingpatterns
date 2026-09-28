@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from datetime import date as date_type, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
@@ -163,7 +164,11 @@ def _validate_measure_date(measure_date: date_type, user: User) -> None:
             detail="measure_date cannot be in the future",
             code="validation_error",
         )
-    earliest = min(user.created_at.date(), today) - timedelta(days=BACKDATE_GRACE_DAYS)
+    # entries.py's twin guards a NULL created_at (defensive parity — the
+    # column is NOT NULL with an ORM default, but the two modules
+    # implementing the same grace semantics must not disagree).
+    created_day = user.created_at.date() if user.created_at else today
+    earliest = min(created_day, today) - timedelta(days=BACKDATE_GRACE_DAYS)
     if measure_date < earliest:
         raise ApiError(
             status_code=422,
@@ -436,6 +441,12 @@ async def delete_measure(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
+    # Same malformed-id guard the entries paths enforce (2026-09-28 deep
+    # audit symmetry fix — identical verdict, one shared shape).
+    from ..schemas import CLIENT_ID_PATTERN as _MEASURE_ID_PATTERN
+
+    if re.fullmatch(_MEASURE_ID_PATTERN, client_measure_id) is None:
+        raise ApiError(status_code=404, detail="measure not found", code="not_found")
     expected_epoch = user.token_epoch
     await _require_verifier(user, verifier, request, session)
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):

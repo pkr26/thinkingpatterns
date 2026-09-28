@@ -33,13 +33,13 @@
       "id": 2,
       "type": "stat",
       "title": "Live processing sessions (keystore)",
-      "description": "mindpattern_keystore_sessions — S2 at >0 sustained; escalates to S1 per the runbook's plaintext-exposure checklist.",
+      "description": "mindpattern_keystore_sessions — S2 at >16 sustained for 15m (4x the analyze slots across three full TTL windows); escalates to S1 per the runbook's plaintext-exposure checklist. Orange = approaching the alert boundary.",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
       "targets": [{ "refId": "A", "expr": "max(mindpattern_keystore_sessions)" }],
       "fieldConfig": {
         "defaults": {
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 8 }, { "color": "red", "value": 16 }] }
         },
         "overrides": []
       }
@@ -138,6 +138,24 @@
         { "refId": "A", "expr": "sum by (outcome) (rate(mindpattern_llm_calls_total[5m]))", "legendFormat": "{{outcome}}" }
       ],
       "fieldConfig": { "defaults": { "unit": "ops", "custom": { "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Audit-chain verification failures (1h)",
+      "description": "mindpattern_audit_chain_failures — daily sweep result, counting FAILED patient trails (not rows). S2 at any increase: the access-log chain is the tamper evidence for breach assessment.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(mindpattern_audit_chain_failures[1h]))" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
     }
   ]
 }

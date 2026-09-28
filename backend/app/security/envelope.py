@@ -81,6 +81,17 @@ def envelope_aad(username: str, kdf_params: dict[str, int | str]) -> bytes:
     compact, ASCII-only. kdf_params must already be canonical
     (kdf.validate_kdf_params) — this function does not re-validate so the
     stored blob and its AAD can never disagree by a normalization step.
+
+    ORDERING RULE (deep audit 2026-09-28): canonical means the dict is
+    REBUILT in validate_kdf_params' insertion order
+    ({algorithm, version, iterations}) before it reaches this function —
+    it does NOT mean "any dict with the same logical content". A dict
+    parsed from canonical_kdf_params_json's SORTED storage serialization
+    ({algorithm, iterations, version}) produces DIFFERENT AAD bytes for
+    the same parameters and fails every unwrap with TamperError. Both TS
+    clients rebuild the dict in wrap order before computing the AAD
+    (mobile keyEnvelope.ts documents the same trap); keep that invariant
+    on every path that round-trips a stored blob.
     """
     payload = {
         "context": ENVELOPE_CONTEXT,

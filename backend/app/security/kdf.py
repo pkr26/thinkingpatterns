@@ -232,6 +232,10 @@ def parse_kdf_params_json(stored: str | None) -> dict[str, int | str] | None:
     hand-edited column answers None, never a half-parsed dict)."""
     if not stored:
         return None
+    # The documented storage/AAD bound, enforced (deep audit 2026-09-28:
+    # this cap was defined but checked nowhere — a decorated constant).
+    if len(stored) > KDF_PARAMS_MAX_JSON_CHARS:
+        return None
     try:
         parsed = json.loads(stored)
     except (ValueError, TypeError):

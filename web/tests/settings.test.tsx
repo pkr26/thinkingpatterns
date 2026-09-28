@@ -655,6 +655,63 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     expect(root.root.findAllByType("button").some((node) => textOfNode(node) === "Change password")).toBe(false);
     expect(textOf(root)).not.toContain("Upgrade key protection");
   });
+
+  it("2026-09-28 audit (MEDIUM): an account stored with 800k params changes its password AT 800k — derivation, re-wrap, and the declared body all agree", async () => {
+    // Pre-fix shape: the re-wrap defaulted to 600k and the PUT omitted
+    // new_kdf_params, so the server RETAINED the 800k blob while the
+    // envelope moved to a 600k KEK/AAD — the next unlock derived the AAD
+    // from the stored 800k params, hit TamperError, and the account was
+    // permanently locked out. The params and the KEK now come from one
+    // source: the account's own envelope.
+    const KDF_PARAMS_800K = { algorithm: "pbkdf2-sha256", version: 1, iterations: 800_000 };
+    const mock = stubFetch((url, init) => {
+      if (url.endsWith("/auth/key-envelope")) {
+        return jsonResponse({ key_scheme: "v2", salt: UPGRADE_SALT_B64, kdf_params: KDF_PARAMS_800K, wrapped_data_key: "QQ==" });
+      }
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: UPGRADE_SALT_B64 });
+      if (url.endsWith("/processing/sessions") && init.method === "POST") {
+        return jsonResponse({ session_token: "proc-800k", expires_in: 900 });
+      }
+      if (url.endsWith("/account/password") && init.method === "PUT") return new Response(null, { status: 204 });
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
+      if (url.endsWith("/access-log")) return jsonResponse([]);
+      if (url.endsWith("/consents")) return jsonResponse([]);
+      if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return jsonResponse([], { headers: { "X-Entries-Revision": "1" } });
+      if (url.startsWith(`${ORIGIN}/api/v1/measures?`)) return jsonResponse([], { headers: { "X-Measures-Revision": "1" } });
+      return jsonResponse({}, { status: 404 });
+    });
+    const onLockdown = vi.fn();
+    const vaultKeyB64 = toBase64(vault.get().dataKey);
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await typeInto(root, "New password", V2_NEW_PASSWORD);
+    await typeInto(root, "Confirm new password", V2_NEW_PASSWORD);
+    await press(root, "Change password");
+    await settle(200, 8);
+
+    const calls = mock.mock.calls as [string, RequestInit][];
+    const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
+    expect(put).toBeTruthy();
+    const body = JSON.parse(String(put![1].body)) as Record<string, unknown>;
+    // The body DECLARES the account's own params (the server would retain
+    // them anyway; now the bytes say what they bind to).
+    expect(body.new_kdf_params).toEqual(KDF_PARAMS_800K);
+    expect(atob(String(body.wrapped_data_key))).toHaveLength(60);
+    // The re-wrapped blob opens the SAME data key under the NEW password
+    // derived AT THE DECLARED COUNT — the whole contract.
+    const newMaster = await deriveMasterKey(V2_NEW_PASSWORD, fromBase64(String(body.new_salt)), 800_000);
+    const reopened = await unwrapEnvelope(newMaster, fromBase64(String(body.new_salt)), "tester", String(body.wrapped_data_key), KDF_PARAMS_800K);
+    expect(toBase64(reopened)).toBe(vaultKeyB64);
+    // The pre-fix bug's signature, gone: a 600k derivation of the same
+    // password CANNOT open the blob (the KEK is the 800k one).
+    const wrongMaster = await deriveMasterKey(V2_NEW_PASSWORD, fromBase64(String(body.new_salt)));
+    await expect(
+      unwrapEnvelope(wrongMaster, fromBase64(String(body.new_salt)), "tester", String(body.wrapped_data_key), KDF_PARAMS_800K),
+    ).rejects.toThrow();
+    zeroize(newMaster, wrongMaster);
+    expect(onLockdown).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {

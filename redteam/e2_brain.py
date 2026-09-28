@@ -118,14 +118,22 @@ def e2_campaign() -> None:
                         any(disguised[:20] in v for v in p.detail.get("variants", []))
                         for p in result.surfaced)
     sensitive_flag = ok and any(p.detail.get("sensitive") for p in result.surfaced)
+    # Verdict gate (2026-09-28 audit): the DEFENSE CHAIN is "a recurring
+    # crisis phrase is either never quoted back, or the card that quotes it
+    # carries the sensitive flag so the client renders a non-quoting card".
+    # The old gate keyed on bypasses_suppress instead — the suppress tier is
+    # one INPUT to that chain (and a normalization catch may make it False
+    # for this probe text), not the outcome; it is now reported as its own
+    # signal, never the verdict.
     verdict("E2.disguised-crisis-recurrence",
-            "FINDING" if (quoted and bypasses_suppress) else "BLOCKED",
-            f"disguised crisis phrase x81 days: suppress-tier now CATCHES it "
-            f"(bypass={bypasses_suppress}, 2026-09-16 normalization fix) and the "
-            f"surfaced card carries sensitive={sensitive_flag} — the client renders "
-            f"a non-quoting card; the recurring pattern is still DETECTED "
-            f"(surfaced={surfaced_kinds(result) if ok else result}), it is just "
-            f"never quoted back")
+            "FINDING" if (quoted and not sensitive_flag) else "BLOCKED",
+            f"disguised crisis phrase x81 days: quoted-back={quoted}, sensitive flag on "
+            f"the surfaced card={sensitive_flag}, bypasses_suppress={bypasses_suppress} "
+            f"(reported separately — the suppress-tier normalization catch is one layer, "
+            f"not the verdict) — a quoted crisis card WITHOUT the sensitive flag would "
+            f"ruminate the phrase back at a vulnerable user; here the phrase is either "
+            f"not quoted or flagged, and the recurring pattern is still DETECTED "
+            f"(surfaced={surfaced_kinds(result) if ok else result})")
 
     # 6. Resource bound: max-size corpus timing
     big_text = " ".join(f"word{i%997}" for i in range(4000))[:20000]

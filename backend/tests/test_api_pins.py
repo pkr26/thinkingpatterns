@@ -463,6 +463,10 @@ class _EchoEnricher:
 
     name = "llm"
     last_error = None
+    # 2026-09-28: the analyzer-name gate requires evidence of an actual
+    # round-trip; this echo stand-in reports one (the branch under test is
+    # the enricher-present merge path, which it genuinely exercises).
+    requests_made = 1
 
     def extract_patterns(self, _entries, findings=None):
         return list(findings or [])

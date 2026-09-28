@@ -44,7 +44,7 @@ takes voice input through the OS keyboard's dictation (see mobile/README.md).
 | Property | v1 implementation |
 |---|---|
 | Client-side encryption | AES-256-GCM envelope `nonce(12) ‖ ct‖tag`, AAD binds `(user_id, entry_id, context)` so blobs cannot be swapped between entries/users undetected. Key derived on device. |
-| Credentials | `master_key = PBKDF2-HMAC-SHA256(password, salt, 600k)`. `auth_key = HKDF(master, "auth")`, `data_key = HKDF(master, "data")`. Only `auth_key` is sent at login (server stores `scrypt(auth_key)` at N=2¹⁶, hashed off the event loop). Tokens carry a revocation epoch; logout retires every token for the account. |
+| Credentials | `master_key = PBKDF2-HMAC-SHA256(password, salt, 600k)`. `auth_key = HKDF(master, "auth")`, `data_key = HKDF(master, "data")`. Only `auth_key` is sent at login (server stores `scrypt(auth_key)` at N=2¹⁶, hashed off the event loop). Tokens carry a revocation epoch; logout retires every token for the account. *(Historical drift, recorded 2026-09-28: the shipped scrypt default is N=2¹⁷ = 131072 — raised from 2¹⁶ on 2026-09-26, `MINDPATTERN_SCRYPT_N`; the README documents 131072. And since 2026-09-26, logout revokes only the presented token's `jti` — the epoch bump survives as the global primitive on credential rotation, password change, and account deletion.)* |
 | Server blind to content | Server stores opaque blobs; no plaintext columns; tests assert plaintext bytes never land in the DB. Exception by design: the single-use processing session (below). |
 | Secure processing | `POST /api/processing/sessions` delivers `data_key` over TLS into an **in-memory TTL keystore** (never persisted, single-use, destroyed on consumption and on account deletion, stored bytes zeroized). `SecureProcessingContext` decrypts, analyzes, re-encrypts, and scrubs the key + plaintext bytearrays it owns. Known limit: analyzer string copies are GC-reclaimed only — documented, not a TEE claim. |
 | Threshold honesty | NOTHING is decrypted before 30 distinct active days (recompute short-circuits from DB metadata). Entry dates cannot predate the account. |
@@ -136,6 +136,13 @@ PUT  /api/v1/account/llm-consent   {enabled, verifier}                    → {e
 DEL  /api/v1/account               (X-Account-Verifier header; JSON body deprecated fallback) → hard cascade delete
 ```
 
+*(Historical drift, recorded 2026-09-28: the logout line above predates
+2026-09-26. Logout now records the presented token's 128-bit `jti` in a
+revocation store until its own expiry — one device signs out without
+killing the account's other sessions — and the account-wide epoch bump
+survives as the global primitive, firing on credential rotation, password
+change, and account deletion.)*
+
 Every error response is one envelope: `{"detail": <human string>, "code":
 <snake_case>}` — e.g. `unauthorized`, `invalid_credentials`,
 `processing_session_required`/`processing_session_invalid`,
@@ -147,7 +154,11 @@ Every error response is one envelope: `{"detail": <human string>, "code":
 
 Rate limiting (fixed window, in-memory, bounded key count) on auth, salt,
 register (per-IP + per-username), entries (create/delete), processing,
-reads, export, consent, and delete. Whole-body cap (2 MiB) before parsing;
+reads, export, consent, and delete. *(Historical drift, recorded
+2026-09-28: since 2026-09-26 the limiters are exact sliding windows —
+keyed on the monotonic clock, with sharded overflow locks bounding the
+key-set's memory — not fixed windows; the fixed-window burst-of-2 edge at
+the boundary no longer exists.)* Whole-body cap (2 MiB) before parsing;
 422s never echo input; security headers on every response including 500s.
 
 ## 6. Repository layout
