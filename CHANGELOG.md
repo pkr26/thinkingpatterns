@@ -14,6 +14,70 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Therapist portal — "warm dusk" palette (2026-09-28 UI/UX audit,
+  user-directed)**: the blue accent and green success tones are gone.
+  Research-backed replacement (light purples/lavenders cited as calming
+  across mental-health design sources; warm gold/orange for the success
+  and warn tones; WCAG 4.5:1 text / 3:1 non-text floors for dark clinical
+  themes): `--primary` #6748cc violet (white label 6.22:1, hover darker
+  7.22:1), `--primary-strong` #b3a4f5 lavender (8.54:1 as text), new
+  `--primary-focus` #8b6ef0 (focus ring ≥4.5:1 on every dark surface),
+  `--info-accent` #c3b4f0, `--ok` gold #c9a54a/#e3c87d (11.47:1),
+  `--warn` orange #c97e3f/#e8a36b; danger red unchanged. The pw-meter
+  ladder is red/orange/violet/gold with *-strong FILLS (6.4–8.7:1 vs the
+  track — the old red/blue rungs missed the 3:1 non-text floor), and the
+  sparkline/trend strokes use the lavender accentBright. Every ratio is
+  computed FROM the CSS by `portal/tests/designTokens.test.ts` (new
+  ok-strong and focus-ring floors), so a palette regression fails CI.
+
+### Fixed
+
+- **Therapist portal — every finding of the 2026-09-28 UI/UX audit
+  (AUDIT_PORTAL_UIUX_2026-09-28.md, 87 → 97 after this wave), each
+  re-verified live in a real browser:**
+  - **F1 (Enter-to-submit)**: the UI kit rendered every button
+    `type="button"`, so the multi-field login/register forms had NO submit
+    control and a real browser's Enter silently did nothing (the fix-18
+    tests dispatched `onSubmit` directly, which is why CI never caught
+    it). `Button` gained a `type` prop; the primary actions are real
+    `type="submit"` buttons with no onClick (the click routes through the
+    form's onSubmit). New pins hold the type AND the no-onClick contract,
+    and the test `press()` helper routes submit-button clicks through the
+    owning form like a browser.
+  - **F2 (phrase highlighting)**: pattern labels are punctuation-stripped
+    by the engine while journal entries are not, so the raw
+    `includes()` never matched multi-word phrases (live: 0 `<mark>`
+    elements). Both sides now normalize to letters+digits before matching
+    (live: 10/10 evidence entries highlight).
+  - **F3 (stale "new" badges)**: per-card badges rode the server's
+    `is_new` flag and stayed green after Mark reviewed while the header
+    count reset to 0. Badges now derive from the same local anchor as the
+    count (and say "new for you to review" before the first anchor).
+  - **F4 (SAS mismatch copy)**: names the likely cause first — the
+    account id was entered wrong — before the key-substitution alarm.
+  - **F5 (copy density)**: a native accessible `<details>` Disclosure
+    component collapses the longest policy paragraphs (login crypto note,
+    note-encryption note, change-password mechanics, rotation grants)
+    behind one-line summaries.
+  - **F6 (raw error strings)**: `invalid credentials` maps to
+    "Sign-in failed — check your username and password."; the api layer's
+    "check the server URL" copy (the portal has no server-URL field) is
+    now "check your connection". Unknown errors still surface verbatim.
+  - **F7 (text-only measures trends)**: each instrument renders a
+    per-instrument SVG trend with a full aria-label above the exact text
+    line.
+  - **F8 (raw pids)**: notes-only anchors render in human terms ("on a
+    recurring phrase"), screen and print.
+  - **F9 (date seam)**: the caseload "N patterns as of …" date is the
+    clinic-LOCAL calendar day of the summary update timestamp (the same
+    L-80 basis as the delta anchors; forDate remains the fallback) — it
+    used to read "tomorrow" for clinicians west of UTC in their evening.
+  - **F10 (toolbar labels, password reveal)**: caseload search/sort
+    labels are proper 13px/600 labels; password fields carry a
+    Show/Hide-password toggle.
+
 ### Fixed
 
 - **Therapist portal — pattern-anchored notes invisible after a revoke**

@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { auth, ApiError, clearSession, normalizeApiBaseUrl, setSession, type TokenResponse } from "../api";
 import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, toBase64 } from "../crypto";
-import { Button, Card, ErrorBanner, Field, Note, PasswordStrengthMeter } from "../ui";
+import { Button, Card, Disclosure, ErrorBanner, Field, Note, PasswordStrengthMeter } from "../ui";
 import { currentOrigin, randomBytes } from "../platform";
 
 export interface PortalKeys {
@@ -63,9 +63,21 @@ function wipeKeys(
 }
 
 /** S-3 (pentest 2026-09-26): the second-factor field accepts BOTH forms —
- *  the 6-digit authenticator code or a 10-char single-use recovery code
- *  (case-insensitive; the server normalizes). */
+ * the 6-digit authenticator code or a 10-char single-use recovery code
+ * (case-insensitive; the server normalizes). */
 const TOTP_OR_RECOVERY = /^(\d{6}|[A-Z0-9]{10})$/i;
+
+/** 2026-09-28 audit F6: the common raw server errors rendered as UI copy
+ * verbatim ("invalid credentials" — lowercase, no next step). Map the
+ * known codes/details to sentence-cased, actionable copy; anything
+ * unknown still surfaces verbatim (honesty over cosmetics). */
+function friendlyLoginError(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+  if ((err instanceof ApiError && err.code === "invalid_credentials") || message === "invalid credentials") {
+    return "Sign-in failed — check your username and password.";
+  }
+  return err instanceof Error ? err.message : "sign-in failed";
+}
 
 export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenResponse, baseUrl: string) => void | Promise<void> }): React.JSX.Element {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -184,7 +196,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
         keepPassword = true;
         setError("That code was wrong or already used — enter the current one (or a recovery code).");
       } else {
-        setError(err instanceof Error ? err.message : "sign-in failed");
+        setError(friendlyLoginError(err));
       }
     } finally {
       // Password strings cannot be overwritten in JavaScript, but removing
@@ -300,7 +312,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
               </>
             )}
             {mode === "login" && <Field label="Username" value={username} onChange={setUsername} placeholder="dromega" autoComplete="username" />}
-            <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
+            <Field label="Password" value={password} onChange={setPassword} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} reveal />
             {mode === "register" && <PasswordStrengthMeter strength={passwordStrength(password)} />}
             {mode === "login" && totpNeeded && (
               <Field
@@ -312,7 +324,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
               />
             )}
             {mode === "register" && (
-              <Field label="Repeat password" value={password2} onChange={setPassword2} type="password" autoComplete="new-password" />
+              <Field label="Repeat password" value={password2} onChange={setPassword2} type="password" autoComplete="new-password" reveal />
             )}
             {mode === "register" && (
               <>
@@ -358,23 +370,31 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
             <ErrorBanner message={error} />
             {mode === "login" ? (
               <>
+                {/* 2026-09-28 audit F1: the primary action is type=submit,
+                    so a real browser's Enter-in-any-field submits the form
+                    (implicit submission). The old always-type=button button
+                    left the multi-field form with NO submit control — Enter
+                    silently did nothing. No onPress: the click routes through
+                    the same form onSubmit. */}
                 <Button
                   label={busy ? "Signing in…" : totpNeeded ? "Verify code" : "Sign in"}
-                  onPress={() => void signIn(totpNeeded ? totpCode : undefined)}
+                  type="submit"
                   disabled={busy || !canSignIn}
                 />
                 <Button label="Create a therapist account instead" small onPress={() => { setMode("register"); setError(""); setTotpNeeded(false); setTotpCode(""); }} disabled={busy} />
               </>
             ) : (
               <>
-                <Button label={busy ? "Creating…" : "Create account"} onPress={register} disabled={busy || !canRegister} />
+                <Button label={busy ? "Creating…" : "Create account"} type="submit" disabled={busy || !canRegister} />
                 <Button label="Back to sign in" small onPress={() => { setMode("login"); setError(""); setTotpNeeded(false); setTotpCode(""); }} disabled={busy} />
               </>
             )}
-            <Note>
+            {/* 2026-09-28 audit F5: the full crypto-honesty paragraph is one
+                click away instead of a standing wall of text. */}
+            <Disclosure summary="How your password is protected">
               Your password never leaves this page: the server stores only a hash of a derived key, and
               your sharing key is decryptable only with your password.
-            </Note>
+            </Disclosure>
           </form>
         </Card>
       </div>

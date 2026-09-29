@@ -91,7 +91,7 @@ const { LoginView } = await import("../src/views/LoginView");
 const { PatientsView } = await import("../src/views/PatientsView");
 const { PatientView } = await import("../src/views/PatientView");
 const mockedCrypto = vi.mocked(await import("../src/crypto"));
-const { render, flush, textOf, press, buttonByLabel, typeInto } = await import("./helpers/rtr");
+const { render, flush, textOf, textOfNode, press, buttonByLabel, typeInto } = await import("./helpers/rtr");
 const { act } = await import("react-test-renderer");
 
 const patient = {
@@ -336,6 +336,27 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
       expect.objectContaining({ username: "drnew", display_name: "Dr. New" }),
     );
     expect(onReady).toHaveBeenCalled();
+  });
+
+  it("FIX 18 (2026-09-28 audit F1): the primary actions are REAL submit buttons — Enter submits in a browser", async () => {
+    // The 2026-09-21 fix claimed Enter-to-submit but the UI kit rendered
+    // every button type=button, so the multi-field form had NO submit
+    // control and implicit submission did nothing (verified live in a real
+    // browser). These pins hold the actual root cause: the primary button
+    // is type=submit and carries no onClick of its own (a click routes
+    // through the form's onSubmit, exactly like the browser).
+    const login = await render(<LoginView onReady={vi.fn()} />);
+    const signIn = login.root.findAllByType("button").find((n) => textOfNode(n) === "Sign in");
+    expect(signIn?.props.type).toBe("submit");
+    expect(signIn?.props.onClick).toBeUndefined();
+    const secondary = login.root.findAllByType("button").find((n) => textOfNode(n).includes("Create a therapist account"));
+    expect(secondary?.props.type).toBe("button");
+
+    await press(login, "Create a therapist account instead");
+    await flush();
+    const register = login.root.findAllByType("button").find((n) => textOfNode(n) === "Create account");
+    expect(register?.props.type).toBe("submit");
+    expect(register?.props.onClick).toBeUndefined();
   });
 
   it("FIX 18: enrollment-policy status notices are live regions (role=status)", async () => {

@@ -129,7 +129,9 @@ describe("LoginView TOTP step (2026-09-22)", () => {
     await press(root, "Sign in");
     await flush(6);
     expect(root.root.findAllByType("input").some((i) => i.props.placeholder === "123456")).toBe(false);
-    expect(textOf(root)).toContain("invalid credentials");
+    // 2026-09-28 audit F6: the 401 invalid_credentials detail renders as
+    // friendly copy, not the raw lowercase server string.
+    expect(textOf(root)).toContain("Sign-in failed — check your username and password.");
 
     // Fresh mount: totp_required arms the stage…
     const root2 = await render(<LoginView onReady={vi.fn()} />);

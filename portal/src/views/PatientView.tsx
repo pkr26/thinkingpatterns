@@ -39,7 +39,7 @@ import {
   unwrapPatientDataKey,
   type PatternPayload,
 } from "../crypto";
-import { Button, Card, ErrorBanner, Note as NoteText, theme } from "../ui";
+import { Button, Card, Disclosure, ErrorBanner, Note as NoteText, theme } from "../ui";
 import { printPage, randomBytes, visitAnchorStore } from "../platform";
 
 export interface PortalSession {
@@ -105,7 +105,7 @@ const lastVisitKey = (therapistId: string, userId: string): string =>
  *  calendar day keeps "marked reviewed" on the same date the clinician's
  *  wall clock showed, and the anchor-vs-first_seen comparison stays a
  *  pure date-to-date comparison with no time-of-day seam. */
-function localDateISO(date: Date): string {
+export function localDateISO(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -204,13 +204,47 @@ function MoodSparkline(props: { points: { date: string; sentiment: number }[] })
       aria-label={`Mood over the ${pts.length} mood-tagged evidence entries (average ${(avg).toFixed(2)})`}
     >
       <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke={theme.border} strokeWidth={1} />
-      <path d={path} fill="none" stroke={theme.accent} strokeWidth={1.6} />
+      {/* 2026-09-28 palette wave: accentBright (8.2:1 on the card surface) —
+          the raw accent line missed the 3:1 non-text floor on --surface-deep. */}
+      <path d={path} fill="none" stroke={theme.accentBright} strokeWidth={1.6} />
     </svg>
   );
 }
 
-function evidenceRows(pattern: PatternPayload): [string, string][] {
-  const d = pattern.detail;
+/** 2026-09-28 audit F7: the per-instrument measures trend — the same
+ *  inline-SVG language as the mood sparkline, rendered above the exact
+ *  text line (which stays for precision and print). Scores are plotted
+ *  against the group's own maximum; interpretation stays the
+ *  clinician's, and the aria-label carries the numbers a screen reader
+ *  needs (the line alone is not accessible information). */
+function MeasureTrend(props: { instrument: string; readings: { measureDate: string; score: number }[] }): React.JSX.Element | null {
+  const pts = props.readings;
+  if (pts.length < 2) return null;
+  const w = 320;
+  const h = 40;
+  const max = Math.max(...pts.map((p) => p.score), 1);
+  const step = w / (pts.length - 1);
+  const y = (v: number): number => h - 4 - (v / max) * (h - 8);
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
+  const scores = pts.map((p) => p.score);
+  const first = scores[0]!;
+  const last = scores[scores.length - 1]!;
+  const low = Math.min(...scores);
+  const high = Math.max(...scores);
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      className="trend"
+      role="img"
+      aria-label={`${props.instrument} trend over ${pts.length} readings: first ${first}, latest ${last}, low ${low}, high ${high} (higher is more of what the instrument measures; interpretation is the clinician's)`}
+    >
+      <line x1={0} y1={h - 4} x2={w} y2={h - 4} stroke={theme.border} strokeWidth={1} />
+      <path d={path} fill="none" stroke={theme.accentBright} strokeWidth={1.6} />
+    </svg>
+  );
+}
+
+function evidenceRows(pattern: PatternPayload): [string, string][] {  const d = pattern.detail;
   const rows: [string, string][] = [];
   if (d.pattern_state) rows.push(["state", String(d.pattern_state)]);
   if (typeof d.first_seen === "string") rows.push(["first seen", dayOf(d.first_seen)]);
@@ -228,6 +262,39 @@ function newNoteId(): string {
   // F-6 (2026-09-21): through the platform seam, not bare crypto.
   const bytes = randomBytes(8);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** 2026-09-28 audit F8: a note's surviving pattern anchor after a revoke,
+ *  named in human terms instead of the raw pid ("phrase:a4adc4d084fc").
+ *  The pid's coarse kind prefix is the same topic id the server already
+ *  holds in plaintext; anything unrecognized degrades to "a pattern". */
+export function patternAnchorLabel(pid: string | null): string {
+  if (!pid) return "a pattern";
+  const kind = pid.split(":")[0] ?? "";
+  const names: Record<string, string> = {
+    phrase: "a recurring phrase",
+    rumination: "a recurring phrase",
+    temporal: "a day-of-week pattern",
+    topic: "a topic pattern",
+    link: "a day-after pattern",
+    mood_correlation: "a mood correlation",
+    mood_shift: "a mood shift",
+    inertia: "a mood-carryover pattern",
+    instability: "a mood-swing pattern",
+    avoidance: "an avoidance pattern",
+    cadence: "a writing-rhythm pattern",
+  };
+  return names[kind] ?? "a pattern";
+}
+
+/** 2026-09-28 audit F2: phrase highlighting must survive the engine's
+ *  label normalization. Pattern labels arrive punctuation/space-stripped
+ *  ("can't sleep mind won't stop") while journal entries keep their
+ *  punctuation ("can't sleep, mind won't stop.") — a raw includes()
+ *  never matched the multi-word case (verified live: 0 <mark> elements).
+ *  Fold both sides to letters+digits before comparing. */
+function normalizeForMatch(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function patternKey(pattern: PatternPayload, index: number): string {
@@ -953,7 +1020,9 @@ export function PatientView(props: {
   };
 
   const labelMatches = (text: string, label: string): boolean =>
-    label.length > 0 && text.toLowerCase().includes(label.toLowerCase());
+    // 2026-09-28 audit F2: normalized on both sides (see normalizeForMatch)
+    // — the raw includes() never fired for punctuation-stripped labels.
+    label.length > 0 && normalizeForMatch(text).includes(normalizeForMatch(label));
 
   return (
     <main className="portal-main">
@@ -1025,6 +1094,7 @@ export function PatientView(props: {
         <Card title={`Recorded measures (${measures?.length ?? 0})`}>
           {measureGroups.map((group) => (
             <div key={group.instrument}>
+              <MeasureTrend instrument={measureLabel(group.instrument)} readings={group.readings} />
               <NoteText>
                 {measureLabel(group.instrument)}: {group.readings.map((m) => `${m.measureDate}: ${m.score}`).join("  ·  ")}
               </NoteText>
@@ -1114,7 +1184,21 @@ export function PatientView(props: {
         patterns?.map((pattern, index) => (
           <Card key={patternKey(pattern, index)} title={pattern.detail.sensitive ? "A difficult thought has been returning" : pattern.label}>
             <NoteText>{describePattern(pattern)}</NoteText>
-            {pattern.detail.is_new && <NoteText tone="ok">new since your last visit window</NoteText>}
+            {/* 2026-09-28 audit F3: the badge derives from the SAME local
+                anchor as the header count (first_seen > anchor; everything
+                counts when no anchor exists), so marking reviewed clears
+                the count AND every badge together — the server-side is_new
+                flag used here could stay green for a whole server
+                generation after the clinician marked the chart reviewed. */}
+            {(lastReviewed !== null
+              ? Boolean(pattern.detail.first_seen && pattern.detail.first_seen > lastReviewed)
+              : true) && (
+              <NoteText tone="ok">
+                {lastReviewed !== null
+                  ? `new since you marked reviewed ${lastReviewed}`
+                  : "new for you to review"}
+              </NoteText>
+            )}
             <Button label="See the evidence" small onPress={() => void openDrilldown(pattern)} />
           </Card>
         ))
@@ -1205,9 +1289,12 @@ export function PatientView(props: {
               {/* F1 (GUI drill 2026-09-28): in the notes-only chart an
                   anchored note names its pid — the one anchor that survives
                   the ended share (never note-derived text; the pid is the
-                  same coarse topic id the server already holds). */}
+                  same coarse topic id the server already holds).
+                  2026-09-28 audit F8: the pid is rendered in human terms
+                  (patternAnchorLabel) — the raw "phrase:a4adc4d084fc" was
+                  opaque to every reader. */}
               {notesOnly && note.pattern_pid && (
-                <span className="note-anchor">on pattern {note.pattern_pid}</span>
+                <span className="note-anchor">on {patternAnchorLabel(note.pattern_pid)}</span>
               )}
               <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
               {/* Final-verification 2026-09-22: the note edit history used to
@@ -1339,9 +1426,11 @@ ${tpl}` : tpl)}
         <div>
           <Button label={busy ? "Saving…" : "Save note"} onPress={saveNote} disabled={busy || !draft.trim()} />
         </div>
-        <NoteText>
+        {/* 2026-09-28 audit F5: the full privacy/retention paragraph is one
+            click away; the summary line names what matters at a glance. */}
+        <Disclosure summary="How private clinician notes are encrypted">
           Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it.
-        </NoteText>
+        </Disclosure>
       </Card>
 
       {/* Print-only session summary (2026-09-17): everything a paper record
@@ -1416,9 +1505,10 @@ ${tpl}` : tpl)}
                   <p className="print-note-p">
                     {dayOf(note.created_at)} — {note.text}
                     {/* F1 (GUI drill 2026-09-28): the paper record carries the
-                        same surviving anchor the notes-only screen shows. */}
+                        same surviving anchor the notes-only screen shows
+                        (2026-09-28 audit F8: human terms, not the raw pid). */}
                     {notesOnly && note.pattern_pid && (
-                      <span className="print-edited"> · on pattern {note.pattern_pid}</span>
+                      <span className="print-edited"> · on {patternAnchorLabel(note.pattern_pid)}</span>
                     )}
                     {/* Final-verification 2026-09-22: this summary is paper —
                         it must never carry a clickable affordance (the old

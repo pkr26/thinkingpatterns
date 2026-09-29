@@ -74,6 +74,17 @@ export async function press(root: ReactTestRenderer, label: string): Promise<voi
   const button = root.root.findAllByType("button").find((n) => joined(n) === label);
   if (!button) throw new Error(`no button labeled ${JSON.stringify(label)}`);
   await act(async () => {
+    // 2026-09-28 audit F1: a submit-typed button carries no onClick — a
+    // real browser routes its click through the owning form's submit
+    // event, so the helper mirrors that (the browser behavior the old
+    // always-type=button bug silently broke).
+    if (button.props.type === "submit") {
+      let form = button.parent;
+      while (form && form.type !== "form") form = form.parent;
+      if (!form) throw new Error(`submit button ${JSON.stringify(label)} has no owning form`);
+      form.props.onSubmit({ preventDefault: () => {} });
+      return;
+    }
     button.props.onClick();
   });
 }
@@ -83,11 +94,14 @@ export function buttonByLabel(root: ReactTestRenderer, label: string): boolean {
 }
 
 /** Type into a <label>-wrapped input, matched by the label's text (the
- * Field component renders exactly that shape). */
+ *  Field component renders exactly that shape). 2026-09-28: a password
+ *  Field with a reveal toggle sits inside the reveal row's <span> — walk
+ *  up to the owning label instead of assuming the direct parent. */
 export async function typeInto(root: ReactTestRenderer, labelText: string, value: string): Promise<void> {
   const field = root.root.findAllByType("input").find((n) => {
-    const label = n.parent;
-    return label !== null && label.type === "label" && textOfNode(label).includes(labelText);
+    let label = n.parent;
+    while (label && label.type !== "label") label = label.parent;
+    return label !== null && textOfNode(label).includes(labelText);
   });
   if (!field) throw new Error(`no input whose label contains ${JSON.stringify(labelText)}`);
   await act(async () => {

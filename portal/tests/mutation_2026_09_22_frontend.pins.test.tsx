@@ -668,7 +668,9 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     await typeInto(root, "Authenticator code", "123456");
     await press(root, "Verify code");
     await flush();
-    expect(textOf(root)).toContain("bad credentials");
+    // 2026-09-28 audit F6: the invalid_credentials code maps to friendly
+    // copy even mid-TOTP-stage (the password itself was rejected).
+    expect(textOf(root)).toContain("Sign-in failed — check your username and password.");
     const passwordField = root.root.findAllByType("input").find((n) => n.props.type === "password")!;
     expect(passwordField.props.value).toBe("");
   });

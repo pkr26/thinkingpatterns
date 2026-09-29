@@ -208,7 +208,8 @@ describe("LoginView", () => {
     await typeInto(root, "Password", "wrong");
     await press(root, "Sign in");
     await flush();
-    expect(textOf(root)).toContain("invalid credentials");
+    // 2026-09-28 audit F6: the raw server detail is mapped to actionable copy.
+    expect(textOf(root)).toContain("Sign-in failed — check your username and password.");
   });
 
   it("a non-Error sign-in failure shows the generic fallback, and Back-to-sign-in works", async () => {
@@ -1478,7 +1479,8 @@ describe("audit fixes 2026-09-20", () => {
     // the whole-chart title, and its pid rides along as the anchor.
     expect(textOf(root)).toContain("My notes about this patient");
     expect(textOf(root)).toContain("existing note text");
-    expect(textOf(root)).toContain("on pattern phrase:a4adc4d084fc");
+    // 2026-09-28 audit F8: the anchor renders in human terms, not the raw pid.
+    expect(textOf(root)).toContain("on a recurring phrase");
     // The anchored note keeps the full affordances of its own record:
     // pressing Edit opens the editor (Save edit / Cancel mount).
     await press(root, "Edit");

@@ -180,7 +180,7 @@ describe("round 2: api error taxonomy and request shapes", () => {
     setSession("tok", BASE);
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
     const unreachable = await realApi.api.me().then(() => null, (e: unknown) => e as { message?: string });
-    expect(unreachable?.message).toBe("server unreachable — check the server URL or your connection");
+    expect(unreachable?.message).toBe("server unreachable — check your connection");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ detail: "nope", code: 42 }), headers: new Headers(), url: "" })));
     const numeric = await realApi.api.me().then(() => null, (e: unknown) => e as { code?: unknown });
     expect(numeric?.code).toBeUndefined(); // a non-string code never reaches ApiError.code
@@ -415,7 +415,7 @@ describe("round 2: App idle lock and session races", () => {
 // ---------------------------------------------------------------------------
 
 describe("round 2: ui theme and tones", () => {
-  it("the theme table is exactly the clinical palette (2026-09-26 audit: AA-corrected button accents; warn/ok/danger mirror the *-strong tones the notes actually render with)", () => {
+  it("the theme table is exactly the clinical palette (2026-09-28 \"warm dusk\" wave: violet accent, gold ok, orange warn — every tone ≥4.5:1 as text on the dark surfaces, see tests/designTokens.test.ts)", () => {
     expect(ui.theme).toEqual({
       bg: "#0d1219",
       card: "#151b28",
@@ -423,11 +423,11 @@ describe("round 2: ui theme and tones", () => {
       text: "#e8edf6",
       body: "#c6cfdd",
       muted: "#8a95a3",
-      accent: "#2f6fe0",
-      accentBright: "#7db0ff",
+      accent: "#6748cc",
+      accentBright: "#b3a4f5",
       danger: "#f0a89e",
-      ok: "#7cc7a2",
-      warn: "#e5b87e",
+      ok: "#e3c87d",
+      warn: "#e8a36b",
       border: "#232b3b",
       radius: 12,
     });

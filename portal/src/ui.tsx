@@ -12,16 +12,13 @@
  * the label; Note preserves line breaks; ErrorBanner announces with
  * role=alert.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 /** Mirrors the CSS custom properties in public/portal.css (guarded by
- *  tests/designTokens.test.ts). 2026-09-26 audit corrections:
- *   - accent/accentBright follow the AA-corrected button palette
- *     (--primary/--primary-strong — white labels now clear 4.5:1);
- *   - warn/ok/danger mirror the color those tones actually RENDER with
- *     (--warn-strong/--ok-strong/--danger-strong — .note--warn and
- *     friends color their text with the *-strong variants, so the old
- *     base-token mirrors were tone drift). */
+ *  tests/designTokens.test.ts). 2026-09-28 palette wave ("warm dusk"):
+ *  blue→violet and green→gold/orange (see the token block in the CSS for
+ *  the recomputed WCAG ratios). The tone keys still mirror the colors
+ *  those tones actually RENDER text with (the *-strong variants). */
 export const theme = {
   bg: "#0d1219",
   card: "#151b28",
@@ -29,30 +26,38 @@ export const theme = {
   text: "#e8edf6",
   body: "#c6cfdd",
   muted: "#8a95a3",
-  accent: "#2f6fe0",
-  accentBright: "#7db0ff",
+  accent: "#6748cc",
+  accentBright: "#b3a4f5",
   danger: "#f0a89e",
-  ok: "#7cc7a2",
-  warn: "#e5b87e",
+  ok: "#e3c87d",
+  warn: "#e8a36b",
   border: "#232b3b",
   radius: 12,
 };
 
 export function Button(props: {
   label: string;
-  onPress: () => void;
+  onPress?: () => void;
   disabled?: boolean;
   danger?: boolean;
   small?: boolean;
   variant?: "primary" | "ghost";
+  /** 2026-09-28 audit F1: a submit-typed button drives its form's
+   *  onSubmit (real Enter-to-submit in a browser). A submit button
+   *  carries NO onPress — a click would otherwise fire the handler AND
+   *  the form submit, running the action twice. */
+  type?: "button" | "submit";
 }): React.JSX.Element {
   const classes = ["btn"];
   if (props.danger) classes.push("btn--danger");
   else if (props.variant === "ghost") classes.push("btn--ghost");
   if (props.small) classes.push("btn--small");
+  if (props.type === "submit" && props.onPress) {
+    throw new Error("a submit button must not carry its own onPress (double-fire)");
+  }
   return (
     <button
-      type="button"
+      type={props.type ?? "button"}
       // The portal keeps its audited contract: the handler stays attached
       // while disabled (a real browser never fires clicks on a disabled
       // button; the portal suite exercises the guard directly).
@@ -90,19 +95,56 @@ export function Field(props: {
   type?: string;
   placeholder?: string;
   autoComplete?: string;
+  /** 2026-09-28 audit F10: for password fields — renders a Show/Hide
+   *  toggle beside the input. The toggle is a real button whose label
+   *  names the field kind, so screen readers announce the reveal state. */
+  reveal?: boolean;
 }): React.JSX.Element {
+  const [shown, setShown] = useState(false);
+  const isPassword = (props.type ?? "text") === "password";
+  const type = isPassword && shown ? "text" : props.type ?? "text";
+  const input = (
+    <input
+      type={type}
+      value={props.value}
+      placeholder={props.placeholder}
+      autoComplete={props.autoComplete}
+      onChange={(e) => props.onChange(e.target.value)}
+      className="input"
+    />
+  );
   return (
     <label className="field">
       <span className="field__label">{props.label}</span>
-      <input
-        type={props.type ?? "text"}
-        value={props.value}
-        placeholder={props.placeholder}
-        autoComplete={props.autoComplete}
-        onChange={(e) => props.onChange(e.target.value)}
-        className="input"
-      />
+      {props.reveal && isPassword ? (
+        <span className="field__row">
+          {input}
+          <Button
+            label={shown ? "Hide password" : "Show password"}
+            small
+            variant="ghost"
+            onPress={() => setShown((v) => !v)}
+          />
+        </span>
+      ) : (
+        input
+      )}
     </label>
+  );
+}
+
+/** 2026-09-28 audit F5: long policy paragraphs collapse behind a native
+ *  <details> disclosure — one short labeled line on screen, the full
+ *  honest text one click (or one screen-reader announcement) away. The
+ *  body renders as a muted note; open state is the user's own. */
+export function Disclosure(props: { summary: string; children: ReactNode }): React.JSX.Element {
+  return (
+    <details className="disclose">
+      <summary>{props.summary}</summary>
+      <div className="disclose__body">
+        <Note tone="muted">{props.children}</Note>
+      </div>
+    </details>
   );
 }
 

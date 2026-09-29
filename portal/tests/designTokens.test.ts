@@ -83,8 +83,8 @@ describe("design tokens: JS mirrors CSS", () => {
     // and --info-accent (the de-hardcoded info accent) are load-bearing.
     for (const name of [
       "body", "info-accent", "primary", "primary-hover", "primary-strong",
-      "danger", "danger-hover", "danger-strong", "warn-strong", "warn-soft",
-      "surface", "surface-deep",
+      "primary-focus", "danger", "danger-hover", "danger-strong",
+      "warn-strong", "warn-soft", "ok-strong", "surface", "surface-deep",
     ]) {
       expect(cssToken(name), `--${name} defined`).toMatch(/^#[0-9a-f]{6}$/);
     }
@@ -115,6 +115,14 @@ describe("design tokens: WCAG contrast floors (computed from the parsed CSS)", (
     { fg: cssToken("warn-strong"), bg: cssToken("warn-soft"), min: 4.5, label: "warn text on --warn-soft" },
     { fg: cssToken("danger-strong"), bg: cssToken("danger-soft"), min: 4.5, label: "danger banner text on --danger-soft" },
     { fg: cssToken("info-accent"), bg: cssToken("primary-soft"), min: 4.5, label: "info banner text on --primary-soft" },
+    // 2026-09-28 palette wave: the new gold success tone as text on every
+    // dark surface it renders on (notes, pw-meter label), plus the new
+    // focus violet against the darkest surfaces (WCAG 1.4.11 non-text
+    // floor for the focus indicator, applied with margin).
+    { fg: cssToken("ok-strong"), bg: cssToken("bg"), min: 4.5, label: "ok text on --bg" },
+    { fg: cssToken("ok-strong"), bg: cssToken("surface"), min: 4.5, label: "ok text on card (--surface)" },
+    { fg: cssToken("primary-focus"), bg: cssToken("surface-deep"), min: 3, label: "focus ring on --surface-deep (non-text)" },
+    { fg: cssToken("primary-focus"), bg: cssToken("surface"), min: 3, label: "focus ring on --surface (non-text)" },
     // Ghost-button label and the select chevron.
     { fg: cssToken("primary-strong"), bg: cssToken("bg"), min: 4.5, label: "ghost btn label on --bg" },
     { fg: cssToken("primary-strong"), bg: cssToken("primary-soft"), min: 4.5, label: "ghost btn hover label on --primary-soft" },

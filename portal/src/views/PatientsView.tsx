@@ -26,11 +26,24 @@ import {
 } from "../crypto";
 import type { Bytes, CaseloadSummary } from "../crypto";
 import { copyToClipboard, currentOrigin, downloadTextFile, randomBytes, sessionStore, visitAnchorStore } from "../platform";
-import { Button, Card, ErrorBanner, Field, Note } from "../ui";
+import { Button, Card, Disclosure, ErrorBanner, Field, Note } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
-import { verifyInsightsGeneration, type PortalSession } from "./PatientView";
+import { verifyInsightsGeneration, localDateISO, type PortalSession } from "./PatientView";
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+
+/** 2026-09-28 audit F9: the caseload summary's as-of date, on the
+ *  CLINIC-LOCAL calendar (the same L-80 basis as the delta anchors) —
+ *  the server's UTC forDate used to read "tomorrow" for clinicians west
+ *  of UTC during their evening. Falls back to the payload's forDate
+ *  when no (parseable) update timestamp exists. */
+function summaryAsOfDate(summary: CaseloadSummary, updatedAt?: string | null): string {
+  if (updatedAt) {
+    const parsed = new Date(updatedAt);
+    if (!Number.isNaN(parsed.getTime())) return localDateISO(parsed);
+  }
+  return summary.forDate ?? "an unknown date";
+}
 
 /** 2026-09-26 audit round (M, UX copy): the deep triage scan's access
  *  footprint — one insights fetch + full-blob decrypt per active patient,
@@ -852,7 +865,11 @@ export function PatientsView(props: {
                       : <>Verification code for this pairing. The server sent no valid key fingerprint, so it could not be verified against your own key here. </>}
                     The patient&apos;s app shows the same code after they enter yours — read it to
                     each other and confirm it matches EXACTLY before they confirm sharing. A
-                    mismatch means a key was substituted: generate a new code and do not proceed.
+                    {/* 2026-09-28 audit F4: a mismatch is MOST often a mistyped
+                        account id — name that cause before the alarming one,
+                        or a legitimate pairing gets aborted in panic. */}
+                    mismatch means the account id was entered wrong here or a key was
+                    substituted: re-check the id first, then generate a new code and do not proceed.
                   </Note>
                 </>
               );
@@ -974,10 +991,10 @@ export function PatientsView(props: {
                 {/* M-21 (2026-09-20): a manual scan row is FRESHER than the
                     server's last-recompute summary, so it wins when both
                     exist; the summary count otherwise renders with its
-                    as-of date (forDate), because "4 patterns" is only
-                    interpretable next to the date it was true of. */}
+                    as-of date (summaryAsOfDate), because "4 patterns" is
+                    only interpretable next to the date it was true of. */}
                 {row && row.patterns >= 0 && ` · ${row.patterns} pattern${row.patterns === 1 ? "" : "s"} (scanned just now)`}
-                {(!row || row.patterns < 0) && summary && ` · ${summary.patterns} pattern${summary.patterns === 1 ? "" : "s"} as of ${summary.forDate ?? "an unknown date"}`}
+                {(!row || row.patterns < 0) && summary && ` · ${summary.patterns} pattern${summary.patterns === 1 ? "" : "s"} as of ${summaryAsOfDate(summary, patient.summary_updated_at)}`}
                 {row && row.newSinceReviewed > 0 && ` · ${row.newSinceReviewed} new`}
                 {row && row.lastReviewed && ` · reviewed ${row.lastReviewed}`}
               </Note>
@@ -1067,11 +1084,18 @@ export function PatientsView(props: {
           <>
             <div className="stack">
               <h3 className="section-label section-label--flush">Change password</h3>
+              {/* 2026-09-28 audit F5: the long mechanics note collapses behind
+                  a disclosure; the operation-critical fact (every session
+                  ends) stays visible. */}
               <Note>
-                Your sharing key is re-wrapped under the new password first, then the login credential is
-                rotated — on success every session, including this one, is signed out. There is still no
+                On success every session — including this one — is signed out. There is still no
                 password reset: keep the new password in a password manager.
               </Note>
+              <Disclosure summary="How the change works (re-wrap ordering)">
+                Your sharing key is re-wrapped under the new password first, then the login
+                credential is rotated — so an interruption between the two steps leaves the
+                account repairable by the "Recover sharing key" flow below.
+              </Disclosure>
               <Field label="Current password" value={pwCurrent} onChange={setPwCurrent} type="password" autoComplete="current-password" />
               <Field label="New password" value={pwNew} onChange={setPwNew} type="password" autoComplete="new-password" />
               <Field label="Repeat new password" value={pwConfirm} onChange={setPwConfirm} type="password" autoComplete="new-password" />
@@ -1116,11 +1140,15 @@ export function PatientsView(props: {
               <hr className="divider" />
               <h3 className="section-label section-label--flush">Rotate sharing key (suspected compromise)</h3>
               <Note>
-                Publishes a brand-new sharing keypair sealed under your current password. Existing grants
-                stay readable only after each patient re-wraps their data key via the pairing fingerprint
-                path; grants that never re-wrap are intentionally lost — retiring the compromised key is
-                the point. Your notes are unaffected: they are sealed under your password, not this key.
+                Publishes a brand-new sharing keypair sealed under your current password; grants from
+                patients who never re-wrap are intentionally lost — retiring the compromised key is the
+                point. Your notes are unaffected.
               </Note>
+              <Disclosure summary="What happens to existing patient grants">
+                Existing grants stay readable only after each patient re-wraps their data key via the
+                pairing fingerprint path; grants that never re-wrap are intentionally lost. Your notes
+                are unaffected: they are sealed under your password, not this key.
+              </Disclosure>
               <Field label="Current password (to authorize rotation)" value={compCurrent} onChange={setCompCurrent} type="password" autoComplete="current-password" />
               <label className="confirm-label">
                 <input
@@ -1148,10 +1176,10 @@ export function PatientsView(props: {
               {totpStatus === false && !totpPending && (
                 <>
                   <Note>
-                    Optional second factor for sign-in: after it is enabled, your password AND a 6-digit
-                    code from an authenticator app are both required. Enabling also mints a set of
-                    single-use recovery codes (shown once) so a lost authenticator no longer needs an
-                    operator to clear. Disabling two-factor needs both halves again.
+                    Optional second factor for sign-in: after it is enabled, your password AND a
+                    6-digit code from an authenticator app are both required. Enabling mints a set
+                    of single-use recovery codes (shown once) so a lost authenticator no longer
+                    needs an operator to clear.
                   </Note>
                   <Field label="Current password (to authorize setup)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
                   <Button

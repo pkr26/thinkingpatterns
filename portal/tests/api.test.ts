@@ -403,7 +403,7 @@ describe("authenticated requests", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
     await expect(api.logout()).rejects.toMatchObject({
       status: 0,
-      message: "server unreachable — check the server URL or your connection",
+      message: "server unreachable — check your connection",
     });
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ detail: "rate limited" }, 429)));
     await expect(api.logout()).rejects.toMatchObject({ status: 429, message: "rate limited" });
@@ -508,7 +508,7 @@ describe("authenticated requests", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
     await expect(api.notes("u1")).rejects.toMatchObject({
       status: 0,
-      message: "server unreachable — check the server URL or your connection",
+      message: "server unreachable — check your connection",
     });
   });
 });

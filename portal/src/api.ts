@@ -204,7 +204,7 @@ async function requestWithResponse<T>(
     }, activeSession.baseUrl, activeSession.controller.signal);
   } catch (err) {
     if (err instanceof ApiError) throw err;
-    throw new ApiError(0, "server unreachable — check the server URL or your connection");
+    throw new ApiError(0, "server unreachable — check your connection");
   }
   // A fetch implementation can resolve despite an abort race.  Do not parse
   // or return protected content once logout / expiry has replaced the
@@ -249,7 +249,7 @@ async function authRequest<T>(
     }, safeBaseUrl);
   } catch (err) {
     if (err instanceof ApiError) throw err;
-    throw new ApiError(0, "server unreachable — check the server URL or your connection");
+    throw new ApiError(0, "server unreachable — check your connection");
   }
   const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
   if (!response.ok) {
@@ -628,7 +628,7 @@ export const api = {
       );
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      throw new ApiError(0, "server unreachable — check the server URL or your connection");
+      throw new ApiError(0, "server unreachable — check your connection");
     }
     if (response.status === 204) return null;
     const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
