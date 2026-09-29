@@ -94,10 +94,17 @@ server {
     access_log off;
 
     # Browser hardening belongs at the static host, not just in the API.
-    # The React portal intentionally uses inline style attributes for its
-    # dynamic theme. Keep this aligned with portal/public/_headers and its
+    # Keep this aligned with portal/public/_headers and portal/index.html's
     # meta fallback: a stricter second CSP would intersect and block the UI.
-    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'" always;
+    # Since 2026-09-26 there is no 'unsafe-inline' anywhere — the shell's
+    # stylesheets are the same-origin /portal.css and /print.css, and the
+    # views' former inline style objects are portal.css classes now, so
+    # style-src needs no inline escape (SVG stroke/fill are attributes,
+    # which style-src does not govern). FE-2 (pentest 2026-09-29): this
+    # template had kept the pre-hardening escape hatch — and its stale
+    # justifying comment — after every pinned portal copy dropped it; the
+    # X-Robots-Tag below is the same noindex the patient-web block ships.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "no-referrer" always;
     add_header X-Frame-Options "DENY" always;
@@ -106,6 +113,7 @@ server {
     add_header Cross-Origin-Opener-Policy "same-origin" always;
     add_header Cross-Origin-Resource-Policy "same-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
 
     root /srv/mindpattern/portal/dist;
     index index.html;

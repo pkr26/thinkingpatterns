@@ -13,6 +13,10 @@
 #   - tests?/ directories — throwaway credentials and crypto fixtures in
 #     test code. Policy: a real production secret must never live in a
 #     test; if one ever does, ROTATE it — an allowlist entry is not secrecy.
+#     Pentest 2026-09-29 INFRA-3: the path alone exempted ANY value in any
+#     tests dir; the entry now ALSO requires the flagged value to look like
+#     a fixture (see the allowlist body for the marker vocabulary and the
+#     condition=and semantics).
 #   - generated/vendored trees — node_modules, coverage, dist, .venv,
 #     .tools, redteam mutation-campaign results: machine-generated
 #     copies of already-scanned source, or vendored toolchains.
@@ -36,10 +40,43 @@ paths = [
 ]
 
 [[allowlists]]
-description = "test fixtures and throwaway test credentials"
+# Pentest 2026-09-29 INFRA-3: this was a bare path exemption — ANY secret
+# pasted into any directory named tests/ or test/ was invisible to both CI
+# and pre-commit. The path component stays, but the exemption now also
+# requires the flagged VALUE to look like a fixture: `condition = "and"` +
+# `regexTarget = "secret"` mean a finding under a tests path is allowed only
+# when the secret itself matches a clearly-fake marker. Realistic shapes
+# (AKIA…, ghp_…, a random sk-… key, a private-key block) committed into
+# test code now fail the gate like anywhere else — verified against
+# gitleaks v8.30.1, the version ci.yml and pre-commit both pin (note the
+# key is `condition`, not `matchCondition`, at this version; a future pin
+# bump that drops the key would flag the fixtures and fail loudly, not
+# silently re-widen the exemption). Engine caveat, verified on the pinned
+# binary: the full-HISTORY scan — CI's authoritative gate, and the one
+# that sees every tests/ file, since CI checks out committed content only —
+# enforces the AND (a planted AKIA…/ghp_… value under backend/tests/ is
+# caught). The --no-git scanner (and pre-commit's staged pass) skips whole
+# files on a bare paths match in sources/common.go shouldSkipPath without
+# consulting the condition — a v8.30.1 limitation upstream marks
+# "TODO: Remove this in v9"; re-test both modes when the pin next moves.
+#
+# Marker vocabulary, kept honest and minimal: the classic placeholder words
+# plus the exact synthetic values this repo's fixtures actually use today —
+# sequential hex runs (0123456789, abcdef, e.g. `abcdEFGH1234` and the
+# `sk-live-abcdef0123456789` fake LLM key), the alternating
+# `a1b2c3d4e5f6…` wrap-key-fingerprint placeholder, and the
+# `rotation-with-rewrap-*` password fixtures. Base32 TOTP secrets are
+# deliberately NOT matched: synthetic and real base32 are indistinguishable
+# by shape, so an enrollment secret in a test must stay a FINDING.
+description = "test fixtures and throwaway test credentials (tests path + clearly-fake value)"
 paths = [
   '''(^|[/\\])tests?([/\\]|$)''',
 ]
+regexTarget = "secret"
+regexes = [
+  '''(?i)(fake|dummy|example|redteam|audit-|gui-|e2e-|test|xxxx|aaaa|abcdef|0123456789|a1b2c3d4e5f6|rotation-with-rewrap)''',
+]
+condition = "and"
 
 [[allowlists]]
 description = "generated and vendored trees"

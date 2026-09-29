@@ -1873,12 +1873,16 @@ async def local_recompute(
     server-side engine's integrity work (FDR, replication gates) protects
     the patient from flukes; it cannot protect them from their own client
     any more than entry storage can — and the therapist only ever reads
-    what this patient's app produced. What the server DOES ground:
-    ``analysis_dates`` is intersected with the account's real entry dates
-    (a client cannot claim analysis of data that does not exist), the
-    count stays bounded, and ``base_state_seq`` is checked against the
-    latest brain row so a stale local run cannot silently clobber a
-    newer one (409 conflict; the client re-fetches and re-runs).
+    what this patient's app produced. What the server DOES ground: the
+    threshold and phase in the response are evaluated over the account's
+    REAL entry dates read from the database — ``analysis_dates`` is
+    accepted, format-validated client metadata that influences neither
+    (pentest I-1, 2026-09-29: an earlier docstring claimed an
+    intersection that never ran; the real grounding is stronger, since a
+    client's claims cannot ADD counted days) — the blob count stays
+    bounded, and ``base_state_seq`` is checked against the latest brain
+    row so a stale local run cannot silently clobber a newer one (409
+    conflict; the client re-fetches and re-runs).
     """
     settings = request.app.state.settings
     if body.base_state_seq < 0:
@@ -1909,10 +1913,14 @@ async def local_recompute(
             detail="blobs must be within the storage size bounds",
             code="validation_error",
         )
-    parsed_days: set[date_type] = set()
+    # I-1 (2026-09-29): validate each declared date's ISO format (rejecting
+    # garbage early), but do not accumulate them — the threshold below is
+    # evaluated exclusively over the account's real DB dates, so the
+    # client's analysis_dates can neither add counted days nor influence
+    # the phase. The old parsed_days set was built and never read.
     for raw in body.analysis_dates:
         try:
-            parsed_days.add(date_type.fromisoformat(raw))
+            date_type.fromisoformat(raw)
         except ValueError:
             raise ApiError(
                 status_code=422, detail="analysis_dates must be ISO dates", code="validation_error"

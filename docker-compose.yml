@@ -14,11 +14,21 @@
 #   openssl rand -base64 32 > deploy/secrets/backup_key
 #   openssl rand -hex 16 > deploy/secrets/postgres_password
 #
-# POSTGRES_PASSWORD additionally stays in .env: the api service interpolates
-# it raw into MINDPATTERN_DB_URL below (compose-level interpolation cannot
-# read secret files), so the database container itself reads it from the
-# mounted file while the api's copy remains env-based — documented residual,
-# rotatable, and lower blast-radius than the signing secrets.
+# The database password rode .env as the one documented EXCEPTION (compose
+# cannot interpolate a secret FILE into an environment value, so the api's
+# MINDPATTERN_DB_URL interpolated ${POSTGRES_PASSWORD} raw — docker-inspect
+# readable). Pentest 2026-09-29 MED-1 closed it the only way compose allows:
+# the api now mounts the SAME postgres_password secret file the db service
+# reads, and backend/docker-entrypoint.sh assembles MINDPATTERN_DB_URL from
+# the file plus the non-secret POSTGRES_USER/POSTGRES_DB values before
+# exec'ing uvicorn. The password enters only the api process's runtime
+# environment, never the container's static config, and POSTGRES_PASSWORD
+# no longer needs an .env copy at all. Two constraints carry over: the file
+# value must stay hex (openssl rand -hex 16 — the entrypoint interpolates it
+# into a URL verbatim, so URL-reserved characters would corrupt the
+# connection string; 2026-09-19 audit, L-86), and an operator who sets
+# MINDPATTERN_DB_URL directly (custom deployments) overrides the assembly —
+# the entrypoint never rewrites a value it was given.
 services:
   api:
     # The image CMD (docker-entrypoint.sh) runs `alembic upgrade head`
@@ -71,15 +81,26 @@ services:
       # unreadable path and `docker compose up` crash-looped the api.
       - auth_token_secret
       - metrics_token
+      # Pentest 2026-09-29 MED-1: the same file the db service reads
+      # (native POSTGRES_PASSWORD_FILE there). docker-entrypoint.sh builds
+      # MINDPATTERN_DB_URL from it in-process — see the environment block
+      # below for why the URL itself is no longer interpolated here.
+      - postgres_password
     environment:
-      # POSTGRES_PASSWORD is interpolated RAW into this URL: it must be a
-      # hex string (openssl rand -hex 16, as the db service example shows)
-      # or another charset with no URL-reserved characters (: / @ # ? %).
-      # A password containing any of those would silently corrupt the
-      # connection URL — enforce hex-only generation in your secret store
-      # (2026-09-19 audit, L-86).
       MINDPATTERN_ENV: production
-      MINDPATTERN_DB_URL: postgresql+asyncpg://${POSTGRES_USER:-mindpattern}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-mindpattern}
+      # Pentest 2026-09-29 MED-1: MINDPATTERN_DB_URL is deliberately ABSENT.
+      # Compose interpolated the db password raw from .env into it — the
+      # last secret outside the file-mount posture, readable back via
+      # `docker inspect`. Compose cannot interpolate a secret file into an
+      # env value, so the URL is assembled inside the container by
+      # docker-entrypoint.sh from the mounted postgres_password secret plus
+      # these two NON-secret components (same values the db service itself
+      # gets; usernames and database names are visible in every container's
+      # env by design). A MINDPATTERN_DB_URL set here by an overlay, or in
+      # the image, still wins — the entrypoint only assembles when it is
+      # unset/empty.
+      POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
+      POSTGRES_DB: ${POSTGRES_DB:-mindpattern}
       # The signing secret reads from the mounted file (empty env var falls
       # through to <VAR>_FILE in app.config); the dev overlay may keep the
       # plain env form.
@@ -161,8 +182,9 @@ services:
       - postgres_password
     environment:
       # From the mounted secret file (native POSTGRES_PASSWORD_FILE support)
-      # — the password never appears in this container's environment. The
-      # .env copy exists only for the api service's URL interpolation.
+      # — the password never appears in this container's environment, and
+      # since pentest 2026-09-29 (MED-1) the api reads the SAME file via its
+      # entrypoint, so no .env POSTGRES_PASSWORD copy is needed anywhere.
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-mindpattern}

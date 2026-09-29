@@ -365,6 +365,16 @@ class Settings:
     # with a valid verifier, so no lockout oracle for unauthenticated
     # spray) must stay independently observable and configurable.
     totp_failure_limit: int = 10
+    # Per-USERNAME wrong-verifier budget across ALL verifier-gated
+    # endpoints at once (pentest I-2, 2026-09-29). Thirteen endpoints
+    # accept the password re-auth, each with its own per-IP bucket, so a
+    # stolen bearer used to buy ~13 x auth_rate_limit scrypt runs per
+    # minute from one IP. This keyed bucket (reachable only past a valid
+    # bearer — no anonymous lockout oracle) counts only ACTUAL failures,
+    # so a legitimate user's rare typo costs nothing until the aggregate
+    # wall. 30/min: generous for human re-auth, 4x tighter than the
+    # fan-out it closes.
+    verifier_failure_limit: int = 30
     entries_rate_limit: int = 120
     entries_rate_window: int = 60
     processing_rate_limit: int = 10
@@ -571,6 +581,7 @@ class Settings:
             "auth_rate_limit",
             "auth_rate_window",
             "totp_failure_limit",
+            "verifier_failure_limit",
             "entries_rate_limit",
             "entries_rate_window",
             "processing_rate_limit",
@@ -627,6 +638,7 @@ class Settings:
         for name in (
             "auth_rate_limit",
             "totp_failure_limit",
+            "verifier_failure_limit",
             "entries_rate_limit",
             "processing_rate_limit",
             "read_rate_limit",
@@ -676,6 +688,23 @@ class Settings:
             len(explicit_mac) != 64 or any(c not in "0123456789abcdefABCDEF" for c in explicit_mac)
         ):
             raise RuntimeError("MINDPATTERN_AUDIT_MAC_SECRET must be 32 bytes of hex (64 chars)")
+        # Pentest MED-2 (2026-09-29): without an explicit MAC secret the
+        # audit-chain key is HKDF-derived from the TOKEN secret — sound
+        # against a database-only attacker (the key never touches the DB),
+        # but one exfiltrated env value then both mints bearers AND re-forges
+        # the whole tamper-evident trail. Rotating to a dedicated secret is a
+        # one-way re-MAC (existing chains verify only under the key that
+        # sealed them), so this is a loud boot WARNING, not a boot failure:
+        # operators must make the split deliberately, knowing the trade.
+        if not explicit_mac and self.environment != "development":
+            logger.warning(
+                "MINDPATTERN_AUDIT_MAC_SECRET is unset: the audit-chain MAC "
+                "key is derived from MINDPATTERN_TOKEN_SECRET, so one "
+                "exfiltrated value would compromise both bearer minting and "
+                "the audit trail's tamper evidence. Set a dedicated 32-byte-"
+                "hex secret to decouple them (note: existing chains verify "
+                "only under the key that sealed them — rotate deliberately)."
+            )
         # 2026-09-26 audit item 9: the edge buffers one complete body per
         # in-flight request, so the deployment's worst-case buffer memory is
         # this product. Refuse the combination up front with the arithmetic
@@ -836,6 +865,7 @@ class Settings:
             export_rate_limit=_int_env("MINDPATTERN_EXPORT_RATE_LIMIT", 5),
             export_rate_window=_int_env("MINDPATTERN_EXPORT_RATE_WINDOW", 60),
             totp_failure_limit=_int_env("MINDPATTERN_TOTP_FAILURE_LIMIT", 10),
+            verifier_failure_limit=_int_env("MINDPATTERN_VERIFIER_FAILURE_LIMIT", 30),
             ops_rate_limit=_int_env("MINDPATTERN_OPS_RATE_LIMIT", 240),
             ops_rate_window=_int_env("MINDPATTERN_OPS_RATE_WINDOW", 60),
             access_log_retention_days=_int_env("MINDPATTERN_ACCESS_LOG_RETENTION_DAYS", 730),

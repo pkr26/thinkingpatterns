@@ -14,6 +14,98 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Security
+
+- **Deep penetration test 2026-09-29 + full remediation** (report:
+  `PENTEST_DEEP_2026-09-29.md`; 4 parallel white-box audits + a 35-probe
+  live campaign + the existing 9-campaign harness as baseline — no
+  Critical/High findings, every actionable Low/Medium fixed same-day and
+  re-verified under live fire):
+  - **Backend — note-revisions byte-paging (BE-1):**
+    `GET /therapist/notes/{id}/revisions` was the only blob read outside
+    the shared `_paging` contract (~32 MiB ciphertext per request on a
+    near-quota chart). It now sizes metadata-first, enforces the 2 MiB
+    hard page budget (legacy over-budget reads fail loudly with 413;
+    byte-paginating clients get short pages + `X-Next-Offset`), and
+    guards the blob fetch against mid-page drift.
+  - **Backend — edge rate gate before the body drain (BE-2):** the
+    pre-dispatch limiter check now runs BEFORE the middleware buffers the
+    request body, so an over-limit client's flood no longer costs a full
+    max-body buffer per refused request (pinned by a raw-ASGI test proving
+    `receive()` is never called for a refused request).
+  - **Backend — catch-all edge bucket (BE-3):** requests that resolve to
+    no limiter-bearing route (unknown paths → framework 404s, CORS
+    preflights, dev-only docs routes) now land in one generous
+    per-identity `edge-catchall` bucket sized to the read budget — a 404
+    or preflight flood is bounded instead of drawing unlimited responses.
+  - **Backend — KDF write floor (T-2):** registration, envelope upgrade,
+    and password-change envelope swaps refuse `kdf_params.iterations`
+    below the shipped 600k contract (a hostile client could previously
+    register at the 100k library floor). Read-validation keeps the
+    historical 100k floor so pre-constraint blobs keep validating.
+  - **Backend — aggregate verifier-failure budget (I-2):** wrong-verifier
+    failures across ALL 13 verifier-gated endpoints now share one
+    per-username budget (`MINDPATTERN_VERIFIER_FAILURE_LIMIT`, default
+    30/min), closing the 13×-per-IP scrypt fan-out a stolen bearer had;
+    counts only actual failures (no anonymous lockout oracle — the bucket
+    is reachable only past a valid bearer).
+  - **Backend — misc:** `local_recompute`'s dead `analysis_dates`
+    accumulation removed and its docstring corrected (I-1: the real
+    grounding — threshold evaluated over the account's DB dates — is
+    stronger than the intersection the docstring claimed); deactivated
+    patients no longer linger in the therapist's revoked history (I-5,
+    consistent with the active pass); boot WARNs loudly outside
+    development when the audit-chain MAC key is only derived from the
+    token secret (MED-2 — one exfiltrated value would compromise both
+    bearer minting and the audit trail; set
+    `MINDPATTERN_AUDIT_MAC_SECRET` to decouple).
+  - **Web — v1 rotation snapshots vault buffers (FE-4):** the one
+    rotation path missing the snapshot-and-recheck idiom (an idle-lock
+    mid-flow zeroized shared buffers and the rotation continued with zero
+    keys) now snapshots both buffers before the first await, re-checks at
+    every pre-server boundary, and zeroizes in `finally`.
+  - **Web — in-memory lock fallback (T-1):** `withLock`'s final fallback
+    (browsers with neither Web Locks nor writable localStorage) now
+    serializes same-tab sections via a per-name memory mutex instead of
+    running unlocked.
+  - **Web — post-password-change rekey hint (MED-3):** a successful v2
+    password change plants a dismissible notice that changing the
+    password does NOT rotate the encryption key, with a button that runs
+    the FULL rotation (rekey + new-key envelope swap — scheme-aware,
+    because the plain credential route 409s `key_scheme_conflict` for v2
+    accounts). An old-envelope attacker survives a password change unless
+    the data key is rotated; the flow now says so at the moment it
+    matters.
+  - **Portal — error-banner sanitizer (FE-1):** the phishing-vector
+    sanitizer web/mobile already ship (URLs, scheme-less domains,
+    phone-like digits, bidi/zero-width) is ported to `portal/src/api.ts`
+    with web's adversarial test corpus.
+  - **Portal — SRI in the build (FE-3):** `tools/add-sri.mjs` (adapted
+    from web) stamps subresource integrity on the built bundle, verified
+    by test.
+  - **Deploy — nginx template sync (FE-2):** the operator template's
+    portal CSP dropped its stale `style-src 'unsafe-inline'` (now
+    byte-identical to `portal/public/_headers`) and gained the web
+    block's `X-Robots-Tag`.
+  - **Deploy — DB password out of the api env (MED-1):** the api
+    container no longer receives the database password through its
+    environment (`docker inspect` readable); the entrypoint assembles
+    `MINDPATTERN_DB_URL` from the 0600 `POSTGRES_PASSWORD_FILE` secret
+    mount, the same posture every other secret already had.
+  - **Repo hygiene:** the synthetic TOTP enrollment secret visible in a
+    committed e2e screenshot is redacted, with a screenshot-hygiene
+    policy note (INFRA-2); the gitleaks `tests?/` path allowlist now also
+    requires clearly-fake fixture VALUES (INFRA-3); the accepted-risk
+    residuals (GCM nonce birthday bound, Python string residuals, TOTP
+    economics, homoglyph display names, unbounded account creation,
+    biometric custody trade, dev-credential never-reuse rule) are
+    documented in `docs/SECURITY_RESIDUALS.md`.
+  - **Verification:** backend 1660 passed / 4 skipped (18 new tests in
+    `tests/test_pentest_2026_09_29_fixes.py`), web 676 / 5 skipped (+8),
+    portal 459 (+9), ruff + mypy + tsc clean, redteam harness 96 verdicts
+    unchanged (77 BLOCKED, the same 8 documented accepted-risk residuals),
+    and 4 live fix-verification probes all BLOCKED.
+
 ### Changed
 
 - **Therapist portal — teal accent wave (2026-09-29, user-directed)**: the

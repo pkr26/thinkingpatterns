@@ -12,16 +12,22 @@ Responsibilities, in order:
  4. Warn once at first sight of X-Forwarded-For while trust_proxy_headers is
     off — the usual symptom of a proxy deployment that forgot to opt in, in
     which case rate limiting keys on the proxy's address for every client.
- 5. Count malformed-JSON bodies into the route's own rate-limit bucket
-    (M-1, 2026-09-20). FastAPI raises RequestValidationError while PARSING
-    the body, before any route dependency runs — so a flood of garbage JSON
-    used to draw unlimited 422s that no limiter ever saw. The validation
-    handler in main.py marks such requests in scope state; this layer then
-    (a) counts the failed parse into the same bucket the route's limiter
-    dependency would have used, and (b) short-circuits with a 429 once the
-    bucket is full — BEFORE the body is handed to FastAPI at all, so an
-    over-limit client costs no further parsing.
- 6. Mirror the CORS allow-list onto this middleware's own short-circuit
+ 5. Admit-or-refuse every request at the rate gate BEFORE its body is
+    buffered (M-1, 2026-09-20; pentest BE-2 2026-09-29). FastAPI parses the
+    body before any route dependency runs, so a flood of garbage JSON used
+    to draw unlimited 422s that no limiter ever saw — and the gate itself
+    used to run after the complete body drain, so an over-limit client
+    still cost a full max-body buffer per refused request. The validation
+    handler in main.py marks body-parse failures in scope state; this layer
+    then (a) counts the failed parse into the same bucket the route's
+    limiter dependency would have used, and (b) short-circuits with a 429
+    once the bucket is full — before the body is handed to FastAPI at all.
+ 6. Catch-all edge bucket for requests no limiter-bearing route resolves
+    to — unknown paths (framework 404s), CORS preflights, and the dev-only
+    docs routes (pentest BE-3, 2026-09-29). These used to draw unlimited
+    cheap responses through the full stack outside every bucket; they now
+    share one generous per-identity bucket sized to the read budget.
+ 7. Mirror the CORS allow-list onto this middleware's own short-circuit
     responses (400/408/413/429/500). CORSMiddleware sits INSIDE this layer,
     so its headers never reach responses generated here — a browser client
     saw only opaque failures for oversized bodies (L-4, 2026-09-20).
@@ -410,7 +416,87 @@ class HardeningMiddleware:
                 )
                 return
 
-        # --- 2. Bound-and-replay the COMPLETE body before dispatch ----------
+        # --- 2. Pre-dispatch rate gate (M-1, 2026-09-20; BE-2/BE-3 2026-09-29) -
+        #
+        # FastAPI parses the body BEFORE route dependencies run, so a request
+        # whose JSON never parses draws a 422 that no limiter ever counted:
+        # an unauthenticated flood used to get unlimited 422s, each costing a
+        # full body buffer + parse. Two moves close it, both keyed to the
+        # SAME bucket (and client identity) the route's limiter dependency
+        # uses — the rules were built from the live router in main.py:
+        #   * pre-dispatch (here): a client already at its bucket's limit is
+        #     refused before the request body is buffered or FastAPI spends
+        #     anything on the request at all (pentest BE-2, 2026-09-29: this
+        #     gate used to run AFTER the complete body drain, so an
+        #     over-limit client still cost a full max-body buffer per
+        #     refused request during a flood);
+        #   * post-response (in send_with_headers below): a 422 the
+        #     validation handler marked as a body-parse failure is counted
+        #     into the bucket — the dependency never ran for that request,
+        #     so this is the ONE count, never a double.
+        # Boundary parity with the dependency: dependencies 429 once the
+        # post-hit count EXCEEDS the limit, which is exactly a pre-hit
+        # check() count >= limit — a valid request sees the same admission
+        # decision it always had, one layer earlier and without the parse.
+        #
+        # Catch-all (pentest BE-3, 2026-09-29): requests that resolve to NO
+        # limiter-bearing route — unknown paths (framework 404s), CORS
+        # preflights (answered by the inner CORSMiddleware before any route
+        # dependency), and the dev-only docs routes — used to draw unlimited
+        # cheap responses through this full stack, outside every bucket.
+        # They now share one generous per-identity bucket sized to the read
+        # budget: ordinary browser traffic is ~one preflight per API request
+        # (the same rate the read bucket already admits), while a 404 or
+        # preflight flood is bounded. No dependency will ever count these
+        # requests, so this layer records the hit itself.
+        rate_counter = self._rate_counter
+        # Audit item 6: the live settings object wins when a provider is
+        # wired; the constructor snapshot stays as the direct-construction
+        # fallback only.
+        rate_settings = self._live_settings() or self._rate_limit_settings
+        matched_checks: tuple[RateLimitCheck, ...] = ()
+        rate_key: str | None = None
+        if rate_counter is not None and rate_settings is not None and self._rate_rules:
+            matched_checks = self._matched_rate_checks(scope)
+            rate_key = client_key_from_scope(scope, self.trust_proxy_headers)
+            if rate_key is None:
+                # Audit item 5 (cache.py): no socket peer means no
+                # rate-limit identity. One shared bucket let a single
+                # client 429 the whole socketless surface; a fresh
+                # per-request key would disable limiting entirely.
+                # Fail closed: refuse before the app spends anything.
+                if self._status_observer is not None:
+                    self._status_observer(429)
+                await self._send_simple(
+                    send,
+                    429,
+                    _RATE_LIMITED,
+                    raw_headers=raw_headers,
+                    extra_headers=[(b"retry-after", b"1")],
+                    legacy=legacy_api,
+                )
+                return
+            if matched_checks:
+                for check in matched_checks:
+                    limit = getattr(rate_settings, check.limit_attr)
+                    window = getattr(rate_settings, check.window_attr)
+                    result = rate_counter.check(f"{check.bucket}:{rate_key}", window)
+                    if result.count >= limit:
+                        await self._reject_over_limit(
+                            send, raw_headers, result.retry_after, legacy=legacy_api
+                        )
+                        return
+            else:
+                catchall = rate_counter.hit(
+                    f"edge-catchall:{rate_key}", rate_settings.read_rate_window
+                )
+                if catchall.count > rate_settings.read_rate_limit:
+                    await self._reject_over_limit(
+                        send, raw_headers, catchall.retry_after, legacy=legacy_api
+                    )
+                    return
+
+        # --- 3. Bound-and-replay the COMPLETE body before dispatch ----------
         #
         # Counting only when the downstream application calls receive() is
         # not a request-size boundary: body-ignoring routes (and an app that
@@ -468,62 +554,6 @@ class HardeningMiddleware:
                 break
 
         replay_index = 0
-
-        # --- 3. Pre-dispatch malformed-body rate gate (M-1, 2026-09-20) -----
-        #
-        # FastAPI parses the body BEFORE route dependencies run, so a request
-        # whose JSON never parses draws a 422 that no limiter ever counted:
-        # an unauthenticated flood used to get unlimited 422s, each costing a
-        # full body buffer + parse. Two moves close it, both keyed to the
-        # SAME bucket (and client identity) the route's limiter dependency
-        # uses — the rules were built from the live router in main.py:
-        #   * pre-dispatch (here): a client already at its bucket's limit is
-        #     refused before FastAPI spends anything on the request at all;
-        #   * post-response (in send_with_headers below): a 422 the
-        #     validation handler marked as a body-parse failure is counted
-        #     into the bucket — the dependency never ran for that request,
-        #     so this is the ONE count, never a double.
-        # Boundary parity with the dependency: dependencies 429 once the
-        # post-hit count EXCEEDS the limit, which is exactly a pre-hit
-        # check() count >= limit — a valid request sees the same admission
-        # decision it always had, one layer earlier and without the parse.
-        rate_counter = self._rate_counter
-        # Audit item 6: the live settings object wins when a provider is
-        # wired; the constructor snapshot stays as the direct-construction
-        # fallback only.
-        rate_settings = self._live_settings() or self._rate_limit_settings
-        matched_checks: tuple[RateLimitCheck, ...] = ()
-        rate_key: str | None = None
-        if rate_counter is not None and rate_settings is not None and self._rate_rules:
-            matched_checks = self._matched_rate_checks(scope)
-            if matched_checks:
-                rate_key = client_key_from_scope(scope, self.trust_proxy_headers)
-                if rate_key is None:
-                    # Audit item 5 (cache.py): no socket peer means no
-                    # rate-limit identity. One shared bucket let a single
-                    # client 429 the whole socketless surface; a fresh
-                    # per-request key would disable limiting entirely.
-                    # Fail closed: refuse before the app spends anything.
-                    if self._status_observer is not None:
-                        self._status_observer(429)
-                    await self._send_simple(
-                        send,
-                        429,
-                        _RATE_LIMITED,
-                        raw_headers=raw_headers,
-                        extra_headers=[(b"retry-after", b"1")],
-                        legacy=legacy_api,
-                    )
-                    return
-                for check in matched_checks:
-                    limit = getattr(rate_settings, check.limit_attr)
-                    window = getattr(rate_settings, check.window_attr)
-                    result = rate_counter.check(f"{check.bucket}:{rate_key}", window)
-                    if result.count >= limit:
-                        await self._reject_over_limit(
-                            send, raw_headers, result.retry_after, legacy=legacy_api
-                        )
-                        return
 
         async def limited_receive():
             nonlocal replay_index

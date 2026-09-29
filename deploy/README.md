@@ -143,7 +143,6 @@ Create `/etc/mindpattern/secrets.env` with mode `0600` for a first deployment
 
 ```dotenv
 MINDPATTERN_TOKEN_SECRET=<a unique 32+-character secret>
-POSTGRES_PASSWORD=<a unique database password>
 BACKUP_KEY=<a unique base64 backup-encryption key>
 MINDPATTERN_TRUST_PROXY_HEADERS=0
 ```
@@ -189,7 +188,7 @@ still shipped as plain env):
 mkdir -p "$APP_DIR/deploy/secrets" && cd "$APP_DIR/deploy/secrets"
 openssl rand -hex 32  > token_secret        # = MINDPATTERN_TOKEN_SECRET
 : > auth_token_secret                       # optional; empty = derive
-openssl rand -hex 16  > postgres_password   # same value as .env's POSTGRES_PASSWORD
+openssl rand -hex 16  > postgres_password   # the ONLY copy (MED-1 2026-09-29: no .env mirror)
 openssl rand -base64 32 > backup_key        # = BACKUP_KEY
 openssl rand -hex 16  > metrics_token       # api /metrics bearer; SAME value must
                                             # go into deploy/monitoring/token for
@@ -200,10 +199,12 @@ cp rclone_config.example rclone_config && $EDITOR rclone_config  # fill the S3 r
 chmod 600 rclone_config
 ```
 
-`POSTGRES_PASSWORD` stays in the secrets.env as well — the api service
-interpolates it raw into `MINDPATTERN_DB_URL` (compose cannot read secret
-files for interpolation), so that one value remains env-based by design;
-everything else above moves out of the environment.
+The database password never enters any container environment (pentest
+MED-1, 2026-09-29): the api mounts the same `postgres_password` secret the
+db reads, and `backend/docker-entrypoint.sh` assembles `MINDPATTERN_DB_URL`
+from it in-process before `exec uvicorn` — `docker inspect` shows neither
+the URL nor the password. An explicitly exported `MINDPATTERN_DB_URL`
+(custom deployments, the dev overlay) still overrides the assembly.
 
 Use a shell function so an exported host variable cannot override the release
 image references. The release env file is passed *after* the secrets file, so
@@ -272,7 +273,6 @@ overlay. These names are not deployable release references.
 cd /path/to/thinkingpatterns
 cat > .env <<EOF
 MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
 BACKUP_KEY=$(openssl rand -base64 32)
 MINDPATTERN_API_IMAGE=mindpattern-api:local
 MINDPATTERN_BACKUP_IMAGE=mindpattern-backup:local
@@ -418,7 +418,10 @@ safe procedure:
      umask 077
      stamp=$(date -u +%Y%m%dT%H%M%SZ)
      out="/backups/mindpattern-$stamp.dump.enc"; tmp="$out.tmp"
-     PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+     printf "db:5432:%s:%s:%s\n" "$POSTGRES_DB" "$POSTGRES_USER" \
+       "$(cat /run/secrets/postgres_password)" > "$PGPASSFILE"
+     chmod 600 "$PGPASSFILE"
+     pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
        | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -out "$tmp"
      mindpattern-backup-mac write "$tmp" "$out.hmac.tmp"
      mv "$out.hmac.tmp" "$out.hmac"; mv "$tmp" "$out"   # sidecar first, ciphertext last

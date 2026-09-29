@@ -712,6 +712,181 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     zeroize(newMaster, wrongMaster);
     expect(onLockdown).toHaveBeenCalledTimes(1);
   });
+
+  /** MED-3 (pentest 2026-09-29): the O(1) v2 change re-wraps the SAME data
+   *  key, so an attacker holding an old envelope plus the old password
+   *  keeps decrypting forever — the change itself never tells the user. A
+   *  successful change now plants a persisted, dismissible hint (it must
+   *  survive the mandatory epoch lockdown + sign-back-in), and the hint's
+   *  action runs the FULL rotation for the v2 account: corpus rekey through
+   *  two processing sessions, then the envelope swap on the NEW key via the
+   *  same O(1) PUT (the v1 credential route would 409 key_scheme_conflict
+   *  AFTER the rekey — the bricked half-rotated shape). */
+  describe("v2 change × rekey hint (MED-3, pentest 2026-09-29)", () => {
+    const REKEY_HINT_KEY = "mindpattern.rekeyHint.user-1";
+
+    it("a successful v2 change plants the hint; the next Settings visit shows it; dismissing consumes it", async () => {
+      schemeStubs("v2", { password: () => new Response(null, { status: 204 }) });
+      const onLockdown = vi.fn();
+      let root = await render(<SettingsView onLockdown={onLockdown} />);
+      await settle(40, 3);
+      // Before any change there is nothing to hint about.
+      expect(textOf(root)).not.toContain("does not rotate your encryption key");
+      await typeInto(root, "New password", "a-fresh-long-passphrase-7");
+      await typeInto(root, "Confirm new password", "a-fresh-long-passphrase-7");
+      await press(root, "Change password");
+      await settle(120, 6);
+      expect(onLockdown).toHaveBeenCalledTimes(1); // every session died
+      // The hint is PERSISTED: the lockdown unmounts this view, so only a
+      // per-account flag can carry it across the sign-back-in.
+      expect(window.localStorage.getItem(REKEY_HINT_KEY)).toBe("1");
+      // The real UX: the user signs back in and reopens Settings.
+      schemeStubs("v2", { password: () => new Response(null, { status: 204 }) });
+      root = await render(<SettingsView onLockdown={vi.fn()} />);
+      await settle(40, 3);
+      expect(textOf(root)).toContain("does not rotate your encryption key");
+      expect(textOf(root)).toContain("Rotate encryption key");
+      // Dismissing consumes it — the user has read it.
+      await press(root, "Dismiss");
+      await settle(20, 2);
+      expect(textOf(root)).not.toContain("does not rotate your encryption key");
+      expect(window.localStorage.getItem(REKEY_HINT_KEY)).toBeNull();
+    });
+
+    it("acting on the hint runs the FULL rotation for a v2 account: rekey + new-key envelope swap, never the 409-only credential route", async () => {
+      // The planted hint, plus a seeded pending salt (deterministic keys).
+      window.localStorage.setItem(REKEY_HINT_KEY, "1");
+      window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+      const mock = schemeStubs("v2", { password: () => new Response(null, { status: 204 }) });
+      const onLockdown = vi.fn();
+      const root = await render(<SettingsView onLockdown={onLockdown} />);
+      await settle(40, 3);
+      expect(textOf(root)).toContain("does not rotate your encryption key");
+      // The hint's recipe: type the CURRENT password, rotate the key.
+      await typeInto(root, "New password", "a-fresh-long-passphrase-7");
+      await typeInto(root, "Confirm new password", "a-fresh-long-passphrase-7");
+      await press(root, "Rotate encryption key");
+      await settle(200, 10);
+
+      const calls = mock.mock.calls as [string, RequestInit][];
+      // The corpus was rekeyed through two processing sessions...
+      expect(calls.some(([url, init]) => url.endsWith("/processing/rekey") && init.method === "POST")).toBe(true);
+      // ...and a THIRD session, opened with the NEW key, carried the
+      // possession probe of the envelope swap (old + new + probe).
+      const sessions = calls.filter(([url, init]) => url.endsWith("/processing/sessions") && init.method === "POST");
+      expect(sessions).toHaveLength(3);
+      // The swap went through the O(1) PUT — NOT the v1 credential route a
+      // v2 account cannot use (409 key_scheme_conflict after the rekey).
+      const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
+      expect(put).toBeTruthy();
+      expect(calls.some(([url, init]) => url.endsWith("/account/credential") && init.method === "PUT")).toBe(false);
+      const body = JSON.parse(String(put![1].body)) as Record<string, string>;
+      expect(body.verifier).toBe(toBase64(OLD_KEY)); // the CURRENT verifier
+      expect(body.new_salt).toBe(toBase64(PENDING_SALT)); // the pending salt
+      // The uploaded envelope wraps the FRESH data key of the new password's
+      // generation — the old vault key is evicted from the account, which is
+      // the entire point of the hint (MED-3).
+      const { dataKey } = await derivePendingKeys();
+      const newMaster = await deriveMasterKey("a-fresh-long-passphrase-7", PENDING_SALT);
+      const reopened = await unwrapEnvelope(newMaster, PENDING_SALT, "tester", body.wrapped_data_key!, KDF_PARAMS);
+      expect(toBase64(reopened)).toBe(toBase64(dataKey));
+      expect(toBase64(reopened)).not.toBe(toBase64(OLD_KEY));
+      zeroize(newMaster);
+      // The hint and the pending salt are consumed; the honest v1-style
+      // success copy landed (every session died with the epoch bump).
+      expect(window.localStorage.getItem(REKEY_HINT_KEY)).toBeNull();
+      expect(window.localStorage.getItem(PENDING_SALT_KEY)).toBeNull();
+      expect(onLockdown).toHaveBeenCalledTimes(1);
+      expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
+    });
+  });
+});
+
+/** FE-4 (pentest 2026-09-29): vault.get() hands out SHARED buffers, and
+ *  the v1 rotation flow serialized the old key only AFTER several awaits
+ *  (queue drain, derivation) — an idle/hidden-tab lock in that window
+ *  zeroized the buffers and the rotation continued on all-zero bytes.
+ *  The flow now snapshots both buffers before the first await and
+ *  re-checks at every boundary where nothing has moved server-side
+ *  (abort honestly); once the corpus HAS moved it COMPLETES with the
+ *  snapshot, so the post-rotation local re-wraps survive a mid-flow lock
+ *  (with the shared buffers they read as zeros and the clear-on-rotate
+ *  fallbacks silently destroyed the local stores). */
+describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09-29)", () => {
+  it("a lock during the queue drain aborts honestly — no session, no rekey, no zero keys uploaded", async () => {
+    const queueMod = await import("../src/offlineQueue");
+    const drainSpy = vi.spyOn(queueMod, "drainPendingQueueForRotation").mockImplementation(async () => {
+      vault.lock(); // the idle/hidden-tab lock lands INSIDE the drain await
+      return 0;
+    });
+    const mock = baseStubs();
+    const onLockdown = vi.fn();
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await fillRotateForm(root);
+    await press(root, "Change password");
+    await settle(60, 4);
+    expect(textOf(root)).toContain("Your session locked");
+    expect(onLockdown).not.toHaveBeenCalled();
+    const urls = mock.mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.endsWith("/processing/sessions"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/processing/rekey"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/account/credential"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/account/password"))).toBe(false);
+    drainSpy.mockRestore();
+  });
+
+  it("a lock while the processing sessions open aborts BEFORE the rekey — never a zero-key session", async () => {
+    const apiMod = await import("../src/api/client");
+    const sessionSpy = vi.spyOn(apiMod.api, "openProcessingSession").mockImplementation(async () => {
+      vault.lock(); // lands between the session opens and the rekey POST
+      return { session_token: "dead-session", expires_in: 300 };
+    });
+    const mock = baseStubs();
+    const onLockdown = vi.fn();
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await fillRotateForm(root);
+    await press(root, "Change password");
+    await settle(60, 4);
+    expect(textOf(root)).toContain("Your session locked");
+    expect(onLockdown).not.toHaveBeenCalled();
+    const urls = mock.mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.endsWith("/processing/rekey"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/account/credential"))).toBe(false);
+    sessionSpy.mockRestore();
+  });
+
+  it("a lock AFTER the corpus moved still completes — the local stores rewrap under the snapshotted old key instead of being cleared", async () => {
+    // Seed a mood entry under the OLD key and the pending salt, so the new
+    // generation is deterministic and the rewrap is checkable.
+    await recordMood(OLD_KEY, USER, "2026-09-24", 0.4);
+    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    const apiMod = await import("../src/api/client");
+    const listSpy = vi.spyOn(apiMod.api, "listConsents").mockImplementation(async () => {
+      vault.lock(); // the lock lands AFTER the rekey committed server-side
+      return [];
+    });
+    baseStubs();
+    const onLockdown = vi.fn();
+    const root = await render(<SettingsView onLockdown={onLockdown} />);
+    await settle(40, 3);
+    await fillRotateForm(root);
+    await press(root, "Change password");
+    await settle(120, 8);
+    expect(onLockdown).toHaveBeenCalledTimes(1);
+    expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
+    // The mood log SURVIVED the zeroizing lock: readable under the NEW
+    // generation's key. (Pre-fix shape: the shared old buffer read as all
+    // zeros, every rewrap failed, and the clear-on-rotate fallback fired.)
+    const { dataKey } = await derivePendingKeys();
+    const moods = await recentMoods(dataKey, USER);
+    expect(moods.map((m) => m.date)).toContain("2026-09-24");
+    // And the v1 flow never plants the MED-3 rekey hint — it rekeys the
+    // data key by construction (MED-3 note, pentest 2026-09-29).
+    expect(window.localStorage.getItem("mindpattern.rekeyHint.user-1")).toBeNull();
+    listSpy.mockRestore();
+  });
 });
 
 describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {

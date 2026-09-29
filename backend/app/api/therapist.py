@@ -83,6 +83,7 @@ from ..security.tokens import issue_token
 from ..services import threshold
 from ._audit import append_access_log, parse_access_log_cursor
 from ._paging import (
+    NEXT_OFFSET_HEADER,
     assert_expected_revision,
     collection_changed_error,
     emit_page_headers,
@@ -887,9 +888,22 @@ async def list_patients(
         ]
         alive_revoked: set[str] = set()
         if revoked_patient_ids:
+            # Pentest I-5 (2026-09-29): existence alone used to decide
+            # liveness here, so a DEACTIVATED patient stayed listed in the
+            # revoked history while the active pass (audit item 20) and
+            # every content read (_active_consent) filter is_active — an
+            # account suspended by an operator now disappears from both
+            # passes consistently. Revoked rows serve no key material, so
+            # this is metadata consistency, not an access change.
             alive_revoked = set(
                 (
-                    (await session.execute(select(User.id).where(User.id.in_(revoked_patient_ids))))
+                    (
+                        await session.execute(
+                            select(User.id).where(
+                                User.id.in_(revoked_patient_ids), User.is_active.is_(True)
+                            )
+                        )
+                    )
                     .scalars()
                     .all()
                 )
@@ -1934,15 +1948,27 @@ async def update_note(
 )
 async def read_note_revisions(
     note_id: str,
+    response: Response,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
+    offset: int = Query(default=0, ge=0, le=100_000),
     limit: int = Query(default=50, ge=1, le=200),
+    page_bytes: int | None = Query(default=None, ge=1, le=NOTES_PAGE_BLOB_BYTES),
 ):
     """The edit history of one of the therapist's OWN notes (P3,
     2026-09-21 — clinic readiness). Revisions are the superseded blobs,
     newest first, under the same note AAD the portal already uses for
     live notes. Ownership-scoped: another therapist's note id is the
-    flat 404, and the read is audit-logged."""
+    flat 404, and the read is audit-logged.
+
+    2026-09-29 pentest BE-1: this read was the ONLY blob read outside the
+    shared byte-page contract (_paging) — it selected full revision blobs
+    with just a row cap, so 50 near-quota revisions materialized ~32 MiB
+    of ciphertext plus ~43 MiB of base64 per request. It now joins the
+    entries/measures/notes contract: metadata-first sizing, the 2 MiB
+    hard page budget (a legacy no-``page_bytes`` request over budget
+    fails loudly with 413; a byte-paginating client gets short pages +
+    X-Next-Offset), and the mid-page drift guard on the blob fetch."""
     row = (
         (
             await session.execute(
@@ -1956,23 +1982,61 @@ async def read_note_revisions(
     )
     if row is None:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
-    revisions = (
+    # The revisions collection changes exactly when the note is edited (each
+    # edit supersedes one blob and bumps note.version), so the live row's
+    # version is the snapshot marker stamped on drift conflicts below.
+    note_version = row.version if row.version is not None else 1
+    candidate_rows = (
+        await session.execute(
+            select(
+                TherapistNoteRevision.id,
+                _revision_blob_length(session).label("size"),
+            )
+            .where(
+                TherapistNoteRevision.note_id == note_id,
+                TherapistNoteRevision.therapist_id == user.id,
+            )
+            .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())
+            # One extra METADATA row is has-more evidence only; it never
+            # becomes a returned revision.
+            .offset(offset)
+            .limit(limit + 1)
+        )
+    ).all()
+    page = select_byte_page(
+        [(str(rev_id), int(size or 0)) for rev_id, size in candidate_rows[:limit]],
+        more_after_request=len(candidate_rows) > limit,
+        page_bytes=page_bytes,
+        hard_budget=NOTES_PAGE_BLOB_BYTES,
+        collection="note revision",
+    )
+    selected_ids = [rev_id for rev_id, _ in page.selected]
+    fetched = (
         (
             await session.execute(
-                select(TherapistNoteRevision)
-                .where(
-                    TherapistNoteRevision.note_id == note_id,
+                select(TherapistNoteRevision).where(
+                    TherapistNoteRevision.id.in_(selected_ids),
                     TherapistNoteRevision.therapist_id == user.id,
                 )
-                .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())
-                .limit(limit)
             )
         )
         .scalars()
         .all()
+        if selected_ids
+        else []
+    )
+    revisions = verify_fetched_page(
+        selected_ids,
+        fetched,
+        byte_limit=NOTES_PAGE_BLOB_BYTES,
+        collection="note revision",
+        header_name=NOTES_REVISION_HEADER,
+        revision=note_version,
     )
     await _audit(session, user, row.user_id, "read_note_revisions")
     await session.commit()
+    if page.has_more and revisions:
+        response.headers[NEXT_OFFSET_HEADER] = str(offset + len(revisions))
     return [
         NoteRevisionOut(
             id=rev.id,

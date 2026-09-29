@@ -258,6 +258,10 @@ describe("mutation pins 2026-09-22: api session + transport", () => {
   });
 
   it("clamps a server detail message to 200 characters", async () => {
+    // FE-1 (pentest 2026-09-29): message() now routes detail through the
+    // sanitizeDetail ported from the web client, so the cap marks the cut
+    // with an ellipsis (200 kept characters + "…") instead of a silent
+    // hard slice — the identical web/mobile truncation contract.
     realApi.setSession("tok", BASE);
     const long = "x".repeat(250);
     vi.stubGlobal("fetch", vi.fn(async () => ({
@@ -265,7 +269,8 @@ describe("mutation pins 2026-09-22: api session + transport", () => {
     })));
     const err: unknown = await realApi.api.me().then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect((err as { message: string }).message).toHaveLength(200);
+    expect((err as { message: string }).message).toHaveLength(201);
+    expect((err as { message: string }).message.endsWith("…")).toBe(true);
     vi.unstubAllGlobals();
   });
 });

@@ -106,7 +106,64 @@ export function hasSession(): boolean {
 }
 
 function message(detail: unknown, status: number): string {
-  if (typeof detail === "string" && detail.trim()) return detail.slice(0, 200);
+  return detailToMessage(detail, status);
+}
+
+/** Server-provided detail is attacker-controllable text (a hostile or
+ * compromised backend): cap length, strip URLs (ANY scheme — tel:,
+ * custom-app schemes, not just http), scheme-less domains, phone-like
+ * digit runs, and invisible/bidi characters so the role=alert banner can
+ * never be turned into a phishing surface ("contact
+ * mindpattern-support.example.com or call 555-0134" aimed at clinicians).
+ * Ported from web/src/api/client.ts — FE-1, pentest 2026-09-29; that copy
+ * was itself ported from the mobile client's F2 sanitizer, so all three
+ * clients now sanitize identically. The corpus lives in tests/api.test.ts. */
+const MAX_ERROR_MESSAGE_CHARS = 200;
+
+export function sanitizeDetail(text: string): string {
+  const stripped = text
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    // Bidi overrides / isolates and zero-width characters: invisible
+    // homoglyph tricks that can flip or disguise error-dialog text.
+    // U+2060-U+206F (word joiner, invisible math/operators) and U+FEFF
+    // are in the strip set because the 2026-09-19 mobile audit smuggled a
+    // word joiner INSIDE a domain ("bit\u2060.ly") so the domain rules
+    // below never matched it. Invisibles go FIRST so the domain regexes
+    // see the cleaned text.
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
+    .replace(/https?:\/\/\S+/gi, "")
+    // Any other scheme://… (evilapp://pay, ftp://…) — same phishing class;
+    // the scheme AND its payload go, like the http case above.
+    .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "")
+    // Scheme-less domains ("go to evil.com/support") — ANY alpha TLD of
+    // 2-24 chars, never an allowlist: the 2026-09-19 mobile audit walked
+    // bit.ly / mindpattern-support.de / discord.gg straight through the
+    // old com|net|org|… list. Over-stripping ("node.js" in a stack
+    // trace) is the safe direction for attacker-controlled text.
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,24}\b(?::\d+)?(?:\/\S*)?/gi, "")
+    // Phone-like digit runs ("call 555-0134") — separators included.
+    .replace(/\d[\d\s().-]{2,}\d/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length > MAX_ERROR_MESSAGE_CHARS
+    ? `${stripped.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`
+    : stripped;
+}
+
+/** Map a server error body's `detail` to banner copy. FastAPI validation
+ * errors put a list of message objects there; both shapes sanitize.
+ * Exported for tests: the sanitization is a security property. */
+export function detailToMessage(detail: unknown, status: number): string {
+  if (typeof detail === "string") return sanitizeDetail(detail) || `request failed (${status})`;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((d) =>
+      typeof d === "object" && d !== null && "msg" in d && typeof (d as { msg: unknown }).msg === "string"
+        ? (d as { msg: string }).msg
+        : "invalid field",
+    );
+    if (parts.length > 0) return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
+  }
   return `request failed (${status})`;
 }
 

@@ -95,6 +95,16 @@ async function newKeyReadsJournal(userId: string, newDataKey: Bytes): Promise<bo
  *  never needs a resume ladder.) */
 const pendingSaltKey = (userId: string): string => `mindpattern.rotatePendingSalt.${userId}`;
 
+/** MED-3 (pentest 2026-09-29): the "rotate your encryption key too" hint a
+ *  v2 password change leaves behind. PERSISTED, per account, because a
+ *  successful v2 change ends in the epoch lockdown — every session dies
+ *  and the user must sign back in, so an in-memory flag would never be
+ *  seen. One bit of non-content metadata (like the pending salt key, but
+ *  not even key material): wiped by dismissal, by a completed full
+ *  rotation, and by deletion's mindpattern.* prefix sweep. The v1 flow
+ *  never sets it — a v1 password change rekeys by construction. */
+const rekeyHintKey = (userId: string): string => `mindpattern.rekeyHint.${userId}`;
+
 export function SettingsView(props: { onLockdown: (notice: string) => void; onOpenSafetyPlan?: () => void }): React.JSX.Element {
   const [themePref, setThemePref] = useState<ThemePref>(() => readThemePref());
   // Language (audit 2026-09-26 LOW): 'auto' | 'en' | 'es', applied live.
@@ -128,6 +138,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const [keyScheme, setKeyScheme] = useState<"v1" | "v2" | null>(null);
   const [schemeUnknown, setSchemeUnknown] = useState(false);
   const [upgradePassword, setUpgradePassword] = useState("");
+  /** MED-3 (pentest 2026-09-29): the dismissible "also rotate the
+   *  encryption key" notice a v2 password change leaves behind (see
+   *  rekeyHintKey). Set on mount from the persisted flag — the change
+   *  itself ends in the epoch lockdown, so this view is always a FRESH
+   *  mount after the sign-back-in when the notice is first seen. */
+  const [showRekeyHint, setShowRekeyHint] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -163,6 +179,18 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     if (envelope) {
       setKeyScheme(envelope.key_scheme === "v2" ? "v2" : "v1");
       setSchemeUnknown(false);
+      // MED-3 (pentest 2026-09-29): surface the rekey hint a previous v2
+      // password change left behind — but only while the account really is
+      // v2. A v1 account rekeys on every password change by construction,
+      // so a leftover flag there is stale and gets swept, not shown.
+      const ownerForHint = vault.ownerUserId();
+      if (ownerForHint) {
+        const hintKey = rekeyHintKey(ownerForHint);
+        if (localStore.get(hintKey)) {
+          if (envelope.key_scheme === "v2") setShowRekeyHint(true);
+          else localStore.remove(hintKey);
+        }
+      }
       // 2026-09-28 audit: remember the DECLARED params when they parse —
       // an invalid echo (hostile/buggy server) leaves null, which every
       // consumer below treats as the pinned default for v1-shaped state;
@@ -297,6 +325,11 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
    *  credential (epoch death everywhere, disclosed). Ordering is the
    *  mobile rotation.ts contract: the rekey MUST land while both keys are
    *  derivable; the credential rotation MUST be last (it kills the token).
+   *  MED-3 (pentest 2026-09-29): the final step is scheme-aware — a v2
+   *  account (routed here by the post-password-change rekey hint) swaps
+   *  credential + data-key envelope via PUT /account/password instead of
+   *  the v1 credential rotation, which the server refuses for v2 with 409
+   *  key_scheme_conflict AFTER the rekey.
    *
    *  H-4 + M-W2 (audit 2026-09-26, port of mobile's audit-round-2 F-4):
    *  once the server has moved the corpus to the new key — this attempt's
@@ -330,6 +363,22 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     setBusy(true);
     setError("");
     const old = vault.get();
+    // FE-4 (pentest 2026-09-29): snapshot BOTH vault buffers BEFORE the
+    // first await — vault.get()'s buffers are SHARED, and this flow awaits
+    // (queue drain, derivation, every server step) before serializing the
+    // old key into the processing session and the old verifier into the
+    // rekey/credential calls. An idle/hidden-tab lock (sessionLock.ts) in
+    // that window zeroizes the shared buffers and the rotation used to
+    // continue on all-zero bytes — the one path missing the snapshot idiom
+    // the v2 change, the v1→v2 upgrade, and the grant flow already carry.
+    // The copies also keep the POST-key-move local re-wraps (mood log,
+    // drafts, queue) alive across a mid-flow lock: once the server has
+    // moved to the new key those MUST complete with the old key even
+    // though the vault itself has locked. Zeroized in finally.
+    const oldDataKey = new Uint8Array(new ArrayBuffer(old.dataKey.length));
+    oldDataKey.set(old.dataKey);
+    const oldAuthKey = new Uint8Array(new ArrayBuffer(old.authKey.length));
+    oldAuthKey.set(old.authKey);
     // H-4(c): the derived new-key generation is zeroized in finally (mobile
     // rotation.ts:251-254) — success, failure, and lockdown alike.
     let newKeys: PatientKeys | null = null;
@@ -345,6 +394,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       const remainingQueued = await drainPendingQueueForRotation(owner).catch(() => -1);
       if (remainingQueued !== 0) {
         setError(t("settings.rotateQueueBlocked"));
+        return;
+      }
+      // FE-4: a lock during the drain leaves nothing moved server-side —
+      // abort honestly instead of opening sessions under a dead key.
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
         return;
       }
       // B-1 (2026-09-26 audit follow-up): reuse a PENDING salt from an
@@ -363,18 +418,64 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       const newSalt = pendingB64 ? fromBase64(pendingB64) : randomBytes(16);
       const newSaltB64 = toBase64(newSalt);
       localStore.set(pendingSaltKey(owner), newSaltB64);
-      newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt));
+      // MED-3 (pentest 2026-09-29): the full rotation now serves v2 accounts
+      // too (the post-password-change rekey hint routes here), so the final
+      // credential step is scheme-aware below — and the derivation must use
+      // the account's OWN declared kdf_params, fetched FRESH at press time
+      // exactly like the v2 change (2026-09-28 audit M-4): deriving at the
+      // 600k default for a non-default-params account would desynchronize
+      // the envelope AAD from the KEK and brick the next unlock. A 404
+      // means the backend predates the endpoint (a v1-only world): the v1
+      // shape with the pinned default params — byte-identical to the old
+      // behavior for every v1 account.
+      const envelope = await api.keyEnvelope().then(
+        (body) => body,
+        (err: unknown) => (err instanceof ApiError && err.status === 404
+          ? { key_scheme: "v1", salt: "", kdf_params: null, wrapped_data_key: null }
+          : null),
+      );
+      if (!envelope) {
+        setError(t("settings.rotateFailed"));
+        return;
+      }
+      const params = envelope.kdf_params == null ? KDF_PARAMS_DEFAULT : validateKdfParams(envelope.kdf_params);
+      if (params.algorithm !== "pbkdf2-sha256") {
+        // This build derives PBKDF2 only: refuse BEFORE any server step.
+        setError(t("settings.kdfUnsupportedWeb"));
+        return;
+      }
+      const schemeV2 = envelope.key_scheme === "v2";
+      if (schemeV2 && !sessionUsername()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
+      newKeys = await derivePatientKeys(await deriveMasterKey(newPassword, newSalt, params.iterations));
+      // FE-4: a lock during the derivation still leaves nothing moved —
+      // abort honestly before opening the processing sessions.
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
 
       // Const alias: keeps TS's non-null narrowing inside the closures below.
       const newKey = newKeys;
       let oldB64 = "";
-      for (const byte of old.dataKey) oldB64 += String.fromCharCode(byte);
+      for (const byte of oldDataKey) oldB64 += String.fromCharCode(byte);
       let newB64 = "";
       for (const byte of newKey.dataKey) newB64 += String.fromCharCode(byte);
       const oldSession = await api.openProcessingSession(btoa(oldB64));
       const newSession = await api.openProcessingSession(btoa(newB64));
+      // FE-4: a lock while the sessions were opening still leaves the corpus
+      // untouched — abort honestly instead of rekeying under a dead
+      // session's authorization. (After the rekey lands there are NO more
+      // re-checks: H-4 requires the flow to COMPLETE, with the snapshotted
+      // old key, so the local re-wraps survive a mid-flow lock.)
+      if (!vault.isUnlocked()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
       try {
-        await api.rekeyStoredData(oldSession.session_token, newSession.session_token, toBase64(old.authKey));
+        await api.rekeyStoredData(oldSession.session_token, newSession.session_token, toBase64(oldAuthKey));
         serverMovedToNewKey = true;
       } catch (err) {
         if (err instanceof ApiError && err.code === "rekey_key_mismatch") {
@@ -418,16 +519,53 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         if (consent.status !== "active" || !consent.therapist_wrap_pub_key) continue;
         try {
           const wrap = await wrapDataKeyForTherapist(newKey.dataKey, consent.therapist_wrap_pub_key, owner, consent.therapist_id);
-          await api.rewrapConsent(consent.id, wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(old.authKey));
+          await api.rewrapConsent(consent.id, wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(oldAuthKey));
         } catch {
           rewrapFailures.push(consent.display_name || consent.username);
         }
       }
 
-      await api.rotateCredential(toBase64(old.authKey), newSaltB64, toBase64(newKey.authKey));
+      // MED-3 (pentest 2026-09-29): the last step is scheme-aware. A v2
+      // account CANNOT retire the credential via PUT /account/credential —
+      // the server answers 409 key_scheme_conflict by design (swapping the
+      // salt without re-wrapping the envelope would strand the random data
+      // key irrecoverably), which here would leave a half-rotated account:
+      // corpus under the new key, envelope still wrapping the old one. The
+      // same O(1) PUT the quick v2 change uses completes the rotation
+      // instead: the corpus now sits under newKey.dataKey, so the
+      // possession probe opens with the NEW key (the old one no longer
+      // authenticates stored ciphertext), and the envelope wraps the NEW
+      // key under the new password's KEK — salt, verifier and envelope
+      // swap atomically with the epoch bump, exactly like the quick path.
+      if (schemeV2) {
+        const username = sessionUsername();
+        if (username === null) {
+          // Unreachable past the press-time guard above; if it ever fires,
+          // the catch's moved-key lockdown is the honest shape (the pending
+          // salt + resume ladder finish the rotation on the next sign-in).
+          throw new Error(t("common.sessionLocked"));
+        }
+        const wrappedDataKeyB64 = await rewrapDataKey(newKey.dataKey, newKeys.masterKey, newSalt, username, params);
+        const probe = await api.openProcessingSession(toBase64(newKey.dataKey));
+        await api.changePassword({
+          verifierB64: toBase64(oldAuthKey),
+          newSaltB64,
+          newVerifierB64: toBase64(newKey.authKey),
+          wrappedDataKeyB64,
+          // Declared EXPLICITLY equal to the account's current params — the
+          // same discipline as the quick v2 change.
+          newKdfParams: params as unknown as Record<string, unknown>,
+          processingToken: probe.session_token,
+        });
+      } else {
+        await api.rotateCredential(toBase64(oldAuthKey), newSaltB64, toBase64(newKey.authKey));
+      }
       // Full completion: the pending rotation salt has done its job.
       localStore.remove(pendingSaltKey(owner));
-      await rebindEntryVersions(owner, old.dataKey, newKey.dataKey).catch(() => forgetAllEntryVersions(owner));
+      // MED-3: and the rekey hint with it — the corpus now sits under a
+      // fresh key, which is exactly what the hint was asking for.
+      localStore.remove(rekeyHintKey(owner));
+      await rebindEntryVersions(owner, oldDataKey, newKey.dataKey).catch(() => forgetAllEntryVersions(owner));
       // 2026-09-26 audit follow-up (B-7): the mood log, question
       // feedback, and pattern mutes are sealed under the OLD data key —
       // REWRAP each under the new key so the user's trend history and mute
@@ -435,22 +573,22 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // mobile parity in kind, not in loss). Any rewrap failure falls back
       // to the old clear-on-rotate: a readable-empty store beats a store
       // sealed under a key nothing will derive again.
-      await rewrapMoodLog(old.dataKey, newKey.dataKey, owner).catch(() => clearMoodLog(owner).catch(() => undefined));
-      await rewrapFeedback(old.dataKey, newKey.dataKey, owner).catch(() => clearFeedback(owner).catch(() => undefined));
+      await rewrapMoodLog(oldDataKey, newKey.dataKey, owner).catch(() => clearMoodLog(owner).catch(() => undefined));
+      await rewrapFeedback(oldDataKey, newKey.dataKey, owner).catch(() => clearFeedback(owner).catch(() => undefined));
       // The lock-sealed journal draft rides the same family (audit
       // 2026-09-26): re-sealed under the new key, or cleared if unreadable.
-      await rewrapActiveDraft(old.dataKey, newKey.dataKey, owner).catch(() => clearActiveDraft(owner).catch(() => undefined));
+      await rewrapActiveDraft(oldDataKey, newKey.dataKey, owner).catch(() => clearActiveDraft(owner).catch(() => undefined));
       // The local safety plan (clinical review 2026-09-27) rides it too —
       // durable patient-written content, so a rotation re-seals it rather
       // than losing it; an unreadable plan degrades to blank, never an
       // error that blocks the rotation.
-      await rewrapSafetyPlan(old.dataKey, newKey.dataKey, owner).catch(() => clearSafetyPlan(owner).catch(() => undefined));
+      await rewrapSafetyPlan(oldDataKey, newKey.dataKey, owner).catch(() => clearSafetyPlan(owner).catch(() => undefined));
       // Re-audit 2026-09-27: the pending-measure slot rides the same
       // family — an in-flight questionnaire survives the rotation (or is
       // cleared if unreadable; it is disposable metadata, never worth a
       // rotation-blocking error).
-      await rewrapPendingMeasure(old.dataKey, newKey.dataKey, owner).catch(() => clearPendingMeasure(owner).catch(() => undefined));
-      await readMutedPids(old.dataKey, owner)
+      await rewrapPendingMeasure(oldDataKey, newKey.dataKey, owner).catch(() => clearPendingMeasure(owner).catch(() => undefined));
+      await readMutedPids(oldDataKey, owner)
         .then((pids) => writeMutedPids(newKey.dataKey, owner, pids))
         .catch(() => clearMutedPids(owner).catch(() => undefined));
       // The offline queue rides the same family (independent audit
@@ -459,7 +597,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // under the SAME AAD, under the queue's Web Lock. A blob that cannot
       // be rewrapped stays as-is (it fails visibly on requeue); the
       // completed rotation is never blocked.
-      await rewrapQueue(owner, old.dataKey, newKey.dataKey).catch(() => undefined);
+      await rewrapQueue(owner, oldDataKey, newKey.dataKey).catch(() => undefined);
       props.onLockdown(
         rewrapFailures.length > 0
           ? t("settings.rotateSuccessPartialNotice", { count: rewrapFailures.length })
@@ -476,6 +614,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       }
       setError(err instanceof Error ? err.message : t("settings.rotateFailed"));
     } finally {
+      // FE-4: the snapshotted old-key buffers die here too — success,
+      // failure, and lockdown alike (the vault's own copies remain the
+      // vault's to manage).
+      zeroize(oldDataKey, oldAuthKey);
       if (newKeys) zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
       setBusy(false);
     }
@@ -584,6 +726,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       });
       // No local rewrap of anything: the data key did not change. The
       // epoch bump killed this token too — lockdown, honestly.
+      // MED-3 (pentest 2026-09-29): the O(1) change re-wrapped the SAME
+      // data key, so an attacker holding an old envelope plus the old
+      // password keeps decrypting forever — leave the rekey hint behind so
+      // the NEXT Settings visit (this view unmounts with the lockdown)
+      // tells the user the honest difference and offers the full rotation.
+      localStore.set(rekeyHintKey(owner), "1");
       props.onLockdown(t("settings.rotateV2SuccessNotice"));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("settings.rotateFailed"));
@@ -675,6 +823,15 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       setUpgradePassword("");
       setBusy(false);
     }
+  };
+
+  /** MED-3 (pentest 2026-09-29): dismissing consumes the persisted hint —
+   *  the user has read it. A FUTURE v2 password change sets a fresh one;
+   *  a completed full rotation sweeps it from the flow itself. */
+  const dismissRekeyHint = (): void => {
+    setShowRekeyHint(false);
+    const owner = vault.ownerUserId();
+    if (owner) localStore.remove(rekeyHintKey(owner));
   };
 
   const deleteAccount = async (): Promise<void> => {
@@ -856,8 +1013,35 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         ) : (
           <>
             <Note tone="muted">{t(keyScheme === "v2" ? "settings.rotateV2Note" : "settings.rotateNote")}</Note>
+            {/* MED-3 (pentest 2026-09-29): the dismissible notice a v2
+                password change leaves behind. The O(1) re-wrap keeps the
+                SAME data key, so a password change alone never evicts
+                someone who held the old envelope together with the old
+                password — the user is told the honest difference and
+                offered the full rotation (the rekey flow below, entered
+                with the typed password). */}
+            {keyScheme === "v2" && showRekeyHint && (
+              <Note tone="warn">{t("settings.rekeyHintNote")}</Note>
+            )}
             <Field label={t("settings.newPasswordField")} value={newPassword} onChange={setNewPassword} type="password" autoComplete="new-password" />
             <Field label={t("settings.confirmPasswordField")} value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />
+            {keyScheme === "v2" && showRekeyHint && (
+              <div className="row row--wrap">
+                <Button
+                  label={busy ? t("settings.working") : t("settings.rekeyHintButton")}
+                  onPress={() => void rotatePassword()}
+                  small
+                  disabled={busy}
+                />
+                <Button
+                  label={t("settings.rekeyHintDismiss")}
+                  onPress={dismissRekeyHint}
+                  small
+                  variant="ghost"
+                  disabled={busy}
+                />
+              </div>
+            )}
             <Button
               label={busy ? t("settings.working") : t("settings.changePasswordButton")}
               onPress={() => void (keyScheme === "v2" ? rotatePasswordV2() : rotatePassword())}

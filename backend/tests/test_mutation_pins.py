@@ -104,6 +104,8 @@ ALL_MINDPATTERN_ENV_VARS = [
     "MINDPATTERN_LLM_DATA_RETENTION",
     "MINDPATTERN_LLM_POLICY_VERSION",
     "MINDPATTERN_ACCESS_LOG_RETENTION_DAYS",
+    "MINDPATTERN_TOTP_FAILURE_LIMIT",
+    "MINDPATTERN_VERIFIER_FAILURE_LIMIT",
     "MINDPATTERN_THERAPIST_SHARING_ENABLED",
     "MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN",
     "MINDPATTERN_TRUST_PROXY_HEADERS",
@@ -153,6 +155,9 @@ def test_settings_defaults_are_pinned(clean_env):
         # Added 2026-09-26 (pentest D-4): per-username second-factor failure
         # budget, independent of the per-IP auth bucket.
         "totp_failure_limit": 10,
+        # Added 2026-09-29 (pentest I-2): aggregate per-username
+        # wrong-verifier budget across all verifier-gated endpoints.
+        "verifier_failure_limit": 30,
         "entries_rate_limit": 120,
         "entries_rate_window": 60,
         "processing_rate_limit": 10,

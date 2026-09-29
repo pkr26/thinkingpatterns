@@ -1,5 +1,6 @@
 /** Static-host defenses are easy to accidentally drop during a deployment
  * refactor, so pin the security policy files as part of the portal suite. */
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -50,12 +51,24 @@ describe("static-host security policy", () => {
       expect(source).not.toContain("'unsafe-inline'");
     }
     expect(html).toContain('<link rel="stylesheet" href="/print.css" media="print" />');
-    // The deploy template lives outside the portal package and is pinned
-    // as-shipped: its page-route CSP still carries the looser style-src
-    // from before the migration. Multiple CSP sources INTERSECT, so the
-    // stricter meta policy above still governs what the page may do —
-    // tightening the edge template is a deploy-repo follow-up.
-    expect(nginx).toContain("style-src 'self' 'unsafe-inline'");
+    // FE-2 (pentest 2026-09-29): the deploy template's portal block is
+    // synced to the pinned header set. It had kept style-src
+    // 'unsafe-inline' (with a stale justifying comment about an inline
+    // style theme the portal no longer ships) for three days after every
+    // pinned portal copy dropped it, so an operator deploying from the
+    // template silently got a LOOSER CSP than any tested copy. Slice to
+    // the portal block — the patient-web block below the marker carries
+    // its own literal, pinned by the web suite.
+    const portalBlock = nginx.slice(0, nginx.indexOf("Patient web client (web/)"));
+    expect(portalBlock).toContain("style-src 'self';");
+    // The ban is checked on COMMENT-STRIPPED text — the template
+    // legitimately explains, in comments, why 'unsafe-inline' is absent
+    // (same rule as the web suite's nginx pin).
+    const stripNginxComments = (text: string): string => text.replace(/(^|\n)\s*#[^\n]*/g, "$1");
+    expect(stripNginxComments(portalBlock)).not.toContain("unsafe-inline");
+    // The clinician portal is as unindexable as the patient app: the same
+    // noindex header the web block ships.
+    expect(portalBlock).toContain('add_header X-Robots-Tag "noindex, nofollow" always;');
     expect(nginx).toContain("connect-src 'self'");
     expect(nginx).toContain('add_header Cache-Control "no-store" always;');
     expect(nginx).toContain('add_header Cross-Origin-Resource-Policy "same-origin" always;');
@@ -76,4 +89,31 @@ describe("static-host security policy", () => {
     expect(nginx).toContain("http2 on;");
     expect(nginx).not.toContain("listen 443 ssl http2");
   });
+
+  it.skipIf(!existsSync(resolve(portalRoot, "dist/index.html")))(
+    "the built shell carries subresource integrity for every local subresource",
+    async () => {
+      // FE-3 (pentest 2026-09-29): the portal build gained the web
+      // client's post-build SRI stamp (tools/add-sri.mjs, wired after
+      // `vite build` in package.json) — the same dist pin the web suite
+      // runs. dist/ is gitignored, so this self-skips in a checkout
+      // without a local build and fires wherever a build has run.
+      const distIndex = resolve(portalRoot, "dist/index.html");
+      const html = await readFile(distIndex, "utf8");
+      const stamped = [...html.matchAll(/<(script|link)\b[^>]*>/g)].filter((m) =>
+        /\b(src|href)="\/[^"]*"/.test(m[0]),
+      );
+      expect(stamped.length).toBeGreaterThanOrEqual(2);
+      for (const match of stamped) {
+        const tag = match[0];
+        const integrity = tag.match(/\bintegrity="(sha384-[^"]+)"/)?.[1];
+        expect(integrity, `${tag} must carry an SRI hash`).toBeDefined();
+        const publicPath = tag.match(/\b(?:src|href)="(\/[^"]+)"/)?.[1];
+        const digest = createHash("sha384")
+          .update(await readFile(resolve(portalRoot, "dist", publicPath!.replace(/^\//, ""))))
+          .digest("base64");
+        expect(integrity).toBe(`sha384-${digest}`);
+      }
+    },
+  );
 });

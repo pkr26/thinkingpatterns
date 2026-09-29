@@ -260,18 +260,16 @@ jobs:
         # The secrets mount as FILES (2026-09-26 infra audit): the compose
         # file reads them from deploy/secrets/, which is gitignored — CI
         # materializes throwaway copies the same way it writes .env.
-        # Re-audit 2026-09-27: POSTGRES_PASSWORD is generated ONCE into a
-        # shell variable and written to BOTH sinks (.env for the api's
-        # MINDPATTERN_DB_URL interpolation, deploy/secrets/postgres_password
-        # for the db's native POSTGRES_PASSWORD_FILE). Two independent
-        # `openssl rand` calls here meant the api could never authenticate
-        # to the db it depends on.
+        # Pentest 2026-09-29 (MED-1): POSTGRES_PASSWORD lives ONLY in
+        # deploy/secrets/postgres_password now. The api container never
+        # receives it (no MINDPATTERN_DB_URL interpolation anywhere) —
+        # backend/docker-entrypoint.sh assembles the URL from the mounted
+        # secret — so there is no .env copy to keep in sync.
         run: |
           set -euo pipefail
           pg_password=$(openssl rand -hex 16)
           test -n "$pg_password" || { echo "::error::openssl produced an empty password" >&2; exit 1; }
           {
-            echo "POSTGRES_PASSWORD=$pg_password"
             # The checked-in production compose file consumes published
             # image references only.  CI intentionally opts into the
             # explicit local source-build overlay.
@@ -300,46 +298,38 @@ jobs:
           chmod 600 deploy/monitoring/token
           cmp -s deploy/secrets/metrics_token deploy/monitoring/token \
             || { echo '::error::metrics token sinks diverged' >&2; exit 1; }
-      - name: Assert the db password is ONE value across .env and the secret file
-        # Fail-fast re-audit assertion (2026-09-27): the api authenticates
-        # with the password interpolated from .env into MINDPATTERN_DB_URL,
-        # while the db service reads deploy/secrets/postgres_password via
-        # POSTGRES_PASSWORD_FILE. If those diverge, every later step in this
-        # job fails confusingly at `up --wait`. Check the files directly AND
-        # the rendered compose contract (what the containers will actually
-        # receive) before anything is built.
+      - name: Assert the db password never reaches a container environment
+        # Pentest 2026-09-29 (MED-1): the api used to receive
+        # MINDPATTERN_DB_URL with ${POSTGRES_PASSWORD} interpolated raw
+        # into its environment — readable via `docker inspect`. The fixed
+        # contract is the NEGATIVE of the old assertion: the RENDERED
+        # compose (what containers actually receive) must contain neither
+        # the URL nor the password anywhere in the api service, and the
+        # api must mount the SAME postgres_password secret the db reads
+        # (docker-entrypoint.sh assembles the URL from it in-process).
         run: |
           set -euo pipefail
-          for f in .env deploy/secrets/postgres_password; do
-            test -f "$f" || { echo "::error::required file $f was not written by the previous step" >&2; exit 1; }
-          done
-          env_password=$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)
+          test -f deploy/secrets/postgres_password \
+            || { echo "::error::deploy/secrets/postgres_password was not written by the previous step" >&2; exit 1; }
           file_password=$(cat deploy/secrets/postgres_password)
-          if [ -z "$env_password" ]; then
-            echo "::error::.env carries no POSTGRES_PASSWORD" >&2
+          if [ -z "$file_password" ]; then
+            echo "::error::deploy/secrets/postgres_password is empty" >&2
             exit 1
           fi
-          if [ "$env_password" != "$file_password" ]; then
-            echo "::error::POSTGRES_PASSWORD mismatch: .env and deploy/secrets/postgres_password hold DIFFERENT values — the api's MINDPATTERN_DB_URL could never authenticate to the db" >&2
+          rendered=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml config)
+          if printf '%s' "$rendered" | grep -q 'MINDPATTERN_DB_URL'; then
+            echo "::error::rendered compose still carries MINDPATTERN_DB_URL — the api environment must never contain it (MED-1 regression)" >&2
             exit 1
           fi
-          rendered_url=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml config \
-            | sed -n 's/^[[:space:]]*MINDPATTERN_DB_URL:[[:space:]]*//p' | head -n 1)
-          case "$rendered_url" in
-            *"$file_password"*)
-              echo "compose render: api MINDPATTERN_DB_URL contains the deploy/secrets/postgres_password value"
-              ;;
-            *)
-              # Independent audit 2026-09-27: redact the credential from
-              # the annotation — rendered_url is the FULL connection URL
-              # including the password, and ::error text lands in the
-              # run log (this is a throwaway per-run value, but the
-              # secret-in-log pattern is the one this job exists to
-              # prevent).
-              echo "::error::rendered MINDPATTERN_DB_URL does not contain the postgres_password file's value (compose render drifted from the .env contract): $(printf '%s' "${rendered_url:-}" | sed 's/:[^:@\/]*@/:***@/')" >&2
-              exit 1
-              ;;
-          esac
+          if printf '%s' "$rendered" | grep -qF "$file_password"; then
+            echo "::error::rendered compose contains the postgres password in plaintext (MED-1 regression)" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$rendered" | grep -q postgres_password; then
+            echo "::error::rendered compose does not reference the postgres_password secret (the api/db mounts drifted)" >&2
+            exit 1
+          fi
+          echo "compose render: no MINDPATTERN_DB_URL, no plaintext password, postgres_password secret mounted"
       - name: Validate compose and build both local source images
         # --progress=plain (2026-09-26): a bare "build" failure reports
         # only the failing stage; the plain renderer shows the compile/apt
@@ -377,8 +367,15 @@ jobs:
             http://127.0.0.1:8000/readyz
       - name: Assert migrations are at head
         # The entrypoint ran `alembic upgrade head` before uvicorn; verify
-        # the result instead of trusting the boot log.
-        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T api alembic current | grep -q "(head)"
+        # the result instead of trusting the boot log. Pentest 2026-09-29
+        # (MED-1): MINDPATTERN_DB_URL is no longer static container config —
+        # the entrypoint assembles it and passes it across the final `exec
+        # uvicorn`, so it lives in PID 1's environment. `compose exec` gets
+        # only the static config env, so source the URL from /proc/1/environ.
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T api sh -c \
+            'export MINDPATTERN_DB_URL="$(tr "\0" "\n" < /proc/1/environ | sed -n "s/^MINDPATTERN_DB_URL=//p")"; test -n "$MINDPATTERN_DB_URL" || { echo "::error::PID 1 carries no MINDPATTERN_DB_URL" >&2; exit 1; }; alembic current' \
+            | grep -q "(head)"
       - name: Seed a row that a backup restore must reproduce
         # Archive parsing alone cannot prove pg_restore can apply schema/data.
         # Seed through the public API so the backup assertion includes a real

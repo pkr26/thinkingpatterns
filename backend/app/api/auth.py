@@ -58,6 +58,7 @@ from ..schemas import (
 )
 from ..security import tokens
 from ..security.kdf import (
+    KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
     KdfParamsError,
     canonical_kdf_params_json,
     hkdf_sha256,
@@ -261,7 +262,12 @@ async def register(
                 code="validation_error",
             )
         try:
-            canonical = validate_kdf_params(body.kdf_params)
+            # Pentest T-2 (2026-09-29): NEWLY REGISTERED params must meet the
+            # shipped 600k contract — the read floor stays lower so
+            # pre-constraint blobs keep validating.
+            canonical = validate_kdf_params(
+                body.kdf_params, min_pbkdf2_iterations=KDF_PARAMS_MIN_PBKDF2_ITERATIONS
+            )
         except KdfParamsError as exc:
             raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
         kdf_params_json = canonical_kdf_params_json(canonical)

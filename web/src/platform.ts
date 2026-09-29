@@ -111,9 +111,9 @@ type LocksLike = {
 // "both contenders miss each other's vote" a cyclic impossibility —
 // mutual exclusion holds. Crashed holders self-heal: votes older than
 // LOCK_STALE_MS are swept by the next contender, so a tab that died
-// mid-section cannot deadlock the lock. Browsers whose storage throws
-// (private mode edge) degrade to the historical unlocked run, disclosed
-// here rather than silently claimed.
+// mid-section cannot deadlock the lock. Browsers whose storage is absent
+// (locked-down private modes, T-1 pentest 2026-09-29) fall through to the
+// in-memory mutex below — same-tab serialization without any storage.
 const LOCK_VOTE_PREFIX = "mindpattern.lockvote.";
 const LOCK_STALE_MS = 15_000;
 const LOCK_MAX_WAIT_MS = 30_000;
@@ -246,20 +246,53 @@ async function withStorageLock<T>(storage: StorageLike, name: string, run: () =>
   }
 }
 
+// --- T-1 (pentest 2026-09-29): the storage-free last fallback -----------------
+//
+// When neither navigator.locks NOR a usable localStorage exists (locked-
+// down private modes), the "locked" section used to run UNLOCKED — so two
+// same-tab read-modify-writes over the offline queue could interleave and
+// last-write-wins would drop a queued entry. This per-name promise chain
+// closes the SAME-TAB half of that window: every section on one name runs
+// strictly after the previous one settles, in this tab. What it honestly
+// does NOT protect: other tabs and other windows (cross-tab serialization
+// is physically impossible without Web Locks or shared storage — it never
+// existed in this configuration), so cross-tab interleaving remains
+// bounded by the server-side idempotency the queue's uploads already
+// carry, exactly as before. The chain is unbounded in waiting sections
+// but never in memory: one settled-tail reference per live name.
+const memoryLockTails = new Map<string, Promise<unknown>>();
+
+function withMemoryLock<T>(name: string, run: () => Promise<T>): Promise<T> {
+  const tail = memoryLockTails.get(name) ?? Promise.resolve();
+  const result = tail.then(run, run);
+  const settled = result.catch(() => undefined);
+  memoryLockTails.set(name, settled);
+  // When this link is the settled tail, the chain is idle: drop the entry
+  // so a process lifetime of distinct lock names cannot grow the map. The
+  // identity check makes the sweep safe against a caller that chained a
+  // newer section between this link's settlement and this microtask.
+  void settled.then(() => {
+    if (memoryLockTails.get(name) === settled) memoryLockTails.delete(name);
+  });
+  return result;
+}
+
 /** Serialize an async section across SAME-ORIGIN tabs via the Web Locks
  *  API (WEB_PLAN P4/P5, R-4: two tabs must not double-flush the offline
- *  queue or double-run reconciliation). Where the API is absent (L-7,
- *  2026-09-28 audit: Safari < 15.2) a localStorage bakery mutex provides
- *  real cross-tab serialization; where even storage is unusable the
- *  section runs unlocked and correctness falls back to server-side
- *  idempotency — the historical behavior, now a disclosed residual
- *  instead of a silent one. */
+ *  queue or double-run reconciliation). Fallback ladder (L-7 audit
+ *  2026-09-28 + T-1 pentest 2026-09-29): where the API is absent (Safari
+ *  < 15.2) a localStorage bakery mutex provides real cross-tab
+ *  serialization; where even storage is unusable (locked-down private
+ *  modes) a per-name in-memory mutex still serializes same-tab sections —
+ *  the unlocked run is gone. Cross-tab exclusion without storage was
+ *  never possible and remains delegated to the queue's server-side
+ *  idempotency. */
 export async function withLock<T>(name: string, run: () => Promise<T>): Promise<T> {
   const locks = (globalThis as { navigator?: LocksLike }).navigator?.locks;
   if (locks?.request) return locks.request(name, run);
   const storage = lockStorage();
   if (storage !== null) return withStorageLock(storage, name, run);
-  return run();
+  return withMemoryLock(name, run);
 }
 
 /** Connectivity probe. Unknown (node, or a stripped browser) reads as

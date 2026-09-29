@@ -251,3 +251,80 @@ describe("withLock bakery fallback (audit 2026-09-28 L-7)", () => {
     }
   });
 });
+
+/** T-1 (pentest 2026-09-29): with neither Web Locks NOR usable storage
+ *  (locked-down private modes) the fallback used to run the section
+ *  UNLOCKED — two same-tab read-modify-writes over the offline queue could
+ *  interleave and last-write-wins dropped a queued entry. The per-name
+ *  in-memory mutex closes the same-tab half; cross-tab was never possible
+ *  without storage and stays delegated to server-side idempotency. */
+describe("withLock in-memory fallback (pentest 2026-09-29 T-1)", () => {
+  /** The storage-free world: no navigator.locks AND no window at all. */
+  const enterStorageFreeWorld = (): void => {
+    vi.stubGlobal("navigator", {});
+    delete (globalThis as { window?: unknown }).window;
+  };
+  const leaveStorageFreeWorld = (): void => {
+    vi.unstubAllGlobals();
+    (globalThis as { window?: unknown }).window = realWindow;
+  };
+
+  it("serializes concurrent sections on one lock name — never overlapping", async () => {
+    enterStorageFreeWorld();
+    try {
+      let active = 0;
+      let maxActive = 0;
+      const section = (label: string): Promise<string> =>
+        withLock("queue-flush", async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 5 + Math.random() * 5));
+          active -= 1;
+          return label;
+        });
+      const results = await Promise.all(["a", "b", "c"].map(section));
+      expect(results.sort()).toEqual(["a", "b", "c"]);
+      expect(maxActive).toBe(1);
+    } finally {
+      leaveStorageFreeWorld();
+    }
+  });
+
+  it("preserves each section's result and lets a REJECTING section release the chain", async () => {
+    enterStorageFreeWorld();
+    try {
+      const boom = withLock("faulty", async () => {
+        throw new Error("section failed");
+      });
+      await expect(boom).rejects.toThrow("section failed");
+      // The failure must not wedge the name: the next section still runs,
+      // and its result reaches the caller untouched.
+      await expect(withLock("faulty", async () => "recovered")).resolves.toBe("recovered");
+    } finally {
+      leaveStorageFreeWorld();
+    }
+  });
+
+  it("different lock names interleave — the fallback serializes per name only", async () => {
+    enterStorageFreeWorld();
+    try {
+      let active = 0;
+      let maxActive = 0;
+      const section = (name: string): Promise<string> =>
+        withLock(name, async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          return name;
+        });
+      const results = await Promise.all([section("queue-flush"), section("reconcile"), section("queue-flush")]);
+      expect(results.sort()).toEqual(["queue-flush", "queue-flush", "reconcile"]);
+      // Two DISTINCT names were genuinely concurrent — per-name exclusion
+      // did not degrade into a global lock.
+      expect(maxActive).toBe(2);
+    } finally {
+      leaveStorageFreeWorld();
+    }
+  });
+});

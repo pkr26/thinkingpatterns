@@ -144,6 +144,39 @@ because this file is the register reviewers read):
   a shorter window is an operator trade of accountability for
   minimisation.
 
+## Pentest 2026-09-29 accepted residuals (MED-2, T-3, T-4, I-6…I-9, INFRA-4)
+
+Residuals from the 2026-09-29 deep pentest (PENTEST_DEEP_2026-09-29.md
+§2/§4/§5) that are DOCUMENTED TRADES rather than open bugs — registered
+here because this file is the register reviewers read. None is directly
+exploitable; each names its precondition. MED-1 (the db password's env
+interpolation) and INFRA-2/INFRA-3 (the committed TOTP screenshot and the
+gitleaks `tests?/` path exemption) were FIXED that day and are
+therefore not residuals — see the compose header, the redacted
+`e2e_gui/audit_screenshots/13/14-*.png`, and `.gitleaks.toml`.
+
+| ID | Severity | Standing verdict and written defense |
+|---|---|---|
+| `MED-2` | Medium (theor.) | By default the audit-chain MAC key is HKDF-derived from `MINDPATTERN_TOKEN_SECRET` (`backend/app/config.py`), so one exfiltrated env value would compromise bearer minting, 2FA wrapping, pairing AND the audit trail's tamper evidence together. Purpose-split exists per env var; a loud boot WARNING now names the coupling outside development. Operators should set `MINDPATTERN_AUDIT_MAC_SECRET` (32-byte hex) to decouple — deliberately, since existing chains verify only under the key that sealed them. |
+| `T-3` | Low (theor.) | AES-GCM's 96-bit random nonces under a long-lived per-account data key carry a birthday bound: collision risk becomes non-negligible only beyond ~2³² encryptions per key, far past any real account's volume. `POST /processing/rekey` mints a fresh key and is the escape hatch if that assumption ever erodes. |
+| `T-4` | Low (residual) | Python `str` residuals: journal plaintext (≤150k chars) and the data key's base64 form linger in process memory past the enclave's zeroization — GC-owned strings cannot be scrubbed deterministically. The processing window stays single-use and TTL-bounded; a real TEE is the deferred closing path (`docs/TEE_ATTESTATION_DESIGN.md`). |
+| `I-6` | Info | TOTP brute-force economics: with a stolen verifier, full-throttle guessing at the 10/min limit yields ~2.9%/day success — bounded by the per-username failure bucket, deliberately not a hard lockout (which would hand the attacker a lockout oracle). The keystore's 4-session-per-owner cap is the flip side: a stolen bearer can block NEW session creation for ≤5 min (availability nuisance, no confidentiality impact). |
+| `I-7` | Info | Display-name homoglyph residue on consent screens: the pattern blocks control/bidi characters but not mixed-script lookalikes. The wrap-key fingerprint is the load-bearing identity check (and the code honestly documents that a malicious server serves both SAS halves — the fingerprint tap is what the human verifies). |
+| `I-8` | Info | Unbounded account creation (10/min/IP forever, unbounded across IPs) — the documented trade for a name-based system with no identity channel, no email, and no payment rail. An operator facing abuse must front the deployment with their own gate (e.g. enrollment tokens, already supported for therapists). |
+| `I-9` | Info | Mobile biometric custody trade: the data key rests under `biometry-current-set` keychain protection, so a coerced biometric prompt yields the key without the password; the password path is never stored. A documented design decision — the alternative (biometric-gated decryption with password re-entry) trades coercion resistance for lockout risk when biometry fails. |
+| `INFRA-4` | Info | The hardcoded dev/e2e credentials in `redteam/common.py`, `redteam/d_llm.py`, and `e2e_gui/seed_patients.py` are localhost-only synthetic values for throwaway instances. They must NEVER be reused in a real deployment — copying a harness credential into production config is an instant compromise, and no scanner can tell a "familiar" string from a live one. |
+
+## Committed screenshots must never carry live secrets (INFRA-2, 2026-09-29)
+
+UI screenshots committed to this repo must never contain live secrets:
+redact enrollment secrets, otpauth URIs, and backup/recovery codes before
+committing. Synthetic fixture DATA (throwaway accounts, seeded journal
+text) is fine; credential MATERIAL is not — gitleaks cannot see inside
+images, so this is a human gate. Applied retroactively on 2026-09-29:
+`e2e_gui/audit_screenshots/13-totp-secret.png` (enrollment secret +
+otpauth URI) and `14-totp-enabled.png` (8 backup codes) were redacted
+in place; future captures must be redacted at capture time.
+
 ## Tracked deferrals (not harness FINDINGs)
 
 Hardening the audit plan asked for that shipped as "next" rather than v1,

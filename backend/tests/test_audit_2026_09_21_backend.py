@@ -40,6 +40,7 @@ from app.api import account as account_module
 from app.api.measures import MEASURE_PAGE_BLOB_BYTES
 from app.deps import ApiError
 from app.models import Consent, Insight, Measure
+from app.cache import SlidingWindowCounter
 from tests.helpers import ClientEmulator, TherapistEmulator, patient_wrap_for
 
 TODAY = date.today()
@@ -498,7 +499,8 @@ async def test_revoke_maps_stale_consent_to_404(client, app):
                     state=SimpleNamespace(
                         # 2026-09-26: _require_verifier reads the configured
                         # scrypt work factor from settings (LOW c).
-                        settings=SimpleNamespace(scrypt_n=2**17)
+                        settings=SimpleNamespace(scrypt_n=2**17),
+                        rate_counter=SlidingWindowCounter()
                     )
                 )
             ),
@@ -537,7 +539,8 @@ async def test_rewrap_maps_stale_consent_to_404(client, app):
                     state=SimpleNamespace(
                         # 2026-09-26: _require_verifier reads the configured
                         # scrypt work factor from settings (LOW c).
-                        settings=SimpleNamespace(scrypt_n=2**17)
+                        settings=SimpleNamespace(scrypt_n=2**17),
+                        rate_counter=SlidingWindowCounter()
                     )
                 )
             ),
@@ -608,7 +611,8 @@ async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
                     state=SimpleNamespace(
                         # 2026-09-26: _require_verifier reads the configured
                         # scrypt work factor from settings (LOW c).
-                        settings=SimpleNamespace(scrypt_n=2**17)
+                        settings=SimpleNamespace(scrypt_n=2**17),
+                        rate_counter=SlidingWindowCounter()
                     )
                 )
             ),

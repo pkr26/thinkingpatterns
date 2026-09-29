@@ -27,7 +27,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..cache import make_rate_limiter
+from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
 from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
@@ -71,6 +71,7 @@ from .auth import (
 from ..security import crypto, envelope, kdf
 from ..security.enclave import zeroize
 from ..security.kdf import (
+    KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
     KdfParamsError,
     canonical_kdf_params_json,
     parse_kdf_params_json,
@@ -155,7 +156,30 @@ async def _require_verifier(
     only so the endpoint's in-fence re-read (which refuses missing
     accounts with its own flat 404) still decides the outcome — nothing
     can commit from a deleted account either way. Returns the row the
-    proof was checked against so callers can reuse the fresh object."""
+    proof was checked against so callers can reuse the fresh object.
+
+    Pentest I-2 (2026-09-29): every verifier-gated endpoint has its OWN
+    per-IP bucket, but thirteen endpoints accept this proof — a stolen
+    bearer used to buy ~13 x auth_rate_limit wrong-verifier scrypt runs
+    per minute from one IP by rotating endpoints. This aggregate
+    per-USERNAME bucket spans them all at once. It is keyed on the
+    authenticated user id (reachable only PAST a valid bearer — no
+    anonymous lockout oracle, the same standing as the TOTP D-4 bucket)
+    and counts only ACTUAL failures, so honest re-auth never spends it.
+    The preflight check runs before the scrypt so an exhausted budget
+    costs no further verifier hashing."""
+    settings = request.app.state.settings
+    # getattr with the documented defaults: direct-call test doubles may
+    # carry partial settings objects (the require_sharing_enabled idiom).
+    verifier_limit = getattr(settings, "verifier_failure_limit", 30)
+    verifier_window = getattr(settings, "auth_rate_window", 60)
+    verifier_fail_key = f"verifier-fail:{user.id}"
+    check_keyed_limit_without_count(
+        request,
+        verifier_fail_key,
+        verifier_limit,
+        verifier_window,
+    )
     target = user
     if session is not None:
         fresh = (
@@ -172,6 +196,7 @@ async def _require_verifier(
     try:
         verifier_bytes = base64.b64decode(body_verifier, validate=True)
     except (binascii.Error, ValueError):
+        record_keyed_failure(request, verifier_fail_key, verifier_window)
         raise ApiError(
             status_code=403, detail="invalid credentials", code="verification_failed"
         ) from None
@@ -183,6 +208,7 @@ async def _require_verifier(
             n=request.app.state.settings.scrypt_n,
         )
     if not hmac.compare_digest(candidate, bytes(target.verifier)):
+        record_keyed_failure(request, verifier_fail_key, verifier_window)
         raise ApiError(status_code=403, detail="invalid credentials", code="verification_failed")
     return target
 
@@ -905,7 +931,12 @@ async def change_password(
     # gets the documented default (the v1 contract's pbkdf2-600k).
     if body.new_kdf_params is not None:
         try:
-            canonical_params = validate_kdf_params(body.new_kdf_params)
+            # Pentest T-2 (2026-09-29): a blob NEWLY PERSISTED by this
+            # credential rotation must meet the shipped 600k contract (the
+            # read floor stays lower for pre-constraint accounts).
+            canonical_params = validate_kdf_params(
+                body.new_kdf_params, min_pbkdf2_iterations=KDF_PARAMS_MIN_PBKDF2_ITERATIONS
+            )
         except KdfParamsError as exc:
             raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
         params_json = canonical_kdf_params_json(canonical_params)
@@ -1140,7 +1171,11 @@ async def upgrade_key_envelope(
         )
     if body.kdf_params is not None:
         try:
-            canonical_params = validate_kdf_params(body.kdf_params)
+            # Pentest T-2 (2026-09-29): same write floor as registration —
+            # an upgrade may not grandfather a sub-contract cost profile.
+            canonical_params = validate_kdf_params(
+                body.kdf_params, min_pbkdf2_iterations=KDF_PARAMS_MIN_PBKDF2_ITERATIONS
+            )
         except KdfParamsError as exc:
             raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
         params_json = canonical_kdf_params_json(canonical_params)

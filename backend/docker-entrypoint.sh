@@ -9,6 +9,35 @@
 # serialized by a Postgres advisory lock inside alembic/env.py.
 set -eu
 
+# Database URL assembly (pentest 2026-09-29, MED-1): the db password is the
+# one secret that cannot ride the app's `<VAR>_FILE` chain — alembic below
+# and the app both want a complete MINDPATTERN_DB_URL, and compose cannot
+# interpolate a secret FILE into an environment value, so it used to be
+# interpolated raw from .env into the api's env where `docker inspect` (or
+# /proc/<pid>/environ) could read it back. The api container now mounts the
+# same postgres_password secret the db service reads, and the URL is built
+# here, in-process: the password enters only this process's runtime
+# environment, never the container's static configuration. An operator-set
+# MINDPATTERN_DB_URL (dev overlay, custom deployments) always wins — this
+# block never rewrites a value it was given.
+if [ -z "${MINDPATTERN_DB_URL:-}" ] && [ -s /run/secrets/postgres_password ]; then
+  db_password=$(cat /run/secrets/postgres_password)
+  # Command substitution already strips trailing newlines; trim any other
+  # trailing whitespace (a space, tab, or CR an editor or CRLF conversion
+  # left behind) the same way — anything else would silently corrupt the
+  # URL's password component. The value itself must stay hex-only
+  # (openssl rand -hex 16); the entrypoint interpolates it verbatim, so
+  # URL-reserved characters would break the connection string (2026-09-19
+  # audit, L-86 — see the compose header).
+  while :; do
+    case "$db_password" in
+      *[[:space:]]) db_password=${db_password%?} ;;
+      *) break ;;
+    esac
+  done
+  export MINDPATTERN_DB_URL="postgresql+asyncpg://${POSTGRES_USER:-mindpattern}:${db_password}@db:5432/${POSTGRES_DB:-mindpattern}"
+fi
+
 # Retry the migration: under compose/k8s a fresh Postgres can accept TCP
 # before it accepts the migration's lock, and a crash-looping container is a
 # worse failure mode than a few seconds of backoff. Persistent failures

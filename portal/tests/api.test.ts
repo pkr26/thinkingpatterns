@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, ApiError, auth, clearSession, setSession } from "../src/api";
+import { api, ApiError, auth, clearSession, detailToMessage, setSession } from "../src/api";
 import { normalizeBaseUrl } from "../src/views/LoginView";
 
 const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}): Response =>
@@ -684,5 +684,83 @@ describe("pairing SAS + token tolerance (2026-09-26 wave)", () => {
     // And the opaque token installs into a session without any parsing.
     expect(() => setSession(token.token, "https://api.example.com")).not.toThrow();
     clearSession();
+  });
+});
+
+describe("FE-1 (pentest 2026-09-29): error-banner sanitizer (web/mobile parity)", () => {
+  // Ported from web/tests/api.test.ts ("F2: error-banner sanitizer") so the
+  // portal corpus tracks the same adversarial cases: a compromised backend
+  // must not be able to aim "contact mindpattern-support.example.com or
+  // call 555-0134" copy at clinicians through the role=alert banner.
+  it("strips bare domains and phone-like digit runs", () => {
+    expect(detailToMessage("go to evil.com/support for help", 400)).not.toContain("evil.com");
+    expect(detailToMessage("call 555-0134 now", 400)).not.toContain("555");
+    expect(detailToMessage("see https://evil.example/x", 400)).not.toContain("evil");
+    expect(detailToMessage("open mindpattern-support://x", 400)).not.toContain("://");
+  });
+
+  it("no TLD allowlist — EVERY domain TLD is stripped (2026-09-19 corpus)", () => {
+    expect(detailToMessage("Account locked. Unlock at bit.ly/mp-verify", 403))
+      .not.toContain("bit.ly");
+    expect(detailToMessage("Verify your account at mindpattern-support.de/login", 403))
+      .not.toContain("mindpattern-support.de");
+    expect(detailToMessage("Join the support chat: discord.gg/mindpattern", 403))
+      .not.toContain("discord.gg");
+    expect(detailToMessage("Recover data at mp-recover.to/help", 403))
+      .not.toContain("mp-recover.to");
+    expect(detailToMessage("see status.example.xyzzy now", 400)).not.toContain("example.xyzzy");
+  });
+
+  it("invisible characters cannot split a domain", () => {
+    expect(detailToMessage("Unlock at bit\u2060.ly/mp-verify", 403))
+      .not.toContain(".ly");
+    expect(detailToMessage("Unlock at bit\u2060.ly/mp-verify", 403))
+      .not.toContain("\u2060");
+    expect(detailToMessage("Unlock at evil\ufeff.com/verify", 403))
+      .not.toContain("evil");
+    expect(detailToMessage("go bit\u200b.ly now", 400)).not.toContain(".ly");
+  });
+
+  it("bidi overrides cannot flip the banner's reading order", () => {
+    const out = detailToMessage("safe\u202etext\u202c: call 555-0134", 400);
+    expect(out).not.toContain("\u202e");
+    expect(out).not.toContain("\u202c");
+    expect(out).not.toContain("555");
+  });
+
+  it("honest text still reads fine after the strip", () => {
+    const out = detailToMessage("caseload synced; 3 new shared patterns", 201);
+    expect(out).toContain("caseload synced");
+    expect(out).toContain("3 new shared patterns");
+    const taken = detailToMessage("username is taken; try another in 5 minutes", 409);
+    expect(taken).toContain("username is taken");
+    expect(taken).toContain("5 minutes");
+  });
+
+  it("a fully-sanitized-away detail falls back to the status message", () => {
+    expect(detailToMessage("https://evil.example/everything", 400)).toBe("request failed (400)");
+    expect(detailToMessage("", 500)).toBe("request failed (500)");
+  });
+
+  it("FastAPI array details sanitize too, and length is capped at 200 + ellipsis", () => {
+    const out = detailToMessage([{ msg: "go to evil.com now" }, { msg: "and call 555-0134" }], 422);
+    expect(out).not.toContain("evil.com");
+    expect(out).not.toContain("555");
+    expect(out).not.toContain("invalid field"); // joined msgs, not the placeholder
+    const long = detailToMessage(`x`.repeat(500), 400);
+    expect(long.length).toBe(201);
+    expect(long.endsWith("…")).toBe(true);
+    expect(detailToMessage([{ nope: 1 }, "str"], 422)).toContain("invalid field");
+  });
+
+  it("the request path carries sanitized copy end to end (no raw detail in ApiError.message)", async () => {
+    setSession("tok-1", "https://api.example.com");
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      jsonResponse({ detail: "Account locked. Unlock at bit.ly/mp-verify or call 555-0134", code: "forbidden" }, 403)));
+    const err = await api.patients().catch((e: unknown) => e) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).not.toContain("bit.ly");
+    expect((err as ApiError).message).not.toContain("555-0134");
+    expect((err as ApiError).message).not.toContain("http");
   });
 });

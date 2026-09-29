@@ -125,6 +125,16 @@ KDF_PARAMS_DEFAULT: dict[str, int | str] = {
 #: a typo (iterations: 6000000 vs 600000, memory 19 MiB vs 19 KiB) must
 #: fail loudly at the boundary instead of locking the account's envelope.
 PBKDF2_MAX_ITERATIONS = 10_000_000  # 10M ≈ tens of seconds of KDF per unlock
+# Pentest T-2 (2026-09-29): the floor for params the server will NEWLY
+# PERSIST (register, upgrade, password-change envelope swap). The library
+# floor MIN_ITERATIONS above protects honest clients from their own
+# downgrades; the server cannot verify a client's real work factor (it
+# never sees the password), but it CAN refuse to store a DECLARED blob
+# below the cross-platform 600k contract — a hostile client registering at
+# the 100k library floor used to get a 6x-downgraded account on record.
+# Read-validation (parse_kdf_params_json) deliberately keeps the historical
+# 100k floor so any blob stored before this change still validates.
+KDF_PARAMS_MIN_PBKDF2_ITERATIONS = KDF_ITERATIONS
 ARGON2_MIN_MEMORY_KIB = 19 * 1024  # 19 MiB — the RFC 9106 recommended floor
 ARGON2_MAX_MEMORY_KIB = 256 * 1024  # 256 MiB ceiling
 ARGON2_MIN_ITERATIONS = 2  # t >= 2 per RFC 9106 low-resource profile guidance
@@ -145,13 +155,21 @@ class KdfParamsError(ValueError):
     this to a 422 validation_error — never a 500."""
 
 
-def validate_kdf_params(params: object) -> dict[str, int | str]:
+def validate_kdf_params(
+    params: object, *, min_pbkdf2_iterations: int = MIN_ITERATIONS
+) -> dict[str, int | str]:
     """Validate structure + bounds and return the CANONICAL dict.
 
     Strict by design: unknown keys are rejected (not ignored) so the AAD
     canonicalization rule ("the bytes you sent are the bytes that bind")
     can never be silently narrowed, and bools are rejected explicitly
     (``isinstance(True, int)`` in Python — JSON true is not a cost).
+
+    ``min_pbkdf2_iterations`` separates the WRITE floor from the READ
+    floor (pentest T-2, 2026-09-29): API paths that PERSIST new params
+    pass KDF_PARAMS_MIN_PBKDF2_ITERATIONS (the shipped 600k contract);
+    read-validation of already-stored blobs keeps the default so
+    pre-constraint accounts keep validating.
     """
     if not isinstance(params, dict):
         raise KdfParamsError("kdf_params must be a JSON object")
@@ -175,9 +193,10 @@ def validate_kdf_params(params: object) -> dict[str, int | str]:
         if {"memory_kib", "parallelism"} & set(params):
             raise KdfParamsError("pbkdf2-sha256 kdf_params carry iterations only")
         iterations = _require_int(params, "iterations")
-        if not MIN_ITERATIONS <= iterations <= PBKDF2_MAX_ITERATIONS:
+        if not min_pbkdf2_iterations <= iterations <= PBKDF2_MAX_ITERATIONS:
             raise KdfParamsError(
-                f"kdf_params.iterations must be {MIN_ITERATIONS}-{PBKDF2_MAX_ITERATIONS} "
+                f"kdf_params.iterations must be "
+                f"{min_pbkdf2_iterations}-{PBKDF2_MAX_ITERATIONS} "
                 "for pbkdf2-sha256"
             )
         canonical["iterations"] = iterations
