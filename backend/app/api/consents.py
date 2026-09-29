@@ -693,6 +693,12 @@ async def set_share_voice(
     revoked one has no key material to hear anything with (409). Both
     transitions are audit-logged as the patient's own actions.
     """
+    # M1 remediation (audit 2026-09-29): flat 404 while the voice feature
+    # is administratively off, matching the /audio router (a disabled
+    # deployment must not advertise the feature). Checked in the BODY so
+    # the authenticate → role → flag wall order holds.
+    if not bool(getattr(request.app.state.settings, "audio_enabled", False)):
+        raise ApiError(status_code=404, detail="not found", code="not_found")
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
     if verifier is None:
         raise ApiError(

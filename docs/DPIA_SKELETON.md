@@ -264,3 +264,28 @@ surface to this assessment. What the browser may persist, per category:
 
 Re-run this addendum's review if a service worker, push notification, or
 any new persistence is added to the web client.
+
+## Addendum: voice journaling (added 2026-09-29 remediation)
+
+- **New processing:** consent-gated speech-to-text of recorded journal
+  entries by a third-party STT provider ({STT_PROVIDER_NAME}); optional
+  English translation of the resulting transcript by the analysis (LLM)
+  provider, itself gated on the user's current analysis consent (never
+  voice consent alone).
+- **Audio lifecycle:** transcription audio exists in API memory for one
+  upstream call and is never persisted. Kept recordings are
+  client-side AES-GCM ciphertext in object storage with a 30-day
+  default expiry (swept + lazy-enforced), therapist playback gated by a
+  separate per-therapist `share_voice` grant with an audit row per
+  served fetch, and account erasure best-effort-deletes objects before
+  the row cascade.
+- **Consent artifacts:** per-user voice-consent record (timestamp,
+  disclosure version, SHA-256 policy fingerprint over provider/endpoint/
+  model/retention/policy) — stale on any operator policy change, judged
+  per request. Re-assess this addendum whenever the STT provider,
+  endpoint, or retention terms change (the fingerprint forces
+  re-consent, but the DPIA must document the new arrangement).
+- **Cross-references:** docs/PRIVACY_POLICY_TEMPLATE.md (voice section),
+  docs/DATA_RETENTION_SCHEDULE.md (kept-recording row),
+  docs/SUBPROCESSOR_BAA_REGISTER.md (STT row),
+  redteam/g_voice.py (adversarial campaign).

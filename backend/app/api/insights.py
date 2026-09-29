@@ -38,6 +38,7 @@ import base64
 import binascii
 import json
 import math
+import re
 import time
 from dataclasses import replace
 from datetime import date as date_type, datetime, timedelta, timezone
@@ -66,6 +67,7 @@ from ..models import (
     utcnow,
 )
 from ..schemas import (
+    LANGUAGE_CODE_PATTERN,
     InsightsResponse,
     LocalRecomputeRequest,
     ProcessingSessionRequest,
@@ -829,9 +831,10 @@ INNER_DATE_TOLERANCE_DAYS = 1
 # refinement.
 _TOD_BUCKETS = frozenset({"morning", "afternoon", "evening", "night"})
 # VOICE_PLAN (2026-09-29): transcript_lang is a bare ISO 639-1 code
-# (optionally with a script/region subtag) — the same shape the client
-# schemas accept.
-_LANG_CODE_RE = __import__("re").compile(r"^[a-z]{2}(-[A-Za-z0-9]{2,8})?$")
+# (optionally with a script/region subtag) — the same pattern the client
+# schemas accept (imported at the top, not re-typed here, so the two
+# cannot drift).
+_LANG_CODE_RE = re.compile(LANGUAGE_CODE_PATTERN)
 
 # Payload-shape failures: the ciphertext authenticated but the plaintext is
 # semantically malformed (bad JSON, wrong types, impossible dates). Both the

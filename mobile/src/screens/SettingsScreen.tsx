@@ -97,6 +97,10 @@ const REMINDER_PRESETS: readonly { label: string; hour: number; minute: number }
 
 type PendingAction =
   | { kind: "llm"; enabled: boolean }
+  // Voice journaling consent (VOICE_PLAN 2026-09-29): the same standing as
+  // the LLM toggle — this is where recordings leave the device, so the
+  // change demands the typed password, never the bare bearer.
+  | { kind: "voice"; enabled: boolean }
   | { kind: "delete" }
   // M-4 (2026-09-20): enabling the biometric wrap persists the data key in
   // the Keychain indefinitely — the same standing as grant/delete, so it
@@ -119,6 +123,18 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // server". Confusing the two erodes trust in a mental-health app.
   const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
   const [llmEnabled, setLlmEnabled] = useState(false);
+  // Voice journaling consent (VOICE_PLAN 2026-09-29), mirroring web's
+  // Settings voice section: availability + provider from meta, the switch's
+  // state + policy currency from the account's consent record. Availability
+  // is null until meta answers — unreachable must not read as "offered" or
+  // "not offered".
+  const [voiceAvailable, setVoiceAvailable] = useState<boolean | null>(null);
+  const [voiceProvider, setVoiceProvider] = useState("");
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  // enabled-but-stale: the server's transcription provider changed since
+  // the consent was given; the toggle must be re-confirmed to accept the
+  // new terms.
+  const [voiceStale, setVoiceStale] = useState(false);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
   const [rejectedCount, setRejectedCount] = useState(0);
   const [quarantined, setQuarantined] = useState(false);
@@ -154,12 +170,25 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // (null) so the copy below never blames the server for being
         // unreachable.
         setSharingAvailable(m?.sharing_available === true);
+        // Voice availability/provider ride the same meta answer; a missing
+        // audio_available never counts as offered (fail closed like sharing).
+        setVoiceAvailable(m?.audio_available === true);
+        setVoiceProvider(typeof m?.stt_provider_name === "string" ? m.stt_provider_name : "");
         // Stryker disable next-line OptionalChaining: with m null/undefined, typeof m.version throws into the same .catch(() => {}) — no observable difference (the typeof guard itself stays live)
         if (typeof m?.version === "string") setServerVersion(m.version);
       })
       .catch(() => setSharingAvailable(null));
     // Stryker disable next-line OptionalChaining: an undefined consent payload makes c.enabled throw into the .catch(() => {}) — setLlmEnabled is never reached either way
     api.getLlmConsent().then((c) => setLlmEnabled(Boolean(c?.enabled))).catch(() => {});
+    // The voice consent record (same read discipline as the LLM consent):
+    // enabled + policy currency; a failed read leaves the switch OFF and
+    // the stale note hidden — never a guessed state.
+    api.getVoiceConsent()
+      .then((c) => {
+        setVoiceEnabled(c?.enabled === true);
+        setVoiceStale(c != null && c.enabled === true && c.active_for_current_policy !== true);
+      })
+      .catch(() => {});
     // Sync-recovery surfaces are scoped to the authenticated account and
     // configured server; no account can learn another's queued metadata.
     api.getUserId().then((userId) => {
@@ -270,6 +299,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       if (pending.kind === "llm") {
         const result = await api.setLlmConsent(pending.enabled, reauth.verifierB64);
         setLlmEnabled(result.enabled);
+      } else if (pending.kind === "voice") {
+        const result = await api.setVoiceConsent(pending.enabled, reauth.verifierB64);
+        setVoiceEnabled(result.enabled);
+        // A fresh consent was just given under the CURRENT policy.
+        setVoiceStale(false);
       } else if (pending.kind === "bio") {
         // The password proof just ran: enabling the biometric wrap now
         // proves the enabler knows the password, not merely that they hold
@@ -778,6 +812,42 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           </View>
         </>
       )}
+      {/* Voice journaling (VOICE_PLAN 2026-09-29): the mic's consent, the
+          same re-authenticated standing as the LLM toggle — this is where
+          recordings leave the device. Hidden entirely while meta is
+          unreachable (null ≠ "not offered"); a server that answers but
+          offers no transcription says so honestly. */}
+      {voiceAvailable === true && (
+        <>
+          <Text style={themed.label}>{tr("settings.voiceLabel")}</Text>
+          <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.md }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
+              <Text style={themed.rowText}>{tr("settings.voiceRow")}</Text>
+              <Switch
+                value={voiceEnabled}
+                disabled={busy}
+                onValueChange={(enabled) => setPending({ kind: "voice", enabled })}
+                trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
+                accessibilityLabel={tr("settings.voiceA11y")}
+                accessibilityState={{ checked: voiceEnabled, disabled: busy }}
+              />
+            </View>
+            <Text style={themed.footnote}>
+              {tr("settings.voiceNote", {
+                provider: voiceProvider || tr("entry.voiceUnavailable"),
+              })}
+            </Text>
+            {voiceStale && (
+              <Text style={[themed.footnote, { color: t.colors.error }]} accessibilityRole="alert">
+                {tr("settings.voiceStaleNote")}
+              </Text>
+            )}
+          </View>
+        </>
+      )}
+      {voiceAvailable === false && (
+        <Text style={themed.footnote}>{tr("settings.voiceNotOffered")}</Text>
+      )}
       {pending && (
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
@@ -787,9 +857,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                 ? tr("settings.reauthBioTitle")
                 : pending.kind === "upgrade"
                   ? tr("settings.reauthUpgradeTitle")
-                  : tr("settings.reauthLlmTitle", {
-                      action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
-                    })}
+                  : pending.kind === "voice"
+                    ? tr("settings.reauthVoiceTitle", {
+                        action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
+                      })
+                    : tr("settings.reauthLlmTitle", {
+                        action: tr(pending.enabled ? "settings.enableWord" : "settings.disableWord"),
+                      })}
           </Text>
           <TextInput
             style={themed.input}

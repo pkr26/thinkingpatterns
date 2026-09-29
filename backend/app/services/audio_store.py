@@ -34,7 +34,6 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +47,10 @@ logger = logging.getLogger("mindpattern.audio_store")
 # backlogged deployment catches up over cycles instead of holding one
 # long transaction.
 SWEEP_BATCH = 500
+
+# Sentinel for "no fetch cap" (the S3 get path keeps a uniform limit+1
+# read shape; an int this large is effectively unbounded).
+ST_S3_UNCAPPED = 1 << 40
 
 
 class AudioStoreError(RuntimeError):
@@ -71,9 +74,10 @@ class S3AudioStore:
     backend = "s3"
 
     def __init__(self, bucket: str, region: str = "", access_key_id: str = "",
-                 secret_access_key: str = "") -> None:
+                 secret_access_key: str = "", endpoint: str = "") -> None:
         self.bucket = bucket
         self.region = region
+        self.endpoint = endpoint.strip()
         self._access_key_id = access_key_id
         self._secret_access_key = secret_access_key
         self._client = None
@@ -81,10 +85,18 @@ class S3AudioStore:
     def _s3(self):
         if self._client is None:
             import boto3  # imported lazily; absent in minimal dev envs
+            from botocore.config import Config
 
             kwargs: dict = {"service_name": "s3"}
             if self.region:
                 kwargs["region_name"] = self.region
+            if self.endpoint:
+                # S3-compatible endpoint override (dev MinIO parity,
+                # M4 remediation 2026-09-29): path-style addressing, or
+                # boto3 would resolve virtual-hosted buckets against the
+                # endpoint host.
+                kwargs["endpoint_url"] = self.endpoint
+                kwargs["config"] = Config(s3={"addressing_style": "path"})
             if self._access_key_id and self._secret_access_key:
                 kwargs["aws_access_key_id"] = self._access_key_id
                 kwargs["aws_secret_access_key"] = self._secret_access_key
@@ -105,9 +117,17 @@ class S3AudioStore:
         except Exception as exc:
             raise AudioStoreError(f"s3 put failed: {type(exc).__name__}") from exc
 
-    async def get(self, key: str) -> bytes:
+    async def get(self, key: str, *, max_bytes: int | None = None) -> bytes:
         def _get() -> bytes:
-            return self._s3().get_object(Bucket=self.bucket, Key=key)["Body"].read()
+            body = self._s3().get_object(Bucket=self.bucket, Key=key)["Body"]
+            # The cap makes a compromised/misconfigured bucket unable to
+            # turn a fetch into unbounded memory: read one byte past the
+            # limit and refuse rather than buffering the object.
+            limit = max_bytes if max_bytes is not None else ST_S3_UNCAPPED
+            data = body.read(limit + 1)
+            if len(data) > limit:
+                raise ValueError("object exceeds the fetch size limit")
+            return data
 
         try:
             return await asyncio.to_thread(_get)
@@ -154,10 +174,17 @@ class LocalAudioStore:
         except OSError as exc:
             raise AudioStoreError(f"local put failed: {type(exc).__name__}") from exc
 
-    async def get(self, key: str) -> bytes:
+    async def get(self, key: str, *, max_bytes: int | None = None) -> bytes:
         path = self._path(key)
+
+        def _read() -> bytes:
+            data = path.read_bytes()
+            if max_bytes is not None and len(data) > max_bytes:
+                raise ValueError("object exceeds the fetch size limit")
+            return data
+
         try:
-            return await asyncio.to_thread(path.read_bytes)
+            return await asyncio.to_thread(_read)
         except FileNotFoundError as exc:
             raise AudioStoreError("object missing") from exc
         except OSError as exc:
@@ -186,12 +213,52 @@ def get_audio_store(settings: Settings):
             settings.audio_bucket_region.strip(),
             settings.audio_aws_access_key_id,
             settings.audio_aws_secret_access_key,
+            endpoint=settings.audio_s3_endpoint,
         )
     if settings.audio_local_dir.strip():
         return LocalAudioStore(settings.audio_local_dir.strip())
     if settings.environment == "development":
         return LocalAudioStore("./data/audio")
     return None
+
+
+# M9 remediation (audit 2026-09-29): routes used to construct a fresh
+# store (and therefore a fresh boto3 client — connection pool, TLS
+# session, ~100 ms of setup) per request, which also made the class's
+# lazy client cache useless. The cached getter keeps ONE live store per
+# distinct audio-storage configuration; a settings swap with different
+# audio knobs builds a new one on the next call (the live-settings
+# discipline), and the previous instance is simply dropped.
+_audio_store_cache: dict[tuple, object] = {}
+
+
+def _audio_store_signature(settings: Settings) -> tuple:
+    return (
+        settings.audio_bucket.strip(),
+        settings.audio_bucket_region.strip(),
+        settings.audio_s3_endpoint.strip(),
+        settings.audio_local_dir.strip(),
+        settings.environment,
+        settings.audio_aws_access_key_id,
+        settings.audio_aws_secret_access_key,
+    )
+
+
+def get_audio_store_cached(settings: Settings):
+    cached = get_audio_store(settings)
+    if cached is None:
+        return None
+    signature = _audio_store_signature(settings)
+    shared = _audio_store_cache.get(signature)
+    if shared is None:
+        _audio_store_cache.clear()
+        _audio_store_cache[signature] = cached
+        return cached
+    if type(shared) is type(cached):
+        return shared
+    _audio_store_cache.clear()
+    _audio_store_cache[signature] = cached
+    return cached
 
 
 async def sweep_expired_audio(session: AsyncSession, store) -> int:

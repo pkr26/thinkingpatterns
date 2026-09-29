@@ -210,6 +210,9 @@ def test_settings_defaults_are_pinned(clean_env):
         "stt_url": "",
         "stt_api_key": "",
         "stt_model": "whisper-1",
+        # M8 remediation (audit 2026-09-29): operator-tunable upstream
+        # transcription budget, validated 1..600s at boot.
+        "stt_timeout_seconds": 120.0,
         "stt_provider_name": "",
         "stt_data_retention": "",
         "stt_policy_version": "v1",
@@ -223,6 +226,9 @@ def test_settings_defaults_are_pinned(clean_env):
         "audio_max_user_bytes": 64 * 1024 * 1024,
         "audio_bucket": "",
         "audio_bucket_region": "",
+        # M4 remediation (audit 2026-09-29): S3-compatible endpoint
+        # override for dev MinIO parity (path-style when set).
+        "audio_s3_endpoint": "",
         "audio_aws_access_key_id": "",
         "audio_aws_secret_access_key": "",
         "audio_local_dir": "",

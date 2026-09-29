@@ -253,7 +253,7 @@ async def _audio_retention_sweep(app: FastAPI) -> None:
     retention even while the sweeper is behind). No-ops cheaply when the
     feature or store is unconfigured.
     """
-    from .services.audio_store import get_audio_store, sweep_expired_audio
+    from .services.audio_store import get_audio_store_cached, sweep_expired_audio
 
     while True:
         settings = app.state.settings
@@ -261,7 +261,7 @@ async def _audio_retention_sweep(app: FastAPI) -> None:
         try:
             if not getattr(settings, "audio_enabled", False):
                 continue
-            store = get_audio_store(settings)
+            store = get_audio_store_cached(settings)
             async with app.state.sessionmaker() as session:
                 swept = await sweep_expired_audio(session, store)
             if swept:

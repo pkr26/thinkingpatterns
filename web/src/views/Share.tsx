@@ -181,7 +181,11 @@ export function ShareView(): React.JSX.Element {
         (current ?? []).map((row) => (row.id === consent.id ? { ...row, share_voice: enabled } : row)),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("share.webRevokeFailed"));
+      // Localized honesty (audit 2026-09-29): the raw error message is
+      // server-provided English; the honest reload below still runs so the
+      // toggle never shows a state the server refused.
+      void err;
+      setError(t("share.voiceToggleFailed"));
       const rows = await api.listConsents().catch(() => null);
       if (rows) setConsents(rows);
     } finally {

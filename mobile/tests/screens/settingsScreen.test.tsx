@@ -1750,3 +1750,62 @@ describe("navigation rows and sign-out hygiene (independent audit 2026-09-27)", 
     expect(textOf(root)).not.toContain("Confirm with password");
   });
 });
+
+describe("voice journaling consent (VOICE_PLAN 2026-09-29, audit C5)", () => {
+  it("shows the section with the provider note and the stored consent state", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ audio_available: true, stt_provider_name: "Whisper Medical" } as never);
+    vi.mocked(api.getVoiceConsent).mockResolvedValue({ enabled: true, active_for_current_policy: true } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling");
+    expect(sw).toBeDefined();
+    expect(sw!.props.value).toBe(true);
+    expect(textOf(root)).toContain("Whisper Medical");
+    // Current policy: no stale note.
+    expect(textOf(root)).not.toContain("transcription provider changed");
+  });
+
+  it("flags an enabled-but-stale consent (the provider changed under it)", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ audio_available: true } as never);
+    vi.mocked(api.getVoiceConsent).mockResolvedValue({ enabled: true, active_for_current_policy: false } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(root)).toContain("re-enable to review and accept the new terms");
+  });
+
+  it("the toggle demands the typed password; the verifier, not the bearer, changes the consent", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ audio_available: true } as never);
+    vi.mocked(api.getVoiceConsent).mockResolvedValue({ enabled: false, active_for_current_policy: true } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const { act } = await import("../helpers/rtr");
+    const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")!;
+    expect(sw.props.value).toBe(false);
+    await act(async () => {
+      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    // The password card names the action; nothing was sent yet.
+    expect(textOf(root)).toContain("Enter your password to enable voice journaling");
+    expect(api.setVoiceConsent).not.toHaveBeenCalled();
+    await reauth(root);
+    expect(api.setVoiceConsent).toHaveBeenCalledWith(true, authKeyB64());
+    expect(
+      root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")!.props.value,
+    ).toBe(true);
+  });
+
+  it("a server without voice says so; an unreachable server guesses nothing", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ audio_available: false } as never);
+    const off = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(off)).toContain("Voice journaling is not offered by this server.");
+    expect(off.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")).toBeUndefined();
+
+    vi.mocked(api.meta).mockRejectedValue(new Error("network down"));
+    const unknown = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    expect(textOf(unknown)).not.toContain("Voice journaling is not offered by this server.");
+    expect(unknown.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")).toBeUndefined();
+  });
+});

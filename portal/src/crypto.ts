@@ -474,6 +474,15 @@ export async function decryptInsights(
   }
 }
 
+/** The only entry payload schema versions this portal understands — the
+ *  web client's guard (web/src/crypto/patient.ts ENTRY_PAYLOAD_VERSIONS)
+ *  mirrored (M-8b, audit 2026-09-29): v1 is the base shape, v2 the
+ *  structured check-in channels, v3 the voice channels. An unknown
+ *  version must throw LOUDLY, never be silently miscast as today's shape
+ *  — a future v4 misread is how a schema roll corrupts the clinical
+ *  chart with wrong-typed fields. */
+export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2, 3];
+
 export async function decryptEntry(
   dataKey: Bytes,
   userId: string,
@@ -522,7 +531,12 @@ export async function decryptEntry(
       }
     }
     if (plain === null) throw failure ?? new Error("entry could not be decrypted");
-    const payload = decodeJson(plain) as { text?: string };
+    const payload = decodeJson(plain) as { v?: unknown; text?: string };
+    // M-8b (audit 2026-09-29): the AEAD bound the bytes to this
+    // account/entry, but nothing else vouches for the version field.
+    if (!ENTRY_PAYLOAD_VERSIONS.includes(payload.v as number)) {
+      throw new Error(`unsupported entry payload version: ${String(payload.v)}`);
+    }
     if (typeof payload.text !== "string") throw new Error("entry payload malformed");
     return payload as { text: string };
   } finally {

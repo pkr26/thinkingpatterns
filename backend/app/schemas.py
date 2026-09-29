@@ -770,6 +770,12 @@ class PatientOut(BaseModel):
     summary_blob: str | None = None
     summary_eph_pub: str | None = None
     summary_updated_at: datetime | None = None
+    # Voice-sharing grant (VOICE_PLAN P5, remediation 2026-09-29): present
+    # (true/false) on ACTIVE consents so the portal roster can show which
+    # patients let this therapist hear recordings; None while revoked
+    # (a revoked grant shares nothing, and the older backend contract
+    # predating the field also yields None — consumers fail closed).
+    share_voice: bool | None = None
 
 
 class MeasureCreate(StrictRequestModel):

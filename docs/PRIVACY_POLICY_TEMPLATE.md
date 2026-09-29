@@ -149,8 +149,13 @@ If you record an entry instead of typing it:
   ({STT_DATA_RETENTION}).
 - The transcript is stored like every entry: encrypted on your device
   before it reaches us, in a form we cannot read. If you recorded in
-  another language, an English translation rides inside the same
-  encrypted payload so your therapist can read it.
+  another language and you have separately enabled pattern insights
+  (our analysis provider), the text is translated to English by that
+  provider before being re-encrypted — voice journaling alone never
+  sends your transcript anywhere else (remediated 2026-09-29: the
+  translation dispatch is hard-gated on your current analysis consent).
+  The translation then rides inside the same encrypted payload so your
+  therapist can read it.
 - If you keep a recording, it is encrypted on your device (we store only
   ciphertext) and automatically deleted after
   {AUDIO_RETENTION_DAYS} days. You can delete it sooner at any time;

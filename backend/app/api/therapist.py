@@ -1036,6 +1036,9 @@ async def list_patients(
                     ),
                     summary_eph_pub=consent.summary_eph_pub if serve_summary else None,
                     summary_updated_at=consent.summary_updated_at if serve_summary else None,
+                    # P5 remediation (2026-09-29): the roster's voice-sharing
+                    # indicator — the grant's live value on active consents.
+                    share_voice=bool(consent.share_voice) if active else None,
                 )
                 # H-14 (2026-09-20): the list moves patient-derived caseload
                 # summaries, so it is audited like every other patient-data
@@ -1439,12 +1442,20 @@ async def read_patient_audio(
     does for entries.
     """
     from ..models import AudioAttachment
-    from ..services.audio_store import AudioStoreError, get_audio_store
+    from ..services.audio_store import AudioStoreError, get_audio_store_cached
 
     settings = request.app.state.settings
+    # M1 remediation (audit 2026-09-29): the dark-launch flag must cover
+    # the THERAPIST fetch path too — a flag-off rollback may not leave a
+    # live route serving previously stored recordings while the patient's
+    # own /audio router is dark. Checked in the BODY (not a decorator
+    # dependency) so the authenticate → role → flag wall order holds: an
+    # anonymous probe still answers the standard 401.
+    if not bool(getattr(settings, "audio_enabled", False)):
+        raise ApiError(status_code=404, detail="not found", code="not_found")
     if len(user_id) > 32:
         raise ApiError(status_code=404, detail="patient not found", code="not_found")
-    store = get_audio_store(settings)
+    store = get_audio_store_cached(settings)
     if store is None:
         raise ApiError(
             status_code=503,
@@ -1484,7 +1495,7 @@ async def read_patient_audio(
                     status_code=410, detail="recording expired", code="audio_expired"
                 )
             try:
-                blob = await store.get(row.storage_key)
+                blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
             except AudioStoreError:
                 logger.warning("audio get failed for attachment %s", row.id)
                 raise ApiError(

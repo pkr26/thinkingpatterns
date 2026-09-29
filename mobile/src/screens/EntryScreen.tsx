@@ -120,7 +120,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [voice, setVoice] = useState<VoiceSession | null>(null);
   const [transcribing, setTranscribing] = useState(false);
   const voiceRecorder = useVoiceRecorder({
-    unsupported: tr("entry.voiceMicUnsupported"),
     permissionDenied: tr("entry.voiceMicDenied"),
     failed: tr("entry.voiceRecordFailed"),
   });
@@ -772,7 +771,26 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
               label={tr("entry.micRecord")}
               onPress={() => {
                 touchActivity();
-                void voiceRecorder.start();
+                // Audit M3: a transcript REPLACES the editor's words. With
+                // typed text on screen, confirm first — the same Alert
+                // confirmation idiom as the crisis/discard dialogs. An
+                // empty editor starts straight away.
+                if (textRef.current.trim() === "") {
+                  void voiceRecorder.start();
+                  return;
+                }
+                Alert.alert(
+                  tr("entry.voiceReplaceTitle"),
+                  tr("entry.voiceReplaceBody"),
+                  [
+                    { text: tr("common.cancel"), style: "cancel" },
+                    {
+                      text: tr("entry.voiceReplaceConfirm"),
+                      style: "destructive",
+                      onPress: () => void voiceRecorder.start(),
+                    },
+                  ],
+                );
               }}
               center={false}
             />

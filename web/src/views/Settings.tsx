@@ -321,7 +321,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       setStatus(enabled ? t("settings.voiceEnabledNote") : t("settings.voiceDisabledNote"));
     } catch (err) {
       if (err instanceof ApiError && err.code === "stt_unavailable") setError(t("settings.voiceNotOffered"));
-      else setError(err instanceof Error ? err.message : t("settings.voiceToggleFailed"));
+      // Localized honesty (audit 2026-09-29): the raw ApiError message is
+      // server-provided English — this surface speaks the user's locale.
+      else setError(t("settings.voiceToggleFailed"));
     } finally {
       setBusy(false);
     }
@@ -1002,9 +1004,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         {llmLoad === "loading" && <Note role="status">{t("common.loading")}</Note>}
         <hr className="divider" />
         {/* Voice journaling (VOICE_PLAN 2026-09-29): the mic's consent,
-            same card — this is where recordings leave the device. */}
+            same card — this is where recordings leave the device. The
+            section label (L-3, audit 2026-09-29) names the scope instead
+            of an unlabeled block behind a divider. */}
         {voice && voice.available && (
           <>
+            <span className="section-label">{t("settings.voiceTitle")}</span>
             <Toggle
               checked={voice.enabled}
               onChange={(enabled) => void toggleVoice(enabled)}

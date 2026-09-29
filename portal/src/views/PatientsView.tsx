@@ -1001,6 +1001,15 @@ export function PatientsView(props: {
               {(row?.sensitive || summary?.sensitive) && (
                 <Note tone="warn">a sensitive card is present — review ordering puts it first</Note>
               )}
+              {/* VOICE_PLAN P5 (remediation 2026-09-29): the patient's
+                  share_voice grant — surfaced here so the therapist can
+                  see which patients let them hear the actual recordings
+                  before opening the chart. Absent (older backend or
+                  revoked grant) renders nothing: fail closed, like the
+                  patient view's play gate. */}
+              {patient.status === "active" && patient.share_voice === true && (
+                <Note>voice recordings shared</Note>
+              )}
             </div>
             <Button label="Open patterns" onPress={() => props.onOpen(patient)} />
           </div>

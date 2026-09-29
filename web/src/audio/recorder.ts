@@ -109,7 +109,15 @@ export function useRecorder(i18n: {
   /** Guard against stop() racing the auto-stop timer. */
   const finishingRef = useRef(false);
 
-  const teardown = useCallback((): void => {
+  /** Shared resource teardown. `assemble` (the finalize path) leaves the
+   *  recorder's onstop/ondataavailable attached — recorder.stop() has
+   *  already queued the events that assemble the kept blob, and detaching
+   *  them here would lose the take the user asked to KEEP. Every other
+   *  caller (reset, unmount) detaches FIRST: stopping the tracks makes the
+   *  browser fire the recorder's async stop event, and a discarded take
+   *  must stay discarded — reset()/unmount may not resurrect it through a
+   *  handler that outlived the decision (audit 2026-09-29 H1). */
+  const teardown = useCallback((assemble = false): void => {
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -122,6 +130,10 @@ export function useRecorder(i18n: {
     if (audioCtxRef.current) {
       void audioCtxRef.current.close().catch(() => undefined);
       audioCtxRef.current = null;
+    }
+    if (!assemble && recorderRef.current) {
+      recorderRef.current.onstop = null;
+      recorderRef.current.ondataavailable = null;
     }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) track.stop();
@@ -136,27 +148,39 @@ export function useRecorder(i18n: {
     finishingRef.current = true;
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
-      recorder.stop(); // fires onstop → assembles the blob
+      try {
+        recorder.stop(); // fires onstop → assembles the blob
+      } catch {
+        // L-6 (audit 2026-09-29): a stop that itself throws must not
+        // strand the mic — teardown always runs below.
+      }
     }
-    teardown();
+    teardown(true);
   }, [teardown]);
 
-  useEffect(() => {
-    // Unmount is a hard teardown: no dangling mic indicator, no rAF loop.
+  // Unmount is a hard teardown: no dangling mic indicator, no rAF loop.
+  // The body lives in the CLEANUP (audit 2026-09-29 H1): the effect used
+  // to run it at MOUNT with a no-op cleanup, so leaving the view kept the
+  // stream and the timers alive.
+  useEffect(() => () => {
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = null;
+      recorder.ondataavailable = null;
       try {
-        recorder.onstop = null;
         recorder.stop();
       } catch {
         // already inactive racing the unmount
       }
     }
     teardown();
-    return () => undefined;
   }, [teardown]);
 
   const start = useCallback(async (): Promise<void> => {
+    // Re-entrancy guard (M-1, audit 2026-09-29): a second press while a
+    // recorder or stream is already live would build a SECOND recorder
+    // over a second mic hold and orphan the first — bail instead.
+    if (recorderRef.current !== null || streamRef.current !== null) return;
     setError(null);
     const mime = pickRecorderMime();
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia || mime === null) {
@@ -187,6 +211,13 @@ export function useRecorder(i18n: {
     recorderRef.current = recorder;
     recorder.ondataavailable = (event: BlobEvent): void => {
       if (event.data && event.data.size > 0) chunksRef.current.push(event.data);
+    };
+    // L-6 (audit 2026-09-29): a failed recorder surfaces honestly and
+    // finalizes immediately — finalize's guarded stop() means teardown
+    // always runs, so the mic never stays live behind a dead take.
+    recorder.onerror = (): void => {
+      setError(i18n.failed);
+      finalize();
     };
     recorder.onstop = (): void => {
       const fullMime = recorder.mimeType || mime;
@@ -243,6 +274,19 @@ export function useRecorder(i18n: {
   }, [finalize, state]);
 
   const reset = useCallback((): void => {
+    // Discard the live recorder BEFORE the track teardown: detach the
+    // event handlers first so neither recorder.stop() nor the track stop's
+    // async stop event can resurrect the take this reset just discarded.
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = null;
+      recorder.ondataavailable = null;
+      try {
+        recorder.stop();
+      } catch {
+        // already inactive racing the reset
+      }
+    }
     teardown();
     setRecording(null);
     setElapsed(0);

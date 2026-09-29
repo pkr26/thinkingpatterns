@@ -760,3 +760,40 @@ describe("serverFingerprintMatches (crypto/sharing)", () => {
     expect(serverFingerprintMatches(THERAPIST_PUB, therapistKeyFingerprint(THERAPIST_PUB))).toBeNull();
   });
 });
+
+describe("share-voice toggle (VOICE_PLAN 2026-09-29, audit C5)", () => {
+  it("an active grant offers the voice switch, verifier-gated through the password card", async () => {
+    // The list answers with a MUTABLE row: the screen refreshes after a
+    // successful toggle, and the server's next list would carry the new
+    // share_voice — the mock must too, or the refresh reverts the row.
+    const row = { ...activeConsent, share_voice: false };
+    vi.mocked(api.listConsents).mockImplementation(async () => [{ ...row }]);
+    const root = await render(<TherapistShareScreen navigation={nav} />);
+    await flush();
+    const { Switch } = await import("react-native");
+    const { act } = await import("../helpers/rtr");
+    const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Let Dr. Active hear my recordings");
+    expect(sw).toBeDefined();
+    // Absent on older backends reads as OFF — never guessed as on.
+    expect(sw!.props.value).toBe(false);
+    expect(textOf(root)).toContain("Therapist cannot hear my recordings");
+
+    await act(async () => {
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+    });
+    await flush();
+    // The disclosure explains the scope change before any password is spent.
+    expect(lastAlert()[0]).toBe("Let your therapist hear your recordings");
+    await pressAlertButton("Continue");
+    await flush();
+    expect(textOf(root)).toContain("Enter your password to change what Dr. Active can hear");
+    expect(api.setShareVoice).not.toHaveBeenCalled();
+    row.share_voice = true; // the server's truth from here on
+    await reauth(root);
+    expect(api.setShareVoice).toHaveBeenCalledWith("a".repeat(32), true, authKeyB64());
+    await flush();
+    // The row flips only on the server's own answer.
+    expect(textOf(root)).toContain("Therapist can hear my recordings");
+    expect(textOf(root)).toContain("tone can carry what text does not");
+  });
+});

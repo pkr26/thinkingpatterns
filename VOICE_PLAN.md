@@ -144,7 +144,7 @@ every side.
 | # | Area | Contract |
 |---|---|---|
 | V-1 | Formats | Web records `audio/webm;codecs=opus` → `audio/webm` → `audio/ogg;codecs=opus` → `audio/mp4` (first that `MediaRecorder.isTypeSupported` accepts; Safari only reliably does mp4/AAC). Mobile records m4a/AAC 16 kHz mono ~24 kbps. File extension is always derived from the *actual* winning mime (the .webm-named-MP4 bug). Server mime allowlist: `audio/webm`, `audio/mp4`, `audio/m4a`, `audio/x-m4a`, `audio/ogg`, `audio/mpeg`, `audio/wav`. |
-| V-2 | Duration & size | Client auto-stops at 300 s; requests carry `duration_seconds` (≤ 310 server-validated) and the audio route has its own body cap (`MINDPATTERN_AUDIO_MAX_BODY_BYTES`, default 12 MiB) replacing the global 2 MiB on `/api/{v1,}/audio` paths only. |
+| V-2 | Duration & size | Client auto-stops at 300 s; requests carry `duration_seconds` (≤ 310 server-validated) and the audio route has its own body cap (`MINDPATTERN_AUDIO_MAX_BODY_BYTES`, default 4 MiB — remediation 2026-09-29: the shipped default is tighter than this plan originally specified) replacing the global 2 MiB on `/api/{v1,}/audio` paths only. |
 | V-3 | Transcription request/response | `POST /audio/transcriptions {audio_b64, mime, duration_seconds}` → `200 {original_text, language (ISO 639-1), language_raw (provider string), english_text|null, provider_name, policy_version}`. Stateless; audio bytes never persisted. Errors: `403 voice_consent_required`, `413 audio_too_large`, `503 stt_unconfigured`, `502 stt_upstream`, a flat `404 not_found` when the flag is off (the shared vectors' `feature_flag` note). |
 | V-4 | Entry payload v3 | `{text, sentiment, created_at, energy, sleep, tags, tod}` + `transcript_lang` (ISO 639-1 or absent), `english_text` (string or null), `input_mode: "typed"|"voice"`. Decryptors accept v1/v2/v3 (missing fields default to typed behavior). `english_text` always matches the *saved* text: if the patient edits the transcript, the client re-translates via `POST /audio/translations {text, source_lang}` before saving. |
 | V-5 | Audio blob crypto | Same patient data key as entries, AES-256-GCM, AAD `("audio", userId, clientEntryId, 1)`, serialized `nonce‖ct‖tag` base64 in JSON. AAD binding makes cross-entry swaps and cross-user grafts fail closed. Implemented once per client: `web/src/crypto/patient.ts`, `mobile/src/crypto/MindPatternCrypto.ts`, `portal/src/crypto.ts` (decrypt only). |
@@ -196,7 +196,7 @@ sweeper stays authoritative so DB and storage stay in sync).
 | `MINDPATTERN_STT_DATA_RETENTION` | provider default | Disclosure copy |
 | `MINDPATTERN_STT_POLICY_VERSION` | `1` | Consent disclosure version |
 | `MINDPATTERN_STT_TIMEOUT_SECONDS` | `60` | Upstream call budget |
-| `MINDPATTERN_AUDIO_MAX_BODY_BYTES` | `12582912` (12 MiB) | Route-scoped body cap for `/audio` |
+| `MINDPATTERN_AUDIO_MAX_BODY_BYTES` | `4194304` (4 MiB — shipped default; plan originally said 12 MiB) | Route-scoped body cap for `/audio` |
 | `MINDPATTERN_AUDIO_MAX_DURATION_SECONDS` | `310` | Claimed-duration bound |
 | `MINDPATTERN_AUDIO_RETENTION_DAYS` | `30` | `expires_at` delta |
 | `MINDPATTERN_AUDIO_MAX_USER_BYTES` | `67108864` (64 MiB) | Live (unexpired) attachment quota |
@@ -305,7 +305,7 @@ lifecycle backstop, orphaned rows can't happen).
 
 `/api/v1/audio` and `/api/audio` paths switch from the global
 `MINDPATTERN_MAX_BODY_BYTES` (2 MiB) to `MINDPATTERN_AUDIO_MAX_BODY_BYTES`
-(12 MiB); every other route keeps the 2 MiB posture. `deploy/nginx`
+(4 MiB); every other route keeps the 2 MiB posture. `deploy/nginx`
 raises `client_max_body_size` for the audio location to match.
 
 ## Client implementation
@@ -470,7 +470,7 @@ Rough effort: P1 2–3 d, P2 3–4 d, P3 3–4 d, P4 3–4 d, P5 2–3 d, P6 2 d
   `s3:PutObject|GetObject|DeleteObject` on `bucket/audio/*`.
 - `docker-compose.dev.yml`: add MinIO service + env wiring
   (`MINDPATTERN_AUDIO_BUCKET`, endpoint override for local testing).
-- `deploy/nginx`: `client_max_body_size 12m;` scoped to the `/api/` audio
+- `deploy/nginx`: `client_max_body_size 8m;` scoped to the `/api/` audio
   locations.
 - Dark-launch order: merge P1–P2 with `MINDPATTERN_AUDIO_ENABLED=false`
   → flip flag for internal accounts → full enable after P6.

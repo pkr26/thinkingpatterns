@@ -4,10 +4,48 @@
   "purpose": "Cross-platform contract for the voice-journaling feature (VOICE_PLAN.md). Web, mobile, and portal pin their crypto, mime handling, and language normalization to THIS file; backend tests pin the server side. Copy-and-pin, the repo's established convention (see brain_vectors.json / crisis_phrases.json).",
   "audio_aad": {
     "context": "audio",
-    "tuple": ["audio", "<user_id>", "<client_entry_id>", 1],
+    "tuple": ["audio", "<user_id>", "<client_entry_id>", "1"],
     "serialization": "AES-256-GCM under the patient data key, nonce(12)||ct||tag, base64 in JSON — identical envelope format to entries, only the AAD context differs",
     "audio_version": 1,
+    "version_encoding": "The 4th tuple element is the STRING \"1\" in the serialized AAD JSON (every client builds it via buildAad(\"audio\", userId, clientEntryId, String(1))). The audio_version number above is documentation; the wire form is the string.",
     "notes": "Version is the AUDIO PAYLOAD version (independent of the entry content_version). Bump only if the audio envelope format itself ever changes."
+  },
+  "crypto_vectors": {
+    "_generator_note": "Deterministic cross-client pins (audit 2026-09-29, M3). Byte-equality is asserted by web/tests/audioVoice.test.ts and mobile/tests/audioVoice.test.ts via their encryptWithFixedNonce seams; portal pins the DECRYPT side (web encrypts, portal plays).",
+    "data_key_b64": "ESIzRFVmd4iZqrvM3e7/ECEyQ1RldoeYqbrL3O3+DyA=",
+    "nonce_b64": "oKGio6Slpqeoqaqr",
+    "user_id": "vector-user-0001",
+    "client_entry_id": "vector-entry-0001",
+    "audio_envelope": {
+      "aad_tuple": ["audio", "vector-user-0001", "vector-entry-0001", "1"],
+      "plaintext_b64": "AwoRGB8mLTQ7QklQV15lbHN6gYiPlp2kq7K5wMfO1dzj6vH4/wYNFBsiKTA3PkVMU1phaG92fYSLkpmgp661vMPK0djf5u30+wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL/GzdTb4unw9/4FDBMaISgvNj1ES1JZYGdudXyDipGYn6attLvCydDX3uXs8/oBCA8WHSQrMjlAR05VXGNqcXh/ho2Um6KpsLe+xczT2uHo7/b9BAsSGSAnLjU8Q0pRWF9mbXR7gomQl56lrLO6wcjP1t3k6/L5AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tng5+71/A==",
+      "blob_b64": "oKGio6Slpqeoqaqr8EtfDq9mRhhp8WsRBnYq0KbTGTZbJkzJHoXDmQPIVPNgJPe6JeohtoM+6DJyuVHj/Wq+8sWmcu2RQSi1Qk91oQMefCFpXjLefRlzDxTibpjOFp4m17JWS1PoqxuAGrD9Xs8D7z7x+nRWPe5cX6WqlNXVKeBoYVHZ+4BNpk93Dsv6tuOFSHtQxjmMmmmTtHspnRaJJqaVW5RDjE8X30w2vY/Ful2kGdIunkws3Niq7oBTuJtcymBeiyPunHWKFX9iGpToPpm9exHQYR65v35aUBzMnH8z/TEma7AMNz24pdOEkNDw0Wew9GUYbYg5nvyuSMpUHR1JYrNOF5GOJ8R4zrDYdCxfxnfrdt9UBn1bZvg=",
+      "format": "AES-256-GCM, envelope nonce(12)||ct||tag, base64",
+      "negative_cases": [
+        "decrypt under user_id 'vector-user-0002' must fail (user binding)",
+        "decrypt under client_entry_id 'vector-entry-0002' must fail (entry binding)",
+        "decrypt under the ENTRY AAD context must fail (context separation)"
+      ]
+    },
+    "entry_payload_v3_envelope": {
+      "aad_tuple": ["entry", "vector-user-0001", "vector-entry-0001", "1"],
+      "plaintext_json": {
+        "v": 3,
+        "text": "Hoy fue un día difícil en el trabajo.",
+        "sentiment": -0.4,
+        "created_at": "2026-09-29T19:04:00Z",
+        "tod": "evening",
+        "input_mode": "voice",
+        "transcript_lang": "es",
+        "english_text": "Today was a hard day at work."
+      },
+      "blob_b64": "oKGio6SlpqeoqaqriGM4NIpzRw4m1lo1cxJt9LrQuNih1fEY2xcemmlnoUvqqMXvuYVAgv1y4Wcpp2Ddz1K+8MX+LUU4oNR7kYiteK6gj8ObiPEeqjkZbWadP9GZc74aut4pHQio5LY3rQhTxDGDbrsHA5q9712OhHnb96LtMuoiIQnz2bxz5AQ7EtkJSQZCurKZF6B0cc8rA/2gTMCqWtviKMMLzB8n7F0PgILI6R/5+iyYKczgAgh4Qj/oPQ7RXeKBtQqo6jHMQmopOK2ZB+azdxfPw/NIUcCeiI8BMsWXBc6/6ei476T/ChUqPxvLik5ArA==",
+      "blob_b64_legacy_aad": "oKGio6SlpqeoqaqriGM4NIpzRw4m1lo1cxJt9LrQuNih1fEY2xcemmlnoUvqqMXvuYVAgv1y4Wcpp2Ddz1K+8MX+LUU4oNR7kYiteK6gj8ObiPEeqjkZbWadP9GZc74aut4pHQio5LY3rQhTxDGDbrsHA5q9712OhHnb96LtMuoiIQnz2bxz5AQ7EtkJSQZCurKZF6B0cc8rA/2gTMCqWtviKMMLzB8n7F0PgILI6R/5+iyYKczgAgh4Qj/oPQ7RXeKBtQqo6jHMQmopOK2ZB+azdxfPw/NIUcCeiI8BMsWXBc6/pIAYRt/+ec4VIpIpCj3TTA==",
+      "format": "same envelope; plaintext is the canonical JSON.stringify of the v3 payload",
+      "negative_cases": [
+        "decrypt with contentVersion 2 must fail (version-bound AAD)"
+      ]
+    }
   },
   "entry_payload_v3": {
     "extends": "v2",

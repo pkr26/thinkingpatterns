@@ -434,6 +434,13 @@ export interface Patient {
   revoked_at: string | null;
   ephemeral_pub: string | null;
   wrapped_key: string | null;
+  /** Voice-sharing grant (VOICE_PLAN 2026-09-29, audit M-8): whether the
+   *  patient lets this therapist fetch kept voice recordings. OPTIONAL
+   *  and additive — a backend whose consent listing predates the field
+   *  omits it, and every consumer FAILS CLOSED (undefined reads as "no
+   *  grant"; the server enforces the identical wall with 403
+   *  consent_voice_share_required on the audio fetch). */
+  share_voice?: boolean;
   /** Caseload summary (2026-09-19): ECIES-wrapped to this therapist at the
    *  patient's last recompute; null until that first recompute and after a
    *  revoke. Decrypted locally with decryptCaseloadSummary. */

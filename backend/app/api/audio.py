@@ -46,7 +46,7 @@ from ..schemas import (
 from ..security.crypto import MIN_BLOB_SIZE
 from ..services import audio_store as audio_store_service
 from ..services import stt
-from ..services.audio_store import AudioStoreError, get_audio_store
+from ..services.audio_store import AudioStoreError, get_audio_store_cached
 from ..services.stt import ALLOWED_AUDIO_MIMES, normalize_mime
 
 logger = logging.getLogger("mindpattern.audio")
@@ -174,7 +174,7 @@ async def transcribe_recording(
             code="stt_upstream",
         ) from None
     english_text = None
-    if result.text:
+    if result.text and stt.translation_dispatch_allowed(user, settings):
         english_text = await stt.translate_to_english(settings, result.text, result.language_iso)
     return AudioTranscriptionResponse(
         original_text=result.text,
@@ -210,9 +210,16 @@ async def translate_text(
     before encryption. Shares the transcription rate bucket: it is the
     same user action (one recording → one transcription + at most a few
     re-translations while editing).
+
+    H4 (audit 2026-09-29): the LLM endpoint is a consent surface of its
+    own — an account that has not accepted the CURRENT LLM policy gets
+    a null translation (degraded mode), never a dispatch of journal
+    text to a provider they declined.
     """
     settings = request.app.state.settings
     _require_voice_consent(user, settings)
+    if not stt.translation_dispatch_allowed(user, settings):
+        return AudioTranslationResponse(english_text=None)
     english_text = await stt.translate_to_english(settings, body.text, body.source_lang)
     return AudioTranslationResponse(english_text=english_text)
 
@@ -306,7 +313,7 @@ async def upload_attachment(
     """
     settings = request.app.state.settings
     _require_voice_consent(user, settings)
-    store = get_audio_store(settings)
+    store = get_audio_store_cached(settings)
     if store is None:
         raise ApiError(
             status_code=503,
@@ -439,7 +446,7 @@ async def fetch_attachment(
 ):
     """Fetch one kept recording (owner-only) for playback."""
     settings = request.app.state.settings
-    store = get_audio_store(settings)
+    store = get_audio_store_cached(settings)
     if store is None:
         raise ApiError(
             status_code=503,
@@ -448,7 +455,7 @@ async def fetch_attachment(
         )
     row = await _owner_attachment(session, store, user.id, attachment_id)
     try:
-        blob = await store.get(row.storage_key)
+        blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
     except AudioStoreError:
         logger.warning("audio get failed for attachment %s", row.id)
         raise ApiError(
@@ -475,7 +482,7 @@ async def delete_attachment(
     'remove audio but keep the entry' control; deleting the entry itself
     cleans its attachment through the entries route)."""
     settings = request.app.state.settings
-    store = get_audio_store(settings)
+    store = get_audio_store_cached(settings)
     if store is None:
         raise ApiError(
             status_code=503,

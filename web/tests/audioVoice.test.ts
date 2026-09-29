@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decryptAudio, decryptEntry, encryptAudio, encryptEntry } from "../src/crypto/patient";
-import { fromBase64, toBase64 } from "../src/crypto/core";
+import { encryptWithFixedNonce, fromBase64, toBase64 } from "../src/crypto/core";
+import { buildAad } from "../src/crypto/aad";
 import {
   MAX_RECORDING_SECONDS,
   RECORDER_MIME_CANDIDATES,
@@ -175,5 +176,77 @@ describe("shared/audio_vectors.json pins", () => {
   it("the AAD tuple context and version match", () => {
     expect(shared.audio_aad.tuple[0]).toBe("audio");
     expect(shared.audio_aad.audio_version).toBe(1);
+  });
+});
+
+describe("shared cross-client crypto vectors (audit 2026-09-29, M3)", () => {
+  // The vectors pin byte-level agreement between web, mobile, and portal:
+  // the two ENCRYPTING clients must reproduce the pinned blobs exactly
+  // through their fixed-nonce seams, and every client must DECRYPT the
+  // pinned blobs back to the pinned plaintexts. Production pairing is
+  // web/mobile encrypt -> portal decrypt, so the decrypt side is the
+  // compatibility that actually ships.
+  const vec = (JSON.parse(
+    readFileSync(join(here, "..", "..", "shared", "audio_vectors.json"), "utf8"),
+  ) as { crypto_vectors: {
+    data_key_b64: string; nonce_b64: string; user_id: string; client_entry_id: string;
+    audio_envelope: { plaintext_b64: string; blob_b64: string };
+    entry_payload_v3_envelope: {
+      blob_b64: string; blob_b64_legacy_aad: string;
+      plaintext_json: { transcript_lang: string; english_text: string; text: string };
+    };
+  } }).crypto_vectors;
+  const vecKey = fromBase64(vec.data_key_b64);
+  const vecNonce = fromBase64(vec.nonce_b64);
+  const audio = vec.audio_envelope;
+  const entry = vec.entry_payload_v3_envelope;
+
+  it("encryptAudio's envelope reproduces the pinned audio blob byte-for-byte", async () => {
+    const blob = await encryptWithFixedNonce(
+      vecKey, fromBase64(audio.plaintext_b64), vecNonce,
+      buildAad("audio", vec.user_id, vec.client_entry_id, "1"),
+    );
+    expect(toBase64(blob)).toBe(audio.blob_b64);
+  });
+
+  it("the pinned audio blob decrypts to the pinned plaintext (cross-client)", async () => {
+    const recovered = await decryptAudio(vecKey, vec.user_id, vec.client_entry_id, audio.blob_b64);
+    expect(toBase64(recovered)).toBe(audio.plaintext_b64);
+  });
+
+  it("the pinned audio blob fails under every documented negative case", async () => {
+    await expect(decryptAudio(vecKey, "vector-user-0002", vec.client_entry_id, audio.blob_b64)).rejects.toThrow();
+    await expect(decryptAudio(vecKey, vec.user_id, "vector-entry-0002", audio.blob_b64)).rejects.toThrow();
+    // Context separation: the audio blob must not decrypt under the ENTRY AAD.
+    await expect(
+      (async () => {
+        const { decrypt } = await import("../src/crypto/core");
+        return decrypt(vecKey, fromBase64(audio.blob_b64), buildAad("entry", vec.user_id, vec.client_entry_id, "1"));
+      })(),
+    ).rejects.toThrow();
+  });
+
+  it("the pinned v3 entry blob decrypts with voice channels intact (web reads web)", async () => {
+    const payload = await decryptEntry(vecKey, vec.user_id, vec.client_entry_id, entry.blob_b64, 1);
+    expect(payload.v).toBe(3);
+    expect(payload.input_mode).toBe("voice");
+    expect(payload.transcript_lang).toBe(entry.plaintext_json.transcript_lang);
+    expect(payload.english_text).toBe(entry.plaintext_json.english_text);
+    // The legacy-AAD variant decrypts through the fallback ladder too.
+    const legacy = await decryptEntry(vecKey, vec.user_id, vec.client_entry_id, entry.blob_b64_legacy_aad);
+    expect(legacy.text).toBe(entry.plaintext_json.text);
+    // Version-bound AAD negative: a mismatched contentVersion must fail.
+    await expect(decryptEntry(vecKey, vec.user_id, vec.client_entry_id, entry.blob_b64, 2)).rejects.toThrow();
+  });
+
+  it("encryptEntry's v3 envelope reproduces the pinned entry blob byte-for-byte", async () => {
+    // Canonical JSON.stringify of the pinned payload, sealed with the
+    // fixed nonce under the version-bound entry AAD.
+    const plaintext = new TextEncoder().encode(JSON.stringify(entry.plaintext_json));
+    const blob = await encryptWithFixedNonce(
+      vecKey, plaintext, vecNonce,
+      buildAad("entry", vec.user_id, vec.client_entry_id, "1"),
+    );
+    expect(toBase64(blob)).toBe(entry.blob_b64);
   });
 });

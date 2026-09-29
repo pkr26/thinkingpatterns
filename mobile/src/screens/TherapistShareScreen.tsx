@@ -14,7 +14,7 @@
  * that already-read data cannot be unread.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { api, ApiError, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
@@ -27,6 +27,10 @@ import { t as tr, dateLocaleTag } from "../strings";
 type PendingAction =
   | { kind: "grant"; code: string; lookup: PairingLookup }
   | { kind: "revoke"; consentId: string }
+  // Share-voice toggle (VOICE_PLAN 2026-09-29): a scope change on a live
+  // grant — verifier-gated through the same typed-password card. The
+  // therapist's display name rides along for the card's title.
+  | { kind: "shareVoice"; consentId: string; enabled: boolean; name: string }
   | null;
 
 /**
@@ -205,8 +209,28 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
     ]);
   };
 
-  /** Both flows land here: the action only runs after the typed password
-   *  re-derives the vault's own auth key (the reauth.ts contract). */
+  /** Share-voice toggle (VOICE_PLAN 2026-09-29): explain, then gate the
+   *  verifier call behind the typed-password card like every other scope
+   *  change on a live grant (web's Share view calls the same endpoint). */
+  const askShareVoice = (consent: ListedConsent, enabled: boolean) => {
+    if (busy) return;
+    Alert.alert(
+      tr("share.voiceTitle"),
+      tr(enabled ? "share.voiceOnBody" : "share.voiceOffBody"),
+      [
+        { text: tr("common.cancel"), style: "cancel" },
+        {
+          text: tr("common.continue"),
+          onPress: () =>
+            setPending({ kind: "shareVoice", consentId: consent.id, enabled, name: consent.display_name }),
+        },
+      ],
+    );
+  };
+
+  /** Every verifier-gated flow lands here: the action only runs after the
+   *  typed password re-derives the vault's own auth key (the reauth.ts
+   *  contract). */
   const confirmWithPassword = async () => {
     if (!pending || busy || !password) return;
     setBusy(true);
@@ -239,6 +263,13 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         Alert.alert(
           tr("share.grantDoneTitle"),
           tr("share.grantDoneBody", { name: pending.lookup.display_name }),
+        );
+      } else if (pending.kind === "shareVoice") {
+        // Optimistic-failure honest (web's Share discipline): the row only
+        // flips on the server's own answer; a failure reloads the truth.
+        await api.setShareVoice(pending.consentId, pending.enabled, reauth.verifierB64);
+        setConsents((current) =>
+          current.map((row) => (row.id === pending.consentId ? { ...row, share_voice: pending.enabled } : row)),
         );
       } else {
         await api.revokeConsent(pending.consentId, reauth.verifierB64);
@@ -339,12 +370,33 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
             </Text>
           </Text>
           {consent.status === "active" && (
-            <GhostButton
-              label={tr("share.stopSharing")}
-              center={false}
-              disabled={busy}
-              onPress={() => askRevoke(consent)}
-            />
+            <>
+              {/* Share-voice (VOICE_PLAN 2026-09-29): additive scope on the
+                  live grant; absent on older backends reads as OFF, never
+                  guessed as on. */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 40 }}>
+                <Text style={themed.rowText}>
+                  {consent.share_voice === true ? tr("share.voiceOn") : tr("share.voiceOff")}
+                </Text>
+                <Switch
+                  value={consent.share_voice === true}
+                  disabled={busy}
+                  onValueChange={(enabled) => askShareVoice(consent, enabled)}
+                  trackColor={{ true: t.colors.primaryBright, false: t.colors.cardDeep }}
+                  accessibilityLabel={tr("share.voiceA11y", { name: consent.display_name })}
+                  accessibilityState={{ checked: consent.share_voice === true, disabled: busy }}
+                />
+              </View>
+              {consent.share_voice === true && (
+                <Text style={themed.footnote}>{tr("share.voiceNote")}</Text>
+              )}
+              <GhostButton
+                label={tr("share.stopSharing")}
+                center={false}
+                disabled={busy}
+                onPress={() => askRevoke(consent)}
+              />
+            </>
           )}
         </View>
       ))}
@@ -440,7 +492,9 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
             {pending.kind === "grant"
               ? tr("share.reauthGrantTitle", { name: pending.lookup.display_name })
-              : tr("share.reauthRevokeTitle")}
+              : pending.kind === "shareVoice"
+                ? tr("share.reauthShareVoiceTitle", { name: pending.name })
+                : tr("share.reauthRevokeTitle")}
           </Text>
           <TextInput
             style={themed.input}

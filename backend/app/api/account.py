@@ -18,6 +18,7 @@ import base64
 import binascii
 import hmac
 import json
+import logging
 import os
 from datetime import date as date_type, datetime, timezone
 
@@ -91,6 +92,8 @@ from ..security.totp import (
 )
 from .measures import _measure_out
 from ..services import llm, stt
+
+logger = logging.getLogger("mindpattern.account")
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -1639,6 +1642,41 @@ async def delete_account(
             )
             await session.execute(delete(Insight).where(Insight.user_id == user.id))
             await session.execute(delete(Entry).where(Entry.user_id == user.id))
+            # M2 remediation (audit 2026-09-29): erasure must remove the
+            # kept-voice OBJECTS too, not just the rows the FK cascade
+            # takes. The storage keys are collected BEFORE the cascade
+            # wipes the rows; an object-store failure is logged and left
+            # to the S3-lifecycle backstop (the account is gone either
+            # way — the objects are undecryptable ciphertext whose data
+            # key no longer exists, but retention hygiene still wants
+            # them gone).
+            try:
+                from ..models import AudioAttachment
+                from ..services.audio_store import AudioStoreError, get_audio_store_cached
+
+                store = get_audio_store_cached(request.app.state.settings)
+                if store is not None:
+                    audio_rows = (
+                        (
+                            await session.execute(
+                                select(AudioAttachment.storage_key).where(
+                                    AudioAttachment.user_id == user.id
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    for storage_key in audio_rows:
+                        try:
+                            await store.delete(storage_key)
+                        except AudioStoreError:
+                            logger.warning(
+                                "account erasure: audio object %s could not be removed",
+                                storage_key,
+                            )
+            except Exception:  # noqa: BLE001 — erasure stands regardless of store state
+                logger.warning("account erasure: audio object sweep failed", exc_info=True)
             await session.execute(delete(User).where(User.id == user.id))
             await session.commit()
 

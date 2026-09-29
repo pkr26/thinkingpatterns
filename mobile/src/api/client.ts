@@ -176,6 +176,9 @@ export interface ListedConsent {
   /** The therapist's public wrap key (rotation flow, 2026-09-20): a client
    *  that just rekeyed its data key re-wraps it to the same therapist. */
   therapist_wrap_pub_key?: string;
+  /** Voice-sharing grant (VOICE_PLAN 2026-09-29): default false; additive
+   *  for older backends — absence reads as OFF, never guessed as on. */
+  share_voice?: boolean;
 }
 
 /** The pairing-lookup answer: who the code belongs to, before any data

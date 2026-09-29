@@ -5,6 +5,12 @@ require Pod::Executable.execute_command('node', ['-p',
     {paths: [process.argv[1]]},
   )', __dir__]).strip
 
+# Expo autolinking (expo@57): defines use_expo_modules!, which pods every
+# expo-* native module (expo-audio included). node_modules/expo/react-native.config.js
+# enables the expo platform ONLY while this Podfile matches /use_expo_modules!/ —
+# the call below is the gate, keep it.
+require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts", "autolinking")
+
 platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
@@ -15,6 +21,9 @@ if linkage != nil
 end
 
 target 'MindPattern' do
+  # Expo modules must pod before use_native_modules! reads the RN config —
+  # expo/scripts/autolinking.rb consults the same config to find them.
+  use_expo_modules!
   config = use_native_modules!
 
   use_react_native!(

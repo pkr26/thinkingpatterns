@@ -1201,10 +1201,19 @@ export const es: Record<string, string> = {
   "entry.voiceAudioNotKept": "La entrada se guardó, pero no se pudo conservar la grabación.",
   "entry.voiceAudioQueuedNote":
     "Guardado sin conexión. La grabación necesita conexión y no se conservó — la transcripción está a salvo.",
+  "entry.voiceCheckFailed": "No se pudo contactar al servidor para confirmar el ajuste de voz — inténtelo de nuevo.",
+  "entry.voiceTooLarge": "La grabación es demasiado larga para subirse.",
+  "entry.voicePlaybackFailed": "No se pudo reproducir la grabación.",
   "history.playRecording": "Reproducir grabación",
+  "history.stopRecording": "Detener la reproducción",
   "history.deleteRecording": "Eliminar grabación",
   "history.recordingExpires": "Grabación disponible {days} día(s) más",
   "history.voiceBadge": "grabada",
+  "history.playbackFailed": "La reproducción falló — inténtelo de nuevo.",
+  "history.playbackExpired": "Esta grabación caducó y fue eliminada.",
+  "history.playbackTampered": "Esta grabación no superó la verificación de integridad y no se reprodujo.",
+  "history.playbackUnavailable": "Las grabaciones no están disponibles temporalmente en este servidor.",
+  "history.deleteRecordingFailed": "No se pudo eliminar la grabación — inténtelo de nuevo.",
   "settings.voiceTitle": "Diario por voz",
   "settings.voiceNote":
     "Grabe entradas en cualquier idioma. Su grabación se envía a {provider} para transcribirla y se elimina inmediatamente después; solo el texto cifrado se guarda. Las grabaciones que conserve se almacenan cifradas durante 30 días.",
@@ -1216,9 +1225,9 @@ export const es: Record<string, string> = {
   "settings.voiceStaleNote":
     "El proveedor de transcripción del servidor cambió — vuelva a activarlo para revisar y aceptar los nuevos términos.",
   "settings.voiceToggleFailed": "No se pudo cambiar el ajuste de voz — inténtelo de nuevo.",
-  "share.voiceTitle": "Permitir que su terapeuta escuche sus grabaciones",
   "share.voiceNote":
     "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo.",
   "share.voiceOn": "Mi terapeuta puede escuchar mis grabaciones",
   "share.voiceOff": "Mi terapeuta no puede escuchar mis grabaciones",
+  "share.voiceToggleFailed": "No se pudo cambiar lo que este terapeuta puede escuchar — inténtelo de nuevo.",
 };

@@ -1002,13 +1002,40 @@ export const es: Record<string, string> = {
   "entry.voiceConsentNeeded": "El diario por voz necesita su permiso — actívelo en Ajustes.",
   "entry.voiceUnavailable": "El diario por voz no está disponible en este servidor.",
   "entry.voiceMicDenied": "Se denegó el acceso al micrófono — permítalo en los ajustes de la app para grabar.",
-  "entry.voiceMicUnsupported": "La grabación no está disponible en este dispositivo.",
   "entry.voiceRecordFailed": "La grabación falló — inténtelo de nuevo.",
   "entry.voiceTranscribeFailed": "La transcripción falló — inténtelo de nuevo.",
   "entry.voiceAudioNotKept": "La entrada se guardó, pero no se pudo conservar la grabación.",
   "entry.voiceAudioQueuedNote": "Guardado sin conexión. La grabación necesita conexión y no se conservó — la transcripción está a salvo.",
+  // M3: una transcripción reemplaza lo escrito — confirmar antes de perderlo.
+  "entry.voiceReplaceTitle": "¿Grabar en lugar de escribir?",
+  "entry.voiceReplaceBody":
+    "La transcripción reemplazará lo que ha escrito hasta ahora. Sus palabras escritas se perderán.",
+  "entry.voiceReplaceConfirm": "Grabar en su lugar",
   "history.playRecording": "Reproducir grabación",
   "history.stopRecording": "Detener reproducción",
   "history.deleteRecording": "Eliminar grabación",
   "history.voiceBadge": "grabada",
+  // --- consentimiento y compartir por voz (VOICE_PLAN 2026-09-29, auditoría C5) --
+  // Sección de voz en Ajustes: mismo texto y nivel que la vista de Ajustes web.
+  "settings.voiceLabel": "Diario por voz",
+  "settings.voiceRow": "Permitir el diario por voz",
+  "settings.voiceA11y": "Permitir el diario por voz",
+  "settings.voiceNote":
+    "Grabe entradas en cualquier idioma. Su grabación se envía a {provider} para transcribirla y se elimina inmediatamente después; solo el texto cifrado se guarda. Las grabaciones que conserve se almacenan cifradas durante 30 días. Desactivado por defecto; se necesita su contraseña para cambiarlo.",
+  "settings.voiceStaleNote":
+    "El proveedor de transcripción del servidor cambió — vuelva a activarlo para revisar y aceptar los nuevos términos.",
+  "settings.voiceNotOffered": "Este servidor no ofrece el diario por voz.",
+  "settings.reauthVoiceTitle": "Escriba su contraseña para {action} el diario por voz",
+  // Pantalla de compartir: alcance adicional sobre una concesión activa.
+  "share.voiceTitle": "Permitir que su terapeuta escuche sus grabaciones",
+  "share.voiceOnBody":
+    "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo.",
+  "share.voiceOffBody":
+    "Su terapeuta ya no podrá reproducir las grabaciones de voz adjuntas a sus entradas. Seguirá pudiendo leer las entradas, y una grabación que ya haya descargado no se puede desoir.",
+  "share.voiceOn": "Mi terapeuta puede escuchar mis grabaciones",
+  "share.voiceOff": "Mi terapeuta no puede escuchar mis grabaciones",
+  "share.voiceA11y": "Permitir que {name} escuche mis grabaciones",
+  "share.voiceNote":
+    "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo.",
+  "share.reauthShareVoiceTitle": "Escriba su contraseña para cambiar lo que {name} puede escuchar",
 };

@@ -82,6 +82,21 @@ export function makeApiMock() {
     deleteAccount: vi.fn(async () => ({})),
     getLlmConsent: vi.fn(async () => ({ enabled: false })),
     setLlmConsent: vi.fn(async () => ({ enabled: true })),
+    // Voice journaling (VOICE_PLAN 2026-09-29): the endpoint surface the
+    // Entry/Settings/Share/History screens drive; defaults are neutral.
+    transcribeAudio: vi.fn(async () => ({
+      language: "en",
+      language_raw: "en-US",
+      original_text: "",
+      english_text: null,
+    })),
+    translateText: vi.fn(async () => ({ english_text: "" })),
+    uploadAudioAttachment: vi.fn(async () => ({})),
+    fetchAudioAttachment: vi.fn(async () => ({ blob: "", mime_type: "audio/m4a", duration_seconds: 60 })),
+    deleteAudioAttachment: vi.fn(async () => ({})),
+    getVoiceConsent: vi.fn(async () => ({ enabled: false })),
+    setVoiceConsent: vi.fn(async () => ({ enabled: true })),
+    setShareVoice: vi.fn(async () => ({ id: "a".repeat(32), share_voice: true })),
     // Therapist sharing (2026-09-16)
     pairingLookup: vi.fn(async () => ({
       therapist_id: "therapist-1",

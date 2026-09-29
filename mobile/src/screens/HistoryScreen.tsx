@@ -83,6 +83,13 @@ interface HistoryEntry {
   energy: number | null;
   sleep: number | null;
   tags: string[];
+  /** v3 voice channels (VOICE_PLAN 2026-09-29): preserved through an edit
+   *  (audit M4) — the kept audio attachment and the therapist-facing
+   *  English translation both depend on them; an edit fixes WORDS and must
+   *  not silently downgrade the payload to v1/v2. */
+  inputMode?: "voice";
+  transcriptLang?: string;
+  englishText: string | null;
 }
 
 type Mode =
@@ -130,6 +137,9 @@ async function decryptRowsWithVersions(
         energy: sanitizeEnergy(payload.energy),
         sleep: sanitizeSleep(payload.sleep),
         tags: sanitizeTags(payload.tags),
+        inputMode: payload.input_mode === "voice" ? "voice" : undefined,
+        transcriptLang: typeof payload.transcript_lang === "string" ? payload.transcript_lang : undefined,
+        englishText: typeof payload.english_text === "string" ? payload.english_text : null,
       });
       if (typeof row.content_version === "number") {
         versioned.push({ clientEntryId: row.client_entry_id, contentVersion: row.content_version });
@@ -291,7 +301,19 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         audioPlayerRef.current = player;
         player.play();
       } catch {
+        // Audit M1: a failure after the scratch file exists must clear the
+        // ref AND release it — a stale ref would make the NEXT attempt
+        // overwrite it and orphan the decrypted cache file forever.
+        try {
+          audioPlayerRef.current?.release?.();
+        } catch {
+          // already released
+        }
+        audioPlayerRef.current = null;
+        const orphaned = playingVoiceRef.current;
+        playingVoiceRef.current = null;
         setPlayingId(null);
+        if (orphaned) await orphaned.release().catch(() => {});
       }
     },
     [playingId, stopPlayback],
@@ -778,6 +800,19 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // content generation's version-bound AAD. Another device's concurrent
       // edit answers 409 version_conflict; one refetch-and-retry recovers
       // the race, a second conflict is surfaced honestly.
+      // M4 (audit 2026-09-29): a voice entry STAYS v3 through an edit —
+      // mirror EntryScreen's save path: re-translate the EDITED text (only
+      // when the payload carried an English translation); a failed or
+      // offline re-translation degrades to null, never downgrades the
+      // payload while the kept audio attachment survives.
+      let englishForSave: string | null = entry.englishText ?? null;
+      if (entry.inputMode === "voice" && entry.englishText != null && trimmed !== entry.text.trim()) {
+        try {
+          englishForSave = (await api.translateText(trimmed, entry.transcriptLang ?? null)).english_text;
+        } catch {
+          englishForSave = null;
+        }
+      }
       const encryptFor = (version: number): string =>
         encryptEntry(
           vault.get(),
@@ -788,6 +823,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           entry.sentiment,
           { energy: entry.energy, sleep: entry.sleep, tags: entry.tags },
           version,
+          entry.inputMode === "voice"
+            ? {
+                inputMode: "voice",
+                transcriptLang: entry.transcriptLang,
+                englishText: englishForSave,
+              }
+            : undefined,
         ).blobB64;
       let nextVersion = (entry.contentVersion ?? 0) + 1;
       // The first encryption stays OUTSIDE the network try: a local vault
@@ -810,7 +852,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         void recordMood(vault.get().dataKey, userId, entry.entryDate, entry.sentiment ?? localSentiment(text)).catch(
           () => {},
         );
-        const updated: HistoryEntry = { ...entry, text };
+        // The English channel mirrors what the replacement actually
+        // encrypted (M4), not the pre-edit translation.
+        const updated: HistoryEntry = {
+          ...entry,
+          text,
+          englishText: entry.inputMode === "voice" ? englishForSave : entry.englishText,
+        };
         setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
         setMode({ kind: "detail", entry: updated });
         showStatus(tr("history.updated"), "ok");

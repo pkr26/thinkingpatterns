@@ -138,7 +138,7 @@ async def delete_attachment_for_entry(
     NOT abort the entry deletion (the recording's retention clock is
     already running); it logs and leaves the orphan to the S3-lifecycle
     backstop / dev scratch dir."""
-    from ..services.audio_store import get_audio_store
+    from ..services.audio_store import get_audio_store_cached
 
     row = (
         (
@@ -154,7 +154,7 @@ async def delete_attachment_for_entry(
     )
     if row is None:
         return
-    store = get_audio_store(settings)
+    store = get_audio_store_cached(settings)
     if store is not None:
         try:
             await store.delete(row.storage_key)

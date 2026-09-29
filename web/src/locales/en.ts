@@ -1217,10 +1217,19 @@ export const en: Record<string, string> = {
   "entry.voiceAudioNotKept": "The entry was saved, but the recording could not be stored.",
   "entry.voiceAudioQueuedNote":
     "Saved offline. The recording itself needs a connection and was not kept — the transcript is safe.",
+  "entry.voiceCheckFailed": "Could not reach the server to confirm the voice setting — try again.",
+  "entry.voiceTooLarge": "The recording is too long to upload.",
+  "entry.voicePlaybackFailed": "The recording could not be played.",
   "history.playRecording": "Play recording",
+  "history.stopRecording": "Stop playback",
   "history.deleteRecording": "Delete recording",
   "history.recordingExpires": "Recording available for {days} more day(s)",
   "history.voiceBadge": "recorded",
+  "history.playbackFailed": "Playback failed — try again.",
+  "history.playbackExpired": "This recording expired and was deleted.",
+  "history.playbackTampered": "This recording failed its integrity check and was not played.",
+  "history.playbackUnavailable": "Recordings are temporarily unavailable on this server.",
+  "history.deleteRecordingFailed": "Could not delete the recording — try again.",
   "settings.voiceTitle": "Voice journaling",
   "settings.voiceNote":
     "Record entries in any language. Your recording is sent to {provider} to be transcribed and deleted immediately after; only the encrypted text is stored. Recordings you keep are stored encrypted for 30 days.",
@@ -1232,9 +1241,9 @@ export const en: Record<string, string> = {
   "settings.voiceStaleNote":
     "The server's transcription provider changed — re-enable to review and accept the new terms.",
   "settings.voiceToggleFailed": "Could not change the voice setting — try again.",
-  "share.voiceTitle": "Let your therapist hear your recordings",
   "share.voiceNote":
     "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active.",
   "share.voiceOn": "Therapist can hear my recordings",
   "share.voiceOff": "Therapist cannot hear my recordings",
+  "share.voiceToggleFailed": "Could not change what this therapist may hear — try again.",
 };

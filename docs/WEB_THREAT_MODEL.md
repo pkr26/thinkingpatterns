@@ -91,3 +91,23 @@ removed; what remains:
    processing session — the v1 trade the on-device port (WEB_PLAN /
    `mobile/src/brain/PORT.md`) is the path to removing. Not a web
    regression; listed so the web threat model is complete.
+
+## Voice journaling addendum (2026-09-29 remediation)
+
+- **Microphone capture** happens only after an explicit in-UI record
+  press with a live consent pre-check; the recorder tears down its
+  MediaStream on unmount/stop/discard (no hot mic after navigating
+  away) and detach-first handlers prevent a discarded take from being
+  resurrected by the asynchronous stop event.
+- **Recording plaintext** lives in memory and (for kept takes) is
+  AES-GCM encrypted in the browser before upload — the server stores
+  ciphertext only. Nothing voice-related is written to localStorage;
+  drafts never carry audio.
+- **Playback** decrypts via the audio AAD (`("audio", userId,
+  clientEntryId, "1")` — context-separated from entry ciphertext,
+  cross-client pinned by shared/audio_vectors.json) into a revoked
+  object URL; a wrong-user/wrong-entry/context graft fails closed.
+- **Residual:** a live tab holds decrypted audio in memory between
+  unlock and lock, same accepted window as entry plaintext. Re-run this
+  addendum's review if recordings gain any new persistence (e.g. an
+  offline kept-take queue).

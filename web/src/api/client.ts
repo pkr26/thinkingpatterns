@@ -22,7 +22,15 @@ const API_PREFIX = "/api/v1";
 
 /** Request deadline: without one, a hung backend parks the UI forever on
  *  a fetch that will never answer. */
-const REQUEST_TIMEOUT_MS = 15_000;
+export const REQUEST_TIMEOUT_MS = 15_000;
+
+/** Voice-call deadline (VOICE_PLAN 2026-09-29, audit H3): the server
+ *  budgets 120 s for one upstream transcription (stt_timeout_seconds) and
+ *  an attachment upload carries megabytes of base64 ciphertext — the 15 s
+ *  global cap silently killed every long take after the mic had already
+ *  done its work. 180 s = the server budget plus margin. Pinned >
+ *  REQUEST_TIMEOUT_MS by tests so the regression cannot return quietly. */
+export const VOICE_REQUEST_TIMEOUT_MS = 180_000;
 
 function isDevelopmentBuild(): boolean {
   return import.meta.env.DEV === true || import.meta.env.MODE === "test";
@@ -109,6 +117,7 @@ export const API_ERROR_CODES = [
   // Voice journaling (VOICE_PLAN 2026-09-29).
   "voice_consent_required",
   "stt_unconfigured",
+  "stt_unavailable",
   "stt_upstream",
   "audio_too_large",
   "audio_storage_unconfigured",
@@ -292,9 +301,10 @@ async function fetchWithTimeout(
   init: RequestInit,
   expectedOrigin: string,
   sessionSignal?: AbortSignal,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const abortForSessionEnd = (): void => controller.abort();
   if (sessionSignal?.aborted) controller.abort();
   else sessionSignal?.addEventListener("abort", abortForSessionEnd, { once: true });
@@ -325,7 +335,7 @@ async function fetchWithTimeout(
     if (err instanceof ApiError) throw err;
     if (err instanceof Error && err.name === "AbortError") {
       if (sessionSignal?.aborted) throw new ApiError(0, "session ended");
-      throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      throw new ApiError(0, `request timed out after ${timeoutMs / 1000}s`);
     }
     throw err;
   } finally {
@@ -362,6 +372,7 @@ async function requestWithResponse<T>(
   path: string,
   body?: unknown,
   extraHeaders: Record<string, string> = {},
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<ApiResponse<T>> {
   const activeSession = session;
   if (!activeSession) throw new ApiError(0, "not signed in");
@@ -377,6 +388,7 @@ async function requestWithResponse<T>(
       { method, headers, body: body === undefined ? undefined : JSON.stringify(body) },
       activeSession.baseUrl,
       activeSession.controller.signal,
+      timeoutMs,
     );
   } catch (err) {
     if (err instanceof ApiError) throw err;
@@ -422,8 +434,9 @@ async function request<T>(
   path: string,
   body?: unknown,
   extraHeaders: Record<string, string> = {},
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
-  return (await requestWithResponse<T>(method, path, body, extraHeaders)).data;
+  return (await requestWithResponse<T>(method, path, body, extraHeaders, timeoutMs)).data;
 }
 
 // --- unauthenticated auth flow (uses the same request core, no token) ------
@@ -790,11 +803,17 @@ export const api = {
    *  is configured) an English translation of the text. Audio bytes exist
    *  server-side only for the upstream call — never stored. */
   transcribeAudio: (audioB64: string, mime: string, durationSeconds: number) =>
-    request<AudioTranscriptionResponse>("POST", "/audio/transcriptions", {
-      audio_b64: audioB64,
-      mime,
-      duration_seconds: durationSeconds,
-    }),
+    request<AudioTranscriptionResponse>(
+      "POST",
+      "/audio/transcriptions",
+      {
+        audio_b64: audioB64,
+        mime,
+        duration_seconds: durationSeconds,
+      },
+      {},
+      VOICE_REQUEST_TIMEOUT_MS,
+    ),
 
   /** Re-translate an EDITED transcript before saving (payload v3 keeps
    *  english_text in sync with the saved text). */
@@ -817,6 +836,8 @@ export const api = {
         mime,
         duration_seconds: durationSeconds,
       },
+      {},
+      VOICE_REQUEST_TIMEOUT_MS,
     );
   },
 

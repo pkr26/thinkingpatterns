@@ -21,6 +21,11 @@ services:
       MINDPATTERN_AUDIO_ENABLED: "true"
       MINDPATTERN_AUDIO_BUCKET: mindpattern-audio-dev
       MINDPATTERN_AUDIO_BUCKET_REGION: us-east-1
+      # M4 remediation (audit 2026-09-29): without an endpoint override
+      # boto3 resolves the bucket against REAL AWS and the dev
+      # round-trip can never work. Path-style addressing is applied
+      # automatically when the endpoint is set.
+      MINDPATTERN_AUDIO_S3_ENDPOINT: http://audio-minio:9000
       MINDPATTERN_AWS_ACCESS_KEY_ID: minioadmin
       MINDPATTERN_AWS_SECRET_ACCESS_KEY: minioadmin
       MINDPATTERN_STT_URL: ${MINDPATTERN_STT_URL:-}

@@ -14,6 +14,48 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Security — voice-journaling audit remediation (2026-09-29, same day)
+
+Full remediation of the independent post-commit audit
+(`AUDIT_VOICE_SESSION_2026-09-29.md`):
+
+- **Consent scope (H4):** transcripts are no longer dispatched to the
+  LLM translation endpoint on voice consent alone — a configured LLM now
+  requires the account's CURRENT llm consent (null/degraded translation
+  otherwise). Privacy-policy copy updated to disclose the coupling.
+- **Dark-launch completeness (M1):** the therapist audio route and the
+  share-voice toggle now answer the flag-off flat 404 (checked in the
+  body so the authenticate → role → flag wall order holds: anonymous
+  stays 401).
+- **Erasure (M2):** account deletion best-effort-deletes every kept-
+  recording OBJECT before the row cascade; retention schedule wording
+  corrected.
+- **STT resilience (M8):** one bounded retry (Retry-After honored,
+  ceiling 5 s) on transient 429/5xx upstream refusals; the upstream
+  budget is operator-tunable via `MINDPATTERN_STT_TIMEOUT_SECONDS`
+  (1–600 s, default 120).
+- **Dev MinIO parity (M4):** `MINDPATTERN_AUDIO_S3_ENDPOINT` override
+  (path-style addressing) — the dev overlay's bucket finally resolves
+  against the compose MinIO instead of real AWS.
+- **Storage hygiene (M9 + LOW):** one cached store instance per
+  configuration (no per-request boto3 client); S3/local reads are
+  capped at `audio_max_body_bytes`.
+- **Cross-client crypto pins (M3):** `shared/audio_vectors.json` now
+  carries real deterministic vectors (fixed key + nonce) for the audio
+  envelope and the v3 entry payload; web/mobile assert byte-equality
+  through their fixed-nonce seams, portal pins the decrypt side. The
+  AAD tuple doc now states the version's wire form is the string "1".
+- **Redteam (H5):** `redteam/g_voice.py` is an EXECUTABLE campaign (9
+  verdicts, all BLOCKED) and is wired into `run_all.sh` — the P6 gate
+  is no longer satisfied by a docstring.
+- **Docs:** nginx example gained the audio location with an 8 m body
+  cap; VOICE_PLAN drift (12 MiB → 4 MiB, retry/timeout env) corrected;
+  DPIA skeleton and web threat model gained voice addenda.
+- **Web/mobile/portal fixes** (recorder lifecycle, playback gating,
+  voice request deadlines, v3-preserving edits, consent pre-checks,
+  mobile native wiring) landed in the same wave — see the audit
+  report's remediation map.
+
 ### Added — voice journaling (VOICE_PLAN.md, 2026-09-29)
 
 Patients can record up to 5 minutes in any language on web and mobile;

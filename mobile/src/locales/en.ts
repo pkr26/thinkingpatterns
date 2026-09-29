@@ -1007,13 +1007,40 @@ export const en: Record<string, string> = {
   "entry.voiceConsentNeeded": "Voice journaling needs your permission first — turn it on in Settings.",
   "entry.voiceUnavailable": "Voice journaling is not available on this server.",
   "entry.voiceMicDenied": "Microphone access was denied — allow it in your app settings to record.",
-  "entry.voiceMicUnsupported": "Recording is unavailable on this device.",
   "entry.voiceRecordFailed": "Recording failed — please try again.",
   "entry.voiceTranscribeFailed": "Transcription failed — please try again.",
   "entry.voiceAudioNotKept": "The entry was saved, but the recording could not be stored.",
   "entry.voiceAudioQueuedNote": "Saved offline. The recording itself needs a connection and was not kept — the transcript is safe.",
+  // M3: a transcript replaces typed words — confirm before they are lost.
+  "entry.voiceReplaceTitle": "Record instead of typing?",
+  "entry.voiceReplaceBody":
+    "The transcript will replace what you have written so far. Your typed words will be lost.",
+  "entry.voiceReplaceConfirm": "Record instead",
   "history.playRecording": "Play recording",
   "history.stopRecording": "Stop playback",
   "history.deleteRecording": "Delete recording",
   "history.voiceBadge": "recorded",
+  // --- voice consent & sharing (VOICE_PLAN 2026-09-29, audit C5) ----------
+  // Settings voice section: same copy/standing as web's Settings view.
+  "settings.voiceLabel": "Voice journaling",
+  "settings.voiceRow": "Allow voice journaling",
+  "settings.voiceA11y": "Allow voice journaling",
+  "settings.voiceNote":
+    "Record entries in any language. Your recording is sent to {provider} to be transcribed and deleted immediately after; only the encrypted text is stored. Recordings you keep are stored encrypted for 30 days. Off by default; needs your password to change.",
+  "settings.voiceStaleNote":
+    "The server's transcription provider changed — re-enable to review and accept the new terms.",
+  "settings.voiceNotOffered": "Voice journaling is not offered by this server.",
+  "settings.reauthVoiceTitle": "Enter your password to {action} voice journaling",
+  // Share screen: additive scope on a live therapist grant.
+  "share.voiceTitle": "Let your therapist hear your recordings",
+  "share.voiceOnBody":
+    "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active.",
+  "share.voiceOffBody":
+    "Your therapist will no longer be able to play the voice recordings attached to your entries. They can still read the entries themselves, and a recording they already downloaded cannot be unheard.",
+  "share.voiceOn": "Therapist can hear my recordings",
+  "share.voiceOff": "Therapist cannot hear my recordings",
+  "share.voiceA11y": "Let {name} hear my recordings",
+  "share.voiceNote":
+    "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active.",
+  "share.reauthShareVoiceTitle": "Enter your password to change what {name} can hear",
 };

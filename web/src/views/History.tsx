@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
 import { zeroize } from "../crypto/core";
-import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/patient";
+import { decryptEntry, encryptEntry, type EntryPayload, type VoiceFields } from "../crypto/patient";
 import { playAttachment, type PlayingAudio } from "../audio/player";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
@@ -89,6 +89,30 @@ function yieldToHost(): Promise<void> {
   });
 }
 
+/** Localized voice-playback failures (audit 2026-09-29): TamperError
+ *  details and ApiError messages are implementation English — the voice
+ *  path surfaces honest, localized copy instead. */
+function playbackErrorText(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "audio_expired") return t("history.playbackExpired");
+    if (err.code === "audio_storage_unconfigured" || err.code === "audio_storage_failed" || err.code === "service_unavailable") {
+      return t("history.playbackUnavailable");
+    }
+    if (err.status === 0) return t("history.loadOffline");
+  }
+  if (err instanceof Error && err.name === "TamperError") return t("history.playbackTampered");
+  return t("history.playbackFailed");
+}
+
+/** Whole days left on a kept recording's retention window (L-3, audit
+ *  2026-09-29): ceil, floored at 0 — "0 more day(s)" is the honest last
+ *  day, and a negative never renders. */
+function recordingDaysLeft(expiresAt: string): number {
+  const ms = Date.parse(expiresAt) - Date.now();
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, Math.ceil(ms / 86_400_000));
+}
+
 export function HistoryView(): React.JSX.Element {
   const [entries, setEntries] = useState<DecodedEntry[] | null>(null);
   const [rolledBack, setRolledBack] = useState<string[]>([]);
@@ -105,33 +129,47 @@ export function HistoryView(): React.JSX.Element {
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   // Kept-recording playback (VOICE_PLAN 2026-09-29): fetch → decrypt in
   // memory → revocable object URL; nothing cached at rest, one at a time.
+  // H2 (audit 2026-09-29): the <audio> element renders ONLY on the entry
+  // whose attachment id is playing — the old `playing &&` gate mounted one
+  // AUTOPLAYING element per audio entry, all sharing one URL.
   const [playing, setPlaying] = useState<PlayingAudio | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
 
   useEffect(() => () => playing?.release(), [playing]);
 
+  const stopPlayback = (): void => {
+    playing?.release();
+    setPlaying(null);
+    setPlayingId(null);
+  };
+
   const toggleRecording = async (entry: DecodedEntry): Promise<void> => {
     if (!entry.audio) return;
-    if (playing) {
-      playing.release();
-      setPlaying(null);
+    const attachmentId = entry.audio.attachment_id;
+    if (playingId === attachmentId) {
+      stopPlayback();
       return;
     }
     if (!vault.isUnlocked()) return;
-    setAudioBusyId(entry.audio.attachment_id);
+    // Pressing play on B while A plays stops A FIRST (H2): exactly one
+    // element may ever be mounted, so the switch is stop-then-start.
+    stopPlayback();
+    setAudioBusyId(attachmentId);
     try {
       const keys = vault.get();
       const owner = vault.ownerUserId();
       if (!owner) return;
       const current = await playAttachment({
-        fetchBlob: () => api.fetchAudioAttachment(entry.audio!.attachment_id),
+        fetchBlob: () => api.fetchAudioAttachment(attachmentId),
         dataKey: keys.dataKey,
         userId: owner,
         clientEntryId: entry.clientEntryId,
       });
       setPlaying(current);
+      setPlayingId(attachmentId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("history.loadFailed"));
+      setError(playbackErrorText(err));
     } finally {
       setAudioBusyId(null);
     }
@@ -143,15 +181,14 @@ export function HistoryView(): React.JSX.Element {
     setError("");
     try {
       await api.deleteAudioAttachment(entry.audio.attachment_id);
-      if (playing) {
-        playing.release();
-        setPlaying(null);
-      }
+      // Only the PLAYING entry's delete stops playback (H2): deleting one
+      // recording must not silence another that is mid-play.
+      if (playingId === entry.audio.attachment_id) stopPlayback();
       setEntries((list) =>
         (list ?? []).map((item) => (item.clientEntryId === entry.clientEntryId ? { ...item, audio: null } : item)),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("history.loadFailed"));
+      setError(err instanceof ApiError && err.status === 0 ? t("history.loadOffline") : t("history.deleteRecordingFailed"));
     } finally {
       setAudioBusyId(null);
     }
@@ -333,6 +370,31 @@ export function HistoryView(): React.JSX.Element {
     setBusy(true);
     try {
       const nextVersion = target.contentVersion + 1;
+      // M-7 (audit 2026-09-29): a voice entry must stay payload v3 through
+      // an edit — re-translate the edited text (only when the payload
+      // carried an english_text) and pass the voice channels to
+      // encryptEntry, exactly like the Entry tab's save. Without this the
+      // edit silently re-encrypted as v1/v2 while the audio attachment
+      // survived, splitting the entry from its own voice metadata. A
+      // failed/offline re-translation degrades to null (the edited text
+      // stands alone), never a silent stale translation.
+      let voiceFields: VoiceFields | undefined;
+      if (target.payload.input_mode === "voice") {
+        let englishForSave = target.payload.english_text ?? null;
+        if (target.payload.english_text != null && editText.trim() !== target.payload.text.trim()) {
+          try {
+            const translated = await api.translateText(editText, target.payload.transcript_lang ?? null);
+            englishForSave = translated.english_text;
+          } catch {
+            englishForSave = null;
+          }
+        }
+        voiceFields = {
+          inputMode: "voice",
+          transcriptLang: target.payload.transcript_lang,
+          englishText: englishForSave,
+        };
+      }
       const { blobB64 } = await encryptEntry(
         keys.dataKey,
         owner,
@@ -347,6 +409,7 @@ export function HistoryView(): React.JSX.Element {
           ...(target.payload.tod != null ? { tod: target.payload.tod } : {}),
         },
         nextVersion,
+        voiceFields,
       );
       await api.updateEntry(target.clientEntryId, blobB64, target.entryDate, nextVersion);
       setEditing(null);
@@ -567,7 +630,7 @@ export function HistoryView(): React.JSX.Element {
               <div className="stack" style={{ gap: "var(--space-2)" }}>
                 <div className="row row--wrap">
                   <Button
-                    label={playing ? t("history.playRecording") : t("history.playRecording")}
+                    label={playingId === entry.audio.attachment_id ? t("history.stopRecording") : t("history.playRecording")}
                     icon="play"
                     small
                     variant="ghost"
@@ -583,8 +646,23 @@ export function HistoryView(): React.JSX.Element {
                     onPress={() => void removeRecording(entry)}
                   />
                 </div>
-                {playing && (
-                  <audio controls autoPlay src={playing.url} style={{ width: "100%" }} onEnded={() => { playing.release(); setPlaying(null); }} />
+                <Note tone="muted">{t("history.recordingExpires", { days: recordingDaysLeft(entry.audio.expires_at) })}</Note>
+                {/* H2 (audit 2026-09-29): the element mounts ONLY on the
+                    entry whose attachment is playing — exactly one <audio>
+                    can ever be in the tree, so N audio entries can no
+                    longer autoplay over one URL. */}
+                {playingId === entry.audio.attachment_id && playing && (
+                  <audio
+                    controls
+                    autoPlay
+                    src={playing.url}
+                    style={{ width: "100%" }}
+                    onEnded={stopPlayback}
+                    onError={() => {
+                      stopPlayback();
+                      setError(t("history.playbackFailed"));
+                    }}
+                  />
                 )}
               </div>
             )}

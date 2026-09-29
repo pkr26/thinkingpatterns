@@ -31,6 +31,7 @@ run_campaign "$PY" c_api.py
 run_campaign "$PY" e_crisis.py
 run_campaign "$PY" e2_brain.py
 run_campaign "$PY" g_infra.py
+run_campaign "$PY" g_voice.py
 run_campaign "$PY" h_privacy.py
 
 echo "== fake-LLM egress campaign =="

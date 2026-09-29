@@ -50,6 +50,12 @@ STT_DISCLOSURE_VERSION = "v1"
 # outlive.
 STT_CONNECT_TIMEOUT_SECONDS = 5.0
 STT_TOTAL_TIMEOUT_SECONDS = 120.0
+# One retry (VOICE_PLAN V-x, remediated 2026-09-29): a cold provider queue
+# answering 429/503 once must not lose the patient's take. Honors
+# Retry-After up to this ceiling, else a fixed backoff.
+STT_RETRY_BACKOFF_SECONDS = 1.0
+STT_RETRY_AFTER_CEILING_SECONDS = 5.0
+STT_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 # A transcript of a five-minute journal is a few KiB. One MiB leaves room
 # for provider envelope changes while preventing a compromised endpoint
 # from making an API worker buffer an arbitrarily large response.
@@ -226,10 +232,12 @@ class SpeechToText:
 
     name = "stt"
 
-    def __init__(self, url: str, api_key: str, model: str = "whisper-1") -> None:
+    def __init__(self, url: str, api_key: str, model: str = "whisper-1",
+                 total_timeout_seconds: float = STT_TOTAL_TIMEOUT_SECONDS) -> None:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.total_timeout_seconds = float(total_timeout_seconds)
 
     async def _post_audio(self, files: dict, data: dict) -> dict:
         """Stream a capped transcription response under a true deadline.
@@ -244,12 +252,12 @@ class SpeechToText:
 
         timeout = httpx.Timeout(
             connect=STT_CONNECT_TIMEOUT_SECONDS,
-            read=STT_TOTAL_TIMEOUT_SECONDS,
-            write=STT_TOTAL_TIMEOUT_SECONDS,
-            pool=STT_TOTAL_TIMEOUT_SECONDS,
+            read=self.total_timeout_seconds,
+            write=self.total_timeout_seconds,
+            pool=self.total_timeout_seconds,
         )
         response_bytes = bytearray()
-        async with asyncio.timeout(STT_TOTAL_TIMEOUT_SECONDS):
+        async with asyncio.timeout(self.total_timeout_seconds):
             async with httpx.AsyncClient(
                 timeout=timeout,
                 follow_redirects=False,
@@ -277,6 +285,29 @@ class SpeechToText:
                         response_bytes.extend(chunk)
         return json.loads(bytes(response_bytes))
 
+    async def _post_audio_with_retry(self, files: dict, data: dict) -> dict:
+        """One bounded retry on a transient upstream refusal (429/5xx).
+
+        A second failure propagates — the route maps every upstream
+        failure to one 502 outcome for the client either way.
+        """
+        import httpx  # lazy, mirrors _post_audio
+
+        for attempt in (0, 1):
+            try:
+                return await self._post_audio(files, data)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if attempt == 0 and status in STT_RETRYABLE_STATUS:
+                    retry_after = exc.response.headers.get("retry-after")
+                    try:
+                        delay = min(float(retry_after), STT_RETRY_AFTER_CEILING_SECONDS)
+                    except (TypeError, ValueError):
+                        delay = 0.0
+                    await asyncio.sleep(max(delay, STT_RETRY_BACKOFF_SECONDS))
+                    continue
+                raise
+
     async def transcribe(self, audio: bytes, mime: str) -> TranscriptionResult:
         """Transcribe in the spoken language; the provider detects it.
 
@@ -290,7 +321,7 @@ class SpeechToText:
             raise ValueError(f"unsupported audio mime {normalized!r}")
         extension = MIME_TO_EXTENSION[normalized]
         response_format = "json" if self.model.startswith("gpt-4o") else "verbose_json"
-        body = await self._post_audio(
+        body = await self._post_audio_with_retry(
             files={"file": (f"recording{extension}", audio, normalized)},
             data={"model": self.model, "response_format": response_format},
         )
@@ -360,5 +391,29 @@ def get_stt(settings: Settings) -> SpeechToText | None:
     has no STT path, and per-user consent cannot turn one on.
     """
     if settings.stt_url.strip():
-        return SpeechToText(settings.stt_url, settings.stt_api_key, settings.stt_model)
+        return SpeechToText(
+            settings.stt_url,
+            settings.stt_api_key,
+            settings.stt_model,
+            total_timeout_seconds=settings.stt_timeout_seconds,
+        )
     return None
+
+
+def translation_dispatch_allowed(user, settings: Settings) -> bool:
+    """Whether THIS user's transcript may be handed to the LLM translation
+    path (audit 2026-09-29, H4).
+
+    Translation rides the chat-completions client, so it inherits the
+    LLM consent surface: an endpoint configured but not consented-to for
+    this account must not receive journal text through the voice path.
+    An UNCONFIGURED endpoint returns True — translate_to_english itself
+    degrades to None when llm_url is empty (nothing is dispatched), and
+    the route needs to distinguish "nothing configured" from
+    "configured but forbidden" only for the suppressed case.
+    """
+    if not settings.llm_url.strip():
+        return True
+    from .llm import consent_is_current
+
+    return consent_is_current(user, settings)

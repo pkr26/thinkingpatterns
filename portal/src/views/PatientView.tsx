@@ -72,13 +72,45 @@ interface EntryRow {
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
 
+/** M-8 (audit 2026-09-29): map a playback failure to an honest, VISIBLE
+ *  line — the old catch silently zeroized and released, leaving therapists
+ *  pressing a button that could never explain itself. */
+function describePlaybackFailure(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "consent_voice_share_required") return "the patient has not shared voice recordings with you";
+    if (err.code === "audio_expired") return "this recording expired and was deleted";
+    if (err.code === "audio_storage_unconfigured" || err.code === "audio_storage_failed") {
+      return "recording storage is unavailable on this server";
+    }
+    if (err.status === 404) return "this recording is no longer available";
+  }
+  if (err instanceof Error && err.name === "TamperError") {
+    return "this recording failed its integrity check and was not played";
+  }
+  return "playback failed — try again";
+}
+
+/** Whole days left on a kept recording's retention window (audit
+ *  2026-09-29): ceil, floored at 0 — "0 more day(s)" is the honest last
+ *  day, and a negative never renders. */
+function recordingDaysLeft(expiresAt: string): number {
+  const ms = Date.parse(expiresAt) - Date.now();
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, Math.ceil(ms / 86_400_000));
+}
+
 /** VOICE_PLAN (2026-09-29): kept-recording playback in the evidence list.
  *  Fetch (audited server-side) → decrypt with the consent's unwrapped key
- *  → revocable object URL; one at a time, never cached at rest. */
+ *  → revocable object URL; one at a time, never cached at rest.
+ *  M-8 (audit 2026-09-29): failures surface as a visible per-entry status
+ *  line (the button that renders only under the consent's share_voice
+ *  grant — see the call site). */
 function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | null>) {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  const [failedId, setFailedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const release = useCallback((): void => {
     if (urlRef.current !== null) {
@@ -91,6 +123,15 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
 
   useEffect(() => () => release(), [release]);
 
+  const fail = useCallback(
+    (attachmentId: string, message: string): void => {
+      release();
+      setFailedId(attachmentId);
+      setError(message);
+    },
+    [release],
+  );
+
   const toggle = useCallback(
     async (entry: EntryRow): Promise<void> => {
       if (!entry.audio || !entry.client_entry_id || !entry.patientUserId) return;
@@ -98,8 +139,13 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
         release();
         return;
       }
+      setFailedId(null);
+      setError(null);
       const dataKey = await unwrapKey();
-      if (!dataKey) return;
+      if (!dataKey) {
+        fail(entry.audio.attachment_id, "could not unlock this patient's data key — sign out and back in, then retry");
+        return;
+      }
       try {
         const patientId = entry.patientUserId;
         if (!patientId) return;
@@ -110,15 +156,15 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
         urlRef.current = objectUrl;
         setUrl(objectUrl);
         setPlayingId(entry.audio.attachment_id);
-      } catch {
+      } catch (err) {
         dataKey.fill(0);
-        release();
+        fail(entry.audio.attachment_id, describePlaybackFailure(err));
       }
     },
-    [playingId, release, unwrapKey],
+    [fail, playingId, release, unwrapKey],
   );
 
-  return { playingId, url, toggle, release };
+  return { playingId, url, failedId, error, toggle, release, fail };
 }
 // The server also caps each page at 2 MiB of raw ciphertext.  Keep the
 // client-side aggregate finite: an evidence card describes at most 60 dates,
@@ -1366,19 +1412,34 @@ export function PatientView(props: {
                 </p>
                 {entry.audio && entry.client_entry_id && (
                   <div className="entry-audio">
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() => void voicePlayback.toggle(entry)}
-                    >
-                      {voicePlayback.playingId === entry.audio.attachment_id ? "stop recording" : "play recording"}
-                    </button>
+                    {/* M-8 (audit 2026-09-29): the affordance renders ONLY
+                        under the consent's share_voice grant — the server
+                        refuses the fetch without it (403
+                        consent_voice_share_required), so a play button for
+                        a non-sharing patient could never work. Absent
+                        field (older backend) fails closed the same way. */}
+                    {patient.share_voice === true && (
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => void voicePlayback.toggle(entry)}
+                      >
+                        {voicePlayback.playingId === entry.audio.attachment_id ? "stop recording" : "play recording"}
+                      </button>
+                    )}
+                    <span className="hint">
+                      Recording available for {recordingDaysLeft(entry.audio.expires_at)} more day(s)
+                    </span>
+                    {voicePlayback.failedId === entry.audio.attachment_id && voicePlayback.error && (
+                      <NoteText tone="warn">{voicePlayback.error}</NoteText>
+                    )}
                     {voicePlayback.playingId === entry.audio.attachment_id && voicePlayback.url && (
                       <audio
                         controls
                         autoPlay
                         src={voicePlayback.url}
                         onEnded={() => voicePlayback.release()}
+                        onError={() => voicePlayback.fail(entry.audio!.attachment_id, "playback failed — try again")}
                       />
                     )}
                   </div>

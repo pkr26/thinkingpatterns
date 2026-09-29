@@ -90,6 +90,18 @@ def _int_env(name: str, default: int) -> int:
         raise ValueError(f"environment variable {name}={raw!r} is not an integer") from exc
 
 
+def _float_env(name: str, default: float) -> float:
+    """Float twin of _int_env: empty means default, garbage is a hard
+    error (a typo'd timeout must not silently boot with the default)."""
+    raw = os.getenv(name, "")
+    if not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"environment variable {name}={raw!r} is not a number") from exc
+
+
 def _secret_env(name: str, default: str = "") -> str:
     """Resolve a secret from the env, or from a mounted secret FILE.
 
@@ -470,6 +482,10 @@ class Settings:
     stt_url: str = ""
     stt_api_key: str = field(default="", repr=False)
     stt_model: str = "whisper-1"
+    # Wall-clock + per-I/O budget for one upstream transcription call.
+    # Operator-tunable as the plan promised (M8 remediation 2026-09-29):
+    # validated 1..600s at boot, default 120 (covers a cold queue).
+    stt_timeout_seconds: float = 120.0
     stt_provider_name: str = ""
     stt_data_retention: str = ""
     stt_policy_version: str = "v1"
@@ -496,6 +512,11 @@ class Settings:
     # degrades visibly" posture).
     audio_bucket: str = ""
     audio_bucket_region: str = ""
+    # Optional S3-compatible endpoint override (dev MinIO parity, M4
+    # remediation 2026-09-29): when set, boto3 targets it with
+    # path-style addressing instead of resolving the bucket against
+    # real AWS. Production deployments leave it empty.
+    audio_s3_endpoint: str = ""
     audio_aws_access_key_id: str = field(default="", repr=False)
     audio_aws_secret_access_key: str = field(default="", repr=False)
     audio_local_dir: str = ""
@@ -737,6 +758,8 @@ class Settings:
             raise RuntimeError(f"audio_max_body_bytes must be <= {MAX_BODY_BYTES}")
         if self.audio_sweep_interval_seconds > 86_400:
             raise RuntimeError("audio_sweep_interval_seconds must be <= 86400")
+        if not 1.0 <= self.stt_timeout_seconds <= 600.0:
+            raise RuntimeError("stt_timeout_seconds must be between 1 and 600 seconds")
         # An analysis budget above the storage quota is misconfiguration
         # (it must BOUND recompute memory below the quota), and 64 MiB of
         # ciphertext is already 8x the 2M-char text analysis budget.
@@ -1035,6 +1058,7 @@ class Settings:
             stt_url=os.getenv("MINDPATTERN_STT_URL", "").strip(),
             stt_api_key=_secret_env("MINDPATTERN_STT_API_KEY"),
             stt_model=os.getenv("MINDPATTERN_STT_MODEL", "whisper-1"),
+            stt_timeout_seconds=_float_env("MINDPATTERN_STT_TIMEOUT_SECONDS", 120.0),
             stt_provider_name=os.getenv("MINDPATTERN_STT_PROVIDER_NAME", ""),
             stt_data_retention=os.getenv("MINDPATTERN_STT_DATA_RETENTION", ""),
             stt_policy_version=os.getenv("MINDPATTERN_STT_POLICY_VERSION", "v1"),
@@ -1050,6 +1074,7 @@ class Settings:
             ),
             audio_bucket=os.getenv("MINDPATTERN_AUDIO_BUCKET", "").strip(),
             audio_bucket_region=os.getenv("MINDPATTERN_AUDIO_BUCKET_REGION", "").strip(),
+            audio_s3_endpoint=os.getenv("MINDPATTERN_AUDIO_S3_ENDPOINT", "").strip(),
             audio_aws_access_key_id=_secret_env("MINDPATTERN_AWS_ACCESS_KEY_ID"),
             audio_aws_secret_access_key=_secret_env("MINDPATTERN_AWS_SECRET_ACCESS_KEY"),
             audio_local_dir=os.getenv("MINDPATTERN_AUDIO_LOCAL_DIR", "").strip(),
