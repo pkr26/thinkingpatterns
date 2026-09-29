@@ -23,33 +23,35 @@
   --muted: #8a95a3;
 
   /* --------------------------------------------------------------- *
-   *  Button palette (redesign 2026-09-28, "warm dusk" — violet/gold).
-   *  Every pair below was verified against the WCAG 2.x relative-
-   *  luminance formula — L = 0.2126·R' + 0.7152·G' + 0.0722·B', where
-   *  each channel is c/12.92 when c ≤ 0.04045, else ((c+0.055)/1.055)^2.4,
+   *  Button palette (2026-09-29 user-directed wave — teal accent on
+   *  the unchanged dark base; the gold/orange/red tones stay). Every
+   *  pair below was verified against the WCAG 2.x relative-luminance
+   *  formula — L = 0.2126·R' + 0.7152·G' + 0.0722·B', where each
+   *  channel is c/12.92 when c ≤ 0.04045, else ((c+0.055)/1.055)^2.4,
    *  and the contrast ratio is (L1+0.05)/(L2+0.05) — with a #fff label:
    *
-   *    --primary        #6748cc  L = 0.11878  → 6.22:1
-   *    --primary-hover  #5a3fc0  L = 0.09534  → 7.22:1
+   *    --primary        #0c7268  L = 0.13112  → 5.80:1
+   *    --primary-hover  #085b53  L = 0.08158  → 7.98:1
    *    --danger         #c2483a  L = 0.16411  → 4.90:1
    *    --danger-hover   #a83a2e  L = 0.11550  → 6.35:1
    *
    *  Hovers stay DARKER than the rest state so contrast INCREASES on
    *  hover. --primary-strong is the accent safe as TEXT on dark
-   *  surfaces (#b3a4f5 on --bg = 8.54:1; plain --primary there is only
-   *  ~2.5:1, so ghost-button labels and other accent text use the
-   *  strong form). --primary-focus (2026-09-28 audit F10/focus) is the
-   *  focus-indicator violet: 4.58–5.00:1 on every dark surface, above
-   *  the 3:1 WCAG 1.4.11 non-text floor the old #2f6fe0-ring pairing
-   *  only met on some of them.
+   *  surfaces (#7ce4d2 = 12.42:1 on --bg, 11.39:1 on --surface and
+ *  9.90:1 on --primary-soft; plain --primary there reaches only
+ *  2.97–3.24:1, so ghost-button labels and other accent text use the
+ *  strong form). --primary-focus is the focus-indicator teal: 7.73–9.70:1
+   *  on EVERY dark surface — the page bg, both card surfaces AND the
+   *  banner softs (warn/danger/primary) — far above the 3:1 WCAG
+   *  1.4.11 non-text floor; it is also the checkbox accent-color.
    *  --------------------------------------------------------------- */
-  --primary: #6748cc;
-  --primary-hover: #5a3fc0;
-  --primary-strong: #b3a4f5;
-  --primary-focus: #8b6ef0;
-  --primary-soft: #241d3d;
-  --primary-border: #3d3260;
-  --primary-ring: rgba(139, 110, 240, 0.32);
+  --primary: #0c7268;
+  --primary-hover: #085b53;
+  --primary-strong: #7ce4d2;
+  --primary-focus: #3fcfb9;
+  --primary-soft: #122b28;
+  --primary-border: #2f5d55;
+  --primary-ring: rgba(63, 207, 185, 0.30);
 
   --danger: #c2483a;
   --danger-hover: #a83a2e;
@@ -57,22 +59,21 @@
   --danger-soft: #2c1a17;
   --danger-border: #5e332c;
 
-  /* 2026-09-28 palette wave: success moves from green to warm GOLD and
-   * warn from amber to ORANGE (the old gold) — with the base tones kept
-   * ≥3:1 and the *-strong text tones ≥4.5:1 on every dark surface
+  /* Success stays warm GOLD and warn ORANGE (2026-09-28 wave, kept).
+   * 2026-09-29: the unused base --ok/--warn tokens are GONE — nothing
+   * has rendered with them since the pw-meter fills moved to the
+   * *-strong variants; only the *-strong text tones exist now
    * (#e3c87d on --bg = 11.47:1; #e8a36b on --warn-soft = 7.47:1). The
-   * pw-meter ladder is red/orange/violet/gold — four distinct hues that
+   * pw-meter ladder is red/orange/teal/gold — four distinct hues that
    * never lean on color alone (bar count + label carry the level). */
-  --ok: #c9a54a;
   --ok-strong: #e3c87d;
 
-  --warn: #c97e3f;
   --warn-strong: #e8a36b;
   --warn-soft: #2c2013;
 
-  /* Info accent: the one lavender info text color (#c3b4f0 on
-   * --primary-soft = 8.43:1 and on --surface-deep = 9.58:1). */
-  --info-accent: #c3b4f0;
+  /* Info accent: the one pale-aqua info text color (#aeebe0 on
+   * --primary-soft = 11.24:1 and on --surface-deep = 13.59:1). */
+  --info-accent: #aeebe0;
 
   --border: #232b3b;
   --border-strong: #323c50;
@@ -105,9 +106,9 @@ body {
 h1, h2, h3, h4, p { margin: 0; }
 /* 2026-09-26 audit, P3: no border-radius here — snapping the shape of
  * whatever is focused (pills, cards, banners) distorts it; the outline
- * alone is the focus indicator. 2026-09-28: the ring uses
- * --primary-focus, which clears the 3:1 WCAG 1.4.11 non-text floor on
- * every dark surface (4.58–5.00:1 — see the token block). */
+ * alone is the focus indicator. The ring uses --primary-focus, which
+ * clears the 3:1 WCAG 1.4.11 non-text floor on every dark surface
+ * (7.73–9.70:1 — see the token block). */
 :focus-visible { outline: 2px solid var(--primary-focus); outline-offset: 2px; }
 
 /* ------------------------------------------------------------- layout */
@@ -194,11 +195,11 @@ h1, h2, h3, h4, p { margin: 0; }
  * visual language as the patient web app (segments fill 1–4; level
  * colors danger/warn/primary/ok). The label uses the *-strong tone
  * variants so it clears AA text contrast on the page background.
- * 2026-09-28 palette wave: the FILLS also use the *-strong variants —
- * red/orange/violet/gold at 6.45–8.66:1 against the empty track, so
- * every filled segment clears the 3:1 non-text floor (the old base
- * tones missed it for the red and blue rungs); the level itself is
- * still carried by bar COUNT and the label, never color alone. */
+ * The FILLS also use the *-strong variants — red/orange/teal/gold at
+ * 6.68–9.38:1 against the empty track, so every filled segment clears
+ * the 3:1 non-text floor (the old base tones missed it for the red and
+ * blue rungs); the level itself is still carried by bar COUNT and the
+ * label, never color alone. */
 .pw-meter { display: flex; gap: 5px; align-items: center; }
 .pw-meter__bar {
   height: 6px; flex: 1; border-radius: var(--radius-pill);
@@ -272,7 +273,12 @@ h1, h2, h3, h4, p { margin: 0; }
 @media (max-width: 767px) { .evidence-grid { grid-template-columns: 1fr; gap: 4px; } }
 
 /* ------------------------------------------- native widget alignment */
-input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; }
+/* 2026-09-29 audit follow-up: the checkbox fill uses --primary-focus,
+ * NOT --primary — the 2026-09-28 violet wave left accent-color on the
+ * base accent, which regressed to 2.77:1 on --surface (below the 3:1
+ * WCAG 1.4.11 non-text floor this palette enforces everywhere else).
+ * --primary-focus is 8.89:1 on --surface. */
+input[type="checkbox"] { accent-color: var(--primary-focus); width: 16px; height: 16px; }
 
 /* -------------------------------------------------------------- utility */
 .tpl-chip {
@@ -298,7 +304,7 @@ input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px
  * <details> disclosure — the honest text stays one click away without
  * dominating the screen. Native summary semantics need no JS and are
  * keyboard/screen-reader accessible by construction; the summary label
- * uses --info-accent (8.4:1 on --primary-soft, 9.9:1 on --surface-deep). */
+ * uses --info-accent (11.24:1 on --primary-soft, 13.59:1 on --surface-deep). */
 .disclose { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-deep); }
 .disclose > summary {
   cursor: pointer; padding: 8px 12px; font-size: var(--text-sm); font-weight: 700;

@@ -79,6 +79,13 @@ export async function press(root: ReactTestRenderer, label: string): Promise<voi
     // event, so the helper mirrors that (the browser behavior the old
     // always-type=button bug silently broke).
     if (button.props.type === "submit") {
+      // 2026-09-29: a DISABLED submit button suppresses both its click
+      // and the form's implicit submission in a real browser — the
+      // helper used to fire onSubmit anyway. Fail loudly: no legitimate
+      // test presses a disabled submit button (fill the form first).
+      if (button.props.disabled === true) {
+        throw new Error(`submit button ${JSON.stringify(label)} is disabled — a browser would do nothing`);
+      }
       let form = button.parent;
       while (form && form.type !== "form") form = form.parent;
       if (!form) throw new Error(`submit button ${JSON.stringify(label)} has no owning form`);

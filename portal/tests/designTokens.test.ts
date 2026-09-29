@@ -115,14 +115,26 @@ describe("design tokens: WCAG contrast floors (computed from the parsed CSS)", (
     { fg: cssToken("warn-strong"), bg: cssToken("warn-soft"), min: 4.5, label: "warn text on --warn-soft" },
     { fg: cssToken("danger-strong"), bg: cssToken("danger-soft"), min: 4.5, label: "danger banner text on --danger-soft" },
     { fg: cssToken("info-accent"), bg: cssToken("primary-soft"), min: 4.5, label: "info banner text on --primary-soft" },
-    // 2026-09-28 palette wave: the new gold success tone as text on every
-    // dark surface it renders on (notes, pw-meter label), plus the new
-    // focus violet against the darkest surfaces (WCAG 1.4.11 non-text
-    // floor for the focus indicator, applied with margin).
+    // 2026-09-28 palette wave: the gold success tone as text on every
+    // dark surface it renders on (notes, pw-meter label). 2026-09-29
+    // teal wave: the focus indicator is now held ≥3:1 against EVERY
+    // dark surface INCLUDING the banner softs (it was 4.2–5.0:1 and
+    // only measured on the three mains), and it doubles as the checkbox
+    // accent-color — so the floor is enforced where the checkbox renders
+    // too (WCAG 1.4.11 non-text, applied with margin).
     { fg: cssToken("ok-strong"), bg: cssToken("bg"), min: 4.5, label: "ok text on --bg" },
     { fg: cssToken("ok-strong"), bg: cssToken("surface"), min: 4.5, label: "ok text on card (--surface)" },
     { fg: cssToken("primary-focus"), bg: cssToken("surface-deep"), min: 3, label: "focus ring on --surface-deep (non-text)" },
     { fg: cssToken("primary-focus"), bg: cssToken("surface"), min: 3, label: "focus ring on --surface (non-text)" },
+    { fg: cssToken("primary-focus"), bg: cssToken("bg"), min: 3, label: "focus ring on --bg (non-text)" },
+    { fg: cssToken("primary-focus"), bg: cssToken("primary-soft"), min: 3, label: "focus ring on --primary-soft (non-text)" },
+    { fg: cssToken("primary-focus"), bg: cssToken("warn-soft"), min: 3, label: "focus ring on --warn-soft (non-text)" },
+    { fg: cssToken("primary-focus"), bg: cssToken("danger-soft"), min: 3, label: "focus ring on --danger-soft (non-text)" },
+    // 2026-09-29 audit follow-up: the checkbox fill must not ride the
+    // base accent (the violet wave regressed it to 2.77:1 on --surface)
+    // — accent-color is pinned to --primary-focus, whose floor on
+    // --surface is enforced just above.
+    { fg: cssToken("primary-strong"), bg: cssToken("surface"), min: 3, label: "sparkline/trend stroke on card (non-text)" },
     // Ghost-button label and the select chevron.
     { fg: cssToken("primary-strong"), bg: cssToken("bg"), min: 4.5, label: "ghost btn label on --bg" },
     { fg: cssToken("primary-strong"), bg: cssToken("primary-soft"), min: 4.5, label: "ghost btn hover label on --primary-soft" },
@@ -136,5 +148,18 @@ describe("design tokens: WCAG contrast floors (computed from the parsed CSS)", (
   it("hover states DARKEN (contrast increases on hover), mirroring the web app's pattern", () => {
     expect(contrast(WHITE, cssToken("primary-hover"))).toBeGreaterThan(contrast(WHITE, cssToken("primary")));
     expect(contrast(WHITE, cssToken("danger-hover"))).toBeGreaterThan(contrast(WHITE, cssToken("danger")));
+  });
+
+  it("2026-09-29 audit follow-up: the checkbox accent-color is --primary-focus, never the base accent", () => {
+    // The violet wave left `accent-color: var(--primary)` on checkboxes —
+    // 2.77:1 on --surface, below the 3:1 floor enforced above. The rule
+    // is pinned to the focus tone so the regression cannot return
+    // silently (the pair floors above carry the contrast math).
+    expect(css).toMatch(/input\[type="checkbox"\]\s*\{\s*accent-color:\s*var\(--primary-focus\)/);
+    expect(css).not.toMatch(/accent-color:\s*var\(--primary\)/);
+  });
+
+  it("2026-09-29: the dead base --ok/--warn tokens stay gone (only *-strong tones render)", () => {
+    expect(css).not.toMatch(/--(ok|warn):/);
   });
 });

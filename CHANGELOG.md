@@ -16,26 +16,66 @@ All notable changes to this project are documented here. Format follows
 
 ### Changed
 
+- **Therapist portal — teal accent wave (2026-09-29, user-directed)**: the
+  violet is gone. The accent family moves to a calm clinical TEAL on the
+  unchanged dark base, every ratio recomputed and enforced from the CSS by
+  `portal/tests/designTokens.test.ts`: `--primary` #0c7268 (white label
+  5.80:1, hover darker #085b53 at 7.98:1), `--primary-strong` #7ce4d2
+  (12.42:1 on --bg, 11.39:1 on cards — text, ghost labels, sparkline/trend
+  strokes), `--primary-focus` #3fcfb9 (7.73–9.70:1 on EVERY dark surface
+  including the banner softs — enforced per-surface now, not just the three
+  mains), `--info-accent` #aeebe0 (11.24:1/13.59:1), `--primary-soft`
+  #122b28. Gold/orange/red tones unchanged; the pw-meter ladder is now
+  red/orange/teal/gold (fills 6.68–9.38:1 vs the track). The unused base
+  `--ok`/`--warn` tokens are deleted (nothing rendered with them). The
+  checkbox accent-color moved to `--primary-focus` — the violet wave left it
+  on the base accent, a 2.77:1 regression on --surface below the 3:1
+  non-text floor (now 8.89:1, pinned in CI). Live-verified in a real
+  browser: computed styles, meter rungs, reveal toggle
+  (`e2e_gui/audit_screenshots/30–31`).
+
 - **Therapist portal — "warm dusk" palette (2026-09-28 UI/UX audit,
-  user-directed)**: the blue accent and green success tones are gone.
-  Research-backed replacement (light purples/lavenders cited as calming
-  across mental-health design sources; warm gold/orange for the success
-  and warn tones; WCAG 4.5:1 text / 3:1 non-text floors for dark clinical
-  themes): `--primary` #6748cc violet (white label 6.22:1, hover darker
-  7.22:1), `--primary-strong` #b3a4f5 lavender (8.54:1 as text), new
-  `--primary-focus` #8b6ef0 (focus ring ≥4.5:1 on every dark surface),
-  `--info-accent` #c3b4f0, `--ok` gold #c9a54a/#e3c87d (11.47:1),
-  `--warn` orange #c97e3f/#e8a36b; danger red unchanged. The pw-meter
-  ladder is red/orange/violet/gold with *-strong FILLS (6.4–8.7:1 vs the
-  track — the old red/blue rungs missed the 3:1 non-text floor), and the
-  sparkline/trend strokes use the lavender accentBright. Every ratio is
-  computed FROM the CSS by `portal/tests/designTokens.test.ts` (new
-  ok-strong and focus-ring floors), so a palette regression fails CI.
+  user-directed; superseded above within the same unreleased cycle)**: the
+  blue accent and green success tones were replaced by violet/gold —
+  `--primary` #6748cc violet (white label 6.22:1), `--primary-strong`
+  #b3a4f5 lavender, `--primary-focus` #8b6ef0, `--info-accent` #c3b4f0,
+  `--ok`/`--ok-strong` gold, `--warn`/`--warn-strong` orange. (Audit
+  follow-up 2026-09-29 correction: the focus ring's originally claimed
+  "≥4.5:1 on every dark surface" held only on the three main surfaces —
+  on the banner softs it was 4.22–4.41:1, still above the 3:1 floor. The
+  teal wave makes the per-surface claim exact and enforced.)
 
 ### Fixed
 
+- **Therapist portal — 2026-09-29 independent-audit remediation** (every
+  finding of the independent audit of commit efe1b5f, fixed and pinned):
+  - checkbox `accent-color` rode the base accent and fell to 2.77:1 on
+    --surface (below the 3:1 WCAG 1.4.11 floor) — now `--primary-focus`
+    (8.89:1), pinned by a CSS-rule assertion in designTokens.
+  - evidence phrase highlighting now also folds DIACRITICS (the engine
+    ASCII-folds labels "café"→"cafe" while entries keep accents), and the
+    match guard tests the normalized needle so a punctuation-only label
+    can never mark every entry.
+  - `patternAnchorLabel` covers every pid kind the engine emits, including
+    the legacy `recurring_phrase:` pid (which rendered "a pattern" while
+    its twins `phrase:`/`rumination:` said "a recurring phrase") and the
+    `coupling:`/`sensemaking:`/`diversity:` kinds.
+  - the 2026-09-28 F10 password reveal toggle and F5 Disclosure had zero
+    automated coverage (the toggle's handler was the uncovered line in
+    ui.tsx) — both pinned end to end in
+    `portal/tests/remediation_2026_09_29.test.tsx` (toggle flips type and
+    label, independent state across the two register rows, toggle is
+    type=button, details/summary structure).
+  - the test `press()` helper fired the form `onSubmit` even for DISABLED
+    submit buttons (a real browser does nothing) — it now rejects loudly.
+  - contrast comments across portal.css/PatientView state the exact
+    measured ranges (the old "4.58–5.00:1 on every dark surface" and
+    "8.2:1" sparkline numbers were overstated); the designTokens suite now
+    enforces the focus ring per surface (bg, surface, surface-deep, and
+    the three softs) and the sparkline stroke floor.
+
 - **Therapist portal — every finding of the 2026-09-28 UI/UX audit
-  (AUDIT_PORTAL_UIUX_2026-09-28.md, 87 → 97 after this wave), each
+  (AUDIT_PORTAL_UIUX_2026-09-28.md, 87 → 97 after that wave), each
   re-verified live in a real browser:**
   - **F1 (Enter-to-submit)**: the UI kit rendered every button
     `type="button"`, so the multi-field login/register forms had NO submit

@@ -15,10 +15,11 @@
 import { useState, type ReactNode } from "react";
 
 /** Mirrors the CSS custom properties in public/portal.css (guarded by
- *  tests/designTokens.test.ts). 2026-09-28 palette wave ("warm dusk"):
- *  blue→violet and green→gold/orange (see the token block in the CSS for
- *  the recomputed WCAG ratios). The tone keys still mirror the colors
- *  those tones actually RENDER text with (the *-strong variants). */
+ *  tests/designTokens.test.ts). 2026-09-29 user-directed wave: the violet
+ *  accent retired for TEAL (#0c7268 family); gold/orange/red tones stay
+ *  (see the token block in the CSS for the recomputed WCAG ratios). The
+ *  tone keys still mirror the colors those tones actually RENDER text
+ *  with (the *-strong variants). */
 export const theme = {
   bg: "#0d1219",
   card: "#151b28",
@@ -26,8 +27,8 @@ export const theme = {
   text: "#e8edf6",
   body: "#c6cfdd",
   muted: "#8a95a3",
-  accent: "#6748cc",
-  accentBright: "#b3a4f5",
+  accent: "#0c7268",
+  accentBright: "#7ce4d2",
   danger: "#f0a89e",
   ok: "#e3c87d",
   warn: "#e8a36b",

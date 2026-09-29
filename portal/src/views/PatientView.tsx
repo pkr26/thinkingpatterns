@@ -204,8 +204,9 @@ function MoodSparkline(props: { points: { date: string; sentiment: number }[] })
       aria-label={`Mood over the ${pts.length} mood-tagged evidence entries (average ${(avg).toFixed(2)})`}
     >
       <line x1={0} y1={h / 2} x2={w} y2={h / 2} stroke={theme.border} strokeWidth={1} />
-      {/* 2026-09-28 palette wave: accentBright (8.2:1 on the card surface) —
-          the raw accent line missed the 3:1 non-text floor on --surface-deep. */}
+      {/* 2026-09-29 teal wave: accentBright (#7ce4d2, 11.39:1 on the card
+          surface) — the base accent stroke missed the 3:1 non-text floor
+          on --surface. */}
       <path d={path} fill="none" stroke={theme.accentBright} strokeWidth={1.6} />
     </svg>
   );
@@ -244,7 +245,8 @@ function MeasureTrend(props: { instrument: string; readings: { measureDate: stri
   );
 }
 
-function evidenceRows(pattern: PatternPayload): [string, string][] {  const d = pattern.detail;
+function evidenceRows(pattern: PatternPayload): [string, string][] {
+  const d = pattern.detail;
   const rows: [string, string][] = [];
   if (d.pattern_state) rows.push(["state", String(d.pattern_state)]);
   if (typeof d.first_seen === "string") rows.push(["first seen", dayOf(d.first_seen)]);
@@ -267,13 +269,17 @@ function newNoteId(): string {
 /** 2026-09-28 audit F8: a note's surviving pattern anchor after a revoke,
  *  named in human terms instead of the raw pid ("phrase:a4adc4d084fc").
  *  The pid's coarse kind prefix is the same topic id the server already
- *  holds in plaintext; anything unrecognized degrades to "a pattern". */
+ *  holds in plaintext. Every kind the engine emits — and both LEGACY
+ *  phrase pids from before the rumination/recurring_phrase unification
+ *  (brain.py _phrase_pid) — maps to a name; anything unrecognized still
+ *  degrades to "a pattern". */
 export function patternAnchorLabel(pid: string | null): string {
   if (!pid) return "a pattern";
   const kind = pid.split(":")[0] ?? "";
   const names: Record<string, string> = {
     phrase: "a recurring phrase",
     rumination: "a recurring phrase",
+    recurring_phrase: "a recurring phrase",
     temporal: "a day-of-week pattern",
     topic: "a topic pattern",
     link: "a day-after pattern",
@@ -283,6 +289,9 @@ export function patternAnchorLabel(pid: string | null): string {
     instability: "a mood-swing pattern",
     avoidance: "an avoidance pattern",
     cadence: "a writing-rhythm pattern",
+    coupling: "an energy–mood coupling",
+    sensemaking: "a sense-making pattern",
+    diversity: "an activity-variety pattern",
   };
   return names[kind] ?? "a pattern";
 }
@@ -292,9 +301,17 @@ export function patternAnchorLabel(pid: string | null): string {
  *  ("can't sleep mind won't stop") while journal entries keep their
  *  punctuation ("can't sleep, mind won't stop.") — a raw includes()
  *  never matched the multi-word case (verified live: 0 <mark> elements).
- *  Fold both sides to letters+digits before comparing. */
+ *  Fold both sides to letters+digits before comparing. 2026-09-29: the
+ *  engine also ASCII-folds accented letters when it builds labels
+ *  (_fold_sentiment_text: "café" → "cafe") while entries keep their
+ *  accents — fold marks away on THIS side too (NFD + strip combining
+ *  marks) so accented recurring phrases still match. */
 function normalizeForMatch(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const folded = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return folded.replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function patternKey(pattern: PatternPayload, index: number): string {
@@ -1019,10 +1036,15 @@ export function PatientView(props: {
     }
   };
 
-  const labelMatches = (text: string, label: string): boolean =>
-    // 2026-09-28 audit F2: normalized on both sides (see normalizeForMatch)
-    // — the raw includes() never fired for punctuation-stripped labels.
-    label.length > 0 && normalizeForMatch(text).includes(normalizeForMatch(label));
+  // 2026-09-28 audit F2: normalized on both sides (see normalizeForMatch)
+  // — the raw includes() never fired for punctuation-stripped labels.
+  // 2026-09-29: the GUARD tests the normalized needle, not the raw label
+  // — a punctuation-only label would otherwise fold to "" and match
+  // every entry ("".includes in String.prototype is always true).
+  const labelMatches = (text: string, label: string): boolean => {
+    const needle = normalizeForMatch(label);
+    return needle.length > 0 && normalizeForMatch(text).includes(needle);
+  };
 
   return (
     <main className="portal-main">
