@@ -687,6 +687,17 @@ export function PatientView(props: {
     [notes, selectedPid],
   );
   const generalNotes = useMemo(() => notes.filter((n) => n.pattern_pid === null), [notes]);
+  /** F1 (GUI drill 2026-09-28): after a revoke the pattern selector is gone,
+   *  but pattern-anchored notes REMAIN — the API serves the therapist's own
+   *  chart at any consent status, and the list view promises "Your notes
+   *  about this patient stay". The notes-only chart therefore renders the
+   *  WHOLE chart chronologically; each anchored note carries its pid so the
+   *  anchor survives the pattern it once pointed at (the same coarse topic
+   *  id the server already holds in plaintext). */
+  const chartNotes = useMemo(
+    () => (selected ? patternNotes : notesOnly ? notes : generalNotes),
+    [selected, patternNotes, notesOnly, notes, generalNotes],
+  );
   /** Measures grouped per instrument, newest-active instrument first
    *  (audit L-76, 2026-09-20).  The decrypted instrument name is part of
    *  the display — "14" is only interpretable next to the questionnaire
@@ -1146,8 +1157,17 @@ export function PatientView(props: {
 
       {/* Audit fix 15 (2026-09-21): the note composer (search filter,
           templates, draft) is interactive chrome — excluded from print. */}
-      <Card className="no-print" title={selected ? "Notes on this pattern" : "General notes about this patient"}>
-        {(selected ? patternNotes : generalNotes).length > 2 && (
+      <Card
+        className="no-print"
+        title={
+          selected
+            ? "Notes on this pattern"
+            : notesOnly
+              ? "My notes about this patient"
+              : "General notes about this patient"
+        }
+      >
+        {chartNotes.length > 2 && (
           <input
             value={noteQuery}
             onChange={(e) => setNoteQuery(e.target.value)}
@@ -1157,8 +1177,8 @@ export function PatientView(props: {
           />
         )}
         {selected && patternNotes.length === 0 && <NoteText>No notes on this pattern yet.</NoteText>}
-        {!selected && generalNotes.length === 0 && <NoteText>No notes yet.</NoteText>}
-        {(selected ? patternNotes : generalNotes)
+        {!selected && chartNotes.length === 0 && <NoteText>No notes yet.</NoteText>}
+        {chartNotes
           .filter((n) => n.text.toLowerCase().includes(noteQuery.trim().toLowerCase()))
           .map((note) => (
           <div key={note.id} className="entry-row">
@@ -1182,6 +1202,13 @@ export function PatientView(props: {
             )}
             <div className="row">
               <span className="note-date">{dayOf(note.created_at)}</span>
+              {/* F1 (GUI drill 2026-09-28): in the notes-only chart an
+                  anchored note names its pid — the one anchor that survives
+                  the ended share (never note-derived text; the pid is the
+                  same coarse topic id the server already holds). */}
+              {notesOnly && note.pattern_pid && (
+                <span className="note-anchor">on pattern {note.pattern_pid}</span>
+              )}
               <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
               {/* Final-verification 2026-09-22: the note edit history used to
                   be reachable ONLY from a button inside this screen's hidden
@@ -1283,15 +1310,16 @@ ${tpl}` : tpl)}
               {tpl.split("\n")[0]!.split(":")[0]}
             </button>
           ))}
-          {(selected ? patternNotes : generalNotes).length > 0 && (
+          {chartNotes.length > 0 && (
             <button
               type="button"
               onClick={() => {
                 // H-13 (2026-09-20): notes arrive created_at ASCENDING, so
                 // the newest note — the one "copy forward" promises — is the
                 // LAST element.  `[0]` seeded the draft with the oldest
-                // session's text.
-                const source = (selected ? patternNotes : generalNotes).at(-1);
+                // session's text.  F1: in the notes-only chart the pool is
+                // the WHOLE chart (anchored notes included).
+                const source = chartNotes.at(-1);
                 if (source) setDraft(source.text);
               }}
               className="tpl-chip"
@@ -1375,16 +1403,23 @@ ${tpl}` : tpl)}
             </p>
           </div>
         ))}
-        {(selected ? patternNotes : generalNotes).length > 0 && (
+        {chartNotes.length > 0 && (
           <>
-            <h2 className="print-h2">Therapist notes ({selected ? "this pattern" : "general"})</h2>
-            {(selected ? patternNotes : generalNotes).map((note) => {
+            <h2 className="print-h2">
+              Therapist notes ({selected ? "this pattern" : notesOnly ? "all" : "general"})
+            </h2>
+            {chartNotes.map((note) => {
               const edited = note.updated_at > note.created_at;
               const priorTexts = history[note.id];
               return (
                 <div key={note.id} className="print-note">
                   <p className="print-note-p">
                     {dayOf(note.created_at)} — {note.text}
+                    {/* F1 (GUI drill 2026-09-28): the paper record carries the
+                        same surviving anchor the notes-only screen shows. */}
+                    {notesOnly && note.pattern_pid && (
+                      <span className="print-edited"> · on pattern {note.pattern_pid}</span>
+                    )}
                     {/* Final-verification 2026-09-22: this summary is paper —
                         it must never carry a clickable affordance (the old
                         "view history" button here was both unreachable on

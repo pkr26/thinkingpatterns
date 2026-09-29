@@ -16,6 +16,26 @@ All notable changes to this project are documented here. Format follows
 
 ### Fixed
 
+- **Therapist portal — pattern-anchored notes invisible after a revoke**
+  (GUI drill 2026-09-28 finding F1, pinned by two new `F1` cases in
+  `portal/tests/views.test.tsx`): the notes-only chart (stopped consent)
+  rendered only `pattern_pid === null` notes, so a note anchored to a
+  pattern the therapist could no longer select — still stored, still
+  served by the API at any consent status — had no UI surface, against
+  the list view's own "Your notes about this patient stay" copy. The
+  notes-only card now renders the WHOLE chart chronologically under "My
+  notes about this patient", each anchored note carrying its pid as the
+  one surviving anchor (`on pattern phrase:…`, the same coarse topic id
+  the server already holds in plaintext); "copy forward last note" and
+  the printed session summary (heading "Therapist notes (all)") cover
+  the same whole-chart set. Verified live against the drill state that
+  exposed it (see `e2e_gui/GUI_DRILL_REPORT_2026-09-28.md`, screenshot
+  11): the anchored note, its edit history, and its Edit/Delete
+  affordances render post-revoke. The active chart's general-notes card
+  is unchanged (anchored notes still surface only via their pattern).
+  Test-harness note: the M-22 case's `createNote` mock now answers with
+  a contract-shaped `NoteOut` (id/created_at) — the old bare `{}` mock
+  rendered an id-less row once the notes-only list stopped filtering.
 - **Sentiment-lexicon polysemy at the rumination gate** (found by the
   1-year simulation above, pinned by
   `backend/tests/test_lexicon_remediation_2026_09_28.py`): "down" was

@@ -1422,11 +1422,20 @@ describe("audit fixes 2026-09-20", () => {
     expect(textOf(root)).toContain("existing note text");
     expect(textOf(root)).not.toContain("Loading decrypted patterns");
     expect(textOf(root)).not.toContain("Mark reviewed");
-    // The therapist can still write against their own record.
+    // The therapist can still write against their own record.  F1 follow-up:
+    // the response must be contract-shaped (NoteOut carries id/created_at) —
+    // the notes-only chart now renders the appended note too, so a bare {}
+    // mock would render an id-less row.
+    mockedApi.createNote.mockResolvedValueOnce({
+      id: "n1", client_note_id: "c1", pattern_pid: null, blob: "b",
+      created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
+    });
     await typeTextarea(root, "Note about this patient…", "post-revoke follow-up");
     await press(root, "Save note");
     await flush();
     expect(mockedApi.createNote).toHaveBeenCalledWith("user-1", expect.objectContaining({ blob: "SEALEDNOTE==" }));
+    // F1: the saved note is part of the whole-chart list in notes-only mode.
+    expect(textOf(root)).toContain("post-revoke follow-up");
   });
 
   it("M-22: the stopped list row hands the revoked patient to the notes-only chart", async () => {
@@ -1441,6 +1450,58 @@ describe("audit fixes 2026-09-20", () => {
     expect(buttonByLabel(root, "Open patterns")).toBe(false);
     await press(root, "Open my notes");
     expect(onOpen).toHaveBeenCalledWith(stopped);
+  });
+
+  // F1 (GUI drill 2026-09-28): a revoke removes the pattern selector but
+  // NOT the therapist's pattern-anchored notes — the API serves the whole
+  // chart at any consent status, and the list row promises the notes stay.
+  // The notes-only chart must therefore render anchored notes too, each
+  // carrying its pid as the one surviving anchor.
+  it("F1: pattern-anchored notes render in the notes-only chart with their pid anchor", async () => {
+    const stopped = {
+      ...patient,
+      status: "revoked",
+      revoked_at: "2026-09-10T00:00:00Z",
+      ephemeral_pub: null,
+      wrapped_key: null,
+    };
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "ng", client_note_id: "cg", pattern_pid: null, blob: "b", created_at: "2026-09-15T00:00:00Z", updated_at: "2026-09-15T00:00:00Z" },
+        { id: "np", client_note_id: "cp", pattern_pid: "phrase:a4adc4d084fc", blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    const root = await render(<PatientView patient={stopped} session={session} onBack={vi.fn()} />);
+    await flush();
+    // Both notes render — the anchored one is no longer invisible — under
+    // the whole-chart title, and its pid rides along as the anchor.
+    expect(textOf(root)).toContain("My notes about this patient");
+    expect(textOf(root)).toContain("existing note text");
+    expect(textOf(root)).toContain("on pattern phrase:a4adc4d084fc");
+    // The anchored note keeps the full affordances of its own record:
+    // pressing Edit opens the editor (Save edit / Cancel mount).
+    await press(root, "Edit");
+    await flush();
+    expect(buttonByLabel(root, "Save edit")).toBe(true);
+    expect(buttonByLabel(root, "Cancel")).toBe(true);
+  });
+
+  it("F1: the active chart's general notes card still excludes anchored notes (unchanged behavior)", async () => {
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [
+        { id: "ng2", client_note_id: "cg2", pattern_pid: null, blob: "b", created_at: "2026-09-15T00:00:00Z", updated_at: "2026-09-15T00:00:00Z" },
+        { id: "np2", client_note_id: "cp2", pattern_pid: "temporal:work", blob: "b", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z" },
+      ],
+      nextOffset: null,
+    });
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush(4);
+    // Without a selected pattern the ACTIVE chart's general card shows only
+    // the general note; the anchored one surfaces via its pattern card's
+    // composer, not here. No pid anchor labels exist on the active chart.
+    expect(textOf(root)).toContain("General notes about this patient");
+    expect(textOf(root)).not.toContain("on pattern");
   });
 
   it("M-23: a single Delete press never reaches the API", async () => {

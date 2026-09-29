@@ -347,6 +347,9 @@ input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px
 /* The notes search field keeps the .input chrome at a smaller size. */
 .note-search { font-size: var(--text-sm); }
 .note-date { color: var(--muted); font-size: 11px; }
+/* F1 (GUI drill 2026-09-28): the surviving anchor on a pattern-anchored
+ * note in the notes-only chart — same quiet metadata tone as the date. */
+.note-anchor { color: var(--muted); font-size: 11px; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; }
 .delete-confirm { color: var(--primary-strong); font-size: 12px; }
 /* The loaded note-history lines (or their honest failure/empty text). */
 .history-line { margin: 6px 0 0 12px; font-size: 12px; color: var(--muted); }
