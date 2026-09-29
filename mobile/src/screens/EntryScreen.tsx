@@ -51,6 +51,8 @@ import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
+import { discardTakeFile, useVoiceRecorder } from "../audio/recorder";
+import { encryptAudio } from "../crypto/MindPatternCrypto";
 import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
 import { mirrorMoodCheckIn } from "../healthkit";
 import {
@@ -107,6 +109,96 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
    *  optional sections are opt-in screen real estate, never a toll every
    *  write pays. Expansion is view state only; picks survive collapse. */
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // --- voice session (VOICE_PLAN 2026-09-29) --------------------------------
+  interface VoiceSession {
+    language: string | null;
+    languageRaw: string;
+    transcribedOriginal: string;
+    englishText: string | null;
+    keepAudio: boolean;
+  }
+  const [voice, setVoice] = useState<VoiceSession | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const voiceRecorder = useVoiceRecorder({
+    unsupported: tr("entry.voiceMicUnsupported"),
+    permissionDenied: tr("entry.voiceMicDenied"),
+    failed: tr("entry.voiceRecordFailed"),
+  });
+
+  // A finished take auto-transcribes exactly once: the ref holds the last
+  // URI handled, so re-renders never re-fire (a re-record mints a new URI).
+  const lastTranscribedUriRef = useRef<string | null>(null);
+  useEffect(() => {
+    const take = voiceRecorder.take;
+    if (!take || lastTranscribedUriRef.current === take.uri) return;
+    lastTranscribedUriRef.current = take.uri;
+    let cancelled = false;
+    void (async () => {
+      setTranscribing(true);
+      try {
+        const result = await api.transcribeAudio(take.base64, take.mime, take.durationSeconds);
+        if (cancelled) return;
+        setVoice({
+          language: result.language,
+          languageRaw: result.language_raw,
+          transcribedOriginal: result.original_text,
+          englishText: result.english_text,
+          keepAudio: true,
+        });
+        setText(result.original_text);
+        textRef.current = result.original_text;
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.code === "voice_consent_required") {
+          setStatus(tr("entry.voiceConsentNeeded"));
+          setStatusTone("neutral");
+        } else if (err instanceof ApiError && err.code === "stt_unconfigured") {
+          setStatus(tr("entry.voiceUnavailable"));
+          setStatusTone("neutral");
+        } else {
+          setStatus(tr("entry.voiceTranscribeFailed"));
+          setStatusTone("neutral");
+        }
+        await discardTakeFile(take);
+      } finally {
+        if (!cancelled) setTranscribing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [voiceRecorder.take]);
+
+  /** Best-effort kept-recording upload after a SENT entry (offline-queued
+   *  entries drop their recording with a notice — O-5). The entry already
+   *  stands; this never fails the save. */
+  const uploadKeptAudio = async (
+    keys: { dataKey: Buffer },
+    userId: string,
+    clientEntryId: string,
+    session: VoiceSession,
+    takeBase64OfUri: string | null,
+  ): Promise<boolean> => {
+    if (!takeBase64OfUri || !session.keepAudio) return true;
+    const audioBuffer = Buffer.from(takeBase64OfUri, "base64");
+    const { blobB64 } = encryptAudio(keys, userId, clientEntryId, audioBuffer);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await api.uploadAudioAttachment(
+          clientEntryId,
+          blobB64,
+          "audio/m4a",
+          voiceRecorder.take?.durationSeconds ?? 60,
+        );
+        return true;
+      } catch (err) {
+        if (err instanceof ApiError && [403, 404, 413].includes(err.status)) return false;
+        if (attempt === 3) return false;
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+    return false;
+  };
   /** Current writing streak from the device-local mood log; hidden at 0
    *  (no guilt — a streak you don't have is not a debt). */
   const [streak, setStreak] = useState(0);
@@ -342,6 +434,19 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // M-2 (2026-09-20): a new entry is the FIRST content generation of
       // its id — encrypt under the version-bound v2 AAD and declare the
       // version to the server, which pins the AAD contract at the row.
+      // Voice sessions keep english_text in sync with the SAVED text (the
+      // v3 contract): an edited transcript re-translates first; a failed or
+      // offline re-translation degrades to null — the transcript stands
+      // alone. (Mirrors the web Entry flow exactly.)
+      let englishForSave: string | null = voice ? voice.englishText : null;
+      if (voice && trimmed !== voice.transcribedOriginal.trim()) {
+        try {
+          const translated = await api.translateText(trimmed, voice.language);
+          englishForSave = translated.english_text;
+        } catch {
+          englishForSave = null;
+        }
+      }
       const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, createdAt, selectedMood, {
         energy: selectedEnergy,
         sleep: sleepQuality,
@@ -349,7 +454,11 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // P3 (2026-09-21): the coarse local writing window — a bucket,
         // never a clock time (the entry contract stays date-granular).
         tod: timeOfDayBucket(new Date().getHours()),
-      }, 1);
+      }, 1, voice ? {
+        inputMode: "voice",
+        transcriptLang: voice.language ?? undefined,
+        englishText: englishForSave,
+      } : undefined);
       // The local mood log powers the baseline-phase trend view; it is
       // device-only metadata, encrypted under the data key, and never
       // leaves the phone. The explicit check-in wins when there is one;
@@ -448,6 +557,22 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       setSelectedEnergy(null);
       setSleepQuality(null);
       setSelectedTags([]);
+      // The kept recording rides only a SENT entry; the offline queue is
+      // the TEXT ciphertext's safety net, not an audio transport (O-5).
+      if (voice) {
+        const kept = !queuedOffline
+          ? await uploadKeptAudio(keys, userId, clientEntryId, voice, voiceRecorder.take?.base64 ?? null)
+          : false;
+        if (!kept && voice.keepAudio && voiceRecorder.take) {
+          showStatus(
+            queuedOffline ? tr("entry.voiceAudioQueuedNote") : tr("entry.voiceAudioNotKept"),
+            "neutral",
+          );
+        }
+        await discardTakeFile(voiceRecorder.take);
+        setVoice(null);
+        voiceRecorder.reset();
+      }
       lightHaptic(); // quiet success pulse (respects the haptics setting)
       setWroteToday(true); // this save just wrote today
       // The save-feedback fix: BOTH outcomes are a quiet inline line now.
@@ -627,6 +752,70 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
               max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()),
             })}
           </Text>
+        )}
+        {/* Voice capture (VOICE_PLAN 2026-09-29): record in any language,
+            review the transcript, keep the take for 30 days or not. */}
+        {voiceRecorder.state === "recording" ? (
+          <View style={{ gap: t.spacing.sm, paddingVertical: t.spacing.sm }}>
+            <Text style={{ color: t.colors.body, fontSize: t.type.bodyLarge.fontSize, fontWeight: "600" }}>
+              {tr("entry.micRecording")} {String(Math.floor(voiceRecorder.elapsedSeconds / 60)).padStart(2, "0")}:
+              {String(voiceRecorder.elapsedSeconds % 60).padStart(2, "0")}
+            </Text>
+            <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+              {tr("entry.micRecordingNote")}
+            </Text>
+            <GhostButton label={tr("entry.micStop")} onPress={() => void voiceRecorder.stop()} center={false} />
+          </View>
+        ) : (
+          !voice && !transcribing && (
+            <GhostButton
+              label={tr("entry.micRecord")}
+              onPress={() => {
+                touchActivity();
+                void voiceRecorder.start();
+              }}
+              center={false}
+            />
+          )
+        )}
+        {transcribing && (
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            {tr("entry.voiceTranscribing")}
+          </Text>
+        )}
+        {voiceRecorder.error && (
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            {voiceRecorder.error}
+          </Text>
+        )}
+        {voice && (
+          <View style={{ gap: t.spacing.sm, paddingVertical: t.spacing.sm }}>
+            <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, fontWeight: "600" }}>
+              {tr("entry.voiceReviewTitle")}
+            </Text>
+            <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+              {tr("entry.voiceLanguage", { lang: voice.language ?? voice.languageRaw })}
+            </Text>
+            {voice.englishText !== null && (
+              <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+                {tr("entry.voiceEnglishPreview")}: {voice.englishText}
+              </Text>
+            )}
+            <GhostButton
+              label={voice.keepAudio ? tr("entry.voiceKeepOn") : tr("entry.voiceKeepOff")}
+              onPress={() => setVoice((current) => (current ? { ...current, keepAudio: !current.keepAudio } : current))}
+              center={false}
+            />
+            <GhostButton
+              label={tr("entry.voiceDiscardTake")}
+              onPress={() => {
+                void discardTakeFile(voiceRecorder.take);
+                setVoice(null);
+                voiceRecorder.reset();
+              }}
+              center={false}
+            />
+          </View>
         )}
         {/* Keyboard-dismiss stays with the editor it dismisses. */}
         {text.length > 0 && (

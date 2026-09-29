@@ -175,7 +175,7 @@ describe("zeroization pins", () => {
   });
 
   it("decryptEntry wipes the buffer even when the payload version is unknown", async () => {
-    const v3 = new TextEncoder().encode(JSON.stringify({ v: 3, text: "future" }));
+    const v3 = new TextEncoder().encode(JSON.stringify({ v: 4, text: "future" }));
     const blob = await encryptWithFixedNonce(dataKey, v3, fromBase64(encryptVectors[0]!.nonce), buildAad("entry", "user-1", "entry-1"));
     const capture = captureDecryptBuffer();
     try {

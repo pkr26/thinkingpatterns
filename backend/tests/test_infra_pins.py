@@ -483,6 +483,11 @@ class TestSettingsReprHidesSecrets:
             "metrics_token",
             "audit_mac_secret_explicit",
             "llm_api_key",
+            # Voice journaling (2026-09-29): STT + object-storage
+            # credentials join the masked set.
+            "stt_api_key",
+            "audio_aws_access_key_id",
+            "audio_aws_secret_access_key",
             "therapist_enrollment_token",
         }
 

@@ -36,6 +36,8 @@ import {
 } from "react-native";
 import { api, ApiError, ENTRY_PAGE_BYTES } from "../api/client";
 import { decryptEntry, encryptEntry } from "../crypto/MindPatternCrypto";
+import { playVoiceAttachment, type PlayingVoice } from "../audio/playback";
+import { createAudioPlayer } from "expo-audio";
 import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { MoodCalendar } from "../components/MoodCalendar";
 import { filterEntries } from "../historyFind";
@@ -69,6 +71,8 @@ interface HistoryEntry {
   clientEntryId: string;
   entryDate: string;
   receivedAt: string;
+  /** Unexpired kept-recording metadata (VOICE_PLAN 2026-09-29). */
+  audio?: { attachment_id: string; expires_at: string } | null;
   /** Server-declared content generation (M-2, 2026-09-20); null on legacy
    *  servers that do not send content_version. */
   contentVersion: number | null;
@@ -100,6 +104,7 @@ async function decryptRowsWithVersions(
     entry_date?: unknown;
     received_at?: unknown;
     content_version?: number;
+    audio?: { attachment_id: string; expires_at: string } | null;
   }>,
 ): Promise<{ decrypted: HistoryEntry[]; failed: number }> {
   const decrypted: HistoryEntry[] = [];
@@ -118,6 +123,7 @@ async function decryptRowsWithVersions(
         clientEntryId: row.client_entry_id,
         entryDate: typeof row.entry_date === "string" ? row.entry_date : "",
         receivedAt: typeof row.received_at === "string" ? row.received_at : "",
+        audio: row.audio ?? null,
         contentVersion: typeof row.content_version === "number" ? row.content_version : null,
         text: typeof payload.text === "string" ? payload.text : "",
         sentiment: sanitizeSentiment(payload.sentiment),
@@ -235,6 +241,77 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
    *  phone. Both reset on reload. */
   const [query, setQuery] = useState("");
   const [dayFilter, setDayFilter] = useState<string | null>(null);
+  // Kept-recording playback (VOICE_PLAN 2026-09-29): fetch → decrypt in
+  // memory → cache file → expo-audio player; the file dies on stop/unmount.
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const playingVoiceRef = useRef<PlayingVoice | null>(null);
+  const audioPlayerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+
+  const stopPlayback = useCallback(async (): Promise<void> => {
+    try {
+      audioPlayerRef.current?.release?.();
+    } catch {
+      // already released
+    }
+    audioPlayerRef.current = null;
+    const playing = playingVoiceRef.current;
+    playingVoiceRef.current = null;
+    setPlayingId(null);
+    if (playing) await playing.release();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      void stopPlayback();
+    };
+  }, [stopPlayback]);
+
+  const playRecording = useCallback(
+    async (entry: HistoryEntry): Promise<void> => {
+      if (!entry.audio) return;
+      if (playingId) {
+        await stopPlayback();
+        return;
+      }
+      if (!vault.isUnlocked()) return;
+      try {
+        const keys = vault.get();
+        const userId = await api.getUserId();
+        if (!userId) return;
+        const attachmentId = entry.audio.attachment_id;
+        const playing = await playVoiceAttachment({
+          fetchBlob: () => api.fetchAudioAttachment(attachmentId),
+          keys,
+          userId,
+          clientEntryId: entry.clientEntryId,
+        });
+        playingVoiceRef.current = playing;
+        setPlayingId(attachmentId);
+        const player = createAudioPlayer({ uri: playing.uri });
+        audioPlayerRef.current = player;
+        player.play();
+      } catch {
+        setPlayingId(null);
+      }
+    },
+    [playingId, stopPlayback],
+  );
+
+  const removeRecording = useCallback(
+    async (entry: HistoryEntry): Promise<void> => {
+      if (!entry.audio) return;
+      if (playingId === entry.audio.attachment_id) await stopPlayback();
+      try {
+        await api.deleteAudioAttachment(entry.audio.attachment_id);
+        setEntries((current) =>
+          current.map((item) => (item.clientEntryId === entry.clientEntryId ? { ...item, audio: null } : item)),
+        );
+      } catch {
+        // honest no-op: the next reload reflects the server's truth
+      }
+    },
+    [playingId, stopPlayback],
+  );
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   // Stryker disable next-line StringLiteral: status starts null (InlineStatus renders nothing) and every setStatus(message) in showStatus is batched with setStatusTone, so the initial tone value is never rendered
@@ -1010,6 +1087,18 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           <Text style={{ color: t.colors.body, fontSize: t.type.body.fontSize, lineHeight: 21 }}>
             {snippetOf(entry.text)}
           </Text>
+          {entry.audio && (
+            <View style={{ flexDirection: "row", gap: t.spacing.md, marginTop: t.spacing.sm }}>
+              <GhostButton
+                label={playingId === entry.audio.attachment_id ? tr("history.stopRecording") : tr("history.playRecording")}
+                onPress={() => void playRecording(entry)}
+              />
+              <GhostButton
+                label={tr("history.deleteRecording")}
+                onPress={() => void removeRecording(entry)}
+              />
+            </View>
+          )}
         </TouchableOpacity>
       )}
       ListHeaderComponent={

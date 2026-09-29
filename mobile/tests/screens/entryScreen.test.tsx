@@ -322,6 +322,9 @@ describe("EntryScreen save pipeline", () => {
       // writing-window bucket alongside the optional channels.
       { energy: null, sleep: null, tags: [], tod: expect.any(String) },
       1,     // M-2 (2026-09-20): first content generation, v2 version-bound AAD
+      // VOICE_PLAN (2026-09-29): typed saves pass no voice channels — the
+      // ninth argument is explicitly undefined.
+      undefined,
     );
     expect(api.createEntry).toHaveBeenCalledTimes(1);
     expect(api.createEntry).toHaveBeenCalledWith(

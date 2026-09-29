@@ -299,10 +299,10 @@ describe("entry payload layer", () => {
   });
 
   it("throws loudly on an unknown payload version", async () => {
-    const v3 = new TextEncoder().encode(JSON.stringify({ v: 3, text: "future" }));
+    const v3 = new TextEncoder().encode(JSON.stringify({ v: 4, text: "future" }));
     const blob = await encryptWithFixedNonce(dataKey, v3, fromBase64(encryptVectors[0]!.nonce), buildAad("entry", userId, entryId));
     await expect(decryptEntry(dataKey, userId, entryId, toBase64(blob))).rejects.toThrow(
-      "unsupported entry payload version: 3",
+      "unsupported entry payload version: 4",
     );
   });
 

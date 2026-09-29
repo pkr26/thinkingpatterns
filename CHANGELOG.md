@@ -14,6 +14,29 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added — voice journaling (VOICE_PLAN.md, 2026-09-29)
+
+Patients can record up to 5 minutes in any language on web and mobile;
+audio is transcribed server-side by an OpenAI-compatible Whisper
+endpoint (consent-gated, never persisted), the transcript is shown in
+its original language plus an English translation, and patterns run on
+the routed text (en/es native, other languages via the English
+translation). Kept recordings are AES-GCM-encrypted on-device, stored
+in S3 (local-dir dev fallback), expire after 30 days, and are playable
+by the patient anywhere; a therapist can hear the actual voice only
+behind the patient's per-consent `share_voice` grant (default off,
+every fetch audit-logged). Backend: `services/stt.py`,
+`services/audio_store.py`, `api/audio.py`, voice-consent + share-voice
+endpoints, attachment sweeper, entry-payload v3 (voice channels).
+Web/mobile: recorder + review flow, playback, Settings/Share toggles,
+en/es strings. Portal: English-first display with show-original
+toggle + consented playback. Pinned by `shared/audio_vectors.json`;
+dark-launched behind `MINDPATTERN_AUDIO_ENABLED` (default off in
+production, on in development). Mobile note: `expo`/`expo-audio`/
+`expo-file-system` are installed as dependencies — run `pod install`
+before the next iOS build.
+
+
 ### Security
 
 - **Deep penetration test 2026-09-29 + full remediation** (report:

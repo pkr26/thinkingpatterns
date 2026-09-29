@@ -52,6 +52,7 @@ from ..schemas import (
     ConsentRewrapRequest,
     PairingLookupRequest,
     PairingLookupResponse,
+    ShareVoiceRequest,
 )
 from ..security import sharing
 from ..security.crypto import MIN_BLOB_SIZE
@@ -203,6 +204,9 @@ def _consent_out(consent: Consent, therapist: User) -> ConsentOut:
         # the list so a client that just rekeyed its data key can re-wrap it
         # to the same therapist without a new pairing round-trip.
         therapist_wrap_pub_key=therapist.wrap_pub_key,
+        # VOICE_PLAN (2026-09-29): the voice-sharing grant rides the same
+        # listing so the Share screen renders the toggle's true state.
+        share_voice=bool(consent.share_voice),
     )
 
 
@@ -664,3 +668,81 @@ async def revoke_consent(
                 raise ApiError(
                     status_code=404, detail="consent not found", code="not_found"
                 ) from None
+
+
+@router.put(
+    "/{consent_id}/share-voice",
+    response_model=ConsentOut,
+    dependencies=[
+        Depends(make_rate_limiter("consents-share-voice", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def set_share_voice(
+    consent_id: str,
+    body: ShareVoiceRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Toggle the per-therapist voice-sharing grant (VOICE_PLAN 2026-09-29).
+
+    Same re-auth + fence discipline as revoke: X-Account-Verifier required,
+    patient fence held across the read-modify-write, epoch re-checked
+    inside. Only an ACTIVE consent can widen or narrow a live share — a
+    revoked one has no key material to hear anything with (409). Both
+    transitions are audit-logged as the patient's own actions.
+    """
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=422,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="validation_error",
+        )
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
+    async with sharing_locks.hold(sharing_patient_lock_key(user.id)):
+        fresh_user = await session.get(User, user.id, populate_existing=True)
+        if fresh_user is None or not fresh_user.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh_user.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        consent = (
+            (
+                await session.execute(
+                    select(Consent)
+                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if consent is None:
+            raise ApiError(status_code=404, detail="consent not found", code="not_found")
+        if consent.status != "active":
+            raise ApiError(
+                status_code=409,
+                detail="consent is revoked; re-grant it before changing scopes",
+                code="conflict",
+            )
+        if bool(consent.share_voice) != body.enabled:
+            consent.share_voice = body.enabled
+            await append_access_log(
+                session,
+                actor_id=fresh_user.id,
+                actor_role=fresh_user.role,
+                user_id=fresh_user.id,
+                action="share_voice_on" if body.enabled else "share_voice_off",
+            )
+            try:
+                await session.commit()
+            except StaleDataError:
+                raise ApiError(
+                    status_code=404, detail="consent not found", code="not_found"
+                ) from None
+        therapist = await session.get(User, consent.therapist_id)
+        if therapist is None:
+            raise ApiError(status_code=404, detail="consent not found", code="not_found")
+        return _consent_out(consent, therapist)

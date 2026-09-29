@@ -203,6 +203,30 @@ def test_settings_defaults_are_pinned(clean_env):
         # out-of-DB journal path (default off).
         "audit_mac_secret_explicit": "",
         "audit_journal_path": "",
+        # Voice journaling (2026-09-29, VOICE_PLAN.md): dev-defaults-on
+        # like therapist sharing; every other default documented in the
+        # plan's config table.
+        "audio_enabled": True,
+        "stt_url": "",
+        "stt_api_key": "",
+        "stt_model": "whisper-1",
+        "stt_provider_name": "",
+        "stt_data_retention": "",
+        "stt_policy_version": "v1",
+        "audio_max_body_bytes": 4 * 1024 * 1024,
+        "audio_max_duration_seconds": 310,
+        "audio_transcribe_rate_limit": 10,
+        "audio_transcribe_rate_window": 3_600,
+        "audio_upload_rate_limit": 30,
+        "audio_upload_rate_window": 3_600,
+        "audio_retention_days": 30,
+        "audio_max_user_bytes": 64 * 1024 * 1024,
+        "audio_bucket": "",
+        "audio_bucket_region": "",
+        "audio_aws_access_key_id": "",
+        "audio_aws_secret_access_key": "",
+        "audio_local_dir": "",
+        "audio_sweep_interval_seconds": 900,
     }
 
 
@@ -2151,6 +2175,13 @@ async def test_meta_payload_is_exact(client):
         # measures + caseload summaries.
         "sharing_disclosure_version": "v2",
         "sharing_access_log_retention_days": 730,
+        # Voice journaling (2026-09-29): dev default has the flag on but no
+        # STT endpoint, so availability is honest-false and every stt_*
+        # declaration is None (the L-31 discipline).
+        "audio_available": False,
+        "stt_provider_name": None,
+        "stt_data_retention": None,
+        "stt_policy_fingerprint": None,
     }
 
 

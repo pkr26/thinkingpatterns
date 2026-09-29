@@ -106,6 +106,17 @@ export const API_ERROR_CODES = [
   "totp_code_invalid",
   "key_scheme_conflict",
   "envelope_key_mismatch",
+  // Voice journaling (VOICE_PLAN 2026-09-29).
+  "voice_consent_required",
+  "stt_unconfigured",
+  "stt_upstream",
+  "audio_too_large",
+  "audio_storage_unconfigured",
+  "audio_storage_failed",
+  "audio_quota_exceeded",
+  "audio_expired",
+  "unknown_entry",
+  "consent_voice_share_required",
   "internal_error",
   "service_unavailable",
   "bad_request",
@@ -473,6 +484,43 @@ export interface ServerMeta {
   llm_data_retention: string | null;
   sharing_available: boolean;
   sharing_disclosure_version: string;
+  /** Voice journaling (2026-09-29): additive; older backends omit them and
+   *  the mic button treats absence as unavailable. */
+  audio_available?: boolean;
+  stt_provider_name?: string | null;
+  stt_data_retention?: string | null;
+  stt_policy_fingerprint?: string | null;
+}
+
+/** POST /audio/transcriptions (VOICE_PLAN 2026-09-29). */
+export interface AudioTranscriptionResponse {
+  original_text: string;
+  language: string | null;
+  language_raw: string;
+  english_text: string | null;
+  provider_name: string;
+  policy_version: string;
+}
+
+/** GET /audio/attachments/{id} — encrypted blob + playback metadata. */
+export interface AudioAttachmentOut {
+  id: string;
+  client_entry_id: string;
+  blob: string;
+  mime_type: string;
+  duration_seconds: number;
+  size_bytes: number;
+  created_at: string;
+  expires_at: string;
+}
+
+/** GET/PUT /account/voice-consent. */
+export interface VoiceConsentState {
+  enabled: boolean;
+  active_for_current_policy: boolean;
+  voice_consent_at: string | null;
+  voice_consent_disclosure: string | null;
+  voice_consent_policy: string | null;
 }
 
 /** GET /auth/key-envelope (bearer): the v2 unlock material. v1 accounts
@@ -523,6 +571,9 @@ export interface ListedEntry {
   entry_date: string;
   received_at: string;
   content_version?: number;
+  /** Unexpired kept-recording metadata (VOICE_PLAN 2026-09-29); absent on
+   *  entries without audio and on pre-voice backends. */
+  audio?: { attachment_id: string; expires_at: string } | null;
 }
 
 /** The backend caps one page at 500 rows and 2 MiB of raw ciphertext. */
@@ -705,6 +756,9 @@ export interface ListedConsent {
    *  after a rekey needs the CURRENT key, which may have rotated since the
    *  grant. */
   therapist_wrap_pub_key?: string;
+  /** Voice-sharing grant (VOICE_PLAN 2026-09-29): default false; additive
+   *  for older backends. */
+  share_voice?: boolean;
 }
 
 export interface PairingLookup {
@@ -728,6 +782,69 @@ export const api = {
    *  login and vault adoption for key_scheme "v2" accounts only — v1
    *  accounts keep deriving locally and never pay this round trip. */
   keyEnvelope: () => request<KeyEnvelopeResponse>("GET", "/auth/key-envelope"),
+
+  // --- voice journaling (VOICE_PLAN 2026-09-29) ---------------------------
+
+  /** Transcribe one recording: the server returns the transcript in the
+   *  spoken language, the detected language, and (when the translation LLM
+   *  is configured) an English translation of the text. Audio bytes exist
+   *  server-side only for the upstream call — never stored. */
+  transcribeAudio: (audioB64: string, mime: string, durationSeconds: number) =>
+    request<AudioTranscriptionResponse>("POST", "/audio/transcriptions", {
+      audio_b64: audioB64,
+      mime,
+      duration_seconds: durationSeconds,
+    }),
+
+  /** Re-translate an EDITED transcript before saving (payload v3 keeps
+   *  english_text in sync with the saved text). */
+  translateText: (text: string, sourceLang: string | null) =>
+    request<{ english_text: string | null }>("POST", "/audio/translations", {
+      text,
+      ...(sourceLang ? { source_lang: sourceLang } : {}),
+    }),
+
+  /** Store (or replace) the kept recording for one entry. The blob is the
+   *  client-side AES-GCM envelope — opaque to the server. */
+  uploadAudioAttachment: (clientEntryId: string, blobB64: string, mime: string, durationSeconds: number) => {
+    if (!ENTRY_ID_PATTERN.test(clientEntryId)) throw new ApiError(0, "invalid entry id — refusing the request");
+    return request<{ attachment_id: string; expires_at: string; size_bytes: number }>(
+      "POST",
+      "/audio/attachments",
+      {
+        client_entry_id: clientEntryId,
+        blob: blobB64,
+        mime,
+        duration_seconds: durationSeconds,
+      },
+    );
+  },
+
+  /** Fetch one kept recording (owner-only) for playback. */
+  fetchAudioAttachment: (attachmentId: string) =>
+    request<AudioAttachmentOut>("GET", `/audio/attachments/${encodeURIComponent(attachmentId)}`),
+
+  /** Delete the recording; the entry survives. */
+  deleteAudioAttachment: (attachmentId: string) =>
+    request<null>("DELETE", `/audio/attachments/${encodeURIComponent(attachmentId)}`),
+
+  /** Voice-consent record (the client toggle reads/writes this). */
+  getVoiceConsent: () =>
+    request<VoiceConsentState>("GET", "/account/voice-consent"),
+  setVoiceConsent: (enabled: boolean, verifierB64: string) =>
+    request<VoiceConsentState>("PUT", "/account/voice-consent", {
+      enabled,
+      verifier: verifierB64,
+    }),
+
+  /** Share-voice grant toggle on one therapist consent. */
+  setShareVoice: (consentId: string, enabled: boolean, verifierB64: string) =>
+    request<{ id: string; share_voice: boolean }>(
+      "PUT",
+      `/consents/${encodeURIComponent(consentId)}/share-voice`,
+      { enabled },
+      { "X-Account-Verifier": verifierB64 },
+    ),
   /** Logout deliberately does NOT ride the session's AbortController: the
    *  button fires this and then synchronously calls clearSession(), whose
    *  abort would cancel the very revocation the request exists to perform.

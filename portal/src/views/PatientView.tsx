@@ -34,6 +34,7 @@ import {
   decryptInsights,
   decryptNote,
   encryptNote,
+  decryptAudio,
   decryptMeasure,
   type MeasureReading,
   unwrapPatientDataKey,
@@ -59,9 +60,66 @@ interface EntryRow {
   entry_date: string;
   text: string;
   sentiment: number | null | undefined;
+  /** Voice channels (payload v3, VOICE_PLAN 2026-09-29). */
+  english_text?: string | null;
+  transcript_lang?: string;
+  client_entry_id?: string;
+  audio?: { attachment_id: string; expires_at: string } | null;
+  /** The owning patient (VOICE_PLAN playback): the row is reused per
+   *  patient view, and the audio fetch + AAD both key on it. */
+  patientUserId?: string;
 }
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+
+/** VOICE_PLAN (2026-09-29): kept-recording playback in the evidence list.
+ *  Fetch (audited server-side) → decrypt with the consent's unwrapped key
+ *  → revocable object URL; one at a time, never cached at rest. */
+function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | null>) {
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const urlRef = useRef<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+
+  const release = useCallback((): void => {
+    if (urlRef.current !== null) {
+      URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    }
+    setUrl(null);
+    setPlayingId(null);
+  }, []);
+
+  useEffect(() => () => release(), [release]);
+
+  const toggle = useCallback(
+    async (entry: EntryRow): Promise<void> => {
+      if (!entry.audio || !entry.client_entry_id || !entry.patientUserId) return;
+      if (playingId) {
+        release();
+        return;
+      }
+      const dataKey = await unwrapKey();
+      if (!dataKey) return;
+      try {
+        const patientId = entry.patientUserId;
+        if (!patientId) return;
+        const fetched = await api.patientAudio(patientId, entry.audio.attachment_id);
+        const plain = await decryptAudio(dataKey, patientId, entry.client_entry_id!, fetched.blob);
+        dataKey.fill(0);
+        const objectUrl = URL.createObjectURL(new Blob([plain], { type: fetched.mime_type }));
+        urlRef.current = objectUrl;
+        setUrl(objectUrl);
+        setPlayingId(entry.audio.attachment_id);
+      } catch {
+        dataKey.fill(0);
+        release();
+      }
+    },
+    [playingId, release, unwrapKey],
+  );
+
+  return { playingId, url, toggle, release };
+}
 // The server also caps each page at 2 MiB of raw ciphertext.  Keep the
 // client-side aggregate finite: an evidence card describes at most 60 dates,
 // and 200 entries is already substantially more than a clinician can review
@@ -433,6 +491,32 @@ export function PatientView(props: {
   const [loadFailed, setLoadFailed] = useState(false);
   const [selected, setSelected] = useState<PatternPayload | null>(null);
   const [entries, setEntries] = useState<EntryRow[] | null>(null);
+  // VOICE_PLAN (2026-09-29): per-row "show original" toggles for
+  // translated entries, and on-demand audio playback. The data key is
+  // unwrapped PER PLAYBACK (the same discipline as the measures/insights
+  // loads) and zeroized immediately after the decrypt.
+  const [originals, setOriginals] = useState<Map<string, boolean>>(new Map());
+  const voicePlayback = useVoicePlayback(
+    useCallback(async (): Promise<Uint8Array<ArrayBuffer> | null> => {
+      // wrapped_key/ephemeral_pub are NULL on a revoked consent — there is
+      // nothing to unwrap with (the notes-only guard is the same wall).
+      if (notesOnly || patient.wrapped_key == null || patient.ephemeral_pub == null) {
+        return null;
+      }
+      try {
+        return await unwrapPatientDataKey(
+          session.privateKey,
+          patient.ephemeral_pub,
+          patient.wrapped_key,
+          patient.user_id,
+          session.userId,
+          session.publicKeyB64,
+        );
+      } catch {
+        return null;
+      }
+    }, [notesOnly, patient.ephemeral_pub, patient.wrapped_key, patient.user_id, session.privateKey, session.publicKeyB64, session.userId]),
+  );
   const [notes, setNotes] = useState<OpenNote[]>([]);
   // F-6 (2026-09-21): the note draft is CONTEXT-SCOPED — one buffer for the
   // general composer, one for the pattern-anchored composer. A single
@@ -907,6 +991,11 @@ export function PatientView(props: {
               entry_date: row.entry_date,
               text: payload.text,
               sentiment: payload.sentiment,
+              english_text: payload.english_text,
+              transcript_lang: payload.transcript_lang,
+              client_entry_id: row.client_entry_id,
+              audio: row.audio ?? null,
+              patientUserId: patient.user_id,
             });
           } catch {
             decrypted.push({
@@ -1245,19 +1334,58 @@ export function PatientView(props: {
           {entries !== null && entries.length === 0 && (
             <NoteText>No decryptable entries behind this pattern (the evidence window may predate the shared corpus).</NoteText>
           )}
-          {entries?.map((entry) => (
-            <div key={entry.id} className="entry-row">
-              <strong className="entry-date">{entry.entry_date}</strong>
-              {typeof entry.sentiment === "number" && (
-                <span className="entry-mood">mood {entry.sentiment.toFixed(2)}</span>
-              )}
-              {/* Audit fix 16 (2026-09-21): journal entries are multi-line;
-                  pre-wrap keeps the patient's line breaks (.entry-text). */}
-              <p className="entry-text">
-                {selected && labelMatches(entry.text, selected.label) ? <mark>{entry.text}</mark> : entry.text}
-              </p>
-            </div>
-          ))}
+          {entries?.map((entry) => {
+            // VOICE_PLAN: English-first display for translated entries —
+            // the portal's working language — with the patient's original
+            // words one toggle away (label matching stays on the ORIGINAL
+            // text, where the pattern evidence lives).
+            const translated = typeof entry.english_text === "string" && entry.english_text.length > 0;
+            const showOriginal = originals.get(entry.id) === true;
+            const displayText = translated && !showOriginal ? entry.english_text! : entry.text;
+            return (
+              <div key={entry.id} className="entry-row">
+                <strong className="entry-date">{entry.entry_date}</strong>
+                {typeof entry.sentiment === "number" && (
+                  <span className="entry-mood">mood {entry.sentiment.toFixed(2)}</span>
+                )}
+                {translated && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() =>
+                      setOriginals((current) => new Map(current).set(entry.id, !showOriginal))
+                    }
+                  >
+                    {showOriginal ? "show translation" : `show original${entry.transcript_lang ? ` (${entry.transcript_lang})` : ""}`}
+                  </button>
+                )}
+                {/* Audit fix 16 (2026-09-21): journal entries are multi-line;
+                    pre-wrap keeps the patient's line breaks (.entry-text). */}
+                <p className="entry-text">
+                  {selected && labelMatches(entry.text, selected.label) ? <mark>{displayText}</mark> : displayText}
+                </p>
+                {entry.audio && entry.client_entry_id && (
+                  <div className="entry-audio">
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void voicePlayback.toggle(entry)}
+                    >
+                      {voicePlayback.playingId === entry.audio.attachment_id ? "stop recording" : "play recording"}
+                    </button>
+                    {voicePlayback.playingId === entry.audio.attachment_id && voicePlayback.url && (
+                      <audio
+                        controls
+                        autoPlay
+                        src={voicePlayback.url}
+                        onEnded={() => voicePlayback.release()}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </Card>
       )}
 

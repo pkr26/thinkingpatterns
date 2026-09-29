@@ -8,6 +8,9 @@
 aiosqlite==0.22.1
 alembic==1.19.2
 asyncpg==0.30.0
+# VOICE_PLAN (2026-09-29): S3 audio-attachment storage (thread-offloaded,
+# lazy import — deployments using only the local-dir store never load it).
+boto3==1.40.11
 cryptography==50.0.1
 fastapi==0.141.1
 greenlet==3.3.2

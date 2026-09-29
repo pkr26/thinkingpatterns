@@ -114,6 +114,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   // while the reminder is on.
   const [cadence, setCadence] = useState<MeasureCadencePref | null>(null);
   const [llm, setLlm] = useState<{ available: boolean; enabled: boolean } | null>(null);
+  // Voice journaling consent (VOICE_PLAN 2026-09-29): same shape/standing
+  // as the LLM toggle it sits beside — available comes from meta, enabled
+  // + policy currency from the account's consent record.
+  const [voice, setVoice] = useState<
+    { available: boolean; enabled: boolean; stale: boolean; provider: string } | null
+  >(null);
   // 2026-09-26 audit LOW b: a FAILED meta/consent read is an explicit
   // unknown state with a retry — the LLM section used to vanish silently.
   const [llmLoad, setLlmLoad] = useState<"loading" | "known" | "unknown">("loading");
@@ -163,9 +169,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     if (!vault.isUnlocked()) return;
     setSchemeUnknown(false);
     setLlmLoad("loading");
-    const [meta, consentState, envelope] = await Promise.all([
+    const [meta, consentState, voiceConsent, envelope] = await Promise.all([
       api.meta().catch(() => null),
       api.getLlmConsent().catch(() => null),
+      api.getVoiceConsent().catch(() => null),
       api.keyEnvelope().then(
         (body) => body,
         (err: unknown) => (err instanceof ApiError && err.status === 404
@@ -214,6 +221,16 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     } else {
       setLlm(null);
       setLlmLoad("unknown");
+    }
+    if (meta) {
+      setVoice({
+        available: meta.audio_available === true,
+        enabled: voiceConsent?.enabled === true,
+        stale: voiceConsent != null && voiceConsent.enabled && !voiceConsent.active_for_current_policy,
+        provider: meta.stt_provider_name ?? "",
+      });
+    } else {
+      setVoice(null);
     }
     const owner = vault.ownerUserId();
     if (owner) {
@@ -286,6 +303,25 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     } catch (err) {
       if (err instanceof ApiError && err.code === "llm_unavailable") setError(t("settings.llmNotOfferedToggle"));
       else setError(err instanceof Error ? err.message : t("settings.llmToggleFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Voice consent toggle (VOICE_PLAN 2026-09-29): the same re-authenticated
+   *  opt-in as the LLM toggle — a stolen bearer must not be able to send
+   *  recordings to a third party. */
+  const toggleVoice = async (enabled: boolean): Promise<void> => {
+    if (!vault.isUnlocked()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.setVoiceConsent(enabled, toBase64(vault.get().authKey));
+      setVoice((current) => (current ? { ...current, enabled, stale: false } : null));
+      setStatus(enabled ? t("settings.voiceEnabledNote") : t("settings.voiceDisabledNote"));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "stt_unavailable") setError(t("settings.voiceNotOffered"));
+      else setError(err instanceof Error ? err.message : t("settings.voiceToggleFailed"));
     } finally {
       setBusy(false);
     }
@@ -964,6 +1000,22 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
           </>
         )}
         {llmLoad === "loading" && <Note role="status">{t("common.loading")}</Note>}
+        <hr className="divider" />
+        {/* Voice journaling (VOICE_PLAN 2026-09-29): the mic's consent,
+            same card — this is where recordings leave the device. */}
+        {voice && voice.available && (
+          <>
+            <Toggle
+              checked={voice.enabled}
+              onChange={(enabled) => void toggleVoice(enabled)}
+              disabled={busy}
+              label={voice.enabled ? t("settings.voiceStatusEnabled") : t("settings.voiceStatusOff")}
+            />
+            <Note tone="muted">{t("settings.voiceNote", { provider: voice.provider || t("entry.voiceUnavailable") })}</Note>
+            {voice.stale && <Note tone="warn">{t("settings.voiceStaleNote")}</Note>}
+          </>
+        )}
+        {voice && !voice.available && <Note tone="muted">{t("settings.voiceNotOffered")}</Note>}
         <hr className="divider" />
         <div className="row row--wrap">
           <Button label={t("settings.export")} onPress={() => void exportData()} small variant="ghost" disabled={busy} />

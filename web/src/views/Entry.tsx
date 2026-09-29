@@ -26,8 +26,10 @@
  * streak chip open the screen.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api/client";
-import { encryptEntry, timeOfDayBucket } from "../crypto/patient";
+import { api, ApiError } from "../api/client";
+import { encryptAudio, encryptEntry, timeOfDayBucket } from "../crypto/patient";
+import { toBase64, type Bytes } from "../crypto/core";
+import { useRecorder } from "../audio/recorder";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { clearActiveDraft, loadActiveDraft, registerDraftSource, type EntryDraft } from "../entryDraft";
@@ -42,9 +44,24 @@ import { zeroize } from "../crypto/core";
 import { detectLanguage, sentimentScore } from "../brain/sentiment";
 import { dateLocaleTag, getLocale, t } from "../strings";
 import { vault } from "../vault";
-import { Button, Card, Chip, DotScale, BarScale, ErrorBanner, Icon, MoodScale, Note, PillNote, TextArea } from "../ui";
+import { Button, Card, Chip, DotScale, BarScale, ErrorBanner, Icon, MoodScale, Note, PillNote, TextArea, Toggle } from "../ui";
 
 export type SaveResult = "sent" | "queued";
+
+/** A confirmed voice session riding the pending entry (VOICE_PLAN
+ *  2026-09-29): the transcript was written into the editor, the original
+ *  recorded take is held in memory (kept ⇒ encrypted + uploaded after the
+ *  entry lands), and the payload will carry the v3 voice channels. */
+interface VoiceSession {
+  audioBlob: Blob | null;
+  normalizedMime: string;
+  durationSeconds: number;
+  language: string | null;
+  languageRaw: string;
+  transcribedOriginal: string;
+  englishText: string | null;
+  keepAudio: boolean;
+}
 
 /** The client-side entry length cap (2026-09-28 audit MEDIUM): the
  *  server's blob ceiling is far higher, so without a client gate a
@@ -70,6 +87,42 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
   const [error, setError] = useState("");
   const [streak, setStreak] = useState<number | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
+  // --- voice session (VOICE_PLAN 2026-09-29) ---
+  const [voice, setVoice] = useState<VoiceSession | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const [audioAvailable, setAudioAvailable] = useState<boolean | null>(null);
+  const recorder = useRecorder({
+    unsupported: t("entry.voiceMicUnsupported"),
+    permissionDenied: t("entry.voiceMicDenied"),
+    failed: t("entry.voiceRecordFailed"),
+  });
+
+  /** Lazy feature discovery (VOICE_PLAN): the mic renders on recorder
+   *  capability alone, and the FIRST press resolves the server's
+   *  audio_available once — a deployment without the feature gets the
+   *  honest unavailable note, and no background fetch ever shifts the
+   *  save path's request sequence. */
+  const micPress = async (): Promise<void> => {
+    if (audioAvailable === null) {
+      try {
+        const meta = await api.meta();
+        setAudioAvailable(meta.audio_available === true);
+        if (meta.audio_available !== true) {
+          setVoiceError(t("entry.voiceUnavailable"));
+          return;
+        }
+      } catch {
+        setAudioAvailable(false);
+        setVoiceError(t("entry.voiceUnavailable"));
+        return;
+      }
+    } else if (audioAvailable !== true) {
+      setVoiceError(t("entry.voiceUnavailable"));
+      return;
+    }
+    await recorder.start();
+  };
 
   const userId = vault.ownerUserId();
   const [draftRestored, setDraftRestored] = useState(false);
@@ -129,6 +182,105 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
 
   const toggleTag = (tag: string): void => {
     setTags((current) => (current.includes(tag) ? current.filter((x) => x !== tag) : [...current, tag]));
+  };
+
+  // --- voice flow (VOICE_PLAN 2026-09-29) ---------------------------------
+  // Auto-transcribe each finished take exactly once: the ref holds the last
+  // Blob handled, so a re-render with the same recording never re-fires
+  // (and a re-record produces a new Blob → a new transcription).
+  const lastTranscribedRef = useRef<Blob | null>(null);
+  useEffect(() => {
+    const take = recorder.recording;
+    if (!take || lastTranscribedRef.current === take.blob) return;
+    lastTranscribedRef.current = take.blob;
+    let cancelled = false;
+    void (async () => {
+      setTranscribing(true);
+      setVoiceError("");
+      try {
+        const plain = new Uint8Array(await take.blob.arrayBuffer());
+        const result = await api.transcribeAudio(
+          toBase64(plain),
+          take.normalizedMime,
+          take.durationSeconds,
+        );
+        if (cancelled) return;
+        setVoice({
+          audioBlob: take.blob,
+          normalizedMime: take.normalizedMime,
+          durationSeconds: take.durationSeconds,
+          language: result.language,
+          languageRaw: result.language_raw,
+          transcribedOriginal: result.original_text,
+          englishText: result.english_text,
+          keepAudio: true,
+        });
+        // The transcript lands in the ordinary editor: the user edits it
+        // like any text, and the check-in channels apply as usual.
+        setText(result.original_text);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.code === "voice_consent_required") {
+          setVoiceError(t("entry.voiceConsentNeeded"));
+        } else if (err instanceof ApiError && err.code === "stt_unconfigured") {
+          setVoiceError(t("entry.voiceUnavailable"));
+        } else {
+          setVoiceError(err instanceof Error ? err.message : t("entry.voiceTranscribeFailed"));
+        }
+      } finally {
+        if (!cancelled) setTranscribing(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [recorder.recording]);
+
+  /** Object URL for reviewing the pending take; revoked on change/unmount
+   *  (nothing decrypted or recorded is ever cached at rest). */
+  const takeUrl = useMemo(() => (voice?.audioBlob ? URL.createObjectURL(voice.audioBlob) : null), [voice?.audioBlob]);
+  useEffect(() => () => {
+    if (takeUrl) URL.revokeObjectURL(takeUrl);
+  }, [takeUrl]);
+
+  const discardVoice = (): void => {
+    setVoice(null);
+    setVoiceError("");
+    recorder.reset();
+  };
+
+  /** Best-effort kept-recording upload: the ENTRY already stands, so this
+   *  never fails the save — it warns. Terminal errors (413/404/403) skip
+   *  the retries; transient ones get three attempts. */
+  const uploadKeptAudio = async (
+    dataKey: Bytes,
+    owner: string,
+    clientEntryId: string,
+    session: VoiceSession,
+  ): Promise<boolean> => {
+    if (!session.audioBlob || !session.keepAudio) return true;
+    const plain = new Uint8Array(await session.audioBlob.arrayBuffer());
+    try {
+      const { blobB64 } = await encryptAudio(dataKey, owner, clientEntryId, plain);
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await api.uploadAudioAttachment(
+            clientEntryId,
+            blobB64,
+            session.normalizedMime,
+            session.durationSeconds,
+          );
+          return true;
+        } catch (err) {
+          if (err instanceof ApiError && [403, 404, 413].includes(err.status)) return false;
+          if (attempt === 3) return false;
+          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+        }
+      }
+      return false;
+    } finally {
+      zeroize(plain);
+    }
   };
 
   const save = async (): Promise<void> => {
@@ -193,6 +345,19 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
       dataKey.set(keys.dataKey);
       try {
+        // Voice sessions keep english_text in sync with the SAVED text
+        // (the v3 contract): an edited transcript re-translates before
+        // encryption; a failed/offline re-translation degrades to null
+        // (the original transcript stands alone).
+        let englishForSave: string | null = voice ? voice.englishText : null;
+        if (voice && text.trim() !== voice.transcribedOriginal.trim()) {
+          try {
+            const translated = await api.translateText(text, voice.language);
+            englishForSave = translated.english_text;
+          } catch {
+            englishForSave = null;
+          }
+        }
         // H-5 (audit 2026-09-26): ONLY the explicit pick rides in the
         // encrypted payload's sentiment slot — null when no pick was made.
         // The machine estimate is never written where the backend/therapist
@@ -211,6 +376,13 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
             tod: timeOfDayBucket(new Date().getHours()),
           },
           1,
+          voice
+            ? {
+                inputMode: "voice",
+                transcriptLang: voice.language ?? undefined,
+                englishText: englishForSave,
+              }
+            : undefined,
         );
         // A lock during the encrypt await: the snapshot kept the blob safe,
         // but nothing more may be written this submit — abort honestly (the
@@ -250,6 +422,20 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
         setTags([]);
         setCrisisPrompt(false);
         setDraftRestored(false);
+        // The kept recording rides only a SENT entry (the offline queue is
+        // the text ciphertext's safety net, not an audio transport —
+        // O-5); a dropped recording warns and never fails the save.
+        if (voice) {
+          const kept =
+            result === "sent" ? await uploadKeptAudio(dataKey, owner, clientEntryId, voice) : false;
+          if (!kept && voice.keepAudio && voice.audioBlob) {
+            setVoiceError(
+              result === "queued" ? t("entry.voiceAudioQueuedNote") : t("entry.voiceAudioNotKept"),
+            );
+          }
+          setVoice(null);
+          recorder.reset();
+        }
         // The entry is safe (server or ciphertext queue) — the sealed draft's
         // custody ends here (entryDraft.ts, audit 2026-09-26).
         await clearActiveDraft(owner).catch(() => undefined);
@@ -268,7 +454,8 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
     text.trim() === "" && moodPick === null && energyPick === null && sleepPick === null && tags.length === 0;
 
   /** Explicit discard (audit 2026-09-26): wipe the editor AND the sealed
-   *  draft — the user said this entry is not happening. */
+   *  draft — the user said this entry is not happening. A pending voice
+   *  session (take + transcript) dies with it. */
   const discard = (): void => {
     setText("");
     setMoodPick(null);
@@ -277,6 +464,7 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
     setTags([]);
     setCrisisPrompt(false);
     setDraftRestored(false);
+    discardVoice();
     const owner = vault.ownerUserId();
     if (owner) void clearActiveDraft(owner).catch(() => undefined);
   };
@@ -350,6 +538,74 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
           placeholder={t("entry.placeholderWeb")}
           rows={8}
         />
+        {/* Voice capture (VOICE_PLAN 2026-09-29): the mic renders on
+            recorder capability; the first press confirms the server has
+            the feature before any recording starts. */}
+        {typeof MediaRecorder !== "undefined" && recorder.state !== "recording" && !voice && (
+          <div className="row">
+            <Button
+              label={t("entry.micRecord")}
+              icon="mic"
+              small
+              variant="ghost"
+              disabled={busy || transcribing || !isOnline()}
+              onPress={() => void micPress()}
+            />
+          </div>
+        )}
+        {recorder.state === "recording" && (
+          <Card title={t("entry.micRecording")} tone="sensitive">
+            <span className="row row--between">
+              <span className="note note--lead" role="timer" aria-live="off">
+                {String(Math.floor(recorder.elapsedSeconds / 60)).padStart(2, "0")}:
+                {String(recorder.elapsedSeconds % 60).padStart(2, "0")}
+              </span>
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: 12,
+                  height: 12,
+                  borderRadius: "50%",
+                  background: "var(--danger, #c0392b)",
+                  opacity: 0.35 + recorder.level * 0.65,
+                }}
+              />
+            </span>
+            <Note tone="muted">{t("entry.micRecordingNote")}</Note>
+            <Button label={t("entry.micStop")} icon="check" onPress={recorder.stop} disabled={busy} block />
+          </Card>
+        )}
+        {transcribing && <PillNote role="status" icon="info">{t("entry.voiceTranscribing")}</PillNote>}
+        {voice && (
+          <Card title={t("entry.voiceReviewTitle")}>
+            {takeUrl && <audio controls src={takeUrl} style={{ width: "100%" }} />}
+            <Note>{t("entry.voiceLanguage", { lang: voice.language ?? voice.languageRaw })}</Note>
+            {voice.englishText !== null && (
+              <Note tone="muted">{t("entry.voiceEnglishPreview")}: {voice.englishText}</Note>
+            )}
+            <Toggle
+              checked={voice.keepAudio}
+              onChange={(keep) => setVoice((current) => (current ? { ...current, keepAudio: keep } : current))}
+              label={voice.keepAudio ? t("entry.voiceKeepOn") : t("entry.voiceKeepOff")}
+            />
+            <div className="row row--wrap">
+              <Button
+                label={t("entry.micRerecord")}
+                icon="mic"
+                small
+                variant="ghost"
+                disabled={busy || transcribing || !isOnline()}
+                onPress={() => {
+                  discardVoice();
+                  void micPress();
+                }}
+              />
+              <Button label={t("entry.voiceDiscardTake")} icon="x" small variant="ghost" disabled={busy} onPress={discardVoice} />
+            </div>
+          </Card>
+        )}
+        {voiceError && <ErrorBanner message={voiceError} />}
         <div className="row row--wrap">
           {chips.map((chip) => (
             <Chip key={chip} label={chip} toggle={false} onPress={() => setText(`${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `)} />

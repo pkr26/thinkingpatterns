@@ -13,7 +13,7 @@ export interface Keys {
 }
 
 export interface EntryPayload {
-  v: 1 | 2;
+  v: 1 | 2 | 3;
   text: string;
   sentiment: number | null; // computed on-device before encryption
   created_at: string; // ISO date
@@ -26,6 +26,12 @@ export interface EntryPayload {
    *  the entry contract stays date-granular for privacy; the bucket is
    *  enough for the "Sunday evening" analysis refinement. */
   tod?: string;
+  /** v3 voice channels (VOICE_PLAN 2026-09-29): how this entry was made
+   *  and, for voice entries, the detected language + the English
+   *  translation of the SAVED text. */
+  input_mode?: "typed" | "voice";
+  transcript_lang?: string;
+  english_text?: string | null;
 }
 
 /** The local-hour bucket for the entry payload's optional time-of-day
@@ -72,11 +78,18 @@ export function encryptEntry(
    *  version echo. Omitted → the legacy three-part AAD (pre-2026-09-20
    *  blobs and cross-platform vectors keep decrypting unchanged). */
   contentVersion?: number,
+  /** Voice channels (VOICE_PLAN 2026-09-29): presence upgrades the payload
+   *  to v3 — typed entries keep the byte-identical v1/v2 shapes. */
+  voice?: {
+    inputMode: "voice";
+    transcriptLang?: string;
+    englishText: string | null;
+  },
 ): { blobB64: string } {
   // Payload v2 (2026-09-17): optional structured channels ride alongside
   // the text. A caller passing none emits the v1 shape byte-for-byte, so
   // older servers and exports behave identically.
-  const payload: EntryPayload =
+  const base: EntryPayload =
     structured &&
     (structured.energy != null ||
       structured.sleep != null ||
@@ -93,6 +106,15 @@ export function encryptEntry(
           ...(structured.tod != null ? { tod: structured.tod } : {}),
         }
       : { v: 1, text, sentiment, created_at: createdAt };
+  const payload: EntryPayload = voice
+    ? {
+        ...base,
+        v: 3,
+        input_mode: "voice",
+        ...(voice.transcriptLang ? { transcript_lang: voice.transcriptLang } : {}),
+        english_text: voice.englishText,
+      }
+    : base;
   // Stryker disable StringLiteral
 const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
   // Stryker restore StringLiteral
@@ -105,11 +127,12 @@ const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
 }
 
 /** The only entry payload schema versions this client understands (v2
- *  added the structured channels). Mirrors decryptInsights' loud-fail
- *  contract: an unknown version must throw, never be silently miscast as
- *  today's shape — a future v3 misread is how a schema roll corrupts the
- *  journal UI with wrong-typed fields. */
-export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2];
+ *  added the structured channels; v3 the voice channels, VOICE_PLAN
+ *  2026-09-29). Mirrors decryptInsights' loud-fail contract: an unknown
+ *  version must throw, never be silently miscast as today's shape — a
+ *  future v4 misread is how a schema roll corrupts the journal UI with
+ *  wrong-typed fields. */
+export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2, 3];
 
 export function decryptEntry(
   keys: Pick<Keys, "dataKey">,
@@ -187,3 +210,36 @@ export function decryptQuestion(keys: Pick<Keys, "dataKey">, userId: string, for
 }
 
 export { zeroize };
+
+
+// --- voice recordings (VOICE_PLAN 2026-09-29) --------------------------------
+//
+// Same AES-GCM envelope, same data key, AAD context "audio" bound to
+// (userId, clientEntryId, audio version 1) — identical contract to web's
+// crypto/patient.ts and pinned by shared/audio_vectors.json.
+
+export const AUDIO_PAYLOAD_VERSION = 1;
+
+export function encryptAudio(
+  keys: Pick<Keys, "dataKey">,
+  userId: string,
+  clientEntryId: string,
+  audio: Buffer,
+): { blobB64: string } {
+  const aad = buildAad("audio", userId, clientEntryId, String(AUDIO_PAYLOAD_VERSION));
+  const blob = encrypt(keys.dataKey, audio, aad);
+  return { blobB64: blob.toString("base64") };
+}
+
+export function decryptAudio(
+  keys: Pick<Keys, "dataKey">,
+  userId: string,
+  clientEntryId: string,
+  blobB64: string,
+): Buffer {
+  return decrypt(
+    keys.dataKey,
+    Buffer.from(blobB64, "base64"),
+    buildAad("audio", userId, clientEntryId, String(AUDIO_PAYLOAD_VERSION)),
+  );
+}

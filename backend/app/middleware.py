@@ -97,6 +97,20 @@ def _is_legacy_api_path(path: str) -> bool:
     return path.startswith("/api/") and not path.startswith("/api/v1")
 
 
+def _is_audio_api_path(path: str) -> bool:
+    """True when the path belongs to the /audio router on EITHER mount.
+
+    Exact-segment matching (a bare prefix test would also swallow a
+    hypothetical /audiobook route). The larger audio body cap applies to
+    transcription and attachment uploads alike; every other route keeps
+    the ordinary cap.
+    """
+    for prefix in ("/api/v1/audio", "/api/audio"):
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+    return False
+
+
 def _forwarded_client(
     raw_headers: list[tuple[bytes, bytes]],
     trusted_networks: tuple[IPv4Network | IPv6Network, ...],
@@ -215,9 +229,26 @@ class HardeningMiddleware:
             return None
         return self._settings_provider()
 
-    def _effective_max_body_bytes(self) -> int:
+    def _effective_max_body_bytes(self, path: str | None = None) -> int:
+        """The body cap for THIS request's path.
+
+        Live settings win over the constructor snapshot (audit item 6).
+        VOICE_PLAN (2026-09-29): /audio routes carry their own larger cap
+        (settings.audio_max_body_bytes) because a 5-minute compressed
+        recording is ~1.2 MB of base64 and needs headroom past the generic
+        2 MiB; every other path keeps the ordinary cap. Direct middleware
+        constructions without a settings provider (or without the audio
+        attribute) keep the historical single-cap behavior.
+        """
         live = self._live_settings()
-        return live.max_body_bytes if live is not None else self.max_body_bytes
+        if live is None:
+            return self.max_body_bytes
+        cap = live.max_body_bytes
+        if path is not None and _is_audio_api_path(path):
+            audio_cap = getattr(live, "audio_max_body_bytes", None)
+            if isinstance(audio_cap, int) and audio_cap > 0:
+                cap = audio_cap
+        return cap
 
     def _cors_extra_headers(
         self, raw_headers: list[tuple[bytes, bytes]]
@@ -312,7 +343,9 @@ class HardeningMiddleware:
         # Audit item 6: per-request body cap from the LIVE settings when a
         # provider is wired (create_app always wires one) — a runtime swap
         # of app.state.settings now moves this layer with the dependencies.
-        max_body_bytes = self._effective_max_body_bytes()
+        # VOICE_PLAN: the path rides along so /audio requests draw the
+        # route-scoped audio cap instead (see _effective_max_body_bytes).
+        max_body_bytes = self._effective_max_body_bytes(scope.get("path"))
         direct_peer_is_trusted = self._direct_peer_is_trusted(scope)
         trusted_forwarding = self.trust_proxy_headers and direct_peer_is_trusted
         # State is the authenticated handoff between this outer ASGI layer

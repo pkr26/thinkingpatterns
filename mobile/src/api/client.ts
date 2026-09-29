@@ -516,6 +516,18 @@ export const API_ERROR_CODES = [
   "service_unavailable",
   // account.py: the LLM recompute provider is down (surfaces as retryable).
   "llm_unavailable",
+  // Voice journaling (VOICE_PLAN 2026-09-29) — verified against backend/app.
+  "voice_consent_required",
+  "stt_unconfigured",
+  "stt_upstream",
+  "stt_unavailable",
+  "audio_too_large",
+  "audio_storage_unconfigured",
+  "audio_storage_failed",
+  "audio_quota_exceeded",
+  "audio_expired",
+  "unknown_entry",
+  "consent_voice_share_required",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -789,6 +801,9 @@ export interface ListedEntry {
    *  first store of the id, +1 per replacement. Absent on pre-2026-09-20
    *  servers — callers treat absence as legacy (version-unverified). */
   content_version?: number;
+  /** Unexpired kept-recording metadata (VOICE_PLAN 2026-09-29); absent on
+   *  entries without audio and on pre-voice backends. */
+  audio?: { attachment_id: string; expires_at: string } | null;
 }
 
 /** Strict wire representation for an owner-journal snapshot revision. Keep
@@ -1437,6 +1452,52 @@ export const api = {
     request("DELETE", `${API_PREFIX}/account`, undefined, { "X-Account-Verifier": verifierB64 }, { sensitive: true }),
   /** Explicit, re-authenticated opt-in for third-party LLM analysis. */
   getLlmConsent: () => request("GET", `${API_PREFIX}/account/llm-consent`),
+  // --- voice journaling (VOICE_PLAN 2026-09-29) ---------------------------
+  /** Transcript (spoken language preserved) + detected language + English
+   *  translation of the text. Audio exists server-side only for the
+   *  upstream call — never stored. */
+  transcribeAudio: (audioB64: string, mime: string, durationSeconds: number) =>
+    request("POST", `${API_PREFIX}/audio/transcriptions`, {
+      audio_b64: audioB64,
+      mime,
+      duration_seconds: durationSeconds,
+    }),
+  /** Re-translate an EDITED transcript before saving (payload v3 keeps
+   *  english_text in sync with the saved text). */
+  translateText: (text: string, sourceLang: string | null) =>
+    request("POST", `${API_PREFIX}/audio/translations`, {
+      text,
+      ...(sourceLang ? { source_lang: sourceLang } : {}),
+    }),
+  /** Store (or replace) the kept recording for one entry — the blob is the
+   *  client-side AES-GCM envelope, opaque to the server. */
+  uploadAudioAttachment: (
+    clientEntryId: string,
+    blobB64: string,
+    mime: string,
+    durationSeconds: number,
+  ) =>
+    request("POST", `${API_PREFIX}/audio/attachments`, {
+      client_entry_id: clientEntryId,
+      blob: blobB64,
+      mime,
+      duration_seconds: durationSeconds,
+    }),
+  fetchAudioAttachment: (attachmentId: string) =>
+    request("GET", `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`),
+  deleteAudioAttachment: (attachmentId: string) =>
+    request("DELETE", `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`),
+  getVoiceConsent: () => request("GET", `${API_PREFIX}/account/voice-consent`),
+  setVoiceConsent: (enabled: boolean, verifierB64: string) =>
+    request("PUT", `${API_PREFIX}/account/voice-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
+  setShareVoice: (consentId: string, enabled: boolean, verifierB64: string) =>
+    request(
+      "PUT",
+      `${API_PREFIX}/consents/${encodeURIComponent(consentId)}/share-voice`,
+      { enabled },
+      { "X-Account-Verifier": verifierB64 },
+      { sensitive: true },
+    ),
   setLlmConsent: (enabled: boolean, verifierB64: string) =>
     request("PUT", `${API_PREFIX}/account/llm-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
 

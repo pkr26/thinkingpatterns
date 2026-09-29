@@ -58,6 +58,8 @@ from ..schemas import (
     TotpEnableResponse,
     TotpSetupRequest,
     TotpSetupResponse,
+    VoiceConsentRequest,
+    VoiceConsentResponse,
     entry_out,
 )
 from ._audit import append_access_log, parse_access_log_cursor
@@ -88,7 +90,7 @@ from ..security.totp import (
     wrap_secret,
 )
 from .measures import _measure_out
-from ..services import llm
+from ..services import llm, stt
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -96,6 +98,8 @@ router = APIRouter(prefix="/account", tags=["account"])
 # fingerprint). Re-exported here for the established account-API import
 # path used by tests and any older callers.
 LLM_DISCLOSURE_VERSION = llm.LLM_DISCLOSURE_VERSION
+# Same standing for the voice-transcription disclosure (services/stt.py).
+VOICE_DISCLOSURE_VERSION = stt.STT_DISCLOSURE_VERSION
 
 # Export is intentionally complete rather than paginated for the user, but
 # each short-lived database page must remain small.  Metadata pages permit a
@@ -1459,6 +1463,93 @@ async def set_llm_consent(
         session.add(fresh)
         await session.commit()
     return _consent_response(fresh, request.app.state.settings)
+
+
+def _voice_consent_response(user: User, settings) -> VoiceConsentResponse:
+    """Voice consent record plus live-policy currency (same honesty as the
+    LLM consent response: a stale yes must never look active)."""
+    return VoiceConsentResponse(
+        enabled=bool(user.voice_consent),
+        active_for_current_policy=stt.consent_is_current(user, settings),
+        voice_consent_at=user.voice_consent_at,
+        voice_consent_disclosure=user.voice_consent_disclosure,
+        voice_consent_policy=user.voice_consent_policy,
+    )
+
+
+@router.get(
+    "/voice-consent",
+    response_model=VoiceConsentResponse,
+    dependencies=[
+        Depends(make_rate_limiter("account-consent-read", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def get_voice_consent(
+    request: Request,
+    user: User = Depends(require_regular_user),
+) -> VoiceConsentResponse:
+    """Current voice-transcription consent state, for the client toggle."""
+    return _voice_consent_response(user, request.app.state.settings)
+
+
+@router.put(
+    "/voice-consent",
+    response_model=VoiceConsentResponse,
+    dependencies=[
+        Depends(make_rate_limiter("account-consent", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def set_voice_consent(
+    body: VoiceConsentRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Explicit, re-authenticated per-user opt-in for voice transcription.
+
+    When the operator has configured MINDPATTERN_STT_URL, recorded audio is
+    only sent to that third-party endpoint for accounts with consent=True,
+    and the audio is deleted immediately after transcription. Enabling
+    writes the Art. 7 record (timestamp + disclosure version); disabling
+    clears it, so the row never claims a consent it no longer holds.
+    Mirrors set_llm_consent exactly (verifier proof, lifecycle fence,
+    fresh re-read, policy fingerprint).
+    """
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, body.verifier, request, session)
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = (
+            (
+                await session.execute(
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        policy = stt.processing_policy_fingerprint(request.app.state.settings)
+        if body.enabled and policy is None:
+            raise ApiError(
+                status_code=409,
+                detail="voice transcription is not configured on this server",
+                code="stt_unavailable",
+            )
+        fresh.voice_consent = body.enabled
+        if body.enabled:
+            fresh.voice_consent_at = utcnow()
+            fresh.voice_consent_disclosure = VOICE_DISCLOSURE_VERSION
+            fresh.voice_consent_policy = policy
+        else:
+            fresh.voice_consent_at = None
+            fresh.voice_consent_disclosure = None
+            fresh.voice_consent_policy = None
+        session.add(fresh)
+        await session.commit()
+    return _voice_consent_response(fresh, request.app.state.settings)
 
 
 @router.delete(

@@ -13,8 +13,46 @@ services:
     build:
       context: ./backend
     image: ${MINDPATTERN_API_IMAGE:?set MINDPATTERN_API_IMAGE to mindpattern-api:local for the development overlay}
+    # VOICE_PLAN (2026-09-29): dev parity for the S3 audio store — point the
+    # API at the MinIO service below. The bucket is created lazily by hand
+    # (mc mb) or by your provisioning; the local-dir fallback still works
+    # without any of this.
+    environment:
+      MINDPATTERN_AUDIO_ENABLED: "true"
+      MINDPATTERN_AUDIO_BUCKET: mindpattern-audio-dev
+      MINDPATTERN_AUDIO_BUCKET_REGION: us-east-1
+      MINDPATTERN_AWS_ACCESS_KEY_ID: minioadmin
+      MINDPATTERN_AWS_SECRET_ACCESS_KEY: minioadmin
+      MINDPATTERN_STT_URL: ${MINDPATTERN_STT_URL:-}
+      MINDPATTERN_STT_API_KEY: ${MINDPATTERN_STT_API_KEY:-}
+    depends_on:
+      - audio-minio
 
   backup:
     build:
       context: ./backup
     image: ${MINDPATTERN_BACKUP_IMAGE:?set MINDPATTERN_BACKUP_IMAGE to mindpattern-backup:local for the development overlay}
+
+  # S3-compatible scratch object store for kept voice recordings in dev
+  # (VOICE_PLAN.md P2). NOT part of any production deployment: production
+  # points MINDPATTERN_AUDIO_BUCKET at a real, dedicated bucket with
+  # least-privilege IAM credentials supplied via compose secrets.
+  audio-minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - audio-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  audio-minio-data:

@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
 import { zeroize } from "../crypto/core";
 import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/patient";
+import { playAttachment, type PlayingAudio } from "../audio/player";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
 import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
@@ -48,6 +49,9 @@ interface DecodedEntry {
   entryDate: string;
   contentVersion: number;
   payload: EntryPayload;
+  /** Unexpired kept-recording metadata from the listing (VOICE_PLAN
+   *  2026-09-29); null/absent on entries without audio. */
+  audio?: { attachment_id: string; expires_at: string } | null;
 }
 
 /** Locale-aware weekday initials (Mon..Sun order, matching monthGrid). */
@@ -99,6 +103,59 @@ export function HistoryView(): React.JSX.Element {
   const [editText, setEditText] = useState("");
   const [conflict, setConflict] = useState<{ theirs: DecodedEntry; mine: string } | null>(null);
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
+  // Kept-recording playback (VOICE_PLAN 2026-09-29): fetch → decrypt in
+  // memory → revocable object URL; nothing cached at rest, one at a time.
+  const [playing, setPlaying] = useState<PlayingAudio | null>(null);
+  const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
+
+  useEffect(() => () => playing?.release(), [playing]);
+
+  const toggleRecording = async (entry: DecodedEntry): Promise<void> => {
+    if (!entry.audio) return;
+    if (playing) {
+      playing.release();
+      setPlaying(null);
+      return;
+    }
+    if (!vault.isUnlocked()) return;
+    setAudioBusyId(entry.audio.attachment_id);
+    try {
+      const keys = vault.get();
+      const owner = vault.ownerUserId();
+      if (!owner) return;
+      const current = await playAttachment({
+        fetchBlob: () => api.fetchAudioAttachment(entry.audio!.attachment_id),
+        dataKey: keys.dataKey,
+        userId: owner,
+        clientEntryId: entry.clientEntryId,
+      });
+      setPlaying(current);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("history.loadFailed"));
+    } finally {
+      setAudioBusyId(null);
+    }
+  };
+
+  const removeRecording = async (entry: DecodedEntry): Promise<void> => {
+    if (!entry.audio) return;
+    setAudioBusyId(entry.audio.attachment_id);
+    setError("");
+    try {
+      await api.deleteAudioAttachment(entry.audio.attachment_id);
+      if (playing) {
+        playing.release();
+        setPlaying(null);
+      }
+      setEntries((list) =>
+        (list ?? []).map((item) => (item.clientEntryId === entry.clientEntryId ? { ...item, audio: null } : item)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("history.loadFailed"));
+    } finally {
+      setAudioBusyId(null);
+    }
+  };
   const [busy, setBusy] = useState(false);
   // H-6 (audit 2026-09-28, mobile parity): the edit path's post-save
   // crisis prompt card — the same tier the Entry tab runs pre-save.
@@ -155,6 +212,7 @@ export function HistoryView(): React.JSX.Element {
             entryDate: row.entry_date,
             contentVersion: row.content_version ?? 1,
             payload,
+            audio: row.audio ?? null,
           });
         } catch {
           // A tampered/undecryptable row is skipped and counted — never
@@ -499,6 +557,37 @@ export function HistoryView(): React.JSX.Element {
               </span>
             </div>
             <Note>{entry.payload.text.length > 240 ? `${entry.payload.text.slice(0, 240)}…` : entry.payload.text}</Note>
+            {entry.payload.input_mode === "voice" && (
+              <span className="row" style={{ gap: 6 }}>
+                <Icon name="mic" size={12} />
+                <span className="note note--muted">{t("history.voiceBadge")}</span>
+              </span>
+            )}
+            {entry.audio && (
+              <div className="stack" style={{ gap: "var(--space-2)" }}>
+                <div className="row row--wrap">
+                  <Button
+                    label={playing ? t("history.playRecording") : t("history.playRecording")}
+                    icon="play"
+                    small
+                    variant="ghost"
+                    disabled={audioBusyId === entry.audio.attachment_id}
+                    onPress={() => void toggleRecording(entry)}
+                  />
+                  <Button
+                    label={t("history.deleteRecording")}
+                    icon="trash"
+                    small
+                    variant="ghost"
+                    disabled={audioBusyId === entry.audio.attachment_id}
+                    onPress={() => void removeRecording(entry)}
+                  />
+                </div>
+                {playing && (
+                  <audio controls autoPlay src={playing.url} style={{ width: "100%" }} onEnded={() => { playing.release(); setPlaying(null); }} />
+                )}
+              </div>
+            )}
             <div className="row">
               <Button label={t("history.edit")} onPress={() => startEdit(entry)} small variant="ghost" disabled={busy || editing !== null || conflict !== null} />
               {armedDelete === entry.clientEntryId ? (

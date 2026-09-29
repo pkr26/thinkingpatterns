@@ -1194,4 +1194,47 @@ export const en: Record<string, string> = {
   "settings.safetyPlanNote":
     "A plan you write yourself — warning signs, what helps, who to reach. Encrypted on this device; never synced, exported, or shared.",
   "settings.openSafetyPlan": "Open my safety plan",
+  // --- voice journaling (VOICE_PLAN 2026-09-29) -----------------------------
+  "entry.micRecord": "Record instead",
+  "entry.micRecording": "Recording…",
+  "entry.micRecordingNote": "Speak in any language — you will review the transcript before anything is saved.",
+  "entry.micStop": "Stop recording",
+  "entry.micRerecord": "Record again",
+  "entry.voiceDiscardTake": "Use text only",
+  "entry.voiceTranscribing": "Transcribing your recording…",
+  "entry.voiceReviewTitle": "Your recording",
+  "entry.voiceLanguage": "Detected language: {lang}",
+  "entry.voiceEnglishPreview": "English translation (for your therapist)",
+  "entry.voiceKeepOn": "Keep the recording for 30 days",
+  "entry.voiceKeepOff": "The recording will be deleted when you save",
+  "entry.voiceConsentNeeded":
+    "Voice journaling needs your permission first — turn it on in Settings, under Privacy & data.",
+  "entry.voiceUnavailable": "Voice journaling is not available on this server.",
+  "entry.voiceMicDenied": "Microphone access was denied — allow it in your browser settings to record.",
+  "entry.voiceMicUnsupported": "This browser cannot record audio — you can still type or paste.",
+  "entry.voiceRecordFailed": "Recording failed — please try again.",
+  "entry.voiceTranscribeFailed": "Transcription failed — please try again.",
+  "entry.voiceAudioNotKept": "The entry was saved, but the recording could not be stored.",
+  "entry.voiceAudioQueuedNote":
+    "Saved offline. The recording itself needs a connection and was not kept — the transcript is safe.",
+  "history.playRecording": "Play recording",
+  "history.deleteRecording": "Delete recording",
+  "history.recordingExpires": "Recording available for {days} more day(s)",
+  "history.voiceBadge": "recorded",
+  "settings.voiceTitle": "Voice journaling",
+  "settings.voiceNote":
+    "Record entries in any language. Your recording is sent to {provider} to be transcribed and deleted immediately after; only the encrypted text is stored. Recordings you keep are stored encrypted for 30 days.",
+  "settings.voiceStatusEnabled": "Voice journaling on",
+  "settings.voiceStatusOff": "Voice journaling off",
+  "settings.voiceEnabledNote": "Voice journaling is on.",
+  "settings.voiceDisabledNote": "Voice journaling is off.",
+  "settings.voiceNotOffered": "Voice journaling is not offered by this server.",
+  "settings.voiceStaleNote":
+    "The server's transcription provider changed — re-enable to review and accept the new terms.",
+  "settings.voiceToggleFailed": "Could not change the voice setting — try again.",
+  "share.voiceTitle": "Let your therapist hear your recordings",
+  "share.voiceNote":
+    "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active.",
+  "share.voiceOn": "Therapist can hear my recordings",
+  "share.voiceOff": "Therapist cannot hear my recordings",
 };

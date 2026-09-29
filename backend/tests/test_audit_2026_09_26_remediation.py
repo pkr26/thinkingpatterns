@@ -283,7 +283,9 @@ async def test_mirrored_cors_responses_carry_vary_origin(settings):
 def test_body_buffer_budget_refuses_oversized_combinations():
     # 64 MiB x 100 concurrent = 6.4 GiB of edge buffers — far past the
     # documented 512 MiB budget; boot must refuse with the arithmetic.
-    with pytest.raises(RuntimeError, match=r"max_body_bytes \* body_buffer_concurrency"):
+    # VOICE_PLAN (2026-09-29): the budget is judged on the LARGER of the
+    # ordinary and audio route caps, so the message names the max().
+    with pytest.raises(RuntimeError, match=r"max\(max_body_bytes, audio_max_body_bytes\) \* body_buffer_concurrency"):
         Settings(
             environment="development",
             token_secret="test-secret-not-for-production",

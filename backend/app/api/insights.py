@@ -828,6 +828,10 @@ INNER_DATE_TOLERANCE_DAYS = 1
 # for privacy; this is exactly enough for the "Sunday evening" temporal
 # refinement.
 _TOD_BUCKETS = frozenset({"morning", "afternoon", "evening", "night"})
+# VOICE_PLAN (2026-09-29): transcript_lang is a bare ISO 639-1 code
+# (optionally with a script/region subtag) — the same shape the client
+# schemas accept.
+_LANG_CODE_RE = __import__("re").compile(r"^[a-z]{2}(-[A-Za-z0-9]{2,8})?$")
 
 # Payload-shape failures: the ciphertext authenticated but the plaintext is
 # semantically malformed (bad JSON, wrong types, impossible dates). Both the
@@ -933,6 +937,33 @@ def _parse_entries(plains: list[bytearray], outer_dates: list[date_type]) -> lis
         if tod_raw is not None:
             if not isinstance(tod_raw, str) or tod_raw not in _TOD_BUCKETS:
                 raise ValueError("tod must be one of: " + ", ".join(sorted(_TOD_BUCKETS)))
+        # --- voice channels (payload v3, VOICE_PLAN 2026-09-29). Validated
+        # like every other channel: malformed values are a 400
+        # (entry_payload_malformed), never a silent default.
+        input_mode = payload.get("input_mode")
+        if input_mode is not None and input_mode not in ("typed", "voice"):
+            raise ValueError("input_mode must be 'typed' or 'voice'")
+        transcript_lang = payload.get("transcript_lang")
+        if transcript_lang is not None and _LANG_CODE_RE.fullmatch(transcript_lang) is None:
+            raise ValueError("transcript_lang must be an ISO 639-1 code")
+        english_text = payload.get("english_text")
+        if english_text is not None:
+            if not isinstance(english_text, str):
+                raise ValueError("english_text must be a string or null")
+            english_text = english_text[:MAX_ANALYSIS_TEXT_CHARS]
+        # D-7 analysis-text routing: en/es analyze their native text (the
+        # engine's own lexicons); every OTHER detected language analyzes the
+        # English translation, so pattern quality never depends on
+        # per-language lexicons. A missing/unavailable translation falls
+        # back to the original text (the EN pipeline's best effort) — a
+        # degraded analysis, never a failed one.
+        if (
+            transcript_lang is not None
+            and transcript_lang not in ("en", "es")
+            and isinstance(english_text, str)
+            and english_text.strip()
+        ):
+            text = english_text
         entries.append(
             JournalEntry(
                 text=text,

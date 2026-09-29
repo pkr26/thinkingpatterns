@@ -1178,4 +1178,47 @@ export const es: Record<string, string> = {
   "settings.safetyPlanNote":
     "Un plan que usted mismo/a escribe — señales de alerta, qué ayuda, a quién recurrir. Cifrado en este dispositivo; nunca se sincroniza, ni se exporta, ni se comparte.",
   "settings.openSafetyPlan": "Abrir mi plan de seguridad",
+  // --- voice journaling (VOICE_PLAN 2026-09-29) -----------------------------
+  "entry.micRecord": "Grabar en su lugar",
+  "entry.micRecording": "Grabando…",
+  "entry.micRecordingNote": "Hable en cualquier idioma — revisará la transcripción antes de guardar nada.",
+  "entry.micStop": "Detener grabación",
+  "entry.micRerecord": "Grabar de nuevo",
+  "entry.voiceDiscardTake": "Solo texto",
+  "entry.voiceTranscribing": "Transcribiendo su grabación…",
+  "entry.voiceReviewTitle": "Su grabación",
+  "entry.voiceLanguage": "Idioma detectado: {lang}",
+  "entry.voiceEnglishPreview": "Traducción al inglés (para su terapeuta)",
+  "entry.voiceKeepOn": "Conservar la grabación durante 30 días",
+  "entry.voiceKeepOff": "La grabación se eliminará al guardar",
+  "entry.voiceConsentNeeded":
+    "El diario por voz necesita su permiso — actívelo en Ajustes, bajo Privacidad y datos.",
+  "entry.voiceUnavailable": "El diario por voz no está disponible en este servidor.",
+  "entry.voiceMicDenied": "Se denegó el acceso al micrófono — permítalo en los ajustes del navegador para grabar.",
+  "entry.voiceMicUnsupported": "Este navegador no puede grabar audio — puede escribir o pegar texto.",
+  "entry.voiceRecordFailed": "La grabación falló — inténtelo de nuevo.",
+  "entry.voiceTranscribeFailed": "La transcripción falló — inténtelo de nuevo.",
+  "entry.voiceAudioNotKept": "La entrada se guardó, pero no se pudo conservar la grabación.",
+  "entry.voiceAudioQueuedNote":
+    "Guardado sin conexión. La grabación necesita conexión y no se conservó — la transcripción está a salvo.",
+  "history.playRecording": "Reproducir grabación",
+  "history.deleteRecording": "Eliminar grabación",
+  "history.recordingExpires": "Grabación disponible {days} día(s) más",
+  "history.voiceBadge": "grabada",
+  "settings.voiceTitle": "Diario por voz",
+  "settings.voiceNote":
+    "Grabe entradas en cualquier idioma. Su grabación se envía a {provider} para transcribirla y se elimina inmediatamente después; solo el texto cifrado se guarda. Las grabaciones que conserve se almacenan cifradas durante 30 días.",
+  "settings.voiceStatusEnabled": "Diario por voz activado",
+  "settings.voiceStatusOff": "Diario por voz desactivado",
+  "settings.voiceEnabledNote": "El diario por voz está activado.",
+  "settings.voiceDisabledNote": "El diario por voz está desactivado.",
+  "settings.voiceNotOffered": "Este servidor no ofrece el diario por voz.",
+  "settings.voiceStaleNote":
+    "El proveedor de transcripción del servidor cambió — vuelva a activarlo para revisar y aceptar los nuevos términos.",
+  "settings.voiceToggleFailed": "No se pudo cambiar el ajuste de voz — inténtelo de nuevo.",
+  "share.voiceTitle": "Permitir que su terapeuta escuche sus grabaciones",
+  "share.voiceNote":
+    "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo.",
+  "share.voiceOn": "Mi terapeuta puede escuchar mis grabaciones",
+  "share.voiceOff": "Mi terapeuta no puede escuchar mis grabaciones",
 };

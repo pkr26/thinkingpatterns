@@ -8,7 +8,7 @@ import { buildAad } from "./aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./core";
 
 export interface EntryPayload {
-  v: 1 | 2;
+  v: 1 | 2 | 3;
   text: string;
   sentiment: number | null; // computed on-device before encryption
   created_at: string; // ISO date
@@ -20,6 +20,13 @@ export interface EntryPayload {
    *  "night". Deliberately a BUCKET, never a clock time — the entry
    *  contract stays date-granular for privacy. */
   tod?: string;
+  /** v3 voice channels (VOICE_PLAN 2026-09-29): how this entry was made
+   *  and, for voice entries, the detected language + the English
+   *  translation of the SAVED text (kept in sync by the client: an edit
+   *  re-translates before saving). */
+  input_mode?: "typed" | "voice";
+  transcript_lang?: string; // ISO 639-1, absent when unknown
+  english_text?: string | null;
 }
 
 /** The local-hour bucket for the entry payload's optional time-of-day
@@ -39,6 +46,15 @@ export interface EntryStructured {
   tod?: string;
 }
 
+/** v3 voice channels (VOICE_PLAN 2026-09-29). Present ⇒ payload v3;
+ * absent ⇒ the byte-identical v1/v2 shapes above (a typed entry on this
+ * client never carries them, so older servers/exports are untouched). */
+export interface VoiceFields {
+  inputMode: "voice";
+  transcriptLang?: string;
+  englishText: string | null;
+}
+
 export async function encryptEntry(
   dataKey: Bytes,
   userId: string,
@@ -53,11 +69,13 @@ export async function encryptEntry(
    *  version echo. Omitted → the legacy three-part AAD (pre-2026-09-20
    *  blobs and cross-platform vectors keep decrypting unchanged). */
   contentVersion?: number,
+  /** Voice channels: presence upgrades the payload to v3. */
+  voice?: VoiceFields,
 ): Promise<{ blobB64: string }> {
   // Payload v2: optional structured channels ride alongside the text. A
   // caller passing none emits the v1 shape byte-for-byte, so older
   // servers and exports behave identically.
-  const payload: EntryPayload =
+  const base: EntryPayload =
     structured &&
     (structured.energy != null ||
       structured.sleep != null ||
@@ -74,6 +92,15 @@ export async function encryptEntry(
           ...(structured.tod != null ? { tod: structured.tod } : {}),
         }
       : { v: 1, text, sentiment, created_at: createdAt };
+  const payload: EntryPayload = voice
+    ? {
+        ...base,
+        v: 3,
+        input_mode: "voice",
+        ...(voice.transcriptLang ? { transcript_lang: voice.transcriptLang } : {}),
+        english_text: voice.englishText,
+      }
+    : base;
   const plaintext = new TextEncoder().encode(JSON.stringify(payload));
   try {
     const aad =
@@ -88,10 +115,11 @@ export async function encryptEntry(
 }
 
 /** The only entry payload schema versions this client understands (v2
- *  added the structured channels). An unknown version must throw, never
- *  be silently miscast as today's shape — a future v3 misread is how a
- *  schema roll corrupts the journal UI with wrong-typed fields. */
-export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2];
+ * added the structured channels; v3 the voice channels). An unknown
+ * version must throw, never be silently miscast as today's shape — a
+ * future v4 misread is how a schema roll corrupts the journal UI with
+ * wrong-typed fields. */
+export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2, 3];
 
 export async function decryptEntry(
   dataKey: Bytes,
@@ -182,5 +210,47 @@ export async function decryptQuestion(
     return JSON.parse(new TextDecoder().decode(plaintext)) as QuestionPayload;
   } finally {
     zeroize(blob, plaintext);
+  }
+}
+
+// --- voice recordings (VOICE_PLAN 2026-09-29) --------------------------------
+//
+// Kept recordings use the SAME AES-GCM envelope as entries under the SAME
+// data key, with the AAD context "audio" bound to (userId, clientEntryId,
+// audio version 1). The server stores the bytes opaquely in S3; the
+// therapist portal decrypts only when the patient granted share_voice.
+
+/** The audio envelope's AAD version — independent of the entry
+ * content_version; pinned by shared/audio_vectors.json. */
+export const AUDIO_PAYLOAD_VERSION = 1;
+
+export async function encryptAudio(
+  dataKey: Bytes,
+  userId: string,
+  clientEntryId: string,
+  audio: Bytes,
+): Promise<{ blobB64: string }> {
+  try {
+    const aad = buildAad("audio", userId, clientEntryId, String(AUDIO_PAYLOAD_VERSION));
+    const blob = await encrypt(dataKey, audio, aad);
+    return { blobB64: toBase64(blob) };
+  } finally {
+    // The caller owns the plaintext audio (the recorder's blob); this
+    // function never zeroes what it did not allocate.
+  }
+}
+
+export async function decryptAudio(
+  dataKey: Bytes,
+  userId: string,
+  clientEntryId: string,
+  blobB64: string,
+): Promise<Bytes> {
+  const blob = fromBase64(blobB64);
+  try {
+    return await decrypt(dataKey, blob, buildAad("audio", userId, clientEntryId, String(AUDIO_PAYLOAD_VERSION)));
+  } catch (err) {
+    zeroize(blob);
+    throw err;
   }
 }

@@ -244,6 +244,34 @@ async def _processing_key_sweep(app: FastAPI) -> None:
         await asyncio.sleep(PROCESSING_KEY_PURGE_INTERVAL_SECONDS)
 
 
+async def _audio_retention_sweep(app: FastAPI) -> None:
+    """Recurring 30-day audio-attachment retention pass (VOICE_PLAN.md).
+
+    Deletes expired attachments' objects then rows, one bounded batch per
+    cycle; a store outage logs and retries next cycle (a failed pass must
+    never take the API down, and lazy per-fetch expiry still bounds
+    retention even while the sweeper is behind). No-ops cheaply when the
+    feature or store is unconfigured.
+    """
+    from .services.audio_store import get_audio_store, sweep_expired_audio
+
+    while True:
+        settings = app.state.settings
+        await asyncio.sleep(settings.audio_sweep_interval_seconds)
+        try:
+            if not getattr(settings, "audio_enabled", False):
+                continue
+            store = get_audio_store(settings)
+            async with app.state.sessionmaker() as session:
+                swept = await sweep_expired_audio(session, store)
+            if swept:
+                logger.info("audio retention sweep removed %d expired attachment(s)", swept)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("audio retention sweep failed; retrying next cycle")
+
+
 def _error_envelope(status_code: int, detail, code: str | None = None) -> dict:
     # detail is ALWAYS a human string — never the FastAPI default list of
     # {loc, msg, input} dicts (mobile parses it as a string, and input echo
@@ -344,6 +372,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             boot_guard_conn = await _acquire_cross_host_guard(app.state.engine)
             sweep_task: asyncio.Task | None = None
             key_sweep_task: asyncio.Task | None = None
+            audio_sweep_task: asyncio.Task | None = None
             try:
                 # create_all is a dev/test convenience only. Outside development
                 # the schema comes from `alembic upgrade head` (run by the image
@@ -384,6 +413,11 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 app.state.access_log_sweep_task = sweep_task
                 key_sweep_task = asyncio.create_task(_processing_key_sweep(app))
                 app.state.processing_key_sweep_task = key_sweep_task
+                # VOICE_PLAN (2026-09-29): attachment retention. The task
+                # itself reads the flag live each cycle, so a runtime flag
+                # flip needs no restart.
+                audio_sweep_task = asyncio.create_task(_audio_retention_sweep(app))
+                app.state.audio_sweep_task = audio_sweep_task
                 yield
             finally:
                 if sweep_task is not None:
@@ -392,6 +426,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 if key_sweep_task is not None:
                     key_sweep_task.cancel()
                     await asyncio.gather(key_sweep_task, return_exceptions=True)
+                if audio_sweep_task is not None:
+                    audio_sweep_task.cancel()
+                    await asyncio.gather(audio_sweep_task, return_exceptions=True)
                 # Process shutdown is a terminal lifecycle boundary: drop
                 # every key before disposing DB/network resources or returning
                 # control to a process manager that may retain memory briefly.

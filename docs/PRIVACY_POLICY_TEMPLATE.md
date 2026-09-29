@@ -135,3 +135,26 @@ own claims.`
 `OPERATOR-FILL: change-notification procedure (the product has no user
 email addresses — use the in-app notice path) and policy version
 history.`
+
+
+## Voice journaling (added 2026-09-29, VOICE_PLAN.md)
+
+If you record an entry instead of typing it:
+
+- Your recording is sent to a third-party transcription service
+  ({STT_PROVIDER_NAME}) only after you explicitly turn voice journaling
+  on, and is deleted from our systems immediately after transcription —
+  we never store the recording from that step. The service's retention
+  of its own copies is governed by its terms, disclosed at consent
+  ({STT_DATA_RETENTION}).
+- The transcript is stored like every entry: encrypted on your device
+  before it reaches us, in a form we cannot read. If you recorded in
+  another language, an English translation rides inside the same
+  encrypted payload so your therapist can read it.
+- If you keep a recording, it is encrypted on your device (we store only
+  ciphertext) and automatically deleted after
+  {AUDIO_RETENTION_DAYS} days. You can delete it sooner at any time;
+  deleting the entry deletes its recording.
+- Your therapist can hear your recordings only if you separately turn on
+  "let my therapist hear my recordings" for that therapist, and every
+  playback by a therapist is recorded in your access log.

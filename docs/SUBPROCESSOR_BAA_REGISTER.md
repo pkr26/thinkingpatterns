@@ -27,3 +27,12 @@ short; the obligation itself remains real.
 Maintenance rules: review the register at every DPIA review; record
 the date each processor was enabled; when a processor is removed,
 verify deletion per its contract and close the row with a date.
+
+
+## Voice journaling subprocessors (added 2026-09-29, VOICE_PLAN.md)
+
+| Subprocessor | Purpose | Data disclosed | Retention | BAA status |
+|---|---|---|---|---|
+| {STT_PROVIDER_NAME — OPERATOR-FILL} | Speech-to-text transcription of consented recordings | Raw audio, one call per recording; never stored by us | Per provider terms ({STT_DATA_RETENTION}) | OPERATOR-FILL |
+| {OBJECT STORAGE PROVIDER — OPERATOR-FILL, e.g. AWS S3} | Storage of KEPT recordings | Client-encrypted ciphertext only (unreadable to us); SSE at rest | 30-day rolling expiry + lifecycle backstop | OPERATOR-FILL |
+| {LLM PROVIDER — existing row applies} | English translation of transcript TEXT | Transcript text only | Per existing row | see above |

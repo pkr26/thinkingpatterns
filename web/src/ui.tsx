@@ -29,7 +29,8 @@ export type IconName =
   | "home" | "book" | "sparkles" | "help" | "clipboard" | "share" | "sliders"
   | "shield" | "flame" | "sun" | "moon" | "chevron-left" | "chevron-right"
   | "chevron-down" | "check" | "x" | "heart" | "alert" | "info" | "copy"
-  | "more" | "logout" | "edit" | "trash" | "search" | "refresh" | "phone";
+  | "more" | "logout" | "edit" | "trash" | "search" | "refresh" | "phone"
+  | "mic" | "play";
 
 const ICON_PATHS: Record<IconName, ReactNode> = {
   home: <><path d="M3 11.5 12 4l9 7.5" /><path d="M5.5 10v10h13V10" /></>,
@@ -59,6 +60,8 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   search: <><circle cx="11" cy="11" r="6.5" /><path d="M15.8 15.8 21 21" /></>,
   refresh: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4.5h-4.5" /></>,
   phone: <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z" />,
+  mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></>,
+  play: <><circle cx="12" cy="12" r="9" /><path d="M10 8.5l6 3.5-6 3.5z" /></>,
 };
 
 export function Icon(props: { name: IconName; size?: number }): React.JSX.Element {

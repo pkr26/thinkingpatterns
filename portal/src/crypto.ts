@@ -478,7 +478,16 @@ export async function decryptEntry(
   dataKey: Bytes,
   userId: string,
   entry: { client_entry_id: string; blob: string; content_version?: number },
-): Promise<{ text: string; created_at?: string; sentiment?: number | null }> {
+): Promise<{
+  text: string;
+  created_at?: string;
+  sentiment?: number | null;
+  /** Voice channels (payload v3, VOICE_PLAN 2026-09-29): absent on every
+   *  pre-voice entry. */
+  input_mode?: "typed" | "voice";
+  transcript_lang?: string;
+  english_text?: string | null;
+}> {
   const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let plain: Bytes | null = null;
@@ -668,4 +677,27 @@ export async function serverWrapKeyFingerprint(spkiB64: string): Promise<string>
   let hex = "";
   for (const byte of digest.subarray(0, 8)) hex += byte.toString(16).padStart(2, "0");
   return hex;
+}
+
+
+/** Decrypt one kept voice recording (VOICE_PLAN 2026-09-29): the same
+ *  AES-GCM envelope as entries under the patient's data key, AAD context
+ *  "audio" bound to (userId, clientEntryId, audio version 1). Called only
+ *  for consents carrying share_voice; the fetched bytes stay in memory and
+ *  the object URL the caller mints is revoked after playback. */
+export const AUDIO_PAYLOAD_VERSION = 1;
+
+export async function decryptAudio(
+  dataKey: Bytes,
+  userId: string,
+  clientEntryId: string,
+  blobB64: string,
+): Promise<Bytes> {
+  const { buildAad } = await import("./aad");
+  const encrypted = unb64(blobB64);
+  return await decrypt(
+    dataKey,
+    encrypted,
+    buildAad("audio", userId, clientEntryId, String(AUDIO_PAYLOAD_VERSION)),
+  );
 }

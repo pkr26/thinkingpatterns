@@ -65,6 +65,16 @@ export default defineConfig({
         find: /^react-native-keychain$/,
         replacement: fileURLToPath(new URL("./tests/helpers/keychainMock.ts", import.meta.url)),
       },
+      // Voice journaling (VOICE_PLAN 2026-09-29): expo modules load through
+      // the same mock discipline as the other native seams.
+      {
+        find: /^expo-audio$/,
+        replacement: fileURLToPath(new URL("./tests/helpers/expoAudioMock.ts", import.meta.url)),
+      },
+      {
+        find: /^expo-file-system(\/legacy)?$/,
+        replacement: fileURLToPath(new URL("./tests/helpers/expoFsMock.ts", import.meta.url)),
+      },
       {
         find: /^@react-navigation\/native-stack$/,
         replacement: fileURLToPath(new URL("./tests/helpers/navigationStackMock.tsx", import.meta.url)),

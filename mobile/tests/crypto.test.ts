@@ -306,9 +306,11 @@ describe("MindPatternCrypto payload helpers", () => {
       encrypt(k.dataKey, Buffer.from(JSON.stringify(payload)), buildAad("entry", "user-9", "e-f")).toString("base64");
     // A future schema roll must fail LOUDLY, not be silently miscast as a
     // v1/v2 shape (the same loud-fail contract decryptInsights carries).
+    // v3 is a KNOWN version since VOICE_PLAN (2026-09-29); the unknown
+    // future roll is v4 now.
     expect(() =>
-      decryptEntry(k, "user-9", "e-f", blobOf({ v: 3, text: "x", sentiment: null, created_at: "2026-09-01" })),
-    ).toThrow(/unsupported entry payload version: 3/);
+      decryptEntry(k, "user-9", "e-f", blobOf({ v: 4, text: "x", sentiment: null, created_at: "2026-09-01" })),
+    ).toThrow(/unsupported entry payload version: 4/);
     // A pre-versioning (or hostile) payload without v is unknown too.
     expect(() => decryptEntry(k, "user-9", "e-f", blobOf({ text: "no version" }))).toThrow(
       /unsupported entry payload version: undefined/,

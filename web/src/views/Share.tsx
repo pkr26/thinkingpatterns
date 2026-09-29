@@ -22,7 +22,7 @@ import { toBase64, zeroize } from "../crypto/core";
 import { keyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
 import { t } from "../strings";
 import { vault } from "../vault";
-import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Icon, Note, PillNote } from "../ui";
+import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Icon, Note, PillNote, Toggle } from "../ui";
 
 export function ShareView(): React.JSX.Element {
   const [consents, setConsents] = useState<ListedConsent[] | null>(null);
@@ -169,6 +169,26 @@ export function ShareView(): React.JSX.Element {
     }
   };
 
+  /** Share-voice toggle (VOICE_PLAN 2026-09-29): verifier-gated like every
+   *  scope change on a live grant; optimistic-failure honest (reload on
+   *  error). */
+  const toggleShareVoice = async (consent: ListedConsent, enabled: boolean): Promise<void> => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.setShareVoice(consent.id, enabled, toBase64(vault.get().authKey));
+      setConsents((current) =>
+        (current ?? []).map((row) => (row.id === consent.id ? { ...row, share_voice: enabled } : row)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("share.webRevokeFailed"));
+      const rows = await api.listConsents().catch(() => null);
+      if (rows) setConsents(rows);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const active = consents?.filter((consent) => consent.status === "active") ?? [];
   const past = consents?.filter((consent) => consent.status !== "active") ?? [];
 
@@ -233,6 +253,13 @@ export function ShareView(): React.JSX.Element {
                 <Note tone="muted">{t("share.webSinceDate", { date: consent.granted_at.slice(0, 10) })}</Note>
               </div>
             </div>
+            <Toggle
+              checked={consent.share_voice === true}
+              onChange={(enabled) => void toggleShareVoice(consent, enabled)}
+              disabled={busy}
+              label={consent.share_voice === true ? t("share.voiceOn") : t("share.voiceOff")}
+            />
+            {consent.share_voice === true && <Note tone="muted">{t("share.voiceNote")}</Note>}
             {armedRevoke === consent.id ? (
               <div className="row row--wrap">
                 <Button label={t("share.webRevoke")} onPress={() => void revoke(consent)} small danger disabled={busy} />

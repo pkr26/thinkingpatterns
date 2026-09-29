@@ -75,6 +75,7 @@ from ..schemas import (
     TherapistAccessLogOut,
     NoteRevisionOut,
     WrapKeyRotateRequest,
+    AudioAttachmentOut,
     entry_out,
 )
 from ..security import sharing, tokens
@@ -106,6 +107,7 @@ from .entries import (
     ENTRIES_REVISION_HEADER,
     MAX_COLLECTION_REVISION,
     _blob_length as _entry_blob_length,
+    audio_meta_map,
     current_entries_revision,
 )
 from .insights import _entry_dates, _latest_insight
@@ -114,6 +116,12 @@ router = APIRouter(
     prefix="/therapist",
     tags=["therapist"],
 )
+
+# VOICE_PLAN (2026-09-29): the audio fetch path logs store failures (row
+# ids only — never entry content).
+import logging  # noqa: E402
+
+logger = logging.getLogger("mindpattern.therapist")
 
 # How long a pairing code lives (single-use). Generated fresh per attempt;
 # the portal displays it, the patient types it.
@@ -1369,7 +1377,12 @@ async def read_patient_entries(
             # the consent fence; once the lock opens a revoke may return, and
             # this request must not newly materialize journal bytes from an
             # already-loaded ORM row after that linearization point.
-            result = [entry_out(row) for row in rows]
+            audio_meta = await audio_meta_map(
+                session, consent.user_id, [row.client_entry_id for row in rows]
+            )
+            result = [
+                entry_out(row, audio=audio_meta.get(row.client_entry_id)) for row in rows
+            ]
             final_revision = await current_entries_revision(session, consent.user_id)
             if final_revision != revision:
                 raise collection_changed_error("entries", ENTRIES_REVISION_HEADER, final_revision)
@@ -1391,6 +1404,109 @@ async def read_patient_entries(
             # commit and stay unaudited: no ciphertext was served. This
             # trailing commit closes the read transaction symmetrically.
             await session.commit()
+    return result
+
+
+# --- voice recordings (VOICE_PLAN 2026-09-29) -----------------------------------
+
+
+@router.get(
+    "/patients/{user_id}/audio/{attachment_id}",
+    response_model=AudioAttachmentOut,
+    dependencies=[
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-audio", "read_rate_limit", "read_rate_window")),
+    ],
+)
+async def read_patient_audio(
+    user_id: str,
+    attachment_id: str,
+    request: Request,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+):
+    """Fetch one of the patient's kept voice recordings for playback.
+
+    Two independent gates beyond the ordinary consent wall:
+      * the consent must carry ``share_voice`` — the patient's explicit,
+        default-off grant that this therapist may hear the actual voice
+        (tone is the most identifying PHI in the system); and
+      * every successful fetch writes an ``audio_access`` audit row that
+        survives in the patient's own access trail.
+
+    The bytes are the same opaque client-side envelope the patient's app
+    stored; the portal decrypts with the unwrapped data key exactly as it
+    does for entries.
+    """
+    from ..models import AudioAttachment
+    from ..services.audio_store import AudioStoreError, get_audio_store
+
+    settings = request.app.state.settings
+    if len(user_id) > 32:
+        raise ApiError(status_code=404, detail="patient not found", code="not_found")
+    store = get_audio_store(settings)
+    if store is None:
+        raise ApiError(
+            status_code=503,
+            detail="audio storage is not configured on this server",
+            code="audio_storage_unconfigured",
+        )
+    result: AudioAttachmentOut
+    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+        async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
+            consent = await _active_consent(session, user, user_id)
+            if not consent.share_voice:
+                raise ApiError(
+                    status_code=403,
+                    detail="patient has not shared voice recordings",
+                    code="consent_voice_share_required",
+                )
+            row = await session.get(AudioAttachment, attachment_id)
+            if row is None or row.user_id != consent.user_id:
+                raise ApiError(
+                    status_code=404, detail="attachment not found", code="not_found"
+                )
+            if row.expires_at <= utcnow():
+                # Same lazy-expiry contract as the patient path; the audit
+                # row below only records SERVED ciphertext.
+                try:
+                    await store.delete(row.storage_key)
+                except AudioStoreError:
+                    logger.warning(
+                        "lazy expiry could not delete object for %s; row kept", row.id
+                    )
+                    raise ApiError(
+                        status_code=410, detail="recording expired", code="audio_expired"
+                    ) from None
+                await session.delete(row)
+                await session.commit()
+                raise ApiError(
+                    status_code=410, detail="recording expired", code="audio_expired"
+                )
+            try:
+                blob = await store.get(row.storage_key)
+            except AudioStoreError:
+                logger.warning("audio get failed for attachment %s", row.id)
+                raise ApiError(
+                    status_code=502,
+                    detail="audio storage failed",
+                    code="audio_storage_failed",
+                ) from None
+            await _audit(session, user, consent.user_id, "audio_access")
+            # The audit fact must survive any response-construction failure
+            # (the entries route's M-30 discipline): commit the row before
+            # the envelope leaves the fence.
+            await session.commit()
+            result = AudioAttachmentOut(
+                id=row.id,
+                client_entry_id=row.client_entry_id,
+                blob=base64.b64encode(blob).decode("ascii"),
+                mime_type=row.mime_type,
+                duration_seconds=row.duration_seconds,
+                size_bytes=row.size_bytes,
+                created_at=row.created_at,
+                expires_at=row.expires_at,
+            )
     return result
 
 

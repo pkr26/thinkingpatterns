@@ -480,6 +480,23 @@ export interface PortalEntry {
    * generation — v2 entries bind it into the four-part entry AAD. Older
    * serialized shapes without the field still decode (additive rule). */
   content_version?: number;
+  /** Unexpired kept-recording metadata (VOICE_PLAN 2026-09-29); absent on
+   *  entries without audio and on pre-voice backends. */
+  audio?: { attachment_id: string; expires_at: string } | null;
+}
+
+/** GET /therapist/patients/{id}/audio/{attachmentId} (VOICE_PLAN): the
+ *  encrypted recording + playback metadata. Requires the consent's
+ *  share_voice grant; every fetch is audit-logged server-side. */
+export interface PortalAudioAttachment {
+  id: string;
+  client_entry_id: string;
+  blob: string;
+  mime_type: string;
+  duration_seconds: number;
+  size_bytes: number;
+  created_at: string;
+  expires_at: string;
 }
 
 /** The backend caps a therapist evidence response at 25 rows and 2 MiB of
@@ -765,6 +782,15 @@ export const api = {
       ),
     };
   },
+  /** Fetch one kept voice recording for playback (VOICE_PLAN 2026-09-29).
+   *  The consent must carry share_voice; the server audit-logs every
+   *  access. Returns the encrypted blob — decryption stays client-side. */
+  patientAudio: (userId: string, attachmentId: string): Promise<PortalAudioAttachment> =>
+    request<PortalAudioAttachment>(
+      "GET",
+      `/therapist/patients/${encodeURIComponent(userId)}/audio/${encodeURIComponent(attachmentId)}`,
+    ),
+
   patientEntries: async (
     userId: string,
     params: { since?: string; until?: string; offset?: number; expectedRevision?: string } = {},

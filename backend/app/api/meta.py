@@ -11,6 +11,7 @@ from ..api.consents import SHARING_DISCLOSURE_VERSION
 from ..cache import make_rate_limiter
 from ..schemas import MetaResponse
 from ..services.llm import processing_policy_fingerprint
+from ..services.stt import processing_policy_fingerprint as stt_policy_fingerprint
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
@@ -53,5 +54,26 @@ async def get_meta(request: Request) -> MetaResponse:
         ),
         sharing_access_log_retention_days=(
             settings.access_log_retention_days if settings.therapist_sharing_enabled else None
+        ),
+        # Voice journaling (2026-09-29): the mic button renders only when
+        # the flag is on AND an STT endpoint exists — and per the L-31
+        # discipline, every stt_* declaration is None otherwise, so a
+        # client can never render provider/retention consent copy for a
+        # path that cannot run.
+        audio_available=bool(settings.audio_enabled and settings.stt_url.strip()),
+        stt_provider_name=(
+            (settings.stt_provider_name.strip() or None)
+            if settings.audio_enabled and settings.stt_url.strip()
+            else None
+        ),
+        stt_data_retention=(
+            (settings.stt_data_retention.strip() or None)
+            if settings.audio_enabled and settings.stt_url.strip()
+            else None
+        ),
+        stt_policy_fingerprint=(
+            stt_policy_fingerprint(settings)
+            if settings.audio_enabled and settings.stt_url.strip()
+            else None
         ),
     )

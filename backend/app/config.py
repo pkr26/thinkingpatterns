@@ -456,6 +456,52 @@ class Settings:
     llm_data_retention: str = ""
     llm_policy_version: str = "v1"
 
+    # --- voice journaling (2026-09-29, VOICE_PLAN.md) ------------------------
+    #
+    # Fail closed like therapist sharing: production defaults OFF (the
+    # whole /audio router 404s until an operator opts in), while
+    # development defaults ON so the full contract is testable without
+    # env ceremony. stt_url empty = no transcription path (endpoints
+    # answer 503 stt_unconfigured); the same production discipline as
+    # llm_url applies — https-only (dev loopback exempt), and an enabled
+    # production STT requires explicit provider/retention/policy
+    # declarations that feed the voice-consent fingerprint.
+    audio_enabled: bool | None = None
+    stt_url: str = ""
+    stt_api_key: str = field(default="", repr=False)
+    stt_model: str = "whisper-1"
+    stt_provider_name: str = ""
+    stt_data_retention: str = ""
+    stt_policy_version: str = "v1"
+    # Route-scoped body cap for /audio requests (a 5-minute compressed
+    # take is ~1.2 MB base64; 4 MiB is generous headroom). Counted in the
+    # edge body-buffer budget through max(max_body_bytes, this) below.
+    audio_max_body_bytes: int = 4 * 1024 * 1024
+    # Client-enforced recording cap is 300s; the server bound carries
+    # upload-clock skew.
+    audio_max_duration_seconds: int = 310
+    # Own buckets: transcription dispatches third-party spend, uploads
+    # move ~1 MiB bodies — neither may ride the generic read/entries
+    # buckets.
+    audio_transcribe_rate_limit: int = 10
+    audio_transcribe_rate_window: int = 3_600
+    audio_upload_rate_limit: int = 30
+    audio_upload_rate_window: int = 3_600
+    # Attachments (P2): 30-day expiry is the user-agreed retention story
+    # (transcript is the durable record; audio is a 30-day convenience).
+    audio_retention_days: int = 30
+    audio_max_user_bytes: int = 64 * 1024 * 1024
+    # Object storage: S3 when the bucket is named, else the local-dir
+    # fallback (dev/self-host; the get_enricher-style "unconfigured
+    # degrades visibly" posture).
+    audio_bucket: str = ""
+    audio_bucket_region: str = ""
+    audio_aws_access_key_id: str = field(default="", repr=False)
+    audio_aws_secret_access_key: str = field(default="", repr=False)
+    audio_local_dir: str = ""
+    audio_sweep_interval_seconds: int = 900
+
+
     # Therapist sharing is intentionally development-convenient but
     # production-fail-closed. A production operator must explicitly enable
     # it and supply a controlled enrollment secret; there is no anonymous
@@ -518,6 +564,12 @@ class Settings:
             )
         if self.therapist_sharing_enabled is None:
             self.therapist_sharing_enabled = self.environment == "development"
+        # Voice journaling follows the sharing convention: development
+        # defaults ON (routes answer 503 stt_unconfigured without a
+        # provider, which the tests pin), every other environment stays
+        # off until an operator opts in.
+        if self.audio_enabled is None:
+            self.audio_enabled = self.environment == "development"
         if not self.token_secret.strip():
             # An explicitly-empty secret is not "unset": without this check
             # HMAC-SHA256(b"") happily signs tokens in staging/prod/anything.
@@ -592,6 +644,13 @@ class Settings:
             "export_rate_window",
             "ops_rate_limit",
             "ops_rate_window",
+            "audio_transcribe_rate_limit",
+            "audio_transcribe_rate_window",
+            "audio_upload_rate_limit",
+            "audio_upload_rate_window",
+            "audio_max_duration_seconds",
+            "audio_retention_days",
+            "audio_sweep_interval_seconds",
             "body_read_timeout_seconds",
             "max_entries_per_user",
             "recompute_entry_limit",
@@ -632,6 +691,8 @@ class Settings:
             "read_rate_window",
             "export_rate_window",
             "ops_rate_window",
+            "audio_transcribe_rate_window",
+            "audio_upload_rate_window",
         ):
             if getattr(self, name) > MAX_RATE_WINDOW_SECONDS:
                 raise RuntimeError(f"{name} must be <= {MAX_RATE_WINDOW_SECONDS}")
@@ -644,12 +705,38 @@ class Settings:
             "read_rate_limit",
             "export_rate_limit",
             "ops_rate_limit",
+            "audio_transcribe_rate_limit",
+            "audio_upload_rate_limit",
         ):
             if getattr(self, name) > MAX_RATE_LIMIT:
                 raise RuntimeError(f"{name} must be <= {MAX_RATE_LIMIT}")
-        for name in ("max_body_bytes", "max_user_blob_bytes", "analysis_blob_budget"):
+        for name in (
+            "max_body_bytes",
+            "max_user_blob_bytes",
+            "analysis_blob_budget",
+            "audio_max_body_bytes",
+            "audio_max_user_bytes",
+        ):
             if getattr(self, name) < 1024:
                 raise RuntimeError(f"{name} must be >= 1024")
+        # Voice-plan bounds: the recording cap may not exceed one hour (a
+        # longer ceiling would be a different product decision than the
+        # 5-minute journaling take this feature is), attachment retention
+        # shares the access-log 1..3650 two-sided discipline (0 would prune
+        # every attachment on the first sweep), the audio quota keeps the
+        # same 8 GiB ceiling as the entry quota, and the audio body cap
+        # keeps the MAX_BODY_BYTES ceiling so one knob cannot bypass the
+        # documented edge limits.
+        if self.audio_max_duration_seconds > 3_600:
+            raise RuntimeError("audio_max_duration_seconds must be <= 3600")
+        if not 1 <= self.audio_retention_days <= 3_650:
+            raise RuntimeError("audio_retention_days must be between 1 and 3650")
+        if self.audio_max_user_bytes > MAX_USER_BLOB_BYTES:
+            raise RuntimeError("audio_max_user_bytes must be <= 8 GiB")
+        if self.audio_max_body_bytes > MAX_BODY_BYTES:
+            raise RuntimeError(f"audio_max_body_bytes must be <= {MAX_BODY_BYTES}")
+        if self.audio_sweep_interval_seconds > 86_400:
+            raise RuntimeError("audio_sweep_interval_seconds must be <= 86400")
         # An analysis budget above the storage quota is misconfiguration
         # (it must BOUND recompute memory below the quota), and 64 MiB of
         # ciphertext is already 8x the 2M-char text analysis budget.
@@ -709,16 +796,20 @@ class Settings:
         # in-flight request, so the deployment's worst-case buffer memory is
         # this product. Refuse the combination up front with the arithmetic
         # in the message — an operator raising either knob alone must see
-        # exactly which budget they blew.
+        # exactly which budget they blew. VOICE_PLAN (2026-09-29): /audio
+        # routes carry their own larger cap, so the budget is judged on the
+        # LARGER of the two caps (a body flood will aim at the audio route).
         if not 1 <= self.body_buffer_concurrency <= 100_000:
             raise RuntimeError("body_buffer_concurrency must be between 1 and 100000")
-        if self.max_body_bytes * self.body_buffer_concurrency > MAX_BODY_BUFFER_BUDGET_BYTES:
+        worst_case_body_bytes = max(self.max_body_bytes, self.audio_max_body_bytes)
+        if worst_case_body_bytes * self.body_buffer_concurrency > MAX_BODY_BUFFER_BUDGET_BYTES:
             raise RuntimeError(
-                "max_body_bytes * body_buffer_concurrency exceeds the edge "
-                f"body-buffer memory budget ({MAX_BODY_BUFFER_BUDGET_BYTES} bytes): "
-                f"{self.max_body_bytes} * {self.body_buffer_concurrency}. Lower one of "
-                "them (or raise the budget with eyes open) — a body-size flood "
-                "otherwise buffers past the container's memory."
+                "max(max_body_bytes, audio_max_body_bytes) * body_buffer_concurrency "
+                "exceeds the edge body-buffer memory budget "
+                f"({MAX_BODY_BUFFER_BUDGET_BYTES} bytes): {worst_case_body_bytes} * "
+                f"{self.body_buffer_concurrency}. Lower one of them (or raise the "
+                "budget with eyes open) — a body-size flood otherwise buffers "
+                "past the container's memory."
             )
         if self.db_pool_timeout > MAX_DB_POOL_TIMEOUT:
             raise RuntimeError(f"db_pool_timeout must be <= {MAX_DB_POOL_TIMEOUT}")
@@ -813,6 +904,65 @@ class Settings:
             raise RuntimeError("llm_provider_name must be at most 120 characters")
         if len(self.llm_data_retention.strip()) > 500:
             raise RuntimeError("llm_data_retention must be at most 500 characters")
+        # --- voice journaling validation (VOICE_PLAN.md, 2026-09-29) ---------
+        if self.stt_url.strip():
+            # Recorded audio is POSTed to this endpoint, so it gets exactly
+            # the llm_url transport discipline: https-only outside an exact
+            # development loopback, no credentials/paths in the URL, and
+            # malformed authorities fail at boot.
+            try:
+                parsed = urlparse(self.stt_url.strip())
+                _ = parsed.port
+            except ValueError as exc:
+                raise RuntimeError("MINDPATTERN_STT_URL contains an invalid authority") from exc
+            stt_dev_loopback = (
+                self.environment == "development"
+                and parsed.scheme == "http"
+                and _is_loopback_hostname(parsed.hostname)
+            )
+            if (
+                not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+                or (parsed.scheme != "https" and not stt_dev_loopback)
+            ):
+                raise RuntimeError(
+                    "MINDPATTERN_STT_URL must use https:// — recorded audio is "
+                    "POSTed to it. Plain http:// is only accepted for exact "
+                    "loopback hosts with MINDPATTERN_ENV=development exactly."
+                )
+            if not self.stt_api_key.strip():
+                # Warn but boot: mirrors the LLM loopback-dev posture.
+                logger.warning(
+                    "MINDPATTERN_STT_URL is set but MINDPATTERN_STT_API_KEY is "
+                    "empty — STT requests will go out without an API key"
+                )
+            if self.environment != "development":
+                missing_stt_terms = [
+                    name
+                    for name, value in (
+                        ("MINDPATTERN_STT_PROVIDER_NAME", self.stt_provider_name),
+                        ("MINDPATTERN_STT_DATA_RETENTION", self.stt_data_retention),
+                        ("MINDPATTERN_STT_POLICY_VERSION", self.stt_policy_version),
+                    )
+                    if not value.strip()
+                ]
+                if missing_stt_terms:
+                    raise RuntimeError(
+                        "a configured production STT requires explicit provider, "
+                        "retention, and policy version declarations (set "
+                        + ", ".join(missing_stt_terms)
+                        + ")"
+                    )
+        if len(self.stt_policy_version.strip()) > 64:
+            raise RuntimeError("stt_policy_version must be at most 64 characters")
+        if len(self.stt_provider_name.strip()) > 120:
+            raise RuntimeError("stt_provider_name must be at most 120 characters")
+        if len(self.stt_data_retention.strip()) > 500:
+            raise RuntimeError("stt_data_retention must be at most 500 characters")
         if self.therapist_sharing_enabled and self.environment != "development":
             if len(self.therapist_enrollment_token.strip()) < 32:
                 raise RuntimeError(
@@ -879,6 +1029,31 @@ class Settings:
             llm_provider_name=os.getenv("MINDPATTERN_LLM_PROVIDER_NAME", ""),
             llm_data_retention=os.getenv("MINDPATTERN_LLM_DATA_RETENTION", ""),
             llm_policy_version=os.getenv("MINDPATTERN_LLM_POLICY_VERSION", "v1"),
+            # Voice journaling (VOICE_PLAN.md): same secret-file resolution
+            # as every other credential-bearing setting.
+            audio_enabled=_optional_bool_env("MINDPATTERN_AUDIO_ENABLED"),
+            stt_url=os.getenv("MINDPATTERN_STT_URL", "").strip(),
+            stt_api_key=_secret_env("MINDPATTERN_STT_API_KEY"),
+            stt_model=os.getenv("MINDPATTERN_STT_MODEL", "whisper-1"),
+            stt_provider_name=os.getenv("MINDPATTERN_STT_PROVIDER_NAME", ""),
+            stt_data_retention=os.getenv("MINDPATTERN_STT_DATA_RETENTION", ""),
+            stt_policy_version=os.getenv("MINDPATTERN_STT_POLICY_VERSION", "v1"),
+            audio_max_body_bytes=_int_env("MINDPATTERN_AUDIO_MAX_BODY_BYTES", 4 * 1024 * 1024),
+            audio_max_duration_seconds=_int_env("MINDPATTERN_AUDIO_MAX_DURATION_SECONDS", 310),
+            audio_transcribe_rate_limit=_int_env("MINDPATTERN_AUDIO_TRANSCRIBE_RATE_LIMIT", 10),
+            audio_transcribe_rate_window=_int_env("MINDPATTERN_AUDIO_TRANSCRIBE_RATE_WINDOW", 3600),
+            audio_upload_rate_limit=_int_env("MINDPATTERN_AUDIO_UPLOAD_RATE_LIMIT", 30),
+            audio_upload_rate_window=_int_env("MINDPATTERN_AUDIO_UPLOAD_RATE_WINDOW", 3600),
+            audio_retention_days=_int_env("MINDPATTERN_AUDIO_RETENTION_DAYS", 30),
+            audio_max_user_bytes=_int_env(
+                "MINDPATTERN_AUDIO_MAX_USER_BYTES", 64 * 1024 * 1024
+            ),
+            audio_bucket=os.getenv("MINDPATTERN_AUDIO_BUCKET", "").strip(),
+            audio_bucket_region=os.getenv("MINDPATTERN_AUDIO_BUCKET_REGION", "").strip(),
+            audio_aws_access_key_id=_secret_env("MINDPATTERN_AWS_ACCESS_KEY_ID"),
+            audio_aws_secret_access_key=_secret_env("MINDPATTERN_AWS_SECRET_ACCESS_KEY"),
+            audio_local_dir=os.getenv("MINDPATTERN_AUDIO_LOCAL_DIR", "").strip(),
+            audio_sweep_interval_seconds=_int_env("MINDPATTERN_AUDIO_SWEEP_INTERVAL_SECONDS", 900),
             therapist_sharing_enabled=_optional_bool_env("MINDPATTERN_THERAPIST_SHARING_ENABLED"),
             therapist_enrollment_token=_secret_env("MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN"),
             cors_origins=_cors_origins(),

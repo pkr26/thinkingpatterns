@@ -32,8 +32,15 @@ from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
-from ..models import Entry, User
-from ..schemas import CLIENT_ID_PATTERN, EntryCreate, EntryOut, EntryReplace, entry_out
+from ..models import AudioAttachment, Entry, User, utcnow
+from ..schemas import (
+    CLIENT_ID_PATTERN,
+    AudioAttachmentMeta,
+    EntryCreate,
+    EntryOut,
+    EntryReplace,
+    entry_out,
+)
 from ..security.crypto import MIN_BLOB_SIZE
 from ._paging import (
     MAX_COLLECTION_REVISION,
@@ -90,6 +97,74 @@ async def current_entries_revision(session: AsyncSession, user_id: str) -> int:
     if revision is None:
         raise collection_changed_error("entries", ENTRIES_REVISION_HEADER)
     return int(revision)
+
+
+async def audio_meta_map(
+    session: AsyncSession, user_id: str, client_entry_ids: list[str]
+) -> dict[str, AudioAttachmentMeta]:
+    """Unexpired kept-recording metadata for a page of entries
+    (VOICE_PLAN 2026-09-29). One bounded metadata join — no blobs, no
+    decryption; shared by the patient listing and the portal's patient
+    listing so the two can never disagree about which entries carry
+    audio."""
+    if not client_entry_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                AudioAttachment.client_entry_id,
+                AudioAttachment.id,
+                AudioAttachment.expires_at,
+            ).where(
+                AudioAttachment.user_id == user_id,
+                AudioAttachment.client_entry_id.in_(client_entry_ids),
+                AudioAttachment.expires_at > utcnow(),
+            )
+        )
+    ).all()
+    return {
+        row.client_entry_id: AudioAttachmentMeta(
+            attachment_id=row.id, expires_at=row.expires_at
+        )
+        for row in rows
+    }
+
+
+async def delete_attachment_for_entry(
+    session: AsyncSession, settings, user_id: str, client_entry_id: str
+) -> None:
+    """Cascade half of entry deletion (VOICE_PLAN): the entry's kept
+    recording dies with it — object first, then row. A store failure must
+    NOT abort the entry deletion (the recording's retention clock is
+    already running); it logs and leaves the orphan to the S3-lifecycle
+    backstop / dev scratch dir."""
+    from ..services.audio_store import get_audio_store
+
+    row = (
+        (
+            await session.execute(
+                select(AudioAttachment).where(
+                    AudioAttachment.user_id == user_id,
+                    AudioAttachment.client_entry_id == client_entry_id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        return
+    store = get_audio_store(settings)
+    if store is not None:
+        try:
+            await store.delete(row.storage_key)
+        except Exception:  # noqa: BLE001 — entry deletion stands regardless
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "entry delete: audio object %s could not be removed", row.storage_key
+            )
+    await session.delete(row)
 
 
 async def _increment_entries_revision(session: AsyncSession, user: User) -> int:
@@ -495,7 +570,15 @@ async def list_entries(
                     header_name=ENTRIES_REVISION_HEADER,
                     revision=revision,
                 )
-            result = [entry_out(row) for row in ordered_rows]
+            # VOICE_PLAN (2026-09-29): play-button/expiry metadata joins the
+            # page (bounded ids-only query; no blobs touched).
+            audio_meta = await audio_meta_map(
+                session, fresh_user.id, [row.client_entry_id for row in ordered_rows]
+            )
+            result = [
+                entry_out(row, audio=audio_meta.get(row.client_entry_id))
+                for row in ordered_rows
+            ]
             final_revision = await current_entries_revision(session, fresh_user.id)
             if final_revision != revision:
                 raise collection_changed_error("entries", ENTRIES_REVISION_HEADER, final_revision)
@@ -561,6 +644,7 @@ async def get_entry(
 async def delete_entry(
     client_entry_id: str,
     response: Response,
+    request: Request,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -584,6 +668,11 @@ async def delete_entry(
             )
             if db_rowcount(result) == 0:
                 raise ApiError(status_code=404, detail="entry not found", code="not_found")
+            # VOICE_PLAN (2026-09-29): a kept recording dies with its entry
+            # — object first, then row, inside the same transaction/lock.
+            await delete_attachment_for_entry(
+                session, request.app.state.settings, fresh_user.id, client_entry_id
+            )
             # 2026-09-26 audit item 23: a bare 204 forced a paged-sync client
             # that had just deleted an entry to issue an extra GET just to
             # learn the new snapshot marker. Echo the post-delete revision
