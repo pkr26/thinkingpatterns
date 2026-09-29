@@ -14,6 +14,76 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed — audio store erasure hygiene (2026-09-29, E2E campaign finding)
+
+`LocalAudioStore.delete` now prunes the account's directory once its
+last object is removed (best-effort, `rmdir`-based): the storage key
+layout embeds the account id (`audio/<user-id>/<uuid>.enc`), so an
+account erasure — or an entry cascade — that deleted every object but
+left the empty `audio/<erased-id>/` directory behind kept the erased
+identity on disk as a directory name. A directory that still holds an
+object is untouched, other accounts are untouched, and repeated
+deletes stay idempotent. Pinned by a store-level unit test
+(`test_local_store_prunes_empty_user_dirs`) and by the extended M2
+erasure test (the account's directory must be gone, not just its
+objects); proven end-to-end by the re-run voice+text campaign (the
+gina erasure check is tightened back to directory-gone, 366/366).
+
+### Testing — voice+text 1-year E2E campaign (2026-09-29, 366/366)
+
+The standing full-system simulation (`reports/simulation1y/`, previously
+10 typed users / 246 checks) is extended to the voice feature and
+re-run green end to end:
+
+- **Three new personas who journal by voice AND text, for a year**:
+  rosa (Spanish takes, native-es analysis), amara (French takes,
+  analyzed through their English translations — the D-7 routing), and
+  kwame (English takes + 54 kept recordings; a spoken-year CONTROL
+  that surfaces zero statistical kinds). 995 spoken takes went through
+  the real pipeline: synthetic recording → `/audio/transcriptions`
+  (multipart, bearer-keyed) → transcript + language + LLM translation
+  → payload-v3 entry under the entry AAD → `/entries`, against two
+  in-process OpenAI-compatible fake providers the campaign serves
+  (STT + chat-completions), so the server's real STT/LLM clients make
+  genuine HTTP round-trips.
+- **The privacy walls are proven live, not asserted**: voice consent
+  required before any transcribe/upload (403s + role/anonymous walls);
+  the H4 gate — an account with voice consent but no CURRENT llm
+  consent transcribes with `english_text: null` while the fake
+  provider's dispatch log stays empty; consent records carry the
+  policy fingerprint (Art. 7) and wipe on disable.
+- **The full kept-recording lifecycle**: client-side-encrypted upload
+  (the "audio" AAD tuple), owner fetch decrypts byte-identically,
+  replace deletes the old object (no disk orphans), delete keeps the
+  entry and drops its audio meta, lazy expiry answers 410 then removes
+  the row, the 256 KiB quota refuses at 413 with replace accounting,
+  and voice-consent-off stops transcription/uploads while kept audio
+  stays playable.
+- **Therapist voice sharing end to end**: share-voice toggle is
+  verifier-fenced (422/403/200), the portal roster serves the live
+  grant, the therapist decrypts a v3 voice entry and PLAYS the kept
+  recording with the unwrapped key (byte-exact take), other
+  therapists get flat 404s, off → 403, revoke → the audio path dies,
+  and every playback writes an `audio_access` audit row the patient
+  sees in their access log.
+- **Resilience + erasure**: the STT 429-with-Retry-After path retries
+  exactly once and succeeds; a hard-failing provider maps to 502
+  `stt_upstream` after one bounded retry; account erasure deletes the
+  kept-recording OBJECTS (M2), not just the rows. At-rest probes now
+  cover the audio store (ciphertext-only objects) and Spanish/French/
+  synthetic-marker plaintext in the DB and WAL.
+- The campaign also adapts the LLM-consent phase to the configured-
+  provider world (enable → 200 against the live fingerprint; the
+  unconfigured 409 remains pinned by unit tests), accepts analyzer
+  `llm` for llm-consented users (brain-first enricher, narration-only
+  dispatch observed where findings were narratable), and pins
+  determinism (live == single-shot replay) for all 13 personas with
+  D-7 analysis-text routing mirrored in the offline replay.
+- Full story: `reports/simulation1y/SIMULATION_REPORT.md` (19 phases,
+  run instructions with the fake-provider env, honest observations —
+  including that the H4 gate correctly refused translation on the
+  campaign's own first mistake).
+
 ### Security — voice-journaling audit remediation (2026-09-29, same day)
 
 Full remediation of the independent post-commit audit

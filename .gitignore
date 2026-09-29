@@ -39,6 +39,9 @@ backend/.artifacts/
 # dev artifacts — never commit real databases
 backend/mindpattern.db
 backend/demo.db
+# runtime object store (local audio backend, sim campaigns) — ciphertext
+# only, but it is generated state, not source
+backend/data/
 .tools/
 
 # Monitoring scrape credential (0600, operator-created — never commit)

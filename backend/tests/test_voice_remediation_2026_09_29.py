@@ -256,16 +256,22 @@ async def test_account_erasure_removes_audio_objects(client, app, settings):
     store = get_audio_store(app.state.settings)
     objects = {p.name for p in store.root.rglob("*.enc")}
     assert len(objects) == 1
+    user_dir = store.root / "audio" / emu.user_id
+    assert user_dir.is_dir()
 
     response = await client.request(
         "DELETE", "/api/account", headers=emu.headers, json={"verifier": emu.auth_key_b64}
     )
     assert response.status_code == 204, response.text
-    # Rows gone (cascade) AND the stored object gone (the M2 fix).
+    # Rows gone (cascade) AND the stored object gone (the M2 fix) — and
+    # the account's directory too: the key layout embeds the user id, so
+    # an empty audio/<erased-id>/ leftover would keep the erased identity
+    # on disk as a directory name (2026-09-29 E2E campaign finding).
     async with app.state.sessionmaker() as session:
         remaining = (await session.execute(select(AudioAttachment))).scalars().all()
         assert remaining == []
     assert {p.name for p in store.root.rglob("*.enc")} == set()
+    assert not user_dir.exists()
 
 
 # --- M4/M9: S3 store mechanics against an injected fake boto3 -------------------

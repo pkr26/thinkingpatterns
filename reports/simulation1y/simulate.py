@@ -1,11 +1,44 @@
 #!/usr/bin/env python3
-"""365-day, 10-user MindPattern end-to-end simulation + full-API campaign.
+"""365-day, 13-user MindPattern end-to-end simulation + full-API campaign.
 
 Successor of reports/simulation60 (60 days, 5 users, 5 endpoints): the
 same live-API philosophy — every entry synced through the real server
-with the real client crypto — extended to a full year, ten personas,
-and EVERY route the backend mounts (52 endpoints), plus every
-functionality that only a year of data exercises:
+with the real client crypto — extended to a full year, thirteen
+personas, and EVERY route the backend mounts, plus every functionality
+that only a year of data exercises.
+
+2026-09-29 VOICE EXTENSION: the campaign now exercises the whole voice
+journaling surface as three additional real users who MIX voice and
+typed entries, against two in-process fake providers the script itself
+serves (an OpenAI-compatible STT endpoint and an OpenAI-compatible
+chat-completions endpoint — the server cannot tell them from the real
+things, which is the point):
+
+  * rosa  — Spanish-speaking voice journaler: recordings transcribed
+    through the STT round-trip, translated by the LLM path, saved as
+    payload-v3 entries (input_mode=voice, transcript_lang=es,
+    english_text), native-Spanish analysis (D-7 en/es routing);
+  * amara — French-speaking voice journaler: the French transcripts
+    are analyzed THROUGH their English translations (D-7 routing for
+    languages without lexicons) — a pattern must surface from the
+    translated text, and no pattern label may contain French;
+  * kwame — English voice journaler + kept recordings: the full
+    attachment lifecycle (encrypt-under-data-key upload, owner fetch
+    byte-identical, replace, delete, lazy expiry 410, quota 413), the
+    share-voice grant (therapist playback decrypts with the unwrapped
+    key; off → 403; revoked consent → 404), and the H4 privacy gate
+    (voice consent alone NEVER dispatches journal text to the LLM —
+    english_text is null and the fake provider log stays empty until
+    the account's CURRENT llm consent exists).
+
+The voice pipeline is driven end to end: synthetic takes are POSTed as
+base64 audio to /audio/transcriptions, the transcript + language +
+translation come back from the fake providers, and the entry is
+encrypted exactly the way the web client does (v3 payload). STT retry
+(429 once → success) and hard upstream failure (500 ×2 → 502
+stt_upstream) are proven through the same seam.
+
+Everything below is the standing year-long campaign:
 
   * pattern lifecycles over 12 months (candidate -> emerging ->
     confirmed, fade + re-qualification), replayed clock-accurately per
@@ -61,25 +94,39 @@ sys.path.insert(0, str(BACKEND))
 REPO = BACKEND.parent
 
 import httpx
+from app.db import build_sessionmaker
+from app.models import User, utcnow
+from app.security import crypto, kdf
+from app.security import envelope as envelope_crypto
+from app.security import sharing as sharing_crypto
+from app.security import totp as totp_mod
+from app.services import brain
+from app.services.brain import STATISTICAL_KINDS
+from app.services.patterns import JournalEntry
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import PublicFormat
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.db import build_sessionmaker
-from app.models import User, utcnow
-from app.security import crypto, envelope as envelope_crypto, kdf
-from app.security import sharing as sharing_crypto
-from app.security import totp as totp_mod
-from app.services import brain, questions
-from app.services.brain import STATISTICAL_KINDS
-from app.services.patterns import JournalEntry
-
 BASE_URL = os.environ.get("E2E_BASE", "http://127.0.0.1:8908")
 DB_URL = os.environ.get("E2E_DB", f"sqlite+aiosqlite:///{BACKEND / 'sim1y.db'}")
+# The fake provider endpoints this script serves, and the URLs the SERVER
+# must have been booted with (MINDPATTERN_STT_URL / MINDPATTERN_LLM_URL).
+STT_FAKE_URL = os.environ.get("E2E_STT", "http://127.0.0.1:8912/v1")
+LLM_FAKE_URL = os.environ.get("E2E_LLM", "http://127.0.0.1:8913/v1")
+STT_FAKE_KEY = "sim-stt-key"
+LLM_FAKE_KEY = "sim-llm-key"
+STT_PROVIDER_NAME = "SimWhisper"
+# The server's audio local-dir store (MINDPATTERN_AUDIO_LOCAL_DIR for the
+# sim boot; phase 17 inspects it, the erasure phase proves objects die).
+AUDIO_DIR = Path(os.environ.get("E2E_AUDIO_DIR", str(BACKEND / "data" / "audio-sim1y")))
 DAYS = 365
-TODAY = date.today()
+# Local calendar date on purpose: the personas' year is anchored to the
+# operator's wall clock, same as the clients' entry_date picker.
+TODAY = date.today()  # noqa: DTZ011
 
 # ------------------------------------------------------------------ checks ----
 
@@ -109,6 +156,217 @@ async def req(c, method, path, **kw):
             continue
         return r
     return r
+
+
+# ------------------------------------------------------- fake providers ----
+#
+# The voice pipeline's two third-party surfaces, served in-process so the
+# REAL server code paths (services/stt.py SpeechToText, services/llm.py
+# LLMAnalyzer) make genuine HTTP round-trips with genuine auth headers,
+# multipart shapes, and response contracts. The STT fake decodes the
+# campaign's deterministic synthetic takes; the LLM fake answers the
+# translation prompt from a fixed phrasebook and the enrichment prompt
+# with an empty narration set (the brain's findings stand unchanged).
+
+SIM_MAGIC = b"SIMAUD1"
+
+
+def synth_take(utterance: str, lang: str, marker: str = "", pad: int = 0) -> bytes:
+    """Deterministic 'recording': magic | lang | marker | text | NUL pad."""
+    return b"\x00".join(
+        [SIM_MAGIC, lang.encode(), marker.encode(), utterance.encode()]
+    ) + b"\x00" * pad
+
+
+def parse_take(audio: bytes) -> tuple[str, str, str]:
+    """(lang, marker, utterance) — raises ValueError on foreign audio."""
+    parts = audio.split(b"\x00", 3)
+    if len(parts) != 4 or parts[0] != SIM_MAGIC:
+        raise ValueError("not a synthetic take")
+    return parts[1].decode(), parts[2].decode(), parts[3].rstrip(b"\x00").decode()
+
+
+# The phrasebook the LLM fake translates from. rosa/amara speak fixed
+# sentences so every transcript's English is exact and assertable.
+ES_BOOK: dict[str, str] = {
+    "no puedo dormir, mi mente no para":
+        "can't sleep, my mind won't stop",
+    "me cuesta dormir, los pensamientos no paran":
+        "struggling to sleep, the thoughts won't stop",
+    "no puedo dormir, mi mente no para hoy":
+        "can't sleep, my mind won't stop today",
+    "se acerca la semana, mucha presión en el trabajo otra vez":
+        "the week is looming, big deadline pressure at work again",
+    "café en el balcón antes de empezar el día":
+        "coffee on the balcony before starting the day",
+    "el trayecto estuvo tranquilo hoy": "the commute was quiet today",
+    "cociné algo sencillo para cenar": "cooked something simple for dinner",
+    "regué las plantas y barrí la cocina":
+        "watered the plants and swept the kitchen",
+    "escuché media hora de podcast al volver":
+        "listened to half a podcast on the way home",
+    "compré pan en la panadería de la esquina":
+        "bought bread at the corner bakery",
+    "ordené un estante de la librería": "tidied one shelf of the bookcase",
+    "caminé hasta la farmacia por el camino largo":
+        "walked the long way to the pharmacy",
+    "vi un capítulo de la serie documental":
+        "watched an episode of the documentary series",
+    "llamé a mi tía un rato": "called my aunt for a while",
+    "estiré cinco minutos por la noche":
+        "stretched for five minutes in the evening",
+    "saqué al perro al parque": "took the dog to the park",
+}
+
+FR_BOOK: dict[str, str] = {
+    "ma poitrine se serre avant la réunion hebdomadaire":
+        "my chest tightens before the weekly review",
+    "la poitrine serrée encore avant la réunion":
+        "chest tight again before the review",
+    "café sur le balcon avant de commencer":
+        "coffee on the balcony before starting",
+    "le trajet était calme aujourd'hui": "the commute was calm today",
+    "j'ai cuisiné quelque chose de simple": "i cooked something simple",
+    "j'ai arrosé les plantes et balayé la cuisine":
+        "watered the plants and swept the kitchen",
+    "j'ai écouté la moitié d'un podcast": "listened to half a podcast",
+    "j'ai acheté du pain à la boulangerie": "bought bread at the bakery",
+    "j'ai rangé une étagère de la bibliothèque":
+        "tidied a shelf of the bookcase",
+    "j'ai marché jusqu'à la pharmacie par le grand chemin":
+        "walked to the pharmacy the long way",
+    "j'ai regardé un épisode du documentaire":
+        "watched an episode of the documentary",
+    "j'ai appelé ma tante un moment": "called my aunt for a while",
+    "j'ai étiré cinq minutes le soir": "stretched five minutes in the evening",
+    "j'ai sorti le chien au parc": "took the dog to the park",
+}
+
+# whisper-1 asks for verbose_json, whose language field carries the
+# provider's full NAME — exactly the shape normalize_language maps.
+STT_LANG_NAMES = {"es": "spanish", "fr": "french", "en": "english"}
+
+
+def _split_multipart(body: bytes, content_type: str) -> dict[str, tuple[str, bytes]]:
+    """Dependency-free multipart/form-data parse: name -> (filename, data)."""
+    match = re.search(r'boundary="?([^";]+)"?', content_type)
+    if not match:
+        raise ValueError("no boundary")
+    boundary = b"--" + match.group(1).encode()
+    out: dict[str, tuple[str, bytes]] = {}
+    for chunk in body.split(boundary)[1:]:
+        chunk = chunk.strip(b"\r\n")
+        if chunk in (b"", b"--"):
+            continue
+        head, _, data = chunk.partition(b"\r\n\r\n")
+        name_m = re.search(rb'name="([^"]+)"(?:;\s*filename="([^"]*)")?', head)
+        if name_m is None:
+            continue
+        name = name_m.group(1).decode()
+        filename = (name_m.group(2) or b"").decode()
+        out[name] = (filename, data.rstrip(b"\r\n"))
+    return out
+
+
+STT_LOG: list[dict] = []
+LLM_LOG: list[dict] = []
+
+
+def build_fakes():
+    stt_app = FastAPI()
+    llm_app = FastAPI()
+
+    @stt_app.get("/healthz")
+    async def _stt_health():
+        return {"ok": True}
+
+    @stt_app.post("/v1/audio/transcriptions")
+    async def _transcribe(request: Request):
+        body = await request.body()
+        parts = _split_multipart(body, request.headers.get("content-type", ""))
+        if "file" not in parts or "model" not in parts:
+            return JSONResponse({"error": "bad multipart"}, status_code=400)
+        filename, audio = parts["file"]
+        model = parts["model"][1].decode()
+        response_format = parts.get("response_format", (b"", b"json"))[1].decode()
+        STT_LOG.append({
+            "size": len(audio), "filename": filename, "model": model,
+            "format": response_format,
+            "auth": request.headers.get("authorization", ""),
+            "content": audio,
+        })
+        try:
+            lang, marker, utterance = parse_take(audio)
+        except ValueError:
+            return JSONResponse({"error": "unparseable audio"}, status_code=400)
+        if marker == "ALWAYSFAIL":
+            return JSONResponse({"error": "upstream on fire"}, status_code=500)
+        if marker == "RETRYONCE":
+            seen = sum(1 for x in STT_LOG[:-1] if x["content"] == audio)
+            if seen == 0:
+                # one cold-queue refusal with a Retry-After the server
+                # must honour (M8: one bounded retry)
+                return JSONResponse(
+                    {"error": "queue cold"}, status_code=429,
+                    headers={"retry-after": "0"})
+        return {"text": utterance, "language": STT_LANG_NAMES.get(lang, lang),
+                "duration": round(len(audio) / 1024, 1)}
+
+    @llm_app.get("/healthz")
+    async def _llm_health():
+        return {"ok": True}
+
+    @llm_app.post("/v1/chat/completions")
+    async def _chat(request: Request):
+        payload = await request.json()
+        system = payload["messages"][0]["content"]
+        user = payload["messages"][-1]["content"]
+        if "translation engine" in system:
+            LLM_LOG.append({"kind": "translate", "text": user,
+                            "auth": request.headers.get("authorization", "")})
+            spec = json.loads(user)
+            text, src = spec.get("text", ""), spec.get("source_language", "auto")
+            if src in ("es",) or text in ES_BOOK:
+                english = ES_BOOK.get(text, "ES:: " + text)
+            elif src in ("fr",) or text in FR_BOOK:
+                english = FR_BOOK.get(text, "FR:: " + text)
+            else:
+                english = text          # an English transcript echoes back
+            return {"choices": [{"message": {"content": english}}]}
+        LLM_LOG.append({"kind": "enrich", "text": user,
+                        "auth": request.headers.get("authorization", "")})
+        # the model may only NARRATE brain findings — none offered
+        return {"choices": [{"message": {"content": '{"patterns": []}'}}]}
+
+    return stt_app, llm_app
+
+
+async def start_fakes() -> list:
+    """Serve both fakes on loopback ports inside this event loop."""
+    from urllib.parse import urlparse
+
+    import uvicorn
+
+    servers = []
+    for app, url in ((build_fakes()[0], STT_FAKE_URL), (build_fakes()[1], LLM_FAKE_URL)):
+        parsed = urlparse(url)
+        cfg = uvicorn.Config(app, host="127.0.0.1", port=parsed.port,
+                             log_level="error")
+        server = uvicorn.Server(cfg)
+        servers.append(server)
+        asyncio.create_task(server.serve())
+    async with httpx.AsyncClient(timeout=10) as probe:
+        for server, url in zip(servers, (STT_FAKE_URL, LLM_FAKE_URL)):
+            origin = f"http://{urlparse(url).netloc}"
+            for _ in range(100):
+                try:
+                    if (await probe.get(origin + "/healthz")).status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    await asyncio.sleep(0.1)
+            else:
+                raise RuntimeError(f"fake provider at {url} did not come up")
+    return servers
 
 
 # ------------------------------------------------------------------ corpus ----
@@ -464,6 +722,82 @@ def gen_elena(p: Persona):
             p.add(d, p.filler(used) + ". calm evening", s + p.rng.uniform(-0.05, 0.05))
 
 
+def gen_rosa(p: Persona):
+    """Spanish VOICE journaler (payload v3, transcript_lang=es): typed
+    Spanish notes in the morning, spoken evenings. M/W/F sleep worry in
+    Spanish, Sunday work dread — the es twin of maya's story, spoken."""
+    p.expected = ["voice year in Spanish (v3 entries, es analysis)",
+                  "cluster on the Spanish sleep worry (recurring_phrase or rumination)"]
+    typed_es = [k for k in ES_BOOK if k not in (
+        "no puedo dormir, mi mente no para",
+        "me cuesta dormir, los pensamientos no paran",
+        "no puedo dormir, mi mente no para hoy",
+        "se acerca la semana, mucha presión en el trabajo otra vez")]
+    worry = ["no puedo dormir, mi mente no para",
+             "me cuesta dormir, los pensamientos no paran"]
+    for i in range(DAYS):
+        d = TODAY - timedelta(days=DAYS - 1 - i)
+        base = p.rng.uniform(-0.1, 0.2)
+        if p.rng.random() < 0.55:                       # typed Spanish note
+            p.add(d, p.rng.choice(typed_es), base)
+        evening, sent = p.rng.choice(typed_es), base    # spoken take
+        if d.weekday() == 6:
+            evening = "se acerca la semana, mucha presión en el trabajo otra vez"
+            sent = p.rng.uniform(-0.75, -0.55)
+        elif d.weekday() in (0, 2, 4) and p.rng.random() < 0.8:
+            evening = p.rng.choice(worry)
+            sent = p.rng.uniform(-0.5, -0.3)
+        p.add(d, evening, sent,
+              voice={"lang": "es", "english": ES_BOOK[evening]})
+
+
+def gen_amara(p: Persona):
+    """French VOICE journaler: the D-7 routing persona — her transcripts
+    are French, but the brain must analyze the ENGLISH translations (fr
+    has no lexicon), so her patterns surface from translated text. The
+    review worry is mostly ONE canonical sentence (maya's sleep-worry
+    shape) so the cluster earns its support."""
+    p.expected = ["voice year in French -> english_text analysis (D-7)",
+                  "cluster on the translated chest-tightness worry",
+                  "no French may ever appear in a pattern label"]
+    typed_fr = [k for k in FR_BOOK if k not in (
+        "ma poitrine se serre avant la réunion hebdomadaire",
+        "la poitrine serrée encore avant la réunion")]
+    for i in range(DAYS):
+        d = TODAY - timedelta(days=DAYS - 1 - i)
+        base = p.rng.uniform(-0.1, 0.2)
+        if p.rng.random() < 0.4:                       # typed French note
+            p.add(d, p.rng.choice(typed_fr), base)
+        spoken, sent = p.rng.choice(typed_fr), base    # spoken take, daily
+        if d.weekday() in (3, 6) and p.rng.random() < 0.9:
+            spoken = ("la poitrine serrée encore avant la réunion"
+                      if p.rng.random() < 0.2 else
+                      "ma poitrine se serre avant la réunion hebdomadaire")
+            sent = p.rng.uniform(-0.55, -0.35)
+        p.add(d, spoken, sent,
+              voice={"lang": "fr", "english": FR_BOOK[spoken]})
+
+
+def gen_kwame(p: Persona):
+    """English VOICE journaler + kept recordings: typed mornings, spoken
+    evenings, every ~5th take KEPT (encrypted attachment). CONTROL voice
+    user — varied mundane takes, no statistical kind may surface."""
+    p.expected = ["voice CONTROL: mundane spoken year, zero statistical kinds",
+                  "kept-recording lifecycle: upload/fetch/replace/delete/"]
+    used: dict[int, int] = {}
+    for i in range(DAYS):
+        d = TODAY - timedelta(days=DAYS - 1 - i)
+        s = p.rng.uniform(-0.3, 0.3)
+        if p.rng.random() < 0.55:                      # typed morning
+            p.add(d, p.filler(used), s)
+        if p.rng.random() >= 0.75:
+            continue                                   # speaks most days
+        take = p.filler(used)
+        keep = len([e for e in p.entries if e.get("voice")]) % 5 == 0
+        p.add(d, take, s + p.rng.uniform(-0.05, 0.05),
+              voice={"lang": "en", "english": take, "keep": keep})
+
+
 def build_personas() -> list[Persona]:
     personas = [
         Persona("maya", "maya-sim-pass-1", 21, "work-dread Sundays + sleep worry + next-day dips"),
@@ -476,10 +810,14 @@ def build_personas() -> list[Persona]:
         Persona("chloe", "chloe-sim-pass-8", 28, "crisis episodes ~3-weekly (sensitive, non-quoting)"),
         Persona("dev", "dev-sim-pass-9", 29, "editor: revises 8%, deletes a few, weekly stress"),
         Persona("elena", "elena-sim-pass-10", 30, "stable; sharing + envelope v2 + password lifecycle"),
+        Persona("rosa", "rosa-sim-pass-11", 31, "VOICE es: spoken Spanish year, translated v3 entries"),
+        Persona("amara", "amara-sim-pass-12", 32, "VOICE fr: spoken French year, english_text analysis"),
+        Persona("kwame", "kwame-sim-pass-13", 33, "VOICE en + kept recordings + share-voice control"),
     ]
     gens = {"maya": gen_maya, "omar": gen_omar, "priya": gen_priya,
             "lena": gen_lena, "tom": gen_tom, "ava": gen_ava, "ben": gen_ben,
-            "chloe": gen_chloe, "dev": gen_dev, "elena": gen_elena}
+            "chloe": gen_chloe, "dev": gen_dev, "elena": gen_elena,
+            "rosa": gen_rosa, "amara": gen_amara, "kwame": gen_kwame}
     for p in personas:
         p.measures: list[dict] = []
         gens[p.name](p)
@@ -528,9 +866,28 @@ class Client:
             payload["sleep"] = e.get("sleep")
             payload["tags"] = e.get("tags")
             payload["tod"] = e.get("tod")
+        voice = e.get("voice")
+        if voice:
+            # v3 exactly as the web client emits it (crypto/patient.ts):
+            # the voice channels upgrade the payload; english_text rides
+            # even when null, transcript_lang only when known.
+            payload["v"] = 3
+            payload["input_mode"] = "voice"
+            if voice.get("lang"):
+                payload["transcript_lang"] = voice["lang"]
+            payload["english_text"] = voice.get("english")
         aad = crypto.entry_aad_v2(self.user_id, e["cid"], content_version)
         blob = crypto.encrypt(self.data_key, json.dumps(payload).encode(), aad)
         return base64.b64encode(blob).decode()
+
+    def encrypt_audio(self, cid: str, audio: bytes) -> str:
+        """Kept-recording envelope: same data key, AAD ("audio", uid, cid, 1)."""
+        aad = crypto.build_aad("audio", self.user_id, cid, "1")
+        return base64.b64encode(crypto.encrypt(self.data_key, audio, aad)).decode()
+
+    def decrypt_audio(self, cid: str, blob_b64: str) -> bytes:
+        aad = crypto.build_aad("audio", self.user_id, cid, "1")
+        return crypto.decrypt(self.data_key, base64.b64decode(blob_b64), aad)
 
     def decrypt_entry(self, blob_b64: str, cid: str, version: int) -> dict:
         blob = base64.b64decode(blob_b64)
@@ -645,8 +1002,17 @@ async def age_account(engine, user_id, days):
 def persona_journal(p: Persona) -> list[JournalEntry]:
     out = []
     for e in p.entries:
+        # D-7 routing mirror (api/insights.py): en/es analyze the native
+        # transcript; every other language analyzes english_text when one
+        # was stored — the offline replay must feed the brain EXACTLY the
+        # text the server's recompute fed it.
+        text = e["text"]
+        voice = e.get("voice")
+        if (voice and voice.get("lang") not in ("en", "es", None)
+                and isinstance(voice.get("english"), str) and voice["english"].strip()):
+            text = voice["english"]
         out.append(JournalEntry(
-            text=e["text"], entry_date=e["date"], sentiment=e["sentiment"],
+            text=text, entry_date=e["date"], sentiment=e["sentiment"],
             energy=e.get("energy"), sleep_quality=e.get("sleep"),
             tags=tuple(e.get("tags") or ()), tod=e.get("tod")))
     return out
@@ -704,15 +1070,20 @@ def replay(persona: Persona, single_shot: bool = False):
 
 async def run():
     t_start = walltime.time()
-    print(f"target {BASE_URL}\ndb      {DB_URL}\nplan    {DAYS} days, 10 personas, every endpoint\n")
+    print(f"target {BASE_URL}\ndb      {DB_URL}")
+    print(f"plan    {DAYS} days, 13 personas (10 typed + 3 voice), every endpoint")
+    print(f"fakes   stt {STT_FAKE_URL} / llm {LLM_FAKE_URL}\n")
     personas = build_personas()
     for p in personas:
+        voice_n = len([e for e in p.entries if e.get("voice")])
         print(f"  {p.name:7} {len(p.entries):4} entries / "
               f"{len({e['date'] for e in p.entries}):3} active days"
+              + (f" / {voice_n} VOICE" if voice_n else "")
               + (f" / {len(p.measures)} measures" if p.measures else ""))
 
     engine = create_async_engine(DB_URL)
     report: dict = {"days": DAYS, "users": [], "phases": []}
+    fakes = await start_fakes()
 
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=180) as c:
 
@@ -731,12 +1102,19 @@ async def run():
               meta["sharing_available"] is True
               and meta["sharing_disclosure_version"] == "v2")
         llm_flag = meta["llm_available"]
+        check("meta: llm_available True (fake provider configured)",
+              llm_flag is True and meta["llm_provider_name"])
+        check("meta: audio_available True with stt policy fingerprint",
+              meta.get("audio_available") is True
+              and meta.get("stt_provider_name") == STT_PROVIDER_NAME
+              and bool(meta.get("stt_policy_fingerprint")),
+              f"audio={meta.get('audio_available')}")
         r2 = await req(c, "GET", "/api/v1/meta")
         check("GET /api/v1/meta (canonical mount) mirrors /api/meta",
               r2.status_code == 200 and r2.json() == meta)
 
         # ---------------------------------------------------------------- 1
-        phase("1 · registration: 10 patients + therapist (+ negatives)")
+        phase("1 · registration: 13 patients + therapist (+ negatives)")
         clients: dict[str, Client] = {}
         for p in personas:
             cl = Client(p.name, p.password)
@@ -751,7 +1129,7 @@ async def run():
             ok = (body["role"] == "user" and body["key_scheme"] == "v1"
                   and body["token"] and body["expires_in"] > 0)
             check(f"register {p.name} -> 201 (role=user, v1)", ok)
-        check("all 10 patient registrations succeeded", len(clients) == 10)
+        check("all 13 patient registrations succeeded", len(clients) == 13)
 
         dr_sharma = Therapist("dr_sharma", "sharma-portal-pass-1", "Dr. Ananya Sharma")
         r = await req(c, "POST", "/api/therapist/register", json=dr_sharma.register_body())
@@ -801,13 +1179,15 @@ async def run():
               and len(base64.b64decode(decoy)) == 16)
 
         # ---------------------------------------------------------------- 2
-        phase("2 · the year of entries: 10 users x 365 days, real client crypto")
+        phase("2 · the year of entries: 10 typed users + typed notes of "
+              "the voice users, real client crypto")
         sync_stats = {}
         for p in personas:
             cl = clients[p.name]
+            typed = [e for e in p.entries if not e.get("voice")]
             t0 = walltime.time()
             ok = fail = 0
-            for e in p.entries:
+            for e in typed:
                 r = await req(c, "POST", "/api/entries", headers=cl.headers, json={
                     "client_entry_id": e["cid"], "blob": cl.encrypt(e),
                     "entry_date": e["date"].isoformat(), "content_version": 1})
@@ -817,7 +1197,7 @@ async def run():
                     print(f"      !! {p.name} {e['cid']}: {r.status_code} {r.text[:120]}")
             secs = walltime.time() - t0
             sync_stats[p.name] = (ok, fail, secs)
-            check(f"{p.name}: {ok}/{ok + fail} entries synced ({secs:.0f}s)",
+            check(f"{p.name}: {ok}/{ok + fail} typed entries synced ({secs:.0f}s)",
                   fail == 0)
 
         e0 = personas[0].entries[0]
@@ -851,7 +1231,304 @@ async def run():
         check("bogus bearer -> 401", r.status_code == 401)
 
         # ---------------------------------------------------------------- 3
-        phase("3 · editing lifecycle (dev) + list pagination (dev, maya)")
+        phase("3 · voice year: consent -> record -> transcribe -> translate "
+              "-> save (rosa es, amara fr, kwame en)")
+        rosa_p = next(p for p in personas if p.name == "rosa")
+        amara_p = next(p for p in personas if p.name == "amara")
+        kwame_p = next(p for p in personas if p.name == "kwame")
+        rosa, amara, kwame = clients["rosa"], clients["amara"], clients["kwame"]
+        ES_WORRY = "no puedo dormir, mi mente no para"
+        ES_WORRY_EDIT = "no puedo dormir, mi mente no para hoy"
+        FR_WORRY = "ma poitrine se serre avant la réunion hebdomadaire"
+
+        def take_b64(utterance, lang, marker="", pad=0):
+            return base64.b64encode(
+                synth_take(utterance, lang, marker, pad)).decode()
+
+        async def transcribe(cl, utterance, lang, marker="", pad=0,
+                             mime="audio/webm", duration=47):
+            return await req(c, "POST", "/api/audio/transcriptions",
+                             headers=cl.headers, json={
+                                 "audio_b64": take_b64(utterance, lang, marker, pad),
+                                 "mime": mime, "duration_seconds": duration})
+
+        # --- the consent wall: nothing voice-shaped works before opt-in
+        r = await req(c, "GET", "/api/account/voice-consent", headers=rosa.headers)
+        check("voice-consent defaults disabled",
+              r.status_code == 200 and r.json()["enabled"] is False)
+        r = await transcribe(rosa, ES_WORRY, "es")
+        check("transcribe without voice consent -> 403 voice_consent_required",
+              r.status_code == 403
+              and r.json().get("code") == "voice_consent_required")
+        r = await req(c, "POST", "/api/audio/attachments", headers=rosa.headers,
+                      json={"client_entry_id": rosa_p.entries[0]["cid"],
+                            "blob": rosa.encrypt_audio(rosa_p.entries[0]["cid"],
+                                                       b"x" * 64),
+                            "mime": "audio/webm", "duration_seconds": 30})
+        check("attachment upload without voice consent -> 403", r.status_code == 403)
+        r = await req(c, "POST", "/api/audio/transcriptions",
+                      headers=dr_sharma.headers, json={
+                          "audio_b64": take_b64("hello", "en"),
+                          "mime": "audio/webm", "duration_seconds": 10})
+        check("therapist token on /audio/transcriptions -> 403",
+              r.status_code == 403)
+        r = await req(c, "POST", "/api/audio/transcriptions", json={
+            "audio_b64": take_b64("hello", "en"),
+            "mime": "audio/webm", "duration_seconds": 10})
+        check("anonymous transcribe -> 401", r.status_code == 401)
+
+        # --- verifier discipline + opt-in for the three voice users
+        r = await req(c, "PUT", "/api/account/voice-consent",
+                      headers=rosa.headers,
+                      json={"enabled": True})
+        check("voice-consent enable WITHOUT verifier -> 422", r.status_code == 422)
+        r = await req(c, "PUT", "/api/account/voice-consent",
+                      headers={**rosa.headers, "X-Account-Verifier": rosa.auth_b64},
+                      json={"enabled": True, "verifier": "AAAA"})
+        check("voice-consent enable with WRONG verifier -> 403",
+              r.status_code == 403)
+        stt_policy = meta["stt_policy_fingerprint"]
+        for cl in (rosa, amara, kwame):
+            r = await req(c, "PUT", "/api/account/voice-consent",
+                          headers={**cl.headers, "X-Account-Verifier": cl.auth_b64},
+                          json={"enabled": True, "verifier": cl.auth_b64})
+            body = r.json()
+            check(f"{cl.username}: voice consent enabled against current policy",
+                  r.status_code == 200 and body["enabled"] is True
+                  and body["active_for_current_policy"] is True
+                  and body["voice_consent_policy"] == stt_policy
+                  and body["voice_consent_at"], str(body)[:140])
+        # rosa and amara want their transcripts translated: the LLM consent
+        # is a SEPARATE surface (H4) and must be granted explicitly. kwame
+        # stays llm-consent-less for now — his H4 probe below depends on it.
+        for cl in (rosa, amara):
+            r = await req(c, "PUT", "/api/account/llm-consent",
+                          headers={**cl.headers, "X-Account-Verifier": cl.auth_b64},
+                          json={"enabled": True, "verifier": cl.auth_b64})
+            check(f"{cl.username}: llm consent enabled (translation surface)",
+                  r.status_code == 200 and r.json()["enabled"] is True
+                  and r.json()["active_for_current_policy"] is True)
+
+        # --- H4 gate: voice consent alone must NEVER dispatch text to the LLM
+        llm_translates = lambda: [x for x in LLM_LOG if x["kind"] == "translate"]
+        before = len(llm_translates())
+        r = await transcribe(kwame, "walked the long way to the pharmacy", "en")
+        body = r.json()
+        check("kwame (voice consent, NO llm consent): transcript ok, "
+              "english_text NULL (H4)",
+              r.status_code == 200
+              and body.get("original_text")
+              == "walked the long way to the pharmacy"
+              and body.get("language") == "en"
+              and body.get("language_raw") == "english"
+              and body.get("english_text") is None, str(body)[:160])
+        check("H4: zero LLM translation dispatches for the non-consented account",
+              len(llm_translates()) == before,
+              f"{before} -> {len(llm_translates())}")
+        r = await req(c, "POST", "/api/audio/translations", headers=kwame.headers,
+                      json={"text": "walked the long way to the pharmacy",
+                            "source_lang": "en"})
+        check("re-translate while llm consent off -> null, still no dispatch",
+              r.status_code == 200 and r.json()["english_text"] is None
+              and len(llm_translates()) == before)
+        r = await req(c, "PUT", "/api/account/llm-consent",
+                      headers={**kwame.headers, "X-Account-Verifier": kwame.auth_b64},
+                      json={"enabled": True, "verifier": kwame.auth_b64})
+        check("kwame enables llm consent (provider configured) -> 200",
+              r.status_code == 200 and r.json()["enabled"] is True)
+        r = await req(c, "POST", "/api/audio/translations", headers=kwame.headers,
+                      json={"text": "walked the long way to the pharmacy",
+                            "source_lang": "en"})
+        check("re-translate after llm consent -> english echo, exactly 1 dispatch",
+              r.status_code == 200
+              and r.json()["english_text"] == "walked the long way to the pharmacy"
+              and len(llm_translates()) == before + 1)
+
+        # --- rosa's first spoken entry: the full patient journey incl. edit
+        rosa_first = next(e for e in rosa_p.entries
+                          if e.get("voice") and e["text"] == ES_WORRY)
+        r = await transcribe(rosa, ES_WORRY, "es")
+        body = r.json()
+        check("rosa take 1: spanish detected, phrasebook translation returned",
+              r.status_code == 200 and body.get("original_text") == ES_WORRY
+              and body.get("language") == "es"
+              and body.get("language_raw") == "spanish"
+              and body.get("english_text") == ES_BOOK[ES_WORRY]
+              and body.get("provider_name") == STT_PROVIDER_NAME,
+              str(body)[:170])
+        if body.get("language"):
+            saved = {**rosa_first,
+                     "voice": {"lang": body["language"],
+                               "english": body["english_text"]}}
+        else:
+            saved = {**rosa_first, "voice": {"lang": "es", "english": None}}
+        r = await req(c, "POST", "/api/entries", headers=rosa.headers, json={
+            "client_entry_id": saved["cid"], "blob": rosa.encrypt(saved),
+            "entry_date": saved["date"].isoformat(), "content_version": 1})
+        check("rosa saves her spoken entry (payload v3) -> 201",
+              r.status_code == 201)
+        r = await req(c, "POST", "/api/audio/translations", headers=rosa.headers,
+                      json={"text": ES_WORRY_EDIT, "source_lang": "es"})
+        check("rosa edits the transcript: re-translate before saving",
+              r.status_code == 200
+              and r.json()["english_text"] == ES_BOOK[ES_WORRY_EDIT])
+        r = await req(c, "GET", f"/api/entries/{saved['cid']}", headers=rosa.headers)
+        version = r.json()["content_version"]
+        edited = {**saved, "text": ES_WORRY_EDIT,
+                  "voice": {"lang": "es", "english": ES_BOOK[ES_WORRY_EDIT]}}
+        r = await req(c, "PUT", f"/api/entries/{saved['cid']}",
+                      headers=rosa.headers, json={
+                          "blob": rosa.encrypt(edited, content_version=version + 1),
+                          "entry_date": saved["date"].isoformat(),
+                          "content_version": version + 1})
+        check("edited voice entry PUT (v3 preserved) -> 200", r.status_code == 200)
+        r = await req(c, "GET", f"/api/entries/{saved['cid']}", headers=rosa.headers)
+        dec = rosa.decrypt_entry(r.json()["blob"], saved["cid"],
+                                 r.json()["content_version"])
+        check("edited entry decrypts with v3 channels intact",
+              dec["v"] == 3 and dec["input_mode"] == "voice"
+              and dec["text"] == ES_WORRY_EDIT
+              and dec["transcript_lang"] == "es"
+              and dec["english_text"] == ES_BOOK[ES_WORRY_EDIT])
+
+        # --- amara's first French take: language routing sanity
+        r = await transcribe(amara, FR_WORRY, "fr")
+        body = r.json()
+        check("amara take 1: french detected, english translation returned",
+              r.status_code == 200 and body.get("original_text") == FR_WORRY
+              and body.get("language") == "fr"
+              and body.get("language_raw") == "french"
+              and body.get("english_text") == FR_BOOK[FR_WORRY],
+              str(body)[:170])
+
+        # --- the bulk voice year: every take through the real pipeline
+        voice_personas = {"rosa": rosa_p, "amara": amara_p, "kwame": kwame_p}
+        attachments: dict[str, dict] = {}
+        for pname, p in voice_personas.items():
+            cl = clients[pname]
+            vlist = [e for e in p.entries
+                     if e.get("voice") and e["cid"] != saved["cid"]]
+            t0, ok, fail = walltime.time(), 0, 0
+            for e in vlist:
+                r = await transcribe(cl, e["text"], e["voice"]["lang"])
+                body = r.json()
+                good = (r.status_code == 200
+                        and body.get("original_text") == e["text"]
+                        and body.get("language") == e["voice"]["lang"])
+                expected_en = (e["text"] if e["voice"]["lang"] == "en"
+                               else e["voice"]["english"])
+                good = good and body.get("english_text") == expected_en
+                ok += good
+                fail += not good
+                if not good:
+                    print(f"      !! {pname} {e['cid']}: {r.status_code} "
+                          f"{str(body)[:120]}")
+                    continue
+                entry = {**e, "voice": {"lang": body["language"],
+                                        "english": body["english_text"]}}
+                r = await req(c, "POST", "/api/entries", headers=cl.headers, json={
+                    "client_entry_id": e["cid"], "blob": cl.encrypt(entry),
+                    "entry_date": e["date"].isoformat(), "content_version": 1})
+                ok += r.status_code == 201
+                fail += r.status_code != 201
+                if e["voice"].get("keep"):
+                    take = synth_take(e["text"], e["voice"]["lang"])
+                    r = await req(c, "POST", "/api/audio/attachments",
+                                  headers=cl.headers, json={
+                                      "client_entry_id": e["cid"],
+                                      "blob": cl.encrypt_audio(e["cid"], take),
+                                      "mime": "audio/webm",
+                                      "duration_seconds": 47})
+                    if r.status_code == 201:
+                        attachments[e["cid"]] = {
+                            "id": r.json()["attachment_id"],
+                            "expires_at": r.json()["expires_at"],
+                            "take": take}
+                    else:
+                        fail += 1
+                        print(f"      !! {pname} attachment {e['cid']}: "
+                              f"{r.status_code} {r.text[:120]}")
+            secs = walltime.time() - t0
+            check(f"{pname}: {len(vlist)} spoken takes transcribed+translated "
+                  f"+ saved as v3 entries ({secs:.0f}s)", fail == 0)
+        kept_n = len(attachments)
+        check(f"kwame kept {kept_n} recordings (encrypted uploads -> 201)",
+              kept_n >= 20)
+        exp_days = {(date.fromisoformat(a["expires_at"][:10]) - TODAY).days
+                    for a in attachments.values()}
+        check("retention: every kept recording expires in ~30 days",
+              bool(exp_days) and exp_days <= {29, 30, 31, 32},
+              f"day deltas {sorted(exp_days)}")
+
+        # --- the providers saw exactly the traffic the server should send
+        check("every STT call carried the bearer key, whisper-1 + verbose_json",
+              STT_LOG and all(x["auth"] == f"Bearer {STT_FAKE_KEY}"
+                              and x["model"] == "whisper-1"
+                              and x["format"] == "verbose_json"
+                              for x in STT_LOG),
+              f"{len(STT_LOG)} calls")
+        ext_ok = all(x["filename"] == "recording.webm" for x in STT_LOG)
+        check("STT filename derives from the mime table (recording.webm)", ext_ok)
+
+        # --- STT retry (M8): one 429, honoured, retried, succeeds
+        retry_take = synth_take("sorted the recycling and took it down",
+                                "en", marker="RETRYONCE")
+        r = await req(c, "POST", "/api/audio/transcriptions",
+                      headers=kwame.headers, json={
+                          "audio_b64": base64.b64encode(retry_take).decode(),
+                          "mime": "audio/webm", "duration_seconds": 30})
+        sends = sum(1 for x in STT_LOG if x["content"] == retry_take)
+        check("STT 429-with-Retry-After retried exactly once -> transcript ok",
+              r.status_code == 200
+              and r.json().get("original_text")
+              == "sorted the recycling and took it down"
+              and sends == 2, f"{sends} upstream sends")
+        fail_take = synth_take("this take never lands", "en", marker="ALWAYSFAIL")
+        r = await req(c, "POST", "/api/audio/transcriptions",
+                      headers=kwame.headers, json={
+                          "audio_b64": base64.b64encode(fail_take).decode(),
+                          "mime": "audio/webm", "duration_seconds": 30})
+        check("STT hard upstream failure -> 502 stt_upstream (one retry, then up)",
+              r.status_code == 502 and r.json().get("code") == "stt_upstream"
+              and sum(1 for x in STT_LOG if x["content"] == fail_take) == 2)
+
+        # --- route validation probes (consented user, hostile inputs)
+        r = await transcribe(rosa, ES_WORRY, "es", mime="audio/flac")
+        check("unsupported mime -> 422", r.status_code == 422)
+        r = await transcribe(rosa, ES_WORRY, "es", duration=400)
+        check("duration over the cap -> 422", r.status_code == 422)
+        r = await req(c, "POST", "/api/audio/transcriptions",
+                      headers=rosa.headers, json={
+                          "audio_b64": "", "mime": "audio/webm",
+                          "duration_seconds": 30})
+        check("empty audio_b64 -> 422", r.status_code == 422)
+        r = await req(c, "POST", "/api/audio/transcriptions",
+                      headers=rosa.headers, json={
+                          "audio_b64": "not-base64!!", "mime": "audio/webm",
+                          "duration_seconds": 30})
+        check("audio_b64 not base64 -> 422", r.status_code == 422)
+        r = await req(c, "POST", "/api/audio/transcriptions",
+                      headers=rosa.headers, json={
+                          "audio_b64": base64.b64encode(os.urandom(5 * 1024 * 1024)).decode(),
+                          "mime": "audio/webm", "duration_seconds": 30})
+        check("5 MiB take -> 413 at the audio body cap", r.status_code == 413)
+
+        # --- owner listing shows unexpired kept-audio metadata only
+        r = await req(c, "GET", "/api/entries?limit=500", headers=kwame.headers)
+        rows = {x["client_entry_id"]: x for x in r.json()}
+        kept_cids = set(attachments)
+        with_audio = {cid for cid, x in rows.items() if x.get("audio")}
+        check("kwame's entry listing carries audio meta exactly on kept takes",
+              with_audio == kept_cids,
+              f"{len(with_audio)} meta / {len(kept_cids)} kept")
+        sample_cid = next(iter(kept_cids))
+        check("audio meta names the attachment + expiry",
+              rows[sample_cid]["audio"]["attachment_id"]
+              == attachments[sample_cid]["id"]
+              and rows[sample_cid]["audio"]["expires_at"])
+
+        # ---------------------------------------------------------------- 4
+        phase("4 · editing lifecycle (dev) + list pagination (dev, maya)")
         dev, devp = clients["dev"], next(p for p in personas if p.name == "dev")
         edited_ok = conflicts = 0
         for cid, new_text, sent in devp.edits:
@@ -931,7 +1608,6 @@ async def run():
               f"{len(page_rows)} rows / {blob_sum} ciphertext bytes")
         r = await req(c, "GET", "/api/entries?limit=500", headers=dev.headers)
         all_rows = r.json()
-        first_date = all_rows[0]["entry_date"]
         mid_date = all_rows[len(all_rows) // 2]["entry_date"]
         r = await req(c, "GET", f"/api/entries?since={mid_date}&limit=500",
                       headers=dev.headers)
@@ -942,8 +1618,8 @@ async def run():
               and later[0]["entry_date"] == mid_date
               and len(later) < len(all_rows))
 
-        # ---------------------------------------------------------------- 4
-        phase("4 · measures: a year of encrypted PHQ-9 (ben, chloe)")
+        # ---------------------------------------------------------------- 5
+        phase("5 · measures: a year of encrypted PHQ-9 (ben, chloe)")
         ben, benp = clients["ben"], next(p for p in personas if p.name == "ben")
         posted = 0
         for m in benp.measures:
@@ -984,8 +1660,8 @@ async def run():
         check("measure DELETE with verifier -> 200 + revision",
               r.status_code == 200 and "measures_revision" in r.json())
 
-        # ---------------------------------------------------------------- 5
-        phase("5 · recompute, insights, questions, determinism (10 users)")
+        # ---------------------------------------------------------------- 6
+        phase("6 · recompute, insights, questions, determinism (13 users)")
         r = await req(c, "POST", "/api/processing/sessions",
                       headers=maya.headers, json={"data_key": "AAAA"})
         check("processing session with non-32B key -> 422", r.status_code == 422)
@@ -1008,9 +1684,16 @@ async def run():
                           json=body if body else None)
             live = r.json()
             recompute_secs = walltime.time() - t0
+            # The three voice users hold CURRENT llm consent on a configured
+            # endpoint, so their recompute legitimately runs brain-first with
+            # the (no-op narration) enricher: analyzer "llm". Everyone else
+            # must stay on the deterministic brain alone.
+            expected_analyzer = ({"brain", "llm"} if p.name
+                                 in ("rosa", "amara", "kwame") else {"brain"})
             if not check(f"{p.name}: recompute -> insight phase",
                          r.status_code == 200 and live["phase"] == "insight"
-                         and live["analyzer"] == "brain", str(live)[:160]):
+                         and live["analyzer"] in expected_analyzer,
+                         str(live)[:160]):
                 continue
             r = await req(c, "POST", "/api/insights/recompute",
                           headers={**cl.headers, "X-Processing-Token": tok})
@@ -1057,7 +1740,7 @@ async def run():
             for x in fp[:12]:
                 fd = next((v["first_day"] for v in seen.values()
                            if v["kind"] == x["kind"] and v["label"] == x["label"]), "?")
-                print(f"        day {str(fd):>3} [{x['state']:9}] {x['kind']:18} "
+                print(f"        day {fd!s:>3} [{x['state']:9}] {x['kind']:18} "
                       f"{x['label'][:56]} (n={x['occurrences']})"
                       + (" [SENSITIVE]" if x["sensitive"] else ""))
             if len(fp) > 12:
@@ -1131,6 +1814,37 @@ async def run():
               "; ".join(sorted({f"{x['kind']}:{x['label'][:24]}"
                                 for x in maya_pat}))[:120])
 
+        # --- voice-persona assertions (the spoken years) -------------------
+        rosa_pat = insights_per_user["rosa"]["patterns"]
+        rosa_worry = [x for x in rosa_pat
+                      if "dormir" in x["label"].lower() or "mente" in x["label"].lower()]
+        check("rosa: the SPANISH sleep-worry take clusters (spoken year, es)",
+              bool(rosa_worry)
+              and rosa_worry[0]["kind"] in ("recurring_phrase", "rumination")
+              and rosa_worry[0]["occurrences"] >= 20,
+              f"{[(x['kind'], x['occurrences']) for x in rosa_worry]}")
+        amara_pat = insights_per_user["amara"]["patterns"]
+        amara_worry = [x for x in amara_pat
+                       if "chest" in x["label"].lower() or "review" in x["label"].lower()]
+        check("amara: worry surfaces from the ENGLISH translation (fr -> en D-7)",
+              bool(amara_worry)
+              and amara_worry[0]["kind"] in ("recurring_phrase", "rumination")
+              and amara_worry[0]["occurrences"] >= 15,
+              f"{[(x['kind'], x['occurrences']) for x in amara_worry]}")
+        check("amara: no French ever reaches a pattern label (analysis ran en)",
+              not any("poitrine" in x["label"].lower()
+                      or "réunion" in x["label"].lower() for x in amara_pat))
+        kwame_pat = insights_per_user["kwame"]["patterns"]
+        kwame_stat = [x for x in kwame_pat if x["kind"] in STATISTICAL_KINDS]
+        check("VOICE CONTROL kwame: zero statistical kinds (spoken noise year)",
+              not kwame_stat, f"surfaced: {[x['kind'] for x in kwame_pat]}")
+        enrich_calls = [x for x in LLM_LOG if x["kind"] == "enrich"]
+        check("llm enricher observed on consented recomputes (narration-only "
+              "contract; kwame holds no findings to narrate)",
+              len(enrich_calls) >= 2
+              and all('"findings"' in x["text"] for x in enrich_calls),
+              f"{len(enrich_calls)} enrichment calls")
+
         # feedback loop, real taps (maya): a tap on one of her patterns
         pid = next((x["detail"].get("pattern_pid") for x in maya_pat
                     if x.get("detail", {}).get("pattern_pid")), None)
@@ -1161,8 +1875,8 @@ async def run():
         else:
             check("maya has a pattern pid to tap feedback on", False)
 
-        # ---------------------------------------------------------------- 6
-        phase("6 · local-recompute: on-device brain, escrow upload (chloe)")
+        # ---------------------------------------------------------------- 7
+        phase("7 · local-recompute: on-device brain, escrow upload (chloe)")
         chloe = clients["chloe"]
         chloe_p = next(p for p in personas if p.name == "chloe")
         r = await req(c, "GET", "/api/insights", headers=chloe.headers)
@@ -1205,10 +1919,9 @@ async def run():
         check("server recompute re-asserts state after local experiment",
               r.status_code == 200 and r.json()["analyzer"] == "brain")
 
-        # ---------------------------------------------------------------- 7
-        phase("7 · zero-knowledge sharing lifecycle (elena+ben -> dr_sharma)")
-        elena, elena_p = clients["elena"], next(
-            p for p in personas if p.name == "elena")
+        # ---------------------------------------------------------------- 8
+        phase("8 · zero-knowledge sharing lifecycle (elena+ben -> dr_sharma)")
+        elena = clients["elena"]
         ben_p = benp
         r = await req(c, "POST", "/api/therapist/pairing-codes",
                       headers=dr_sharma.headers)
@@ -1496,8 +2209,263 @@ async def run():
         check("portal unwraps with the ROTATED key == real data key",
               got == elena.data_key)
 
-        # ---------------------------------------------------------------- 8
-        phase("8 · key lifecycle: rekey (priya), envelope v2 + O(1) password (elena)")
+        # --- kwame's voice-sharing grant: playback behind share_voice -----
+        r = await req(c, "POST", "/api/therapist/pairing-codes",
+                      headers=dr_sharma.headers)
+        code_k = r.json()["code"]
+        wrap_k = sharing_crypto.wrap_data_key(
+            kwame.data_key, dr_sharma._pub_b64(), kwame.user_id, dr_sharma.user_id)
+        r = await req(c, "POST", "/api/consents",
+                      headers={**kwame.headers, "X-Account-Verifier": kwame.auth_b64},
+                      json={"code": code_k, "ephemeral_pub": wrap_k[0],
+                            "wrapped_key": wrap_k[1], "disclosure": "v2"})
+        kwame_consent = r.json()
+        check("kwame grants dr_sharma -> 201", r.status_code == 201)
+        r = await req(c, "PUT", f"/api/consents/{kwame_consent['id']}/share-voice",
+                      headers=kwame.headers, json={"enabled": True})
+        check("share-voice without verifier -> 422", r.status_code == 422)
+        r = await req(c, "PUT", f"/api/consents/{kwame_consent['id']}/share-voice",
+                      headers={**kwame.headers, "X-Account-Verifier": "AAAA"},
+                      json={"enabled": True})
+        check("share-voice with wrong verifier -> 403", r.status_code == 403)
+        r = await req(c, "PUT", f"/api/consents/{kwame_consent['id']}/share-voice",
+                      headers={**kwame.headers,
+                               "X-Account-Verifier": kwame.auth_b64},
+                      json={"enabled": True})
+        check("share-voice ON -> 200, grant widened",
+              r.status_code == 200 and r.json()["share_voice"] is True)
+        r = await req(c, "GET", "/api/consents", headers=kwame.headers)
+        check("kwame's own consent list shows share_voice=True",
+              r.status_code == 200 and r.json()[0]["share_voice"] is True)
+        r = await req(c, "GET", "/api/therapist/patients", headers=dr_sharma.headers)
+        krow = next(x for x in r.json() if x["user_id"] == kwame.user_id)
+        check("portal roster serves the live share_voice grant (P5)",
+              krow.get("share_voice") is True)
+        kwame_unwrapped = dr_sharma.unwrap_patient_key(
+            kwame, krow["ephemeral_pub"], krow["wrapped_key"])
+        check("portal unwraps kwame's data key", kwame_unwrapped == kwame.data_key)
+
+        # walk kwame's entries through the therapist window (page size 25)
+        # until a kept-recording row shows up
+        voice_row, offset = None, 0
+        for _ in range(30):
+            r = await req(
+                c, "GET",
+                f"/api/therapist/patients/{kwame.user_id}/entries"
+                f"?limit=25&offset={offset}",
+                headers=dr_sharma.headers)
+            page = r.json()
+            if not isinstance(page, list):
+                break
+            voice_row = next(
+                (x for x in page if x["client_entry_id"] in attachments), None)
+            nxt = r.headers.get("X-Next-Offset")
+            if voice_row is not None or nxt is None:
+                break
+            offset = int(nxt)
+        check("therapist entry listing carries audio meta for kept takes",
+              voice_row is not None
+              and (voice_row.get("audio") or {}).get("attachment_id")
+              == attachments[voice_row["client_entry_id"]]["id"])
+        dec = json.loads(crypto.decrypt(
+            kwame_unwrapped, base64.b64decode(voice_row["blob"]),
+            crypto.entry_aad_v2(kwame.user_id, voice_row["client_entry_id"],
+                                voice_row["content_version"])))
+        check("portal decrypts a v3 voice entry (mode + lang + translation)",
+              dec["v"] == 3 and dec["input_mode"] == "voice"
+              and dec.get("transcript_lang") == "en"
+              and dec.get("english_text") == dec["text"])
+
+        att = attachments[voice_row["client_entry_id"]]
+        audio_path = (f"/api/therapist/patients/{kwame.user_id}"
+                      f"/audio/{att['id']}")
+        r = await req(c, "GET", audio_path, headers=dr_evil.headers)
+        check("OTHER therapist's audio fetch -> flat 404", r.status_code == 404)
+        r = await req(c, "GET", audio_path, headers=dr_sharma.headers)
+        played = r.json()
+        plain = crypto.decrypt(
+            kwame_unwrapped, base64.b64decode(played["blob"]),
+            crypto.build_aad("audio", kwame.user_id,
+                             voice_row["client_entry_id"], "1"))
+        check("therapist plays the kept recording: decrypts to the take bytes",
+              r.status_code == 200
+              and played["client_entry_id"] == voice_row["client_entry_id"]
+              and plain == att["take"])
+        check("playback metadata honest (mime/duration/size/expiry)",
+              played["mime_type"] == "audio/webm"
+              and played["duration_seconds"] == 47
+              and played["size_bytes"] == len(att["take"]) + 28
+              and played["expires_at"])
+
+        r = await req(c, "PUT", f"/api/consents/{kwame_consent['id']}/share-voice",
+                      headers={**kwame.headers,
+                               "X-Account-Verifier": kwame.auth_b64},
+                      json={"enabled": False})
+        check("share-voice OFF -> 200, grant narrowed",
+              r.status_code == 200 and r.json()["share_voice"] is False)
+        r = await req(c, "GET", audio_path, headers=dr_sharma.headers)
+        check("audio fetch with share-voice off -> 403", r.status_code == 403)
+        r = await req(c, "PUT", f"/api/consents/{kwame_consent['id']}/share-voice",
+                      headers={**kwame.headers,
+                               "X-Account-Verifier": kwame.auth_b64},
+                      json={"enabled": True})
+        check("share-voice back ON -> 200", r.status_code == 200)
+        r = await req(c, "GET", audio_path, headers=dr_sharma.headers)
+        check("playback resumes after re-enable (2nd audited access)",
+              r.status_code == 200)
+
+        # revoking the consent kills the audio path with it
+        r = await req(c, "DELETE", f"/api/consents/{kwame_consent['id']}",
+                      headers={**kwame.headers,
+                               "X-Account-Verifier": kwame.auth_b64})
+        check("kwame revokes the grant -> 204", r.status_code == 204)
+        r = await req(c, "GET", audio_path, headers=dr_sharma.headers)
+        check("audio fetch after revoke -> 404 (consent-gated)", r.status_code == 404)
+
+        # ---------------------------------------------------------------- 9
+        phase("9 · kept-recording lifecycle: fetch/replace/delete/expiry/"
+              "quota (kwame)")
+        def dir_objects() -> set:
+            return {p.relative_to(AUDIO_DIR).as_posix()
+                    for p in AUDIO_DIR.rglob("*.enc")} if AUDIO_DIR.exists() else set()
+
+        cid_a = next(iter(attachments))
+        att_a = attachments[cid_a]
+        r = await req(c, "GET", f"/api/audio/attachments/{att_a['id']}",
+                      headers=kwame.headers)
+        check("owner fetch: blob decrypts to the original take",
+              r.status_code == 200
+              and kwame.decrypt_audio(cid_a, r.json()["blob"]) == att_a["take"])
+        r = await req(c, "GET", f"/api/audio/attachments/{att_a['id']}",
+                      headers=rosa.headers)
+        check("another patient's attachment id -> flat 404", r.status_code == 404)
+
+        # replace: same entry re-recorded — the old object must die
+        before_objs = dir_objects()
+        new_take = synth_take("sorted the recycling and took it down", "en")
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": cid_a,
+                            "blob": kwame.encrypt_audio(cid_a, new_take),
+                            "mime": "audio/webm", "duration_seconds": 52})
+        replaced = r.json()
+        check("re-upload replaces (same attachment row, refreshed expiry)",
+              r.status_code == 201
+              and replaced["attachment_id"] == att_a["id"]
+              and replaced["expires_at"] > att_a["expires_at"],
+              f"{att_a['expires_at']} -> {replaced['expires_at']}")
+        r = await req(c, "GET", f"/api/audio/attachments/{att_a['id']}",
+                      headers=kwame.headers)
+        check("replaced recording decrypts to the NEW take",
+              r.status_code == 200
+              and kwame.decrypt_audio(cid_a, r.json()["blob"]) == new_take)
+        check("replace deleted the old object (no orphans on disk)",
+              len(dir_objects()) == len(before_objs),
+              f"{len(before_objs)} -> {len(dir_objects())} objects")
+        attachments[cid_a]["take"] = new_take
+
+        # delete: the ENTRY survives, the audio is gone
+        cid_b = next(cid for cid in attachments if cid != cid_a)
+        r = await req(c, "DELETE",
+                      f"/api/audio/attachments/{attachments[cid_b]['id']}",
+                      headers=kwame.headers)
+        check("attachment DELETE -> 204", r.status_code == 204)
+        r = await req(c, "GET",
+                      f"/api/audio/attachments/{attachments[cid_b]['id']}",
+                      headers=kwame.headers)
+        check("deleted attachment GET -> 404", r.status_code == 404)
+        r = await req(c, "GET", f"/api/entries/{cid_b}", headers=kwame.headers)
+        check("the entry itself survives the audio delete",
+              r.status_code == 200 and r.json().get("audio") is None)
+        del attachments[cid_b]
+
+        # lazy expiry: a row aged past retention answers 410 and dies
+        cid_c = next(cid for cid in attachments if cid != cid_a)
+        att_c = attachments[cid_c]
+        async with build_sessionmaker(engine)() as s:
+            await s.execute(text(
+                "UPDATE audio_attachments SET expires_at = :past WHERE id = :id"),
+                {"past": utcnow() - timedelta(seconds=5), "id": att_c["id"]})
+            await s.commit()
+        r = await req(c, "GET", f"/api/audio/attachments/{att_c['id']}",
+                      headers=kwame.headers)
+        check("expired recording GET -> 410 audio_expired (lazy sweep)",
+              r.status_code == 410 and r.json().get("code") == "audio_expired")
+        r = await req(c, "GET", f"/api/audio/attachments/{att_c['id']}",
+                      headers=kwame.headers)
+        check("expired row is GONE after the lazy delete", r.status_code == 404)
+        r = await req(c, "GET", "/api/entries?limit=500", headers=kwame.headers)
+        row_c = next(x for x in r.json() if x["client_entry_id"] == cid_c)
+        check("entry listing drops audio meta once expired",
+              row_c.get("audio") is None)
+        del attachments[cid_c]
+
+        # quota: padded takes until the account cap refuses
+        quota_cid = cid_a
+        pad_take = synth_take("quota probe take", "en", pad=150 * 1024)
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": quota_cid,
+                            "blob": kwame.encrypt_audio(quota_cid, pad_take),
+                            "mime": "audio/webm", "duration_seconds": 240})
+        check("large re-upload within quota -> 201 (replace accounting)",
+              r.status_code == 201, r.text[:120])
+        quota_cid2 = next(cid for cid in attachments
+                          if cid not in (cid_a, quota_cid))
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": quota_cid2,
+                            "blob": kwame.encrypt_audio(
+                                quota_cid2, synth_take("over quota", "en",
+                                                       pad=150 * 1024)),
+                            "mime": "audio/webm", "duration_seconds": 240})
+        check("quota exceeded -> 413 audio_quota_exceeded",
+              r.status_code == 413
+              and r.json().get("code") == "audio_quota_exceeded")
+
+        # validation probes on the attachment route
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": "no-such-entry",
+                            "blob": kwame.encrypt_audio("no-such-entry", b"x" * 64),
+                            "mime": "audio/webm", "duration_seconds": 30})
+        check("attachment for unknown entry -> 404 unknown_entry",
+              r.status_code == 404 and r.json().get("code") == "unknown_entry")
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": cid_a,
+                            "blob": base64.b64encode(b"toosmall").decode(),
+                            "mime": "audio/webm", "duration_seconds": 30})
+        check("blob under MIN_BLOB_SIZE -> 422", r.status_code == 422)
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": cid_a,
+                            "blob": kwame.encrypt_audio(cid_a, b"y" * 64),
+                            "mime": "audio/flac", "duration_seconds": 30})
+        check("attachment with unsupported mime -> 422", r.status_code == 422)
+
+        # consent OFF again: transcription and uploads stop, kept audio
+        # stays playable (no provider is involved in playback)
+        r = await req(c, "PUT", "/api/account/voice-consent",
+                      headers={**kwame.headers,
+                               "X-Account-Verifier": kwame.auth_b64},
+                      json={"enabled": False, "verifier": kwame.auth_b64})
+        check("kwame disables voice consent -> 200 (record wiped)",
+              r.status_code == 200 and r.json()["enabled"] is False
+              and r.json()["voice_consent_at"] is None)
+        r = await transcribe(kwame, "walked the long way to the pharmacy", "en")
+        check("transcribe after consent off -> 403", r.status_code == 403)
+        r = await req(c, "POST", "/api/audio/attachments", headers=kwame.headers,
+                      json={"client_entry_id": cid_a,
+                            "blob": kwame.encrypt_audio(cid_a, b"z" * 64),
+                            "mime": "audio/webm", "duration_seconds": 30})
+        check("attachment upload after consent off -> 403", r.status_code == 403)
+        r = await req(c, "GET", f"/api/audio/attachments/{att_a['id']}",
+                      headers=kwame.headers)
+        check("kept recordings remain PLAYABLE with consent off",
+              r.status_code == 200)
+        r = await req(c, "PUT", "/api/account/voice-consent",
+                      headers={**kwame.headers,
+                               "X-Account-Verifier": kwame.auth_b64},
+                      json={"enabled": True, "verifier": kwame.auth_b64})
+        check("kwame re-enables voice consent -> 200", r.status_code == 200)
+
+        # --------------------------------------------------------------- 10
+        phase("10 · key lifecycle: rekey (priya), envelope v2 + O(1) password (elena)")
         priya = clients["priya"]
         old_key = priya.data_key
         # capture a plaintext for comparison across the rotation
@@ -1673,8 +2641,8 @@ async def run():
             "username": "ava", "verifier": ava_old_auth})
         check("old credential is dead (401)", r.status_code == 401)
 
-        # ---------------------------------------------------------------- 9
-        phase("9 · TOTP 2FA (therapist role): full lifecycle")
+        # --------------------------------------------------------------- 11
+        phase("11 · TOTP 2FA (therapist role): full lifecycle")
         r = await req(c, "POST", "/api/account/totp/setup",
                       headers=dr_sharma.headers,
                       json={"verifier": dr_sharma.auth_b64})
@@ -1751,26 +2719,40 @@ async def run():
         dr_sharma.token = r.json()["token"]
 
         # --------------------------------------------------------------- 10
-        phase("10 · LLM consent: honest refusal when no provider is configured")
+        # --------------------------------------------------------------- 12
+        phase("12 · LLM consent lifecycle (fake provider configured by this "
+              "campaign)")
         r = await req(c, "GET", "/api/account/llm-consent", headers=maya.headers)
         check("llm-consent defaults disabled",
               r.status_code == 200 and r.json()["enabled"] is False)
         r = await req(c, "PUT", "/api/account/llm-consent",
                       headers={**maya.headers, "X-Account-Verifier": maya.auth_b64},
                       json={"enabled": True, "verifier": maya.auth_b64})
-        expected = 409 if not llm_flag else 200
-        ok = (r.status_code == expected
-              and (expected == 409 and r.json().get("code") == "llm_unavailable"))
-        check("PUT enable with no provider configured -> 409 llm_unavailable",
-              ok, f"meta.llm_available={llm_flag}")
+        body = r.json()
+        expected = 200 if llm_flag else 409
+        ok = r.status_code == expected and (
+            (expected == 200 and body["enabled"] is True
+             and body["active_for_current_policy"] is True
+             and body["llm_consent_policy"] == meta.get("llm_policy_fingerprint")
+             and body["llm_consent_at"])
+            or (expected == 409 and body.get("code") == "llm_unavailable"))
+        check("PUT enable -> 200 against the current policy fingerprint "
+              "(409 llm_unavailable when unconfigured)", ok,
+              f"meta.llm_available={llm_flag}")
+        r = await req(c, "PUT", "/api/account/llm-consent",
+                      headers={**maya.headers, "X-Account-Verifier": maya.auth_b64},
+                      json={"enabled": True, "verifier": maya.auth_b64})
+        check("double-enable idempotent", r.status_code == 200
+              and r.json()["enabled"] is True)
         r = await req(c, "PUT", "/api/account/llm-consent",
                       headers={**maya.headers, "X-Account-Verifier": maya.auth_b64},
                       json={"enabled": False, "verifier": maya.auth_b64})
-        check("PUT disable -> 200 (idempotent)", r.status_code == 200
-              and r.json()["enabled"] is False)
+        check("PUT disable -> 200 (record wiped)", r.status_code == 200
+              and r.json()["enabled"] is False
+              and r.json()["llm_consent_at"] is None)
 
-        # --------------------------------------------------------------- 11
-        phase("11 · logout kills exactly one token")
+        # --------------------------------------------------------------- 13
+        phase("13 · logout kills exactly one token")
         r = await req(c, "POST", "/api/auth/login", json={
             "username": "maya", "verifier": maya.auth_b64})
         second_token = r.json()["token"]
@@ -1784,8 +2766,8 @@ async def run():
         check("maya's main token still alive (jti-scoped revoke)",
               r.status_code == 200)
 
-        # --------------------------------------------------------------- 12
-        phase("12 · export: zero-knowledge bundle, decrypted locally")
+        # --------------------------------------------------------------- 14
+        phase("14 · export: zero-knowledge bundle, decrypted locally")
         for p in personas:
             cl = clients[p.name]
             r = await req(c, "GET", "/api/account/export", headers=cl.headers)
@@ -1802,6 +2784,18 @@ async def run():
             dec = cl.decrypt_entry(sample["blob"], sample["client_entry_id"],
                                    sample["content_version"])
             ok = ok and isinstance(dec["text"], str)
+            if p.name in ("rosa", "amara", "kwame"):
+                # the voice channels ride the export: find one spoken entry
+                spoken = next(x for x in bundle["entries"]
+                              if x["client_entry_id"].startswith(p.name)
+                              and not x["client_entry_id"].endswith("phq9")
+                              and cl.decrypt_entry(
+                                  x["blob"], x["client_entry_id"],
+                                  x["content_version"]).get("v") == 3)
+                vdec = cl.decrypt_entry(spoken["blob"], spoken["client_entry_id"],
+                                        spoken["content_version"])
+                ok = ok and vdec["input_mode"] == "voice"
+                ok = ok and vdec.get("transcript_lang") in ("es", "fr", "en")
             if p.name == "ben":
                 ok = ok and len(bundle["measures"]) == len(p.measures) - 1
             if p.name == "elena":
@@ -1815,8 +2809,8 @@ async def run():
         check("exported entry blobs are opaque ciphertext (no plaintext leak)",
               "disappear" not in blob_raw and base64.b64decode(blob_raw)[:1] != b"{")
 
-        # --------------------------------------------------------------- 13
-        phase("13 · access logs (patient + therapist) with cursor pagination")
+        # --------------------------------------------------------------- 15
+        phase("15 · access logs (patient + therapist) with cursor pagination")
         rows: list[dict] = []
         cursor = None
         for _ in range(100):   # safety cap; the log is far shorter
@@ -1845,9 +2839,23 @@ async def run():
         check("therapist access log names the patient",
               r.status_code == 200 and any(
                   x.get("patient_name") == "elena" for x in trows))
+        # kwame's voice-sharing actions + the therapist's audio playback
+        r = await req(c, "GET", "/api/account/access-log?limit=200",
+                      headers=kwame.headers)
+        klog = r.json()
+        audio_access = [x for x in klog if x.get("action") == "audio_access"]
+        share_toggles = {x.get("action") for x in klog
+                         if x.get("action", "").startswith("share_voice")}
+        check("kwame's log records every audited therapist playback",
+              r.status_code == 200 and len(audio_access) >= 2
+              and all(x.get("actor") == "therapist" for x in audio_access),
+              f"{len(audio_access)} audio_access rows")
+        check("share-voice on/off toggles are audit-logged as patient actions",
+              share_toggles >= {"share_voice_on", "share_voice_off"},
+              str(sorted(share_toggles)))
 
-        # --------------------------------------------------------------- 14
-        phase("14 · boundaries, roles, deletion (dr_evil + fred)")
+        # --------------------------------------------------------------- 16
+        phase("16 · boundaries, roles, deletion (dr_evil + fred + gina)")
         r = await req(c, "GET", f"/api/therapist/patients/{elena.user_id}/insights",
                       headers=dr_evil.headers)
         check("therapist B reading therapist A's patient -> 404",
@@ -1863,13 +2871,20 @@ async def run():
         check("random patient id -> flat 404", r.status_code == 404)
         patient_routes = ["GET /api/entries?limit=1", "GET /api/insights",
                           "GET /api/consents", "GET /api/questions/today",
-                          "GET /api/account/export", "GET /api/measures?limit=1"]
+                          "GET /api/account/export", "GET /api/measures?limit=1",
+                          "GET /api/audio/attachments/whatever-id",
+                          "POST /api/audio/transcriptions"]
         ok403 = True
         for route in patient_routes:
             method, path = route.split(" ", 1)
-            r = await req(c, method, path, headers=dr_sharma.headers)
+            if method == "POST":
+                r = await req(c, method, path, headers=dr_sharma.headers, json={
+                    "audio_b64": "AAAA", "mime": "audio/webm",
+                    "duration_seconds": 10})
+            else:
+                r = await req(c, method, path, headers=dr_sharma.headers)
             ok403 = ok403 and r.status_code == 403
-        check("therapist token on all patient reads -> 403", ok403)
+        check("therapist token on all patient reads (+audio) -> 403", ok403)
         r = await req(c, "POST", "/api/processing/sessions",
                       headers=dr_sharma.headers, json={"data_key": maya.data_key_b64})
         check("therapist token on processing/sessions -> 403", r.status_code == 403)
@@ -1944,8 +2959,44 @@ async def run():
         check("re-registered account starts empty", r.status_code == 200
               and r.json() == [])
 
-        # --------------------------------------------------------------- 15
-        phase("15 · storage at rest: zero-knowledge database inspection")
+        # gina: voice user erased with kept recordings (M2 — objects die too)
+        gina = Client("gina", "gina-sim-pass-1")
+        r = await req(c, "POST", "/api/auth/register", json=gina.register_body())
+        gina.user_id, gina.token = r.json()["user_id"], r.json()["token"]
+        r = await req(c, "PUT", "/api/account/voice-consent",
+                      headers={**gina.headers, "X-Account-Verifier": gina.auth_b64},
+                      json={"enabled": True, "verifier": gina.auth_b64})
+        check("gina enables voice consent", r.status_code == 200)
+        gina_entry = {"text": "spoke my first note", "sentiment": 0.1,
+                      "date": TODAY, "cid": "gina-1"}
+        r = await req(c, "POST", "/api/entries", headers=gina.headers, json={
+            "client_entry_id": "gina-1", "blob": gina.encrypt(gina_entry),
+            "entry_date": TODAY.isoformat()})
+        check("gina writes an entry", r.status_code == 201)
+        gina_take = synth_take("spoke my first note", "en")
+        r = await req(c, "POST", "/api/audio/attachments", headers=gina.headers,
+                      json={"client_entry_id": "gina-1",
+                            "blob": gina.encrypt_audio("gina-1", gina_take),
+                            "mime": "audio/webm", "duration_seconds": 21})
+        check("gina keeps one recording", r.status_code == 201)
+        gina_dir = AUDIO_DIR / "audio" / gina.user_id
+        check("gina's object exists in the local store before erasure",
+              gina_dir.exists()
+              and any(p.is_file() for p in gina_dir.rglob("*")))
+        r = await req(c, "DELETE", "/api/account",
+                      headers={**gina.headers, "X-Account-Verifier": gina.auth_b64})
+        check("gina account delete (kept audio present) -> 204",
+              r.status_code == 204)
+        # M2: the erasure path best-effort-deletes the OBJECTS before the
+        # row cascade — and the store prunes the account's now-empty
+        # directory, so the erased identity leaves nothing on disk
+        check("account erasure removed her audio OBJECTS, not just rows (M2)",
+              not gina_dir.exists(),
+              f"leftovers: {[p.name for p in gina_dir.rglob('*')]}"
+              if gina_dir.exists() else "user dir gone")
+
+        # --------------------------------------------------------------- 17
+        phase("17 · storage at rest: zero-knowledge database inspection")
         async with build_sessionmaker(engine)() as s:
             tables = (await s.execute(text(
                 "SELECT name FROM sqlite_master WHERE type='table' "
@@ -1954,7 +3005,7 @@ async def run():
             for t in ["users", "entries", "insights", "measures", "consents",
                       "therapist_notes", "therapist_note_revisions",
                       "access_log", "token_revocation", "rekey_journal",
-                      "pairing_codes", "totp_backup_codes"]:
+                      "pairing_codes", "totp_backup_codes", "audio_attachments"]:
                 if t in tables:
                     counts[t] = (await s.execute(
                         text(f"SELECT COUNT(*) FROM {t}"))).scalar_one()
@@ -1966,6 +3017,9 @@ async def run():
                 "SELECT blob FROM measures LIMIT 100"))).scalars().all()
         report["table_counts"] = counts
         print(f"      tables: {counts}")
+        check("audio_attachments table holds kwame's kept recordings",
+              counts.get("audio_attachments", 0) >= 20,
+              f"{counts.get('audio_attachments')} rows")
 
         def looks_cipher(b) -> bool:
             """Structural ciphertext test: a stored plaintext payload would
@@ -1995,18 +3049,28 @@ async def run():
 
         db_bytes = (BACKEND / "sim1y.db").read_bytes()
         probes = [b"fingerpicking", b"doomscrolling", b"grandma", b"want to disappear",
-                  b"deadline pressure", b"Session 1: adjusting"]
+                  b"deadline pressure", b"Session 1: adjusting",
+                  b"no puedo dormir", b"ma poitrine", b"SIMAUD1"]
         leaks = [p for p in probes if p in db_bytes]
-        check("raw DB file contains none of the journal/note plaintext",
-              not leaks, f"leaked: {leaks}" if leaks else "6 probes clean")
+        check("raw DB file contains none of the journal/note/voice plaintext",
+              not leaks, f"leaked: {leaks}" if leaks else "9 probes clean")
         wal = BACKEND / "sim1y.db-wal"
         if wal.exists():
             wal_bytes = wal.read_bytes()
             leaks_wal = [p for p in probes if p in wal_bytes]
             check("DB write-ahead log is equally clean", not leaks_wal)
 
-        # --------------------------------------------------------------- 16
-        phase("16 · rate limiting: default ops bucket burst (429 + Retry-After)")
+        # the local audio store: objects must be CLIENT CIPHERTEXT — the
+        # synthetic take marker can never appear on disk in the clear
+        audio_files = list(AUDIO_DIR.rglob("*.enc")) if AUDIO_DIR.exists() else []
+        plain_objs = [p for p in audio_files
+                      if SIM_MAGIC in p.read_bytes()[:4096]]
+        check("audio store objects are opaque ciphertext (no take plaintext)",
+              len(audio_files) >= 20 and not plain_objs,
+              f"{len(audio_files)} objects, {len(plain_objs)} leaking")
+
+        # --------------------------------------------------------------- 18
+        phase("18 · rate limiting: default ops bucket burst (429 + Retry-After)")
         hit_429 = None
         t0 = walltime.time()
         for i in range(241):
@@ -2020,13 +3084,15 @@ async def run():
               and "retry-after" in {k.lower() for k in hit_429.headers},
               f"tripped at request {i + 1} / {walltime.time() - t0:.1f}s")
 
+    for server in fakes:
+        server.should_exit = True
     await engine.dispose()
 
     # ------------------------------------------------------------------ out ----
     failed = [x for x in CHECKS if not x["ok"]]
     passed_n = len(CHECKS) - len(failed)
     print(f"\n{'=' * 70}")
-    print(f"1-YEAR E2E CAMPAIGN: {passed_n}/{len(CHECKS)} checks passed")
+    print(f"VOICE+TEXT 1-YEAR E2E CAMPAIGN: {passed_n}/{len(CHECKS)} checks passed")
     if failed:
         print("\nFAILED:")
         for x in failed:

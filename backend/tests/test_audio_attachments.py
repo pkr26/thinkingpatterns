@@ -318,19 +318,43 @@ async def test_patient_delete_recording_keeps_entry(client, app, settings):
 async def test_entry_deletion_cascades_to_recording(client, app, settings):
     emu = await _voice_ready(client, settings, "delentry")
     entry_id = await _make_entry(client, emu, "e-cascade")
-    created = (
-        await client.post(
-            "/api/v1/audio/attachments",
-            headers=emu.headers,
-            json=_attachment_body(entry_id),
-        )
-    ).json()
+    response = await client.post(
+        "/api/v1/audio/attachments",
+        headers=emu.headers,
+        json=_attachment_body(entry_id),
+    )
+    assert response.status_code == 201
     assert await _stored_objects(app)
 
     response = await client.delete(f"/api/entries/{entry_id}", headers=emu.headers)
     assert response.status_code == 204
     assert await _run(app, select(AudioAttachment)) == []
     assert await _stored_objects(app) == set()
+    # the entry cascade prunes the account's now-empty directory too
+    assert not (_store(app).root / "audio" / emu.user_id).exists()
+
+
+async def test_local_store_prunes_empty_user_dirs(tmp_path):
+    """Store-level pin of the directory prune (2026-09-29 E2E finding):
+    deleting an object removes the account's directory once it is empty —
+    an erasure must not leave the erased account's id as a directory name —
+    while a directory that still holds an object, or another account's
+    directory, is untouched."""
+    store = LocalAudioStore(str(tmp_path / "store"))
+    await store.put("audio/u1/aaa.enc", b"a" * 40)
+    await store.put("audio/u1/bbb.enc", b"b" * 40)
+    await store.put("audio/u2/ccc.enc", b"c" * 40)
+    u1, u2 = store.root / "audio" / "u1", store.root / "audio" / "u2"
+
+    await store.delete("audio/u1/aaa.enc")
+    assert u1.is_dir() and (u1 / "bbb.enc").exists()  # one object left
+
+    await store.delete("audio/u1/bbb.enc")
+    assert not u1.exists()                             # last object: pruned
+    assert u2.is_dir() and (u2 / "ccc.enc").exists()   # others untouched
+
+    await store.delete("audio/u1/bbb.enc")             # idempotent re-delete
+    assert not u1.exists()
 
 
 async def test_storage_unconfigured_is_503(client, settings):

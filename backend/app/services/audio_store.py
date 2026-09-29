@@ -192,8 +192,22 @@ class LocalAudioStore:
 
     async def delete(self, key: str) -> None:
         path = self._path(key)
+
+        def _delete() -> None:
+            path.unlink(True)  # missing_ok: sweep idempotence
+            # Prune the now-empty user directory, best-effort (2026-09-29
+            # E2E finding): the key layout embeds the account id, and an
+            # account erasure that deletes every object but leaves
+            # audio/<deleted-user-id>/ behind keeps the erased identity on
+            # disk as a directory name. rmdir refuses non-empty dirs, so a
+            # concurrent object for the same account simply keeps its dir.
+            try:
+                path.parent.rmdir()
+            except OSError:
+                pass
+
         try:
-            await asyncio.to_thread(path.unlink, True)  # missing_ok: sweep idempotence
+            await asyncio.to_thread(_delete)
         except OSError as exc:
             raise AudioStoreError(f"local delete failed: {type(exc).__name__}") from exc
 

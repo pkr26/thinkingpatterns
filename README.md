@@ -727,15 +727,22 @@ preserved in git history. The executable attack harnesses remain in
 `redteam/` (`bash redteam/run_all.sh`).
 
 A standing full-system E2E campaign extends that history: **the 1-year,
-10-user, every-endpoint simulation** (`reports/simulation1y/`,
-2026-09-28, **245/245 checks**) drives all 52 mounted routes over live
-HTTP with the real client crypto — a full simulated journaling year per
-persona (including a 365-day pure-noise control that surfaces zero
-statistical kinds), encrypted PHQ-9 measures, the therapist-sharing
-lifecycle end to end, key rotations/rekey/envelope-v2/TOTP, exports,
-deletion, and at-rest zero-knowledge probes of the raw database file.
-Re-run instructions and the per-persona pattern story:
-`reports/simulation1y/SIMULATION_REPORT.md`.
+13-user (10 typed + 3 voice), every-endpoint simulation**
+(`reports/simulation1y/`, 2026-09-29, **366/366 checks**) drives every
+mounted route over live HTTP with the real client crypto — a full
+simulated journaling year per persona (including a 365-day pure-noise
+control that surfaces zero statistical kinds and a spoken-year voice
+control), encrypted PHQ-9 measures, the therapist-sharing lifecycle end
+to end, key rotations/rekey/envelope-v2/TOTP, exports, deletion, and
+at-rest zero-knowledge probes of the raw database file and the audio
+object store. The voice users exercise the whole voice pipeline against
+in-process fake STT/LLM providers: consent walls (voice ≠ LLM
+translation consent — the H4 gate), 995 spoken takes transcribed,
+translated, and saved as payload-v3 entries, kept-recording
+upload/fetch/replace/delete/expiry/quota, the share-voice therapist
+playback path with audited access, STT retry/502 behavior, and account
+erasure that deletes the audio objects. Re-run instructions and the
+per-persona pattern story: `reports/simulation1y/SIMULATION_REPORT.md`.
 
 Facts an operator should know from that history:
 
