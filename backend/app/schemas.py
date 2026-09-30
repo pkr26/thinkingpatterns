@@ -278,6 +278,60 @@ class PasswordChangeRequest(StrictRequestModel):
     wrapped_data_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
 
 
+class RecoverySetupRequest(StrictRequestModel):
+    """PUT /account/recovery — create/replace the recovery envelope.
+
+    The verifier here is the RECOVERY KEY itself (a random 32 bytes the
+    client generated and showed once): like the login scheme, the server
+    stores only its scrypt hash. wrapped_key is the data key sealed
+    CLIENT-side under a key derived from the recovery key — the server
+    stores the blob and cannot open it. Setup additionally requires the
+    PASSWORD verifier proof (every destructive lifecycle action does).
+    """
+
+    password_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    wrapped_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
+
+
+class RecoveryStatusResponse(BaseModel):
+    enabled: bool
+    set_at: datetime | None = None
+
+
+class RecoveryLoginRequest(StrictRequestModel):
+    """POST /auth/recover — username + the recovery key (as the verifier)."""
+
+    username: str = Field(min_length=1, max_length=64)
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+
+
+class RecoveryLoginResponse(BaseModel):
+    token: str
+    user_id: str
+    expires_in: int
+    role: str = "user"
+    # The client-sealed data-key copy: only the recovery key opens it.
+    recovery_wrapped_data_key: str
+
+
+class RecoveryPasswordResetRequest(StrictRequestModel):
+    """PUT /account/recovery/password — set a brand-new password using the
+    RECOVERY key as the proof (the old password is unknown by definition).
+
+    Same swap as PUT /account/password (salt + scrypt verifier + data-key
+    envelope, one transaction, epoch bump) with the same X-Processing-Token
+    possession probe — the popped key must authenticate stored ciphertext,
+    so a recovery key alone can never overwrite the envelope with garbage.
+    """
+
+    proof: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
+    new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    new_kdf_params: object | None = None
+    wrapped_data_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
+
+
 class KeyEnvelopeUpgradeRequest(StrictRequestModel):
     """POST /account/key-envelope/upgrade — v1 -> v2 self-service migration.
 

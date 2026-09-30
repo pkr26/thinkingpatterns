@@ -63,6 +63,9 @@ from ..schemas import (
     VoiceConsentRequest,
     VoiceConsentResponse,
     entry_out,
+    RecoveryPasswordResetRequest,
+    RecoverySetupRequest,
+    RecoveryStatusResponse,
 )
 from ._audit import append_access_log, parse_access_log_cursor
 from .auth import (
@@ -918,6 +921,368 @@ async def rotate_credential(
         # The credential every live bearer authenticated under is gone: kill
         # the sessions and any resident processing keys in the same lifecycle
         # event, exactly like logout.
+        request.app.state.key_store.destroy_all_for_owner(fresh.id)
+
+
+# --- key-recovery envelope (wave 3, 2026-09-30) -----------------------------------
+#
+# A forgotten password destroys a zero-knowledge journal by design; the
+# opt-in recovery envelope is the honest escape hatch: a random user-held
+# 32-byte key whose scrypt verifier lives here, beside a CLIENT-SEALED
+# copy of the data key only that key opens. The server can neither open
+# the data-key copy nor reconstruct the recovery key.
+
+
+@router.get(
+    "/recovery",
+    response_model=RecoveryStatusResponse,
+    dependencies=[
+        Depends(make_rate_limiter("account-recovery-read", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def get_recovery_status(
+    user: User = Depends(require_regular_user),
+) -> RecoveryStatusResponse:
+    """Whether a recovery kit exists (never any secret material)."""
+    return RecoveryStatusResponse(
+        enabled=user.recovery_verifier is not None, set_at=user.recovery_set_at
+    )
+
+
+@router.put(
+    "/recovery",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-recovery", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def set_recovery_envelope(
+    body: RecoverySetupRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create or replace the recovery envelope (password re-auth required).
+
+    The scrypt verifier is computed server-side from the recovery key
+    (the key is transmitted once, over TLS, exactly like a login verifier)
+    and never stored in the clear. A replacement rotates the previous kit
+    off: the OLD recovery key stops working the moment this returns.
+    """
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, body.password_verifier, request, session)
+    try:
+        recovery_key = base64.b64decode(body.verifier, validate=True)
+        wrapped_key = base64.b64decode(body.wrapped_key, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(
+            status_code=422,
+            detail="verifier and wrapped_key must be base64",
+            code="validation_error",
+        ) from None
+    if len(recovery_key) != 32:
+        raise ApiError(
+            status_code=422, detail="verifier must be exactly 32 bytes", code="validation_error"
+        )
+    if len(wrapped_key) != envelope.WRAPPED_DATA_KEY_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrapped_key must be exactly {envelope.WRAPPED_DATA_KEY_BYTES} bytes",
+            code="validation_error",
+        )
+    scrypt_salt = os.urandom(16)
+    async with auth_work_slot(request):
+        recovery_hash = await hash_verifier_off_loop(
+            recovery_key,
+            scrypt_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
+        )
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = (
+            (
+                await session.execute(
+                    select(User)
+                    .where(User.id == user.id)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        fresh.recovery_salt = scrypt_salt
+        fresh.recovery_verifier = recovery_hash
+        fresh.recovery_wrapped_data_key = wrapped_key
+        fresh.recovery_set_at = utcnow()
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="recovery_kit_created",
+        )
+        await session.commit()
+
+
+@router.delete(
+    "/recovery",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-recovery", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def clear_recovery_envelope(
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    verifier: str = Header(default=None),
+):
+    """Disable the recovery kit (password re-auth required).
+
+    From this moment the account is again recoverable ONLY by password —
+    the honest trade-off the confirmation copy states.
+    """
+
+    # Header-shaped proof (mirrors DELETE /account): require the verifier.
+    if not verifier:
+        raise ApiError(
+            status_code=422, detail="verifier header required", code="validation_error"
+        )
+    expected_epoch = user.token_epoch
+    await _require_verifier(user, verifier, request, session)
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = (
+            (
+                await session.execute(
+                    select(User)
+                    .where(User.id == user.id)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if _epoch_fence_failed(fresh, expected_epoch):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        fresh.recovery_salt = None
+        fresh.recovery_verifier = None
+        fresh.recovery_wrapped_data_key = None
+        fresh.recovery_set_at = None
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="recovery_kit_removed",
+        )
+        await session.commit()
+
+
+@router.put(
+    "/recovery/password",
+    status_code=204,
+    dependencies=[
+        Depends(make_rate_limiter("account-recovery-password", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def reset_password_with_recovery_key(
+    body: RecoveryPasswordResetRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    x_processing_token: str | None = Header(default=None),
+):
+    """Set a brand-new password, proven by the RECOVERY key (wave 3).
+
+    The user forgot the password — the old-password verifier proof of
+    PUT /account/password is impossible by definition, so the proof here
+    is knowledge of the recovery key (scrypt against the stored recovery
+    verifier). Everything else is the SAME contract as the password
+    change: one atomic swap of salt + scrypt verifier + data-key envelope,
+    the X-Processing-Token possession probe (the popped key must
+    authenticate stored ciphertext, so a stolen recovery session can
+    never replace the envelope with garbage), the lifecycle fence with
+    the in-fence epoch re-read, a token-epoch bump, and a processing-key
+    purge. The recovery kit itself stays valid (the data key it seals did
+    not change).
+    """
+    try:
+        recovery_key = base64.b64decode(body.proof, validate=True)
+        new_salt_bytes = base64.b64decode(body.new_salt, validate=True)
+        new_verifier_bytes = base64.b64decode(body.new_verifier, validate=True)
+        wrapped_key_bytes = base64.b64decode(body.wrapped_data_key, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(
+            status_code=422,
+            detail="proof, new_salt, new_verifier and wrapped_data_key must be base64",
+            code="validation_error",
+        ) from None
+    if len(recovery_key) != 32:
+        raise ApiError(status_code=422, detail="proof must be exactly 32 bytes", code="validation_error")
+    if len(new_salt_bytes) != SALT_BYTES:
+        raise ApiError(
+            status_code=422, detail=f"new_salt must be exactly {SALT_BYTES} bytes", code="validation_error"
+        )
+    if len(new_verifier_bytes) != AUTH_KEY_SIZE:
+        raise ApiError(
+            status_code=422, detail=f"new_verifier must be {AUTH_KEY_SIZE} bytes", code="validation_error"
+        )
+    if len(wrapped_key_bytes) != envelope.WRAPPED_DATA_KEY_BYTES:
+        raise ApiError(
+            status_code=422,
+            detail=f"wrapped_data_key must be exactly {envelope.WRAPPED_DATA_KEY_BYTES} bytes",
+            code="validation_error",
+        )
+    if user.recovery_verifier is None:
+        raise ApiError(
+            status_code=409,
+            detail="no recovery kit on this account",
+            code="recovery_not_configured",
+        )
+    # Recovery-key proof (off the event loop, same limiter as login).
+    async with auth_work_slot(request):
+        candidate = await hash_verifier_off_loop(
+            recovery_key,
+            user.recovery_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
+        )
+    if not hmac.compare_digest(candidate, bytes(user.recovery_verifier)):
+        raise ApiError(status_code=401, detail="invalid credentials", code="invalid_credentials")
+    # kdf_params: same canonicalization contract as the password change.
+    if body.new_kdf_params is not None:
+        try:
+            canonical_params = validate_kdf_params(
+                body.new_kdf_params, min_pbkdf2_iterations=KDF_PARAMS_MIN_PBKDF2_ITERATIONS
+            )
+        except KdfParamsError as exc:
+            raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
+        params_json = canonical_kdf_params_json(canonical_params)
+    elif user.kdf_params:
+        stored_params = parse_kdf_params_json(user.kdf_params)
+        if stored_params is None:
+            raise ApiError(
+                status_code=409,
+                detail="stored kdf_params are invalid; contact the operator",
+                code="envelope_key_mismatch",
+            )
+        params_json = canonical_kdf_params_json(stored_params)
+    else:
+        params_json = canonical_kdf_params_json(kdf.KDF_PARAMS_DEFAULT)
+    scrypt_server_salt = os.urandom(16)
+    async with auth_work_slot(request):
+        new_verifier_hash = await hash_verifier_off_loop(
+            new_verifier_bytes,
+            scrypt_server_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
+        )
+    if not x_processing_token:
+        raise ApiError(
+            status_code=422,
+            detail="processing session token required (X-Processing-Token)",
+            code="processing_session_required",
+        )
+    from .insights import KeyNotFound
+
+    try:
+        candidate_key = request.app.state.key_store.pop(x_processing_token, owner=user.id)
+    except KeyNotFound:
+        raise ApiError(
+            status_code=403,
+            detail="processing session missing or expired",
+            code="processing_session_invalid",
+        ) from None
+    expected_epoch = user.token_epoch
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = (
+            (
+                await session.execute(
+                    select(User)
+                    .where(User.id == user.id)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if fresh is None or not fresh.is_active:
+            raise ApiError(status_code=404, detail="account not found", code="not_found")
+        if fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        # Possession probe — the SAME contract as PUT /account/password
+        # (entry AAD first, insight fallback, vacuous on an empty
+        # corpus), run off the loop via the shared helper.
+        entry_row = (
+            await session.execute(
+                select(Entry.client_entry_id, Entry.content_version, Entry.blob)
+                .where(Entry.user_id == fresh.id)
+                .order_by(Entry.received_at.desc(), Entry.id.desc())
+                .limit(1)
+            )
+        ).first()
+        proved = False
+        if entry_row is not None:
+            aad = crypto.entry_aad_candidates(fresh.id, entry_row[0], int(entry_row[1]))
+            proved = await anyio.to_thread.run_sync(
+                _authenticate_blob_only, candidate_key, bytes(entry_row[2]), aad
+            )
+        else:
+            insight_row = (
+                await session.execute(
+                    select(Insight.kind, Insight.for_date, Insight.blob)
+                    .where(Insight.user_id == fresh.id)
+                    .limit(1)
+                )
+            ).first()
+            if insight_row is not None:
+                kind, for_date, blob = insight_row
+                insight_aad = (
+                    crypto.build_aad("question", fresh.id, for_date.isoformat())
+                    if kind == "question" and for_date is not None
+                    else crypto.build_aad("insights", fresh.id, kind)
+                )
+                proved = await anyio.to_thread.run_sync(
+                    _authenticate_blob_only, candidate_key, bytes(blob), insight_aad
+                )
+            else:
+                proved = True  # empty corpus: possession is vacuous
+        if not proved:
+            raise ApiError(
+                status_code=403,
+                detail=(
+                    "the processing session's key did not authenticate stored "
+                    "ciphertext; open a session with the account's current data key"
+                ),
+                code="envelope_key_mismatch",
+            )
+        await session.execute(
+            update(User)
+            .where(User.id == fresh.id)
+            .values(
+                salt=base64.b64encode(new_salt_bytes).decode("ascii"),
+                verifier=new_verifier_hash,
+                scrypt_salt=scrypt_server_salt,
+                token_epoch=User.token_epoch + 1,
+                key_scheme=KEY_SCHEME_V2,
+                wrapped_data_key=wrapped_key_bytes,
+                kdf_params=params_json,
+            )
+        )
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="password_reset_via_recovery",
+        )
+        await session.commit()
         request.app.state.key_store.destroy_all_for_owner(fresh.id)
 
 

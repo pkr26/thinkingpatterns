@@ -55,6 +55,8 @@ from ..schemas import (
     SaltLookupRequest,
     SaltResponse,
     TokenResponse,
+    RecoveryLoginRequest,
+    RecoveryLoginResponse,
 )
 from ..security import tokens
 from ..security.kdf import (
@@ -400,6 +402,92 @@ async def get_salt(
     return SaltResponse(
         salt=decoy_salt(body.username, settings.decoy_secret.strip() or settings.token_secret)
     )
+
+
+@router.post(
+    "/recover",
+    response_model=RecoveryLoginResponse,
+    dependencies=[
+        Depends(make_rate_limiter("auth-recover", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def recover_login(
+    body: RecoveryLoginRequest, request: Request, session: AsyncSession = Depends(get_session)
+):
+    """Log in with the RECOVERY KEY instead of the password (wave 3).
+
+    For accounts that created a recovery kit: the key verifies against its
+    scrypt hash (decoy CPU burn for unknown/inactive/no-kit accounts, so
+    timing never reveals existence or enrollment), the response carries a
+    session AND the client-sealed data-key copy only the recovery key
+    opens. The token epoch bumps (every existing bearer dies — a recovery
+    event implies the password may be lost or compromised).
+
+    PATIENT accounts only: therapist second-factor accounts recover
+    through their TOTP recovery codes; a recovery kit here would bypass
+    that factor entirely.
+    """
+    async with auth_work_slot(request):
+        result = await session.execute(select(User).where(User.username == body.username))
+        user = result.scalar_one_or_none()
+        await _close_read_transaction(session)
+        try:
+            recovery_key = base64.b64decode(body.verifier, validate=True)
+        except _b64_decode_error:
+            recovery_key = b""
+        verifier_hash = user.recovery_verifier if user is not None else None
+        if (
+            user is None
+            or not user.is_active
+            or verifier_hash is None
+            or user.role != "user"
+            or len(recovery_key) != 32
+        ):
+            # Same burn as an unknown-account login; the branch conditions
+            # are deliberately one expression so none of them is readable
+            # from timing.
+            await hash_verifier_off_loop(
+                b"\x00" * 32,
+                b"\x00" * 16,
+                limiter=_auth_limiter(request),
+                n=request.app.state.settings.scrypt_n,
+            )
+            raise ApiError(
+                status_code=401, detail="invalid credentials", code="invalid_credentials"
+            )
+        candidate = await hash_verifier_off_loop(
+            recovery_key,
+            user.recovery_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
+        )
+        if not hmac.compare_digest(candidate, bytes(verifier_hash)):
+            raise ApiError(
+                status_code=401, detail="invalid credentials", code="invalid_credentials"
+            )
+        # The recovery event invalidates every existing bearer.
+        user.token_epoch += 1
+        session.add(user)
+        await session.commit()
+        settings = request.app.state.settings
+        token = issue_token(
+            user.id,
+            settings.auth_token_secret,
+            settings.token_ttl_seconds,
+            epoch=user.token_epoch,
+            purpose=tokens.PURPOSE_PATIENT,
+            ksv=settings.auth_secret_version,
+        )
+        return RecoveryLoginResponse(
+            token=token,
+            user_id=user.id,
+            expires_in=settings.token_ttl_seconds,
+            role=user.role,
+            key_scheme=user.key_scheme if user.key_scheme else "v1",
+            recovery_wrapped_data_key=base64.b64encode(
+                bytes(user.recovery_wrapped_data_key)
+            ).decode("ascii"),
+        )
 
 
 @router.post(

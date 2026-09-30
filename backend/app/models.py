@@ -193,6 +193,15 @@ class User(Base):
     # (nonce||ct||tag, 60 bytes decoded). NULL on v1 accounts; NULL on a v2
     # account is a hard data-loss state the endpoints refuse to create.
     wrapped_data_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Key-recovery envelope (wave 3, 2026-09-30, opt-in): a random
+    # user-held 32-byte recovery key. The server stores its SCRYPT VERIFIER
+    # (never the key) and a CLIENT-SEALED copy of the data key that only
+    # the recovery key opens — a forgotten password no longer destroys the
+    # journal for accounts that created a kit. All nullable = feature off.
+    recovery_salt: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    recovery_verifier: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    recovery_wrapped_data_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    recovery_set_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # Canonical JSON of the client's kdf_params blob (see security.kdf) —
     # which KDF produced the keys, at what cost. Echoed back to
     # authenticated clients (GET /auth/key-envelope) and embedded in the

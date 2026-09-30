@@ -424,6 +424,10 @@ class TestExhaustiveRoleWalls:
             "POST /api/v1/auth/register",
             "POST /api/v1/auth/salt",
             "POST /api/v1/auth/login",
+            # Wave 3 (2026-09-30): recovery login is a credential
+            # PRESENTATION endpoint (like login itself) — the recovery key
+            # IS the credential being verified.
+            "POST /api/v1/auth/recover",
             "GET /api/v1/meta",
             # Therapist signup is open by design; in production it carries
             # the enrollment-token gate instead of a session (verified by
