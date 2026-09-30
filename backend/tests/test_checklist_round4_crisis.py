@@ -64,6 +64,19 @@ DIALOG_SAMPLES = [
     "i am tired of living like this",  # 33 tired of living/life
     "i want to overdose on these pills",  # 34 want to overdose
     "my suicidality is back and it scares me",  # 35 suicidality
+    # 2026-09-29 deep-audit CRITICAL: method-specific ideation samples
+    # (index-parity continues — inserted where the contract inserted them).
+    "i want to be dead and not wake up",  # 36 want to be dead (promoted)
+    "i want to hang myself from the balcony",  # 37 hang/hung myself
+    "i will shoot myself if this continues",  # 38 shoot myself
+    "thinking about drowning myself again",  # 39 drown myself
+    "i want to cut my wrists tonight",  # 40 cut my wrists
+    "sometimes i slit my wrists to cope",  # 41 slit my wrists
+    "going to swallow all my pills tonight",  # 42 swallow all my pills
+    "i swallowed the whole bottle yesterday",  # 43 the whole bottle
+    "i deserve to die for what i did",  # 44 deserve to die
+    "i should be dead already honestly",  # 45 should be dead
+    "i am going to jump off the bridge tomorrow",  # 46 going to jump off
     "quiero morir y no se que hacer",  # 36 quiero morir
     "me quiero matar si no cambia nada",  # 31 me quiero matar
     "pense en quitarme la vida otra vez",  # 32 quitarme la vida
@@ -130,7 +143,6 @@ DIALOG_SAMPLES = [
 SUPPRESS_SAMPLES = [
     "the suicidality screening came back positive",  # 1 suicid\w+
     "this workload is slowly killing me",  # 2 kill(ing)? me
-    "i want to be dead tired tonight",  # 3 want to be dead (fires by policy)
     "i would rather be dead than keep arguing",  # 4 rather be dead
     "he said the world is better off dead",  # 5 better off dead
     "i almost overdosed on caffeine pills",  # 6 overdose(d)?
@@ -154,7 +166,10 @@ SUPPRESS_SAMPLES = [
     "pienso en hacerme daño seguido",  # 23 hacer(le|me|se) daño
     # 2026-09-28 deep audit — the Spanish tense/idiom suppress counterparts.
     "estoy pensando en terminar con todo",  # 24 terminar con todo (any person)
-    "volví a pensar en cortarme los antebrazos",  # 25 cortarme/lastimarme/...
+    "volví a pensar en cortarme los antebrazos",  # cortarme/lastimarme/...
+    # 2026-09-29 deep-audit CRITICAL: method-family suppress counterparts.
+    "someone jumped off a bridge in the news",  # jump(ed|ing) off <place>
+    "i take all of my meds before bed every night",  # take all my meds
 ]
 
 # Extra inflections and near-forms of contract patterns: not index-bound,

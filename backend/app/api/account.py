@@ -1464,6 +1464,18 @@ async def set_llm_consent(
             fresh.llm_consent_disclosure = None
             fresh.llm_consent_policy = None
         session.add(fresh)
+        # 2026-09-29 deep-audit MEDIUM: the most consequential privacy
+        # decision in the product — journal text flowing to a third-party
+        # endpoint — now leaves a tamper-evident trail row. The columns
+        # above are silently REWRITTEN on every toggle, so without this
+        # row a disputed withdrawal has no retained evidence at all.
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="llm_consent_on" if body.enabled else "llm_consent_off",
+        )
         await session.commit()
     return _consent_response(fresh, request.app.state.settings)
 
@@ -1551,6 +1563,16 @@ async def set_voice_consent(
             fresh.voice_consent_disclosure = None
             fresh.voice_consent_policy = None
         session.add(fresh)
+        # 2026-09-29 deep-audit MEDIUM: same trail-completeness fix as the
+        # LLM toggle — recorded audio flowing off-server must be visible in
+        # the chained, MAC-sealed history, not just in a mutable column.
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="voice_consent_on" if body.enabled else "voice_consent_off",
+        )
         await session.commit()
     return _voice_consent_response(fresh, request.app.state.settings)
 

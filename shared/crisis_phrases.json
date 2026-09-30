@@ -38,6 +38,17 @@
   "\\btired\\s+of\\s+(?:living|life)\\b",
   "\\bwant(?:s|ed|ing)?\\s+to\\s+overdose\\b",
   "\\bsuicidality\\b",
+  "\\bwant(?:s|ed|ing)?\\s+to\\s+be\\s+dead\\b",
+  "\\b(?:hang(?:ing|ed)?|hung)\\s+myself\\b",
+  "\\b(?:shoot|shot|shooting)\\s+myself\\b",
+  "\\bdrown(?:ing)?\\s+myself\\b",
+  "\\bcut(?:ting)?\\s+my\\s+(?:wrists?|arms?|thighs?)\\b",
+  "\\bslit(?:ting)?\\s+my\\s+wrists?\\b",
+  "\\b(?:swallow(?:ed|ing)?|took|taking)\\s+all\\s+(?:of\\s+)?my\\s+pills\\b",
+  "\\b(?:swallow(?:ed|ing)?|took|taking)\\s+(?:the\\s+)?whole\\s+bottle\\b",
+  "\\bdeserve\\s+to\\s+die\\b",
+  "\\bshould\\s+be\\s+dead\\b",
+  "\\b(?:want(?:s|ed|ing)?|going|gonna|plan(?:ning)?|will|about)\\s+to\\s+jump\\s+off\\b",
   "\\bquiero\\s+morir\\b",
   "\\bme\\s+quiero\\s+matar\\b",
   "\\bquitarme\\s+la\\s+vida\\b",
@@ -56,8 +67,8 @@
   "\\bla\\s+vida\\s+no\\s+vale\\s+la\\s+pena\\b",
   "\\b(?:me\\s+)?(?:quiero|quisiera|deberia|podria)\\s+quitar(?:me)?\\s+la\\s+vida\\b",
   "\\bme\\s+voy\\s+a\\s+quitar\\s+la\\s+vida\\b",
-  "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar)\\b",
-  "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme)\\b",
+  "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar|ahorcar)\\b",
+  "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme|ahorcarme)\\b",
   "\\bme\\s+(?:lastimo|hago\\s+da[nñ]o|corto\\s+la\\s+piel|quemo\\s+la\\s+piel)\\b",
   "\\b(?:quiero|quisiera)\\s+hacerme\\s+da[nñ]o\\b",
   "\\bno\\s+hay\\s+salida\\b",
@@ -69,7 +80,7 @@
   "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
   "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
   "\\bme\\s+cort(?:e|aba)\\b",
-  "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|matar)\\b",
+  "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|ahorcar|matar)\\b",
   "\\bme\\s+estoy\\s+(?:cortando|lastimando|quemando|ahogando|haciendo\\s+da[nñ]o)\\b",
   "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo)\\s+terminar\\s+con\\s+todo\\b",
   "\\bme\\s+har(?:e|ia)\\s+da[nñ]o\\b",
@@ -93,7 +104,6 @@
  "suppress_extra": [
   "\\bsuicid\\w+",
   "\\bkill(?:ing)?\\s+me\\b",
-  "\\bwant(?:s|ed|ing)?\\s+to\\s+be\\s+dead\\b",
   "\\brather\\s+be\\s+dead\\b",
   "\\bbetter\\s+off\\s+dead\\b",
   "\\boverdose(?:d)?\\b",
@@ -115,7 +125,9 @@
   "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
   "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b",
   "\\bterminar\\s+con\\s+todo\\b",
-  "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme)\\b"
+  "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme|ahorcarme)\\b",
+  "\\b(?:jump(?:ed|ing)?)\\s+off\\s+(?:a\\s+|the\\s+)?(?:bridge|building|roof|balcony|cliff|overpass|ledge)\\b",
+  "\\b(?:take|taking|took)\\s+all\\s+(?:of\\s+)?my\\s+(?:meds?|medication|medicine)\\b"
  ],
  "fixtures": {
   "dialog_fires": [
@@ -228,7 +240,19 @@
    "kiʟʟ myself",
    "kill myse1f",
    "k1ll myse1f",
-   "i will enditall now"
+   "i will enditall now",
+   "i want to hang myself",
+   "i will shoot myself",
+   "thinking about drowning myself",
+   "i want to cut my wrists",
+   "going to swallow all my pills",
+   "swallowed the whole bottle",
+   "i deserve to die",
+   "i should be dead already",
+   "i am going to jump off the bridge tomorrow",
+   "i want to be dead",
+   "me quiero ahorcar",
+   "quiero ahorcarme"
   ],
   "dialog_silent": [
    "This traffic is killing me",
@@ -284,7 +308,9 @@
    "the murky swamp",
    "silky sheets",
    "smoky sunset over the lake",
-   "i love this lucky star"
+   "i love this lucky star",
+   "i take my pills every morning with breakfast",
+   "i hung the picture myself"
   ],
   "suppress_only_fires": [
    "this traffic is killing me",
@@ -304,7 +330,9 @@
    "sometimes everything feels not worth living",
    "ya no vale la pena nada",
    "volvi a pensar en quitar la vida",
-   "pienso en hacerme daño seguido"
+   "pienso en hacerme daño seguido",
+   "someone jumped off a bridge in the news",
+   "i take all of my meds before bed"
   ]
  },
  "benign_compounds": [
@@ -1233,6 +1261,104 @@
    "intent": "benign",
    "dialog": false,
    "suppress": false
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i want to hang myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i am going to hang myself tonight",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i will shoot myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "thinking about drowning myself",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i want to cut my wrists",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "going to swallow all my pills",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i am going to jump off the bridge tomorrow",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i deserve to die",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i should be dead already",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific",
+   "sample": "i want to be dead",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-specific-es",
+   "sample": "me quiero ahorcar",
+   "intent": "crisis",
+   "dialog": true,
+   "suppress": true
+  },
+  {
+   "technique": "method-adherence-benign",
+   "sample": "i take my pills every morning with breakfast",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "method-adherence-benign",
+   "sample": "i hung the picture myself",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": false
+  },
+  {
+   "technique": "method-news-suppress-only",
+   "sample": "someone jumped off a bridge in the news",
+   "intent": "benign",
+   "dialog": false,
+   "suppress": true
   }
  ]
 }

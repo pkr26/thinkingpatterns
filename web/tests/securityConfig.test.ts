@@ -58,6 +58,21 @@ describe("static-host security policy", () => {
       expect(headers).toContain("X-Content-Type-Options: nosniff");
       expect(headers).toContain("Cache-Control: no-store");
       expect(headers).toContain("Permissions-Policy:");
+      // 2026-09-29 deep-audit MEDIUM: the shipped voice recorder calls
+      // getUserMedia, so the app origin must allow its own microphone —
+      // and ONLY its own. The full value is pinned in BOTH shipped header
+      // sources so neither can drift back to microphone=() (feature-dead
+      // voice) nor open any other capability.
+      const permissionsPolicy =
+        "Permissions-Policy: camera=(), microphone=(self), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), display-capture=(), idle-detection=(), browsing-topics=(), serial=(), bluetooth=()";
+      expect(headers).toContain(permissionsPolicy);
+      expect(patientBlock).toContain(
+        'add_header Permissions-Policy "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), display-capture=(), idle-detection=(), browsing-topics=(), serial=(), bluetooth=()" always;',
+      );
+      // The PORTAL keeps the mic fully disabled: it records nothing.
+      const portalBlock = nginx.slice(0, nginx.indexOf("Patient web client (web/)"));
+      expect(portalBlock).toContain("microphone=()");
+      expect(portalBlock).not.toContain("microphone=(self)");
       expect(headers).toContain("Cross-Origin-Opener-Policy: same-origin");
       expect(headers).toContain("Cross-Origin-Resource-Policy: same-origin");
 

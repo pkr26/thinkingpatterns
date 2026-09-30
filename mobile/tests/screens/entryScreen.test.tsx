@@ -1692,3 +1692,76 @@ describe("EntryScreen focus-time draft restore (the 'Write about this' bridge)",
     await act(async () => root.unmount());
   });
 });
+
+describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race)", () => {
+  // The voice save path used to carry the vault's SHARED key buffers across
+  // every await in the save (re-translation, upload, queue). A lock landing
+  // in that window (backgrounding, idle timeout, 401 hook) zeroizes those
+  // buffers IN PLACE — AES-GCM under an all-zero key does not throw, so the
+  // entry saved "successfully" and could never be decrypted again. The fix
+  // snapshots PRIVATE copies for the save's lifetime and zeroizes them in
+  // the save's finally. These pins kill the revert mutant.
+  it("encryptEntry receives a PRIVATE copy — a vault lock mid-save cannot zeroize the key it used", async () => {
+    // Fresh non-zero key bytes for THIS test (beforeEach's lock/unlock cycle
+    // reuses this module-level buffer and earlier tests may have zeroized it).
+    // Refill AFTER the lock wiped it, then unlock onto the refilled buffer.
+    vault.lock();
+    keys.dataKey.fill(7);
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    let releaseCreate: () => void = () => {};
+    vi.mocked(api.createEntry).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCreate = () => resolve(undefined as never);
+        }) as never,
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "words that must survive a mid-save lock");
+    await firePress(root, "Save entry");
+    await flush();
+    // encryptEntry has run (it precedes the awaited upload). The key it got
+    // must NOT be the vault's shared buffer (identity, not equality: the
+    // shared buffer is zeroized in place by the lock below).
+    expect(encryptEntry).toHaveBeenCalled();
+    const passed = vi.mocked(encryptEntry).mock.calls[0][0] as unknown as { dataKey: Buffer };
+    expect(passed.dataKey).not.toBe(keys.dataKey);
+    const bytesAtEncryptTime = Buffer.from(passed.dataKey);
+    expect(bytesAtEncryptTime.equals(Buffer.alloc(32, 7))).toBe(true);
+    // The lock lands while the upload is still pending.
+    vault.lock();
+    expect(vault.isUnlocked()).toBe(false);
+    // The vault's shared buffer really was zeroized in place — proving the
+    // hazard the private copy sidesteps.
+    expect(keys.dataKey.equals(Buffer.alloc(32))).toBe(true);
+    releaseCreate();
+    await flush();
+    // The save completes; the private copy is zeroized when it settles —
+    // key material never outlives the save either.
+    expect(passed.dataKey.equals(Buffer.alloc(32))).toBe(true);
+  });
+
+  it("a typed save still completes after a mid-save lock (no spurious failure alert)", async () => {
+    vault.lock();
+    keys.dataKey.fill(9);
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    let releaseCreate: () => void = () => {};
+    vi.mocked(api.createEntry).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseCreate = () => resolve(undefined as never);
+        }) as never,
+    );
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "saved under a lock that lands mid-upload");
+    await firePress(root, "Save entry");
+    await flush();
+    vault.lock();
+    releaseCreate();
+    await flush();
+    // The entry landed (upload path taken, not the failure alert).
+    expect(api.createEntry).toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+});

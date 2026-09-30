@@ -837,6 +837,11 @@ export const en: Record<string, string> = {
   "app.saved": "Saved.",
   "app.savedOffline": "Saved offline — it will sync when you're back.",
   "app.signedInAs": "Signed in as {name}",
+  "app.crashTitle": "Something went wrong",
+  "app.crashBody":
+    "Your words are still safe — entries are saved on this device. The page hit an unexpected error; reloading usually fixes it.",
+  "app.crashReload": "Reload the page",
+  "app.crashRetry": "Try again",
   "app.noticeIdle": "Locked after inactivity — sign in again to continue.",
   "app.noticeBfcache": "Locked — the page was restored from the browser's back/forward cache.",
   "app.noticeHidden": "Locked — this tab went to the background, so your keys were dropped. Sign in again to continue.",

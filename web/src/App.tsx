@@ -41,6 +41,7 @@ import { SettingsView } from "./views/Settings";
 import { vault } from "./vault";
 import { reconcile, type ReconcileOutcome } from "./sync";
 import { subscribeLanguage, t } from "./strings";
+import { ViewBoundary } from "./ErrorBoundary";
 
 type View =
   | { kind: "booting" }
@@ -328,6 +329,12 @@ export function App(): React.JSX.Element {
             <NavTabs items={navItems} activeId={PRIMARY_KINDS.has(view.kind) ? view.kind : null} onSelect={onNavSelect} />
             <MoreMenu label={t("nav.more")} items={moreItems} activeIds={activeMore} onSelect={onNavSelect} />
           </div>
+          {/* 2026-09-29 audit HIGH: one view crashing must not take the
+              whole app with it — the boundary keeps the frame, nav and the
+              crisis overlay alive, and seals the on-screen draft before
+              showing the calm panel. Keyed by view so navigating away from
+              a crashed view recovers without a reload. */}
+          <ViewBoundary resetKey={view.kind}>
           {view.kind === "today" ? (
             <EntryView onSaved={onSaved} />
           ) : view.kind === "patterns" ? (
@@ -345,6 +352,7 @@ export function App(): React.JSX.Element {
           ) : (
             <HistoryView />
           )}
+          </ViewBoundary>
           {username && <Note tone="muted">{t("app.signedInAs", { name: username })}</Note>}
         </div>
       )}

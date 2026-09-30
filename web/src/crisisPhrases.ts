@@ -64,6 +64,21 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\btired\\s+of\\s+(?:living|life)\\b",
   "\\bwant(?:s|ed|ing)?\\s+to\\s+overdose\\b",
   "\\bsuicidality\\b",
+  // --- 2026-09-29 deep-audit CRITICAL: method-specific first-person
+  // ideation (hang/shoot/drown/cut-wrists/slit-wrists/swallow-all-pills/
+  // jump-off/deserve-to-die/should-be-dead) fired neither tier before;
+  // "want to be dead" promoted from suppress-only to dialog. -----------
+  "\\bwant(?:s|ed|ing)?\\s+to\\s+be\\s+dead\\b",
+  "\\b(?:hang(?:ing|ed)?|hung)\\s+myself\\b",
+  "\\b(?:shoot|shot|shooting)\\s+myself\\b",
+  "\\bdrown(?:ing)?\\s+myself\\b",
+  "\\bcut(?:ting)?\\s+my\\s+(?:wrists?|arms?|thighs?)\\b",
+  "\\bslit(?:ting)?\\s+my\\s+wrists?\\b",
+  "\\b(?:swallow(?:ed|ing)?|took|taking)\\s+all\\s+(?:of\\s+)?my\\s+pills\\b",
+  "\\b(?:swallow(?:ed|ing)?|took|taking)\\s+(?:the\\s+)?whole\\s+bottle\\b",
+  "\\bdeserve\\s+to\\s+die\\b",
+  "\\bshould\\s+be\\s+dead\\b",
+  "\\b(?:want(?:s|ed|ing)?|going|gonna|plan(?:ning)?|will|about)\\s+to\\s+jump\\s+off\\b",
   "\\bquiero\\s+morir\\b",
   "\\bme\\s+quiero\\s+matar\\b",
   "\\bquitarme\\s+la\\s+vida\\b",
@@ -82,8 +97,8 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bla\\s+vida\\s+no\\s+vale\\s+la\\s+pena\\b",
   "\\b(?:me\\s+)?(?:quiero|quisiera|deberia|podria)\\s+quitar(?:me)?\\s+la\\s+vida\\b",
   "\\bme\\s+voy\\s+a\\s+quitar\\s+la\\s+vida\\b",
-  "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar)\\b",
-  "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme)\\b",
+  "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar|ahorcar)\\b",
+  "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme|ahorcarme)\\b",
   "\\bme\\s+(?:lastimo|hago\\s+da[nñ]o|corto\\s+la\\s+piel|quemo\\s+la\\s+piel)\\b",
   "\\b(?:quiero|quisiera)\\s+hacerme\\s+da[nñ]o\\b",
   "\\bno\\s+hay\\s+salida\\b",
@@ -95,7 +110,7 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "\\bno\\s+(?:puedo|aguanto)\\s+mas\\b",
   "\\bno\\s+quiero\\s+(?:despertar|despertarme|seguir\\s+viviendo)\\b",
   "\\bme\\s+cort(?:e|aba)\\b",
-  "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|matar)\\b",
+  "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|ahorcar|matar)\\b",
   "\\bme\\s+estoy\\s+(?:cortando|lastimando|quemando|ahogando|haciendo\\s+da[nñ]o)\\b",
   "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo)\\s+terminar\\s+con\\s+todo\\b",
   "\\bme\\s+har(?:e|ia)\\s+da[nñ]o\\b",
@@ -123,7 +138,6 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
 export const CRISIS_SUPPRESS_EXTRA_PATTERNS: readonly string[] = [
   "\\bsuicid\\w+",
   "\\bkill(?:ing)?\\s+me\\b",
-  "\\bwant(?:s|ed|ing)?\\s+to\\s+be\\s+dead\\b",
   "\\brather\\s+be\\s+dead\\b",
   "\\bbetter\\s+off\\s+dead\\b",
   "\\boverdose(?:d)?\\b",
@@ -145,7 +159,11 @@ export const CRISIS_SUPPRESS_EXTRA_PATTERNS: readonly string[] = [
   "\\bquitar(?:le|me|se)?\\s+la\\s+vida\\b",
   "\\bhacer(?:le|me|se)\\s+da[nñ]o\\b",
   "\\bterminar\\s+con\\s+todo\\b",
-  "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme)\\b",
+  "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme|ahorcarme)\\b",
+  // --- 2026-09-29 deep-audit CRITICAL: suppress-only counterparts for the
+  // method families (non-first-person jump mentions, meds wording). ----
+  "\\b(?:jump(?:ed|ing)?)\\s+off\\s+(?:a\\s+|the\\s+)?(?:bridge|building|roof|balcony|cliff|overpass|ledge)\\b",
+  "\\b(?:take|taking|took)\\s+all\\s+(?:of\\s+)?my\\s+(?:meds?|medication|medicine)\\b",
 ];
 
 /**

@@ -14,6 +14,58 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed — Phase 0 safety wave (2026-09-29 deep audit remediation)
+
+Six same-day fixes from the exhaustive deep audit (every finding
+re-verified in code or by execution before fixing):
+
+- **CRITICAL — crisis tiers missed method-specific first-person
+  ideation.** "i want to hang myself", "i will shoot myself",
+  "thinking about drowning myself", "i want to cut my wrists", "going
+  to swallow all my pills", "i deserve to die", "i should be dead
+  already" fired NEITHER tier (verified against the live matcher), so
+  the support dialog never appeared AND the phrase miner could quote
+  the sentence verbatim on a rumination card — the exact harm the
+  interlock exists to prevent. Both tiers now cover hang/shoot/drown/
+  cut-wrists/slit-wrists/swallow-all-pills/whole-bottle/jump-off/
+  deserve-to-die/should-be-dead; "want to be dead" is promoted from
+  suppress-only to dialog; Spanish gains the ahorcar (hang) family.
+  Medication adherence ("take my pills") deliberately matches nothing.
+  Updated in lockstep: `crisis.py`, `shared/crisis_phrases.json` (+
+  fixtures + redteam corpus), both client `crisisPhrases.ts` copies,
+  the redteam harness corpus, and the per-pattern firing-sample guard
+  (`test_checklist_round4_crisis.py`).
+- **CRITICAL — mobile voice saves could encrypt under a zeroized key.**
+  `EntryScreen.save` carried the vault's SHARED key buffers across the
+  voice re-translation await (and every later await); a lock landing
+  mid-save zeroizes them in place, and AES-GCM under an all-zero key
+  does not throw — the entry saved "successfully" and could never be
+  decrypted again. The save now snapshots PRIVATE key copies
+  (zeroized in the save's `finally`); pinned by identity assertions
+  that survive a mid-save `vault.lock()`.
+- **MEDIUM — voice STT/translation dispatched outside the lifecycle
+  fence.** Consent withdrawal and account erasure can no longer race a
+  third-party dispatch: both audio routes now hold the same
+  `llm-lifecycle` lock the withdrawal/deletion paths take, with the
+  consent re-read on a fresh user row inside the fence (mirroring the
+  recompute path). Pinned by lock-held-across-dispatch tests.
+- **MEDIUM — Permissions-Policy prohibited the shipped web voice
+  feature.** Both app-origin header sources (`web/public/_headers`,
+  the nginx template's patient block) now send `microphone=(self)` —
+  the portal keeps `()` — and the security-config test pins the full
+  value so neither drifts (and nobody "fixes" a dead mic button by
+  deleting the whole header).
+- **MEDIUM — consent toggles left no audit-trail row.** Enabling or
+  withdrawing LLM/voice consent now appends `llm_consent_on/off` /
+  `voice_consent_on/off` rows to the hash-chained, MAC-sealed trail in
+  the same transaction — the system's most consequential privacy
+  decision is no longer visible only in a silently-rewritten column.
+- **HIGH — no ErrorBoundary in web or portal.** A render crash used to
+  be a white screen mid-journal. Both apps now ship a top-level
+  boundary (calm localized copy, reload) plus per-view boundaries that
+  keep the frame, navigation and crisis overlay alive; the web
+  boundary seals the active entry draft before showing the fallback.
+
 ### Fixed — audio store erasure hygiene (2026-09-29, E2E campaign finding)
 
 `LocalAudioStore.delete` now prunes the account's directory once its

@@ -13,6 +13,7 @@ import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView, resetScanConfirmation } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
 import { InfoBanner } from "./ui";
+import { ViewBoundary } from "./ErrorBoundary";
 import { localStore, sessionStore, visitAnchorStore } from "./platform";
 
 type View =
@@ -284,32 +285,39 @@ export function App(): React.JSX.Element {
 
   if (view.kind === "patient") {
     return (
-      <PatientView
-        patient={view.patient}
-        session={session}
-        onBack={() => setView({ kind: "patients" })}
-        // 2026-09-26 audit round (L): an explicit sign-out also clears the
-        // session-backed visit anchors (see lockDown's carve-out).
-        onSignOut={() => lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true })}
-      />
+      // 2026-09-29 audit HIGH: a crash inside one patient's chart falls
+      // back to a calm panel instead of unmounting the portal; the key
+      // makes navigating back to the caselist recover without a reload.
+      <ViewBoundary resetKey={view.kind}>
+        <PatientView
+          patient={view.patient}
+          session={session}
+          onBack={() => setView({ kind: "patients" })}
+          // 2026-09-26 audit round (L): an explicit sign-out also clears the
+          // session-backed visit anchors (see lockDown's carve-out).
+          onSignOut={() => lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true })}
+        />
+      </ViewBoundary>
     );
   }
 
   return (
-    <PatientsView
-      displayName={displayName}
-      session={session}
-      onOpen={(patient) => setView({ kind: "patient", patient })}
-      onSignOut={() => {
-        // Same explicit-sign-out anchor carve-out as the chart's button.
-        lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true });
-      }}
-      // NEW-3 / F.4 (2026-09-22): a successful password change killed every
-      // bearer (the server bumps the token epoch), so the lock-down notice
-      // says why the user is suddenly back at the sign-in screen.
-      onSessionsEnded={() => {
-        lockDown("Password changed. Every session — including this one — has ended; sign in with your new password.");
-      }}
-    />
+    <ViewBoundary resetKey="patients">
+      <PatientsView
+        displayName={displayName}
+        session={session}
+        onOpen={(patient) => setView({ kind: "patient", patient })}
+        onSignOut={() => {
+          // Same explicit-sign-out anchor carve-out as the chart's button.
+          lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true });
+        }}
+        // NEW-3 / F.4 (2026-09-22): a successful password change killed every
+        // bearer (the server bumps the token epoch), so the lock-down notice
+        // says why the user is suddenly back at the sign-in screen.
+        onSessionsEnded={() => {
+          lockDown("Password changed. Every session — including this one — has ended; sign in with your new password.");
+        }}
+      />
+    </ViewBoundary>
   );
 }

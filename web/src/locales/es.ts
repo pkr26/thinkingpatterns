@@ -821,6 +821,11 @@ export const es: Record<string, string> = {
   "app.saved": "Guardado.",
   "app.savedOffline": "Guardado sin conexión — se sincronizará cuando vuelva a estar en línea.",
   "app.signedInAs": "Sesión iniciada como {name}",
+  "app.crashTitle": "Algo salió mal",
+  "app.crashBody":
+    "Tus palabras están a salvo: las entradas se guardan en este dispositivo. La página tuvo un error inesperado; recargar suele resolverlo.",
+  "app.crashReload": "Recargar la página",
+  "app.crashRetry": "Intentar de nuevo",
   "app.noticeIdle": "Bloqueado por inactividad — inicie sesión de nuevo para continuar.",
   "app.noticeBfcache": "Bloqueado — la página se restauró desde la caché de atrás/adelante del navegador.",
   "app.noticeHidden": "Bloqueado — esta pestaña pasó a segundo plano, así que sus llaves se descartaron. Inicie sesión de nuevo para continuar.",

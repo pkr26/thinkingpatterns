@@ -377,6 +377,14 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     // window, audit L-56); the account id comes from userIdRef there.
     let maybeShowCrisisAlert: () => Promise<void> = async () => {};
     let landed = false;
+    // PRIVATE key snapshot for the whole save (2026-09-29 audit CRITICAL):
+    // assigned once the vault is read inside the try, zeroized in the
+    // finally. The voice re-translation, the create/queue and the kept-audio
+    // upload all await while a lock (backgrounding, idle timeout, 401 hook)
+    // can zeroize the vault's SHARED buffers in place — encryptEntry under
+    // the zeroed key saves "successfully" and can never be decrypted again.
+    // The copies are immune to the vault's in-place zeroize-on-lock.
+    let saveKeys: { authKey: Buffer; dataKey: Buffer; authKeyKnown: boolean } | null = null;
     try {
       const userId = await api.getUserId();
       if (!userId) {
@@ -384,13 +392,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         Alert.alert(tr("common.sessionDamagedTitle"), tr("entry.sessionDamagedBody"));
         return;
       }
-      // Re-acquired AFTER the await, not before: vault.get() shares the
-      // vault's key buffers, and a lock landing during the await (app
-      // backgrounded, idle timeout, 401 hook) zeroizes them in place —
-      // encrypting under the zeroed key would produce a blob that saves
-      // "successfully" and can never be decrypted again. get() throws when
-      // locked, which lands in this try's existing error path instead.
+      // Acquired AFTER the getUserId await, then immediately snapshotted:
+      // vault.get() shares the vault's key buffers by design (zeroize-on-
+      // lock must reach every live copy), so every later await in this save
+      // must run against the private saveKeys copy, never the shared one.
       const keys = vault.get();
+      saveKeys = {
+        authKey: Buffer.from(keys.authKey),
+        dataKey: Buffer.from(keys.dataKey),
+        authKeyKnown: keys.authKeyKnown,
+      };
       // LOCAL calendar day: the UTC day is wrong for non-UTC users in the
       // evening (it feeds entry ids, dates and the mood log).
       const today = localDateISO();
@@ -446,7 +457,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           englishForSave = null;
         }
       }
-      const { blobB64 } = encryptEntry(keys, userId, clientEntryId, trimmed, createdAt, selectedMood, {
+      const { blobB64 } = encryptEntry(saveKeys, userId, clientEntryId, trimmed, createdAt, selectedMood, {
         energy: selectedEnergy,
         sleep: sleepQuality,
         tags: selectedTags,
@@ -465,10 +476,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // line refreshes once the write lands.
       // Private snapshot for the ASYNC chain: recordMood/localStreak snapshot
       // the key at call time, but the localStreak continuation runs after
-      // recordMood's awaits — a lock in that window would zeroize the
-      // vault's shared buffer before localStreak snapshots it. This copy is
-      // immune and zeroized when the chain settles.
-      const dataKeyCopy = Buffer.from(keys.dataKey);
+      // recordMood's awaits — and past this save's finally, which zeroizes
+      // saveKeys when the save settles. This copy outlives the save and is
+      // zeroized when the chain settles.
+      const dataKeyCopy = Buffer.from(saveKeys.dataKey);
       void recordMood(dataKeyCopy, userId, today, selectedMood ?? localSentiment(trimmed), selectedEnergy ?? undefined)
         .then(() => localStreak(dataKeyCopy, userId))
         .then(setStreak)
@@ -560,7 +571,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // the TEXT ciphertext's safety net, not an audio transport (O-5).
       if (voice) {
         const kept = !queuedOffline
-          ? await uploadKeptAudio(keys, userId, clientEntryId, voice, voiceRecorder.take?.base64 ?? null)
+          ? await uploadKeptAudio(saveKeys, userId, clientEntryId, voice, voiceRecorder.take?.base64 ?? null)
           : false;
         if (!kept && voice.keepAudio && voiceRecorder.take) {
           showStatus(
@@ -600,6 +611,12 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         { text: tr("common.ok"), onPress: () => { if (crisisLanguage) void maybeShowCrisisAlert(); } },
       ]);
     } finally {
+      // The save's private key material dies with the save — win, lose or
+      // early-return, the copies never outlive this function.
+      if (saveKeys) {
+        zeroize(saveKeys.authKey, saveKeys.dataKey);
+        saveKeys = null;
+      }
       savingRef.current = false;
       setBusy(false);
       // Draft guarantee for the in-flight window (audit L-56): the unmount

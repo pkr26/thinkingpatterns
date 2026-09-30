@@ -103,6 +103,30 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     "\\btired\\s+of\\s+(?:living|life)\\b",
     "\\bwant(?:s|ed|ing)?\\s+to\\s+overdose\\b",
     "\\bsuicidality\\b",
+    # --- 2026-09-29 deep-audit CRITICAL (method-specific first-person
+    # ideation): the pattern families covered kill/hurt/harm/cut/burn/starve
+    # + myself and hopelessness idioms, but NO method verbs — "i want to
+    # hang myself", "i will shoot myself", "thinking about drowning myself",
+    # "i want to cut my wrists", "going to swallow all my pills", "i am
+    # going to jump off the bridge", "i deserve to die", "i should be dead
+    # already" fired NEITHER tier, so the client dialog never appeared AND
+    # the phrase miner could quote the sentence verbatim on a rumination
+    # card — the exact harm the interlock exists to prevent. "want to be
+    # dead" is promoted from suppress-only to dialog (verified: it fired
+    # suppress only). Medication-adherence phrasing is deliberately NOT
+    # matched: the pill patterns require "all (of) my pills" / "the whole
+    # bottle", never bare "take my pills". --------------------------------
+    "\\bwant(?:s|ed|ing)?\\s+to\\s+be\\s+dead\\b",
+    "\\b(?:hang(?:ing|ed)?|hung)\\s+myself\\b",
+    "\\b(?:shoot|shot|shooting)\\s+myself\\b",
+    "\\bdrown(?:ing)?\\s+myself\\b",
+    "\\bcut(?:ting)?\\s+my\\s+(?:wrists?|arms?|thighs?)\\b",
+    "\\bslit(?:ting)?\\s+my\\s+wrists?\\b",
+    "\\b(?:swallow(?:ed|ing)?|took|taking)\\s+all\\s+(?:of\\s+)?my\\s+pills\\b",
+    "\\b(?:swallow(?:ed|ing)?|took|taking)\\s+(?:the\\s+)?whole\\s+bottle\\b",
+    "\\bdeserve\\s+to\\s+die\\b",
+    "\\bshould\\s+be\\s+dead\\b",
+    "\\b(?:want(?:s|ed|ing)?|going|gonna|plan(?:ning)?|will|about)\\s+to\\s+jump\\s+off\\b",
     # --- 2026-09-16 red-team remediation: non-English (Latin script) --------
     "\\bquiero\\s+morir\\b",
     "\\bme\\s+quiero\\s+matar\\b",
@@ -131,8 +155,8 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     "\\bla\\s+vida\\s+no\\s+vale\\s+la\\s+pena\\b",
     "\\b(?:me\\s+)?(?:quiero|quisiera|deberia|podria)\\s+quitar(?:me)?\\s+la\\s+vida\\b",
     "\\bme\\s+voy\\s+a\\s+quitar\\s+la\\s+vida\\b",
-    "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar)\\b",
-    "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme)\\b",
+    "\\bme\\s+quiero\\s+(?:cortar|lastimar|quemar|ahogar|ahorcar)\\b",
+    "\\bquiero\\s+(?:matarme|cortarme|lastimarme|quemarme|ahogarme|ahorcarme)\\b",
     "\\bme\\s+(?:lastimo|hago\\s+da[nñ]o|corto\\s+la\\s+piel|quemo\\s+la\\s+piel)\\b",
     "\\b(?:quiero|quisiera)\\s+hacerme\\s+da[nñ]o\\b",
     "\\bno\\s+hay\\s+salida\\b",
@@ -154,7 +178,7 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     # the crisis interlock exists to prevent. Accented spellings are
     # written post-fold (é/á/í -> e/a/i normalization). --------------------
     "\\bme\\s+cort(?:e|aba)\\b",
-    "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|matar)\\b",
+    "\\bme\\s+voy\\s+a\\s+(?:cortar|lastimar|quemar|ahogar|ahorcar|matar)\\b",
     "\\bme\\s+estoy\\s+(?:cortando|lastimando|quemando|ahogando|haciendo\\s+da[nñ]o)\\b",
     "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo)\\s+terminar\\s+con\\s+todo\\b",
     "\\bme\\s+har(?:e|ia)\\s+da[nñ]o\\b",
@@ -189,7 +213,6 @@ DIALOG_PATTERNS: tuple[str, ...] = (
 SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
     "\\bsuicid\\w+",
     "\\bkill(?:ing)?\\s+me\\b",
-    "\\bwant(?:s|ed|ing)?\\s+to\\s+be\\s+dead\\b",
     "\\brather\\s+be\\s+dead\\b",
     "\\bbetter\\s+off\\s+dead\\b",
     "\\boverdose(?:d)?\\b",
@@ -223,7 +246,14 @@ SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
     # todo") and the reflexive infinitives, so non-first-person mentions of
     # the same acts are never quoted back on pattern cards either. --------
     "\\bterminar\\s+con\\s+todo\\b",
-    "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme)\\b",
+    "\\b(?:cortarme|lastimarme|quemarme|ahogarme|matarme|ahorcarme)\\b",
+    # --- 2026-09-29 deep-audit CRITICAL: suppress-only counterparts for the
+    # method-specific families — non-first-person jump mentions (news-style
+    # "someone jumped off a bridge") must never be quoted back, and the
+    # medication form extends to meds/medication. Bare "take my pills"
+    # (adherence) still matches NOTHING on either tier, by design. --------
+    "\\b(?:jump(?:ed|ing)?)\\s+off\\s+(?:a\\s+|the\\s+)?(?:bridge|building|roof|balcony|cliff|overpass|ledge)\\b",
+    "\\b(?:take|taking|took)\\s+all\\s+(?:of\\s+)?my\\s+(?:meds?|medication|medicine)\\b",
 )
 
 # The effective suppression tier: dialog + suppress_extra (per the JSON).

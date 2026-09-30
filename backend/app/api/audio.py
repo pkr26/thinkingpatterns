@@ -124,6 +124,7 @@ async def transcribe_recording(
     request: Request,
     user: User = Depends(require_regular_user),
     _flag: None = Depends(require_audio_enabled),
+    session: AsyncSession = Depends(get_session),
 ):
     """Transcribe one recording in its spoken language, then translate.
 
@@ -132,6 +133,15 @@ async def transcribe_recording(
     English translation produced from the TEXT via the existing LLM
     client (null when translation is unavailable — degraded, not
     failed). Audio bytes never outlive this request.
+
+    2026-09-29 deep-audit MEDIUM (voice dispatched outside the lifecycle
+    fence): consent withdrawal and account deletion take the same
+    ``llm-lifecycle`` lock, so holding it across BOTH provider round
+    trips makes "withdrawal returned" linearize BEFORE any dispatch that
+    starts after it — the same property the recompute path and account
+    deletion docstring already promise. The consent check re-reads the
+    user fresh INSIDE the fence (the dependency-loaded object can be
+    stale by the time the slow call starts).
     """
     settings = request.app.state.settings
     engine = stt.get_stt(settings)
@@ -141,6 +151,8 @@ async def transcribe_recording(
             detail="speech-to-text is not configured on this server",
             code="stt_unconfigured",
         )
+    # Fail fast on the dependency-loaded row (status-code precedence:
+    # 403 before any 422); the fenced re-read below is the race closure.
     _require_voice_consent(user, settings)
     mime = normalize_mime(body.mime)
     if mime not in ALLOWED_AUDIO_MIMES:
@@ -162,20 +174,34 @@ async def transcribe_recording(
             detail="recording is empty",
             code="validation_error",
         )
-    try:
-        result = await engine.transcribe(audio, mime)
-    except Exception as exc:  # noqa: BLE001 — every upstream failure is one outcome
-        logger.warning(
-            "stt upstream failed for user %s (%s)", user.id, type(exc).__name__
-        )
-        raise ApiError(
-            status_code=502,
-            detail="speech-to-text provider failed; try again",
-            code="stt_upstream",
-        ) from None
-    english_text = None
-    if result.text and stt.translation_dispatch_allowed(user, settings):
-        english_text = await stt.translate_to_english(settings, result.text, result.language_iso)
+    expected_epoch = user.token_epoch
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = await session.get(User, user.id, populate_existing=True)
+        if fresh is None or not fresh.is_active:
+            raise ApiError(
+                status_code=410,
+                detail="account no longer exists",
+                code="account_deleted",
+            )
+        if fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        _require_voice_consent(fresh, settings)
+        try:
+            result = await engine.transcribe(audio, mime)
+        except Exception as exc:  # noqa: BLE001 — every upstream failure is one outcome
+            logger.warning(
+                "stt upstream failed for user %s (%s)", user.id, type(exc).__name__
+            )
+            raise ApiError(
+                status_code=502,
+                detail="speech-to-text provider failed; try again",
+                code="stt_upstream",
+            ) from None
+        english_text = None
+        if result.text and stt.translation_dispatch_allowed(fresh, settings):
+            english_text = await stt.translate_to_english(
+                settings, result.text, result.language_iso
+            )
     return AudioTranscriptionResponse(
         original_text=result.text,
         language=result.language_iso,
@@ -202,6 +228,7 @@ async def translate_text(
     request: Request,
     user: User = Depends(require_regular_user),
     _flag: None = Depends(require_audio_enabled),
+    session: AsyncSession = Depends(get_session),
 ):
     """Re-translate an edited transcript before saving (payload v3).
 
@@ -215,12 +242,30 @@ async def translate_text(
     own — an account that has not accepted the CURRENT LLM policy gets
     a null translation (degraded mode), never a dispatch of journal
     text to a provider they declined.
+
+    2026-09-29 deep-audit MEDIUM: the dispatch runs INSIDE the same
+    ``llm-lifecycle`` fence as transcription, with the consent re-read
+    on a fresh user row — withdrawal/deletion that returned before this
+    request started can never race a dispatch out the door.
     """
     settings = request.app.state.settings
+    # Fail fast (same precedence as before the fence); re-checked under it.
     _require_voice_consent(user, settings)
-    if not stt.translation_dispatch_allowed(user, settings):
-        return AudioTranslationResponse(english_text=None)
-    english_text = await stt.translate_to_english(settings, body.text, body.source_lang)
+    expected_epoch = user.token_epoch
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        fresh = await session.get(User, user.id, populate_existing=True)
+        if fresh is None or not fresh.is_active:
+            raise ApiError(
+                status_code=410,
+                detail="account no longer exists",
+                code="account_deleted",
+            )
+        if fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        _require_voice_consent(fresh, settings)
+        if not stt.translation_dispatch_allowed(fresh, settings):
+            return AudioTranslationResponse(english_text=None)
+        english_text = await stt.translate_to_english(settings, body.text, body.source_lang)
     return AudioTranslationResponse(english_text=english_text)
 
 
