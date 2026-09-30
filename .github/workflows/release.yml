@@ -56,8 +56,12 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
+          # 2026-09-30 (first executed release): the changelog follows
+          # Keep-a-Changelog's bracketed headers (## [X.Y.Z] - date); the
+          # original bare-version pattern matched nothing and failed every
+          # tag — accept BOTH forms.
           awk -v ver="$version" '
-            $0 ~ "^## " ver { capture = 1; next }
+            $0 ~ "^## \[?" ver "\]?" { capture = 1; next }
             capture && /^## / { exit }
             capture { print }
           ' CHANGELOG.md > /tmp/notes.md
@@ -555,7 +559,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           awk -v ver="$VERSION" '
-            $0 ~ "^## " ver { capture = 1; next }
+            $0 ~ "^## \[?" ver "\]?" { capture = 1; next }
             capture && /^## / { exit }
             capture { print }
           ' CHANGELOG.md > /tmp/notes.md
