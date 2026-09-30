@@ -34,21 +34,33 @@ class TestRecoveryErrorBranches:
         r = await client.put(
             "/api/account/recovery",
             headers=emu.headers,
-            json={"password_verifier": emu.auth_key_b64, "verifier": "!!not b64!!", "wrapped_key": b64(os.urandom(60))},
+            json={
+                "password_verifier": emu.auth_key_b64,
+                "verifier": "!!not b64!!",
+                "wrapped_key": b64(os.urandom(60)),
+            },
         )
         assert r.status_code == 422, r.text
         # Wrong recovery-key length (31 bytes).
         r2 = await client.put(
             "/api/account/recovery",
             headers=emu.headers,
-            json={"password_verifier": emu.auth_key_b64, "verifier": b64(os.urandom(31)), "wrapped_key": b64(os.urandom(60))},
+            json={
+                "password_verifier": emu.auth_key_b64,
+                "verifier": b64(os.urandom(31)),
+                "wrapped_key": b64(os.urandom(60)),
+            },
         )
         assert r2.status_code == 422
         # Wrong sealed-blob length.
         r3 = await client.put(
             "/api/account/recovery",
             headers=emu.headers,
-            json={"password_verifier": emu.auth_key_b64, "verifier": b64(os.urandom(32)), "wrapped_key": b64(os.urandom(59))},
+            json={
+                "password_verifier": emu.auth_key_b64,
+                "verifier": b64(os.urandom(32)),
+                "wrapped_key": b64(os.urandom(59)),
+            },
         )
         assert r3.status_code == 422
 
@@ -176,9 +188,7 @@ class TestRecoveryErrorBranches:
         await emu.login(client)
         headers = {
             "Authorization": f"Bearer {recovered.json()['token']}",
-            "X-Processing-Token": await emu.open_processing_session_for(
-                client, emu.data_key
-            ),
+            "X-Processing-Token": await emu.open_processing_session_for(client, emu.data_key),
         }
         emu.password = "another new passphrase"
         new_wrap = emu.wrap_for(emu.password, os.urandom(16))
@@ -228,7 +238,11 @@ class TestAudioErrorBranches:
         r2 = await client.post(
             "/api/v1/audio/transcriptions",
             headers=emu.headers,
-            json={"audio_b64": b64(b"x" * 64), "mime": "audio/webm", "duration_seconds": 10_000_000},
+            json={
+                "audio_b64": b64(b"x" * 64),
+                "mime": "audio/webm",
+                "duration_seconds": 10_000_000,
+            },
         )
         assert r2.status_code == 422
         # Empty audio.

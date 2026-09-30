@@ -158,4 +158,3 @@ class TestUploadEdgeBranches:
         store's path (LocalAudioStore overwrites in place); it is exercised
         by the fake-boto3 harness in test_voice_remediation_2026_09_29."""
         pytest.skip("S3-store arm: covered by the fake-boto3 M4 suite")
-
