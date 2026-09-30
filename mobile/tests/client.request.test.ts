@@ -1210,3 +1210,31 @@ describe("measures paging (M-4/L-55)", () => {
     expect(urls[3]).toContain("expected_revision=6");
   });
 });
+
+describe("listEntriesWindow (2026-09-30 wave 1: month windows)", () => {
+  it("sends since+until bounds, follows continuations, and dedupes rows", async () => {
+    const row = (id: string) => ({ id, client_entry_id: id, blob: "Q==", entry_date: "2026-01-05", received_at: "r" });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse([row("a"), row("b")], 200, DEFAULT_BASE_URL, { "X-Next-Offset": "2" }))
+      .mockResolvedValueOnce(jsonResponse([row("b"), row("c")])); // page-boundary duplicate
+
+    const entries = await api.listEntriesWindow("2026-01-01", "2026-02-01");
+
+    expect(entries.map((e) => e.client_entry_id)).toEqual(["a", "b", "c"]);
+    const urls = vi.mocked(fetch).mock.calls.map(([u]) => u as string);
+    expect(urls[0]).toContain("since=2026-01-01&until=2026-02-01");
+    expect(urls[1]).toContain("offset=2");
+  });
+
+  it("enforces the per-window row cap against a hostile continuation stream", async () => {
+    const flood = Array.from({ length: 500 }, (_, i) => ({
+      id: String(i), client_entry_id: `flood-${i}`, blob: "Q==", entry_date: "2026-01-05", received_at: "r",
+    }));
+    vi.mocked(fetch).mockImplementation(async () =>
+      jsonResponse(flood, 200, DEFAULT_BASE_URL, { "X-Next-Offset": "500" }),
+    );
+    await expect(api.listEntriesWindow("2026-01-01", "2026-02-01", 1500)).rejects.toMatchObject({
+      status: 0,
+    });
+  });
+});

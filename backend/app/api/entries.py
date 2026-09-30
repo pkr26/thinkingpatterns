@@ -489,6 +489,11 @@ async def list_entries(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     since: date_type | None = Query(default=None),
+    # 2026-09-30 wave 1 (mobile history date-jump): the exclusive upper
+    # bound pairing with `since`, so a client can fetch ONE month of a
+    # multi-year journal without walking every newer page first. Additive:
+    # absent on old clients, exactly like `since`.
+    until: date_type | None = Query(default=None),
     offset: int = Query(default=0, ge=0, le=100_000),
     limit: int = Query(default=100, ge=1, le=500),
     page_bytes: int | None = Query(default=None, ge=1, le=ENTRY_PAGE_BLOB_BYTES),
@@ -521,6 +526,8 @@ async def list_entries(
             )
             if since is not None:
                 metadata_query = metadata_query.where(Entry.entry_date >= since)
+            if until is not None:
+                metadata_query = metadata_query.where(Entry.entry_date < until)
             metadata_query = (
                 # id breaks (entry_date, received_at) ties so paginated
                 # clients see one stable order across pages.

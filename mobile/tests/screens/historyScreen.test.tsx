@@ -96,6 +96,20 @@ function moodBadges(root: Awaited<ReturnType<typeof render>>): string[] {
     .map((n) => n.props.accessibilityLabel as string);
 }
 
+/** Press the calendar's month chevron by its accessibility label (the
+ *  chevrons render icons, not Text — pressLabel cannot find them). */
+async function pressCalendarMonth(root: Awaited<ReturnType<typeof render>>, direction: -1 | 1) {
+  const label = direction === -1 ? "Previous month" : "Next month";
+  const button = root.root.findAll(
+    (n) => typeof n.props.accessibilityLabel === "string" && n.props.accessibilityLabel === label,
+  )[0];
+  if (!button) throw new Error(`no control labeled ${label}`);
+  const { act } = await import("../helpers/rtr");
+  await act(async () => {
+    void (button.props as { onPress?: () => unknown }).onPress?.();
+  });
+}
+
 /** Drive list → detail → edit for the entry whose snippet/text matches. */
 async function openEditor(root: Awaited<ReturnType<typeof render>>, text: string) {
   await pressLabel(root, text);
@@ -405,8 +419,9 @@ describe("HistoryScreen list", () => {
     }
 
     expect(api.listEntriesPage).toHaveBeenCalledTimes(5);
-    expect(textOf(root)).toContain("safe download limit (500 entries or 5 pages)");
-    expect(textOf(root)).toContain("More encrypted history remains on the server.");
+    // 2026-09-30 wave 1: the cap is no longer a dead end — the copy points
+    // at the calendar's month navigation (each older month loads on demand).
+    expect(textOf(root)).toContain("browse to that month on the calendar");
     expect(textOf(root)).not.toContain("Load older entries");
     // Even a stale native tap handler from the just-hidden control cannot
     // start a sixth request before React finishes committing the cap state.
@@ -1578,5 +1593,85 @@ describe("HistoryScreen edit: the two-writer conflict dialog (audit 2026-09-25)"
     const rendered = allText(root).join(" ");
     expect(rendered).toContain(theirLong.trim());
     expect(rendered).not.toContain("original words");
+  });
+});
+
+describe("history date-jump (2026-09-30 wave 1): month navigation loads older windows", () => {
+  it("navigating the calendar to an older month fetches exactly that window and merges its rows", async () => {
+    // The newest window holds one recent entry; the older month's row is
+    // unreachable through the linear newest-first pages.
+    vi.mocked(api.listEntriesPage).mockImplementation(async () => ({
+      entries: [entryRow("e-new", "recent loaded day", "2026-09-20")],
+      nextOffset: null,
+      revision: null,
+    }));
+    const oldRow = entryRow("e-old-1", "an entry from a much older month", "2026-01-15");
+    const oldRow2 = entryRow("e-old-2", "another old day", "2026-01-28");
+    vi.mocked(api.listEntriesWindow).mockImplementation(async () => [oldRow, oldRow2]);
+
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush(6);
+    expect(allText(root)).toContain("recent loaded day");
+
+    await pressCalendarMonth(root, -1);
+    await flush(6);
+
+    // The window call covers exactly [first-of-month, first-of-next-month).
+    expect(api.listEntriesWindow).toHaveBeenCalledTimes(1);
+    const [since, until] = vi.mocked(api.listEntriesWindow).mock.calls[0]!;
+    expect(since).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(until).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(until > since).toBe(true);
+    // The decrypted old rows joined the list (search text finds them).
+    expect(allText(root)).toContain("an entry from a much older month");
+    expect(allText(root)).toContain("another old day");
+  });
+
+  it("a second visit to the same month does not refetch", async () => {
+    // The window covers back to August 5: September (a fully-covered
+    // month) never fetches, August (older than the oldest loaded day)
+    // fetches exactly once even after navigating away and back.
+    vi.mocked(api.listEntriesPage).mockImplementation(async () => ({
+      entries: [
+        entryRow("e-new", "recent loaded day", "2026-09-20"),
+        entryRow("e-aug", "loaded august day", "2026-08-05"),
+      ],
+      nextOffset: null,
+      revision: null,
+    }));
+    vi.mocked(api.listEntriesWindow).mockImplementation(async () => []);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush(6);
+    await pressCalendarMonth(root, -1);
+    await flush(4);
+    await pressCalendarMonth(root, 1);
+    await flush(2);
+    await pressCalendarMonth(root, -1);
+    await flush(4);
+    expect(api.listEntriesWindow).toHaveBeenCalledTimes(1);
+    // The empty month got the honest empty status, not an error.
+    expect(allText(root)).toContain("No entries in that month.");
+  });
+
+  it("a failed month fetch stays honest and allows a retry", async () => {
+    vi.mocked(api.listEntriesPage).mockImplementation(async () => ({
+      entries: [entryRow("e-new", "recent loaded day", "2026-09-20")],
+      nextOffset: null,
+      revision: null,
+    }));
+    vi.mocked(api.listEntriesWindow)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce([entryRow("e-retry", "loaded on the retry", "2026-01-10")]);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush(6);
+    await pressCalendarMonth(root, -1);
+    await flush(4);
+    // The failed month is un-marked (a failure must not cache "loaded"):
+    // navigating away and back retries and succeeds.
+    await pressCalendarMonth(root, 1);
+    await flush(2);
+    await pressCalendarMonth(root, -1);
+    await flush(4);
+    expect(allText(root)).toContain("loaded on the retry");
   });
 });

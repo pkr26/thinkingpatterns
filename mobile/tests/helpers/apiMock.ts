@@ -56,6 +56,9 @@ export function makeApiMock() {
     // Keep older screen tests that seed listEntries meaningful while the
     // production client consumes bounded pages.
     listEntriesPage: vi.fn(async () => ({ entries: await listEntries(), nextOffset: null, revision: null })),
+    // 2026-09-30 wave 1 (history date-jump): default empty month window —
+    // month-navigation tests override it with encrypted old rows.
+    listEntriesWindow: vi.fn(async () => []),
     listEntries,
     deleteEntry: vi.fn(async () => ({})),
     // Single-entry fetch (audit fix M-5, 2026-09-20): default 404 shape —

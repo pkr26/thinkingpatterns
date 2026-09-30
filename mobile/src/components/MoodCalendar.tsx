@@ -37,6 +37,7 @@ export function MoodCalendar({
   journaledDays,
   selectedDay,
   onSelectDay,
+  onViewChange,
 }: {
   /** ISO date -> mood value in [-1, 1] (the device-local mood log). */
   dayMoods: Record<string, number>;
@@ -44,6 +45,10 @@ export function MoodCalendar({
   journaledDays: Set<string>;
   selectedDay: string | null;
   onSelectDay: (iso: string | null) => void;
+  /** 2026-09-30 wave 1 (history date-jump): the visible month changed —
+   *  the History screen fetches that month's window on demand, which is
+   *  how journals older than the newest-500 window become reachable. */
+  onViewChange?: (year: number, month: number) => void;
 }): React.JSX.Element {
   const t = useTheme();
   const now = new Date();
@@ -65,7 +70,11 @@ export function MoodCalendar({
     >
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => setView(stepMonth(view.year, view.month, -1))}
+          onPress={() => {
+            const next = stepMonth(view.year, view.month, -1);
+            setView(next);
+            onViewChange?.(next.year, next.month);
+          }}
           accessibilityRole="button"
           accessibilityLabel={tr("calendar.prevMonth")}
           hitSlop={t.touchSlop}
@@ -77,7 +86,11 @@ export function MoodCalendar({
           {monthLabel(view.year, view.month)}
         </Text>
         <TouchableOpacity
-          onPress={() => setView(stepMonth(view.year, view.month, 1))}
+          onPress={() => {
+            const next = stepMonth(view.year, view.month, 1);
+            setView(next);
+            onViewChange?.(next.year, next.month);
+          }}
           accessibilityRole="button"
           accessibilityLabel={tr("calendar.nextMonth")}
           hitSlop={t.touchSlop}

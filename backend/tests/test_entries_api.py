@@ -129,6 +129,36 @@ async def test_since_filter_and_ordering(client):
     assert len(limit_one.json()) == 1
 
 
+async def test_until_bounds_a_window_exclusively(client):
+    """2026-09-30 wave 1: `until` pairs with `since` so a client can fetch
+    one month of a multi-year journal without walking every newer page."""
+    emu = ClientEmulator("windower", "pass-77")
+    await emu.register(client)
+    await emu.backdate_account(client, days=10)
+    for offset in (5, 4, 3, 2, 1):
+        day = TODAY - timedelta(days=offset)
+        await emu.create_entry(client, f"day minus {offset}", day, client_entry_id=f"w{offset}")
+
+    until = await client.get(
+        "/api/entries",
+        headers=emu.headers,
+        params={"until": (TODAY - timedelta(days=3)).isoformat()},
+    )
+    # Everything STRICTLY before the bound (w3 sits ON the bound and is
+    # excluded — an exclusive upper edge makes month windows clean:
+    # until = first day of next month).
+    assert [e["client_entry_id"] for e in until.json()][-2:] == ["w5", "w4"]
+    window = await client.get(
+        "/api/entries",
+        headers=emu.headers,
+        params={
+            "since": (TODAY - timedelta(days=4)).isoformat(),
+            "until": (TODAY - timedelta(days=2)).isoformat(),
+        },
+    )
+    assert [e["client_entry_id"] for e in window.json()] == ["w4", "w3"]
+
+
 async def test_offset_paginates_beyond_the_first_page(client):
     emu = ClientEmulator("paginator", "pass-8")
     await emu.register(client)

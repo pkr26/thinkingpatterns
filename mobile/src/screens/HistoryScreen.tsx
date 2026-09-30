@@ -40,7 +40,7 @@ import { playVoiceAttachment, type PlayingVoice } from "../audio/playback";
 import { createAudioPlayer } from "expo-audio";
 import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { MoodCalendar } from "../components/MoodCalendar";
-import { filterEntries } from "../historyFind";
+import { filterEntries, monthLabel } from "../historyFind";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { recordMood, recentMoods, removeMoodDay, localDateISO } from "../moodLog";
@@ -244,6 +244,17 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [historyLimitReached, setHistoryLimitReached] = useState(false);
+  // 2026-09-30 wave 1 (history date-jump): months already fetched through
+  // the calendar (the newest-500 linear window is NOT the whole journal —
+  // a daily writer crosses it in ~17 months). One fetch per month, merged
+  // into the decrypted list; the epoch guards a reload racing a fetch.
+  const loadedMonthsRef = useRef<Set<string>>(new Set());
+  const monthFetchEpochRef = useRef(0);
+  // The newest-loaded day's predecessor bound: every month whose FIRST day
+  // is newer than the oldest loaded entry is already fully covered by the
+  // newest-window walk (all entries newer than the oldest loaded one are
+  // loaded) — no month fetch needed for it.
+  const oldestLoadedISORef = useRef<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [logMoods, setLogMoods] = useState<Record<string, number>>({});
   /** Search + calendar filter (2026-09-17): plain-text query and a tapped
@@ -367,6 +378,68 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const historyLoadEpochRef = useRef(0);
 
   /** Transient confirmation ("Entry deleted"); replaces itself cleanly. */
+  /** 2026-09-30 wave 1: the calendar's visible month changed — if that
+   *  month is not already loaded, fetch exactly its [first, next-first)
+   *  window from the server and merge the decrypted rows into the list.
+   *  This is how history older than the newest-500 window becomes
+   *  reachable without unbounded downloads. */
+  const handleCalendarViewChange = useCallback((year: number, month: number) => {
+    touchActivity();
+    const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+    if (loadedMonthsRef.current.has(monthKey)) return;
+    const monthStartISO = `${monthKey}-01`;
+    if (
+      oldestLoadedISORef.current !== null &&
+      monthStartISO > oldestLoadedISORef.current
+    ) {
+      // The month sits inside the already-loaded newest window.
+      return;
+    }
+    loadedMonthsRef.current.add(monthKey);
+    const epoch = ++monthFetchEpochRef.current;
+    void (async () => {
+      try {
+        const userId = await api.getUserId();
+        if (epoch !== monthFetchEpochRef.current || !userId || !vault.isUnlocked()) return;
+        const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+        const start = new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10);
+        const end = new Date(Date.UTC(next.y, next.m - 1, 1)).toISOString().slice(0, 10);
+        const rows = await api.listEntriesWindow(start, end);
+        if (epoch !== monthFetchEpochRef.current) return;
+        if (rows.length === 0) {
+          showStatus(tr("history.monthEmpty", { month: monthLabel(year, month) }), "neutral");
+          return;
+        }
+        const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
+        if (epoch !== monthFetchEpochRef.current) return;
+        setEntries((current) => {
+          // Existing rows win (already verified); only genuinely new ids
+          // join — a refetch of a loaded month is a no-op.
+          const byId = new Map(current.map((e) => [e.clientEntryId, e] as const));
+          let added = 0;
+          for (const e of decrypted) {
+            if (!byId.has(e.clientEntryId)) {
+              byId.set(e.clientEntryId, e);
+              added += 1;
+            }
+          }
+          if (added === 0) return current;
+          const merged = [...byId.values()];
+          merged.sort(
+            (a, b) => b.entryDate.localeCompare(a.entryDate) || b.receivedAt.localeCompare(a.receivedAt),
+          );
+          return merged;
+        });
+        if (failed > 0) setUnreadable((n) => n + failed);
+        showStatus(tr("history.monthLoaded", { count: decrypted.length }), "ok");
+      } catch {
+        loadedMonthsRef.current.delete(monthKey);
+        if (epoch !== monthFetchEpochRef.current) return;
+        showStatus(tr("history.monthLoadFailed"), "neutral");
+      }
+    })();
+  }, []);
+
   const showStatus = (message: string, tone: InlineStatusTone) => {
     if (statusTimer.current) clearTimeout(statusTimer.current);
     setStatusTone(tone);
@@ -391,6 +464,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     loadedServerPagesRef.current = 0;
     loadedCiphertextRowsRef.current = 0;
     historyLimitRef.current = false;
+    loadedMonthsRef.current.clear();
+    monthFetchEpochRef.current += 1;
+    oldestLoadedISORef.current = null;
     if (afterRevisionConflict) {
       // Never retain a mixture of the old and new snapshot while the restart
       // is in flight. The person sees an explicit status below rather than a
@@ -429,6 +505,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       }
       // Newest day first; same-day entries order by server arrival.
       decrypted.sort((a, b) => b.entryDate.localeCompare(a.entryDate) || b.receivedAt.localeCompare(a.receivedAt));
+      oldestLoadedISORef.current = decrypted.length > 0
+        ? decrypted[decrypted.length - 1]!.entryDate
+        : null;
       setEntries(decrypted);
       setUnreadable(failed);
       setShown(PAGE_SIZE);
@@ -1219,6 +1298,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
                   setDayFilter(iso);
                   setShown(PAGE_SIZE);
                 }}
+                onViewChange={handleCalendarViewChange}
               />
               {(query.trim() !== "" || dayFilter !== null) && (
                 <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
@@ -1258,7 +1338,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           )}
           {historyLimitReached && hasMore && (
             <Text accessibilityRole="alert" style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize, textAlign: "center" }}>
-              {tr("history.limitReached", { rows: MAX_HISTORY_ROWS, pages: MAX_HISTORY_SERVER_PAGES })}
+              {tr("history.limitReached", { rows: MAX_HISTORY_ROWS })}
             </Text>
           )}
           {!loading && !offline && !error && entries.length > 0 && visibleEntries.length === 0 && (

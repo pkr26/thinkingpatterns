@@ -830,6 +830,10 @@ export interface ListedEntriesPage {
 
 export interface ListEntriesPageOptions {
   since?: string;
+  /** 2026-09-30 wave 1: EXCLUSIVE upper date bound (wire `until`) — pairs
+   *  with `since` so one month of a multi-year journal is one bounded
+   *  walk, not a linear page-through of every newer entry first. */
+  until?: string;
   limit?: number;
   offset?: number;
   pageBytes?: number;
@@ -1319,6 +1323,7 @@ export const api = {
       page_bytes: String(pageBytes),
     });
     if (options.since) params.set("since", options.since);
+    if (options.until) params.set("until", options.until);
     if (options.expectedRevision !== undefined) params.set("expected_revision", options.expectedRevision);
     const result = (await request(
       "GET",
@@ -1409,6 +1414,46 @@ export const api = {
       }
     }
     throw new ApiError(0, "could not obtain a stable journal history snapshot");
+  },
+  /** 2026-09-30 wave 1 (history date-jump): every entry in [since, until)
+   *  (dates ISO, until EXCLUSIVE), one bounded walk with the same snapshot
+   *  discipline as listEntries. Capped rows per window so a hostile server
+   *  cannot pin the phone the way the linear walk's caps prevent. */
+  listEntriesWindow: async (since: string, until: string, maxRows = 1500): Promise<ListedEntry[]> => {
+    for (let attempt = 0; attempt <= MAX_LIST_SNAPSHOT_RESTARTS; attempt += 1) {
+      try {
+        const all: ListedEntry[] = [];
+        const seen = new Set<string>();
+        let offset = 0;
+        let revision: EntriesRevision | null = null;
+        for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
+          const result = await api.listEntriesPage({
+            since,
+            until,
+            limit: 500,
+            offset,
+            pageBytes: ENTRY_PAGE_BYTES,
+            ...(revision !== null ? { expectedRevision: revision } : {}),
+          });
+          if (revision === null && result.revision !== null) revision = result.revision;
+          for (const entry of result.entries) {
+            if (seen.has(entry.client_entry_id)) continue;
+            if (seen.size >= maxRows) {
+              throw new ApiError(0, "entry window exceeded the on-device bound — narrowing the month view");
+            }
+            seen.add(entry.client_entry_id);
+            all.push(entry);
+          }
+          if (result.nextOffset === null) return all;
+          offset = result.nextOffset;
+        }
+        throw new ApiError(0, "server keeps returning entry continuations — aborting window fetch");
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409 && attempt < MAX_LIST_SNAPSHOT_RESTARTS) continue;
+        throw err;
+      }
+    }
+    throw new ApiError(0, "could not obtain a stable entry window snapshot");
   },
   deleteEntry: async (clientEntryId: string) => {
     // The id lands in the URL path: validate the exact shape this client
