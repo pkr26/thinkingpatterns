@@ -231,3 +231,58 @@ recorded here so they are not silently dropped (audit round 2, F-6):
       brain table and asserting each appears in RESEARCH.md's
       bibliography is the intended shape; until it exists, citation
       claims are hand-verified only.
+
+## Deep-audit 2026-09-29 remediation: fixed same-day vs deferred
+
+The exhaustive deep audit (six-surface review: backend, security,
+web+portal UI/UX, mobile, pattern engine, testing/ops) produced one
+CRITICAL-safety finding, one CRITICAL data-loss race, and a HIGH/MEDIUM
+tail. Fixed same-day (Phase 0–3 commits, each with regression pins):
+the crisis method-specific ideation gap (both tiers + shared contract +
+both client copies + redteam corpora), the mobile voice-save
+zeroized-key race, voice dispatch outside the lifecycle fence, the
+Permissions-Policy microphone drift, unlogged consent toggles, the
+missing web/portal ErrorBoundaries, the mood_correlation tautology,
+per-entry topic binomials, the 2-day window-stat replication spread,
+the sentiment negation artifacts (four engines, vectors regenerated),
+the portal whole-entry `<mark>`, the color-only calendar mood encoding,
+the low-N measures chart, the web coverage-gate debt, the missing
+mobile language override, S3 transport budgets, the `language_raw` cap,
+and the export's missing audio section.
+
+Deferred, with owners and re-review triggers:
+
+- **Redis-externalized rate limits / keystore / token cache** — the
+  single-process ceiling stands (one worker per database, enforced at
+  boot). The 2026-09-29 audit's capacity analysis (restarts reset
+  security counters; in-flight sessions die with the process) is
+  accepted for the current deployment scale. Re-review: before any
+  second API replica or HA requirement.
+- **Per-user-lifetime FDR alpha-spending** — Phase 1 raised the
+  window-stat replication spread above the EWMA memory (2→7 days),
+  closing the same-excursion leak, but the per-RUN Benjamini-Hochberg
+  family still does not accumulate a lifetime error budget. Re-review:
+  with the Benjamini-Yekutieli sensitivity run (still "no code change
+  yet", statsig.py).
+- **Mobile history 500-row/5-page cap** — older entries stay
+  server-side but are unreachable on mobile; the fix (date-jump /
+  month navigation over the existing `since` parameter) is a scoped
+  mobile workstream, not a same-day patch. Re-review: next mobile wave.
+- **Mobile audio offline queue** — kept recordings are still dropped
+  when an entry queues offline (O-5's documented decision; the asymmetry
+  with the text queue is now flagged in the audit). Re-review: next
+  voice wave.
+- **Key-recovery envelope for patients** — forgetting the password
+  still destroys the journal (zero-knowledge by design); the optional
+  downloadable recovery envelope (natural under the v2 key scheme)
+  is a design-then-build workstream with new consent copy. Re-review:
+  before any public launch.
+- **Export ordering under load / O(corpus) quota scans / unbounded
+  consent+caseload lists / list_patients N+1** — the audit's backend
+  performance tail (F3, F5, F7, F8) is real but none is a correctness
+  or security defect at current scale; the maintained-counter and
+  pagination rework is one coherent backend performance wave.
+  Re-review: with the Redis wave (same capacity trigger).
+- **First executed release** — zero tags remain cut; the release
+  workflow (multi-arch, cosign, SBOM, release-env asset) has still
+  never run end-to-end. Re-review: immediately before launch.

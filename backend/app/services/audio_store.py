@@ -87,6 +87,18 @@ class S3AudioStore:
             import boto3  # imported lazily; absent in minimal dev envs
             from botocore.config import Config
 
+            # 2026-09-29 deep audit (HIGH F2): EXPLICIT transport budgets —
+            # botocore's defaults (60s connect/read, many retries) run
+            # inside open DB transactions while user locks are held, so a
+            # slow or throttled bucket could stall that user's whole
+            # lifecycle fence for minutes. Five seconds to connect, ten to
+            # read, one retry: object storage for bounded blobs, not a
+            # patient-facing hang.
+            transport = Config(
+                connect_timeout=5,
+                read_timeout=10,
+                retries={"max_attempts": 1, "mode": "standard"},
+            )
             kwargs: dict = {"service_name": "s3"}
             if self.region:
                 kwargs["region_name"] = self.region
@@ -96,7 +108,14 @@ class S3AudioStore:
                 # boto3 would resolve virtual-hosted buckets against the
                 # endpoint host.
                 kwargs["endpoint_url"] = self.endpoint
-                kwargs["config"] = Config(s3={"addressing_style": "path"})
+                kwargs["config"] = Config(
+                    s3={"addressing_style": "path"},
+                    connect_timeout=5,
+                    read_timeout=10,
+                    retries={"max_attempts": 1, "mode": "standard"},
+                )
+            else:
+                kwargs["config"] = transport
             if self._access_key_id and self._secret_access_key:
                 kwargs["aws_access_key_id"] = self._access_key_id
                 kwargs["aws_secret_access_key"] = self._secret_access_key

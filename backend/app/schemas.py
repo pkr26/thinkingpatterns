@@ -503,6 +503,18 @@ class InsightOut(BaseModel):
     state_seq: int = 0
 
 
+class AudioExportRow(BaseModel):
+    """One kept recording in the account export (additive, 2026-09-29)."""
+
+    id: str
+    client_entry_id: str
+    mime_type: str
+    duration_seconds: int
+    size_bytes: int
+    expires_at: datetime
+    blob: str  # base64 of the stored ciphertext object
+
+
 class ExportBundle(BaseModel):
     version: int
     exported_at: datetime
@@ -523,6 +535,13 @@ class ExportBundle(BaseModel):
     shares: list[ShareRecord] = []
     entries: list[EntryOut]
     insights: list[InsightOut]
+    # Kept voice recordings (2026-09-29 deep audit, additive): the export
+    # used to omit every kept AudioAttachment, so "export my data" before
+    # deletion silently destroyed the patient's recordings (portability
+    # gap, GDPR Art. 20). Each row is the attachment's metadata plus the
+    # base64 ciphertext object exactly as stored (still client-encrypted;
+    # decrypts with the data key under the audio AAD binding).
+    audio: list[AudioExportRow] = []
     # Wellbeing measures (2026-09-20 audit fix H-3): the export bundle used
     # to omit every Measure row, so the README's export-then-delete flow
     # silently destroyed the patient's entire PHQ-9 history. Additive — old

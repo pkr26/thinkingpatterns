@@ -325,7 +325,10 @@ class SpeechToText:
             files={"file": (f"recording{extension}", audio, normalized)},
             data={"model": self.model, "response_format": response_format},
         )
-        language_raw = str(body.get("language") or "").strip().lower()
+        # 2026-09-29 deep audit (LOW): a hostile provider could return a
+        # ~1 MiB "language" string (only the response cap bounded it);
+        # every sibling output is capped — this one now too.
+        language_raw = str(body.get("language") or "").strip().lower()[:64]
         return TranscriptionResult(
             text=_clean_transcript(body.get("text")),
             language_iso=normalize_language(language_raw),

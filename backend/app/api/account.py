@@ -36,6 +36,7 @@ from ..models import (
      KEY_SCHEME_V1,
      KEY_SCHEME_V2,
     AccessLog,
+    AudioAttachment,
     Consent,
     Entry,
     Insight,
@@ -91,7 +92,9 @@ from ..security.totp import (
     wrap_secret,
 )
 from .measures import _measure_out
-from ..services import llm, stt
+from ..services import llm
+from ..services.audio_store import AudioStoreError, get_audio_store_cached
+from ..services import stt
 
 logger = logging.getLogger("mindpattern.account")
 
@@ -367,6 +370,7 @@ async def export_account(
             # ciphertext rows.  Keeping all consent records in this header
             # used an unbounded ``.all()`` before the first response byte.
             shares=[],
+            audio=[],
             entries=[],
             insights=[],
             measures=[],
@@ -686,6 +690,76 @@ async def export_account(
                 for item in rendered:
                     yield ("" if first else ",") + json.dumps(item)
                     first = False
+            # Kept voice recordings (2026-09-29 deep audit, LOW→fixed):
+            # the export used to omit every kept AudioAttachment — the
+            # recordings were destroyed with the account with no
+            # self-service way to take them along (GDPR Art. 20 gap).
+            # Metadata pages read under the lifecycle fence; the OBJECT
+            # fetches happen OUTSIDE it (never hold the fence across
+            # network I/O — same rule as F2): an object erased between
+            # listing and fetch is skipped, honestly.
+            yield '],"audio":['
+            first = True
+            # getattr: the export's own test doubles carry partial app
+            # state (the require_sharing_enabled idiom, line ~184) — no
+            # settings means no audio store, and the section is empty.
+            export_settings = getattr(request.app.state, "settings", None)
+            audio_store = get_audio_store_cached(export_settings) if export_settings is not None else None
+            audio_cursor: tuple | None = None
+            if audio_store is not None:
+                while True:
+                    page_meta: list[dict] = []
+                    async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
+                        async with sessionmaker() as page_session:
+                            query = (
+                                select(
+                                    AudioAttachment.id,
+                                    AudioAttachment.client_entry_id,
+                                    AudioAttachment.mime_type,
+                                    AudioAttachment.duration_seconds,
+                                    AudioAttachment.size_bytes,
+                                    AudioAttachment.expires_at,
+                                    AudioAttachment.created_at,
+                                    AudioAttachment.storage_key,
+                                )
+                                .where(AudioAttachment.user_id == fresh.id)
+                                .order_by(
+                                    AudioAttachment.created_at.asc(),
+                                    AudioAttachment.id.asc(),
+                                )
+                                .limit(EXPORT_METADATA_PAGE_SIZE)
+                            )
+                            if audio_cursor is not None:
+                                last_created, last_id = audio_cursor
+                                query = query.where(
+                                    or_(
+                                        AudioAttachment.created_at > last_created,
+                                        and_(
+                                            AudioAttachment.created_at == last_created,
+                                            AudioAttachment.id > last_id,
+                                        ),
+                                    )
+                                )
+                            meta_rows = (await page_session.execute(query)).all()
+                            page_meta = [row._asdict() for row in meta_rows]
+                            if page_meta:
+                                last = page_meta[-1]
+                                audio_cursor = (last["created_at"], last["id"])
+                    if not page_meta:
+                        break
+                    for meta in page_meta:
+                        key = meta.pop("storage_key")
+                        try:
+                            blob = await audio_store.get(key)
+                        except AudioStoreError:
+                            # Object gone (expired/erased between listing
+                            # and fetch): the row is skipped, not fabricated.
+                            continue
+                        yield ("" if first else ",") + json.dumps(
+                            {**{k: v for k, v in meta.items()}, "blob": base64.b64encode(blob).decode("ascii")},
+                            default=str,
+                        )
+                        first = False
             yield "]}"
         finally:
             if acquired_export_slot and export_limiter is not None:

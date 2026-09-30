@@ -14,6 +14,28 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed — Phase 3 hardening wave (2026-09-29 deep audit)
+
+- **S3 transport budgets (HIGH F2)**: the audio store's boto3 client
+  now carries explicit connect(5s)/read(10s) timeouts and a single
+  retry — botocore's defaults (60s/60s, many retries) executed inside
+  open DB transactions while user locks were held, so a slow bucket
+  could stall a user's whole lifecycle fence for minutes.
+- **`language_raw` capped at 64 chars (LOW)**: a hostile STT provider
+  could return a ~1 MiB "language" string (only the response cap
+  bounded it); every sibling output was already capped.
+- **The account export carries kept recordings (LOW, GDPR Art. 20)**:
+  an additive `audio` section streams every kept AudioAttachment
+  (metadata + base64 ciphertext), with object fetches OUTSIDE the
+  lifecycle fence — an object erased mid-export is skipped, honestly.
+  "Export my data" no longer silently destroys the patient's
+  recordings.
+- **Deferred register updated** (`docs/SECURITY_RESIDUALS.md`): the
+  deep audit's remaining tail (Redis externalization, per-user-lifetime
+  FDR budget, mobile history cap, audio offline queue, key-recovery
+  envelope, backend performance wave, first executed release) is
+  registered with owners and re-review triggers.
+
 ### Changed — Phase 2 UX/a11y wave (2026-09-29 deep audit)
 
 - **HIGH (clinical utility) — portal phrase highlight marks the PHRASE,
