@@ -14,6 +14,52 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed — Phase 1 statistical integrity wave (2026-09-29 deep audit)
+
+Five engine corrections, each pinned by a regression test that fails on
+the pre-fix code (mutant-kill verified via stash):
+
+- **HIGH — mood_correlation tautology broken.** A text-scored mood on a
+  theme-bearing day was computed over the SAME tokens that minted the
+  theme — and theme words ARE the sentiment lexicon's strongest words
+  ("insomnia" -2.6, "restless" -1.5). For a TAG-LESS journal (the
+  default user) the tie test read the lexicon, not the person: the
+  audit's planted corpus (sleep vocabulary, nothing else) surfaced
+  `mood_correlation | sleep | lower` at mood_delta=0.408. The tie mood
+  for untagged theme-days is now re-scored WITHOUT the theme's own
+  tokens; explicit client tags are never re-scored. Ground truth added
+  to probe_brain (checks I/J): a genuine tag-less tie still surfaces
+  (d up to 3.9); pure lexical overlap mints nothing.
+- **HIGH — topic "rising" is a DAY-level Bernoulli.** The rising test
+  counted ENTRIES (the clustered-journal flaw the weekday detector was
+  already fixed for): a 10-entries-a-day writer multiplied the trial
+  count ~10x and any slightly-more-frequent word became "significantly
+  rising". One calendar day, one trial now; presence stays entry-based
+  (a direct measurement, never a tested claim). Detail carries the
+  day-level rates the test actually ran.
+- **HIGH — window-stat replication spread raised to 7 days.** For
+  mood_shift/inertia/instability/cadence/coupling, qualification days 2
+  days apart were the SAME EWMA-family excursion scored twice (memory
+  1/lambda ~= 5.5 days; the tail windows share 3 of 5 points). The
+  spread now exceeds that memory. Evidence-date kinds keep the >= 2 NEW
+  evidence-days rule. (Per-user-lifetime alpha-spending remains a
+  documented residual in docs/SECURITY_RESIDUALS.md.)
+- **MEDIUM x2 — sentiment walk (all four implementations, vectors
+  regenerated).** A negated STRONG negative (|v| >= 2.5) is now the
+  ABSENCE of the state, never a damped positive: "i am not suicidal"
+  scored +0.5 and "not suicidal anymore and feeling okay" hit the +1.0
+  clamp before; both now read honestly. Negator tokens doing negation
+  work carry no valence of their own ("no" both scored -1.2 AND
+  negated — "no appetite, no point, no one would notice" read +0.22;
+  now -0.90); a STRANDED negator ("no.", "no no no") keeps its valence
+  and is never flipped by a preceding negator. "dying" now stems to
+  "die" (was unscored: 5-letter -ing cutoff). Same-date entries are
+  ordered canonically by text in update() (float summation order can no
+  longer flip a BH-boundary decision in the last ULP). Python, web TS
+  and mobile TS walks stay byte-pinned via 62 shared vectors (9 new
+  cases); the lexicon contract re-exported with the new
+  strong_negation_abs scalar.
+
 ### Fixed — Phase 0 safety wave (2026-09-29 deep audit remediation)
 
 Six same-day fixes from the exhaustive deep audit (every finding

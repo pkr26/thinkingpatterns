@@ -109,6 +109,18 @@ TEXT_CASES: list[str] = [
     "tengo depresio\u0301n y ansiedad",
     "don\u2019t feel good",
     "constructor constructor constructor",
+    # 2026-09-29 deep-audit pins: negated STRONG negatives are the ABSENCE
+    # of the state (never a damped positive), negator tokens carry no
+    # valence of their own, and "dying" now stems to "die".
+    "i am not suicidal",
+    "not suicidal anymore and feeling okay",
+    "i am not depressed",
+    "i do not want to die",
+    "no no no it is fine",
+    "i have no energy today",
+    "no appetite, no point, no one would notice",
+    "dying inside a little every day",
+    "the food wasn't bad at all",
 ]
 
 STAT_CASES = {

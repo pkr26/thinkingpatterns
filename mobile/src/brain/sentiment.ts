@@ -31,7 +31,12 @@ import { LEXICON } from "./lexicon";
  * per process is free.
  */
 interface Tables {
-  scalars: { negation_scalar: number; sentiment_scale: number; booster_scope: number };
+  scalars: {
+    negation_scalar: number;
+    sentiment_scale: number;
+    booster_scope: number;
+    strong_negation_abs: number;
+  };
   butWords: Set<string>;
   negators: Set<string>;
   negatorsEn: Set<string>;
@@ -240,7 +245,29 @@ export function valenceWalk(tokens: string[], language?: string): number[] {
 
   for (const [seg, segWeight] of segments) {
     for (let i = 0; i < seg.length; i++) {
-      let valence = wordValence(seg[i]!, language);
+      // 2026-09-29 deep audit: a negator DOING NEGATION WORK (a scored
+      // NON-negator within booster scope ahead) carries no valence of its
+      // own; a STRANDED negator ("no.", "no no no") is content — it keeps
+      // its own valence and is never flipped by a preceding negator.
+      // Mirrors brain._valence_walk exactly.
+      const token = seg[i]!;
+      const negs = negatorsFor(language);
+      if (negs.has(token)) {
+        const ahead = seg.slice(i + 1, i + 1 + T().scalars.booster_scope);
+        const working = ahead.some((t) => !negs.has(t!) && wordValence(t!, language) !== 0.0);
+        if (working) continue;
+        const own = wordValence(token, language);
+        if (own !== 0.0) {
+          let boost = 1.0;
+          for (const prev of seg.slice(Math.max(0, i - T().scalars.booster_scope), i)) {
+            const intensifier = T().intensifiers[prev];
+            if (intensifier !== undefined) boost *= intensifier;
+          }
+          sentiments.push(Math.max(-4.0, Math.min(4.0, own * boost)) * segWeight);
+        }
+        continue;
+      }
+      let valence = wordValence(token, language);
       if (valence === 0.0) continue;
       const window = seg.slice(Math.max(0, i - T().scalars.booster_scope), i);
       let boost = 1.0;
@@ -251,7 +278,12 @@ export function valenceWalk(tokens: string[], language?: string): number[] {
         if (negatorsFor(language).has(prev)) negated = true;
       }
       valence *= boost;
-      if (negated) valence *= T().scalars.negation_scalar;
+      if (negated) {
+        // A negated STRONG negative is the ABSENCE of the state: "i am
+        // not suicidal" must never score positive (it measured +0.5).
+        if (valence <= -T().scalars.strong_negation_abs) continue;
+        valence *= T().scalars.negation_scalar;
+      }
       valence = Math.max(-4.0, Math.min(4.0, valence)) * segWeight;
       sentiments.push(valence);
     }

@@ -217,12 +217,15 @@ class TestMoodShift:
         assert all(p.kind != "mood_shift" for p in next_day.surfaced)
         # ...until the qualification days span >= 2 calendar days (the
         # window itself has moved) with the excursion still present.
+        # 2026-09-29 deep audit: window-stat replication needs >= 7 days of
+        # spread (the EWMA's 1/lambda ~= 5.5-day memory means a 2-day
+        # re-qualification was the SAME excursion scored twice).
         grown = entries + [
             JournalEntry("ordinary day notes", T0 + timedelta(days=k), sentiment=-0.7)
-            for k in (1, 2)
+            for k in range(1, 8)
         ]
         second = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=2)
+            brain.load_state(brain.dump_state(first.new_state)), grown, T0 + timedelta(days=7)
         )
         shifts = [p for p in second.surfaced if p.kind == "mood_shift"]
         assert len(shifts) == 1
@@ -796,12 +799,18 @@ class TestMoodDynamics:
         if not unstable:
             # Window-stat replication: two qualification days >= 2 calendar
             # days apart — the swing pattern continues two more days.
+            # 2026-09-29 deep audit: window-stat replication now needs the
+            # qualification days >= 7 apart (EWMA memory ~= 5.5 days — a
+            # 2-day spread re-scored the same swing), so the swing pattern
+            # continues a full week.
             grown = entries + [
-                JournalEntry("ordinary day notes", T0 + timedelta(days=1), sentiment=0.55),
-                JournalEntry("ordinary day notes", T0 + timedelta(days=2), sentiment=-0.45),
+                JournalEntry(
+                    "ordinary day notes", T0 + timedelta(days=k), sentiment=0.55 if k % 2 else -0.45
+                )
+                for k in range(1, 8)
             ]
             second = brain.update(
-                brain.load_state(brain.dump_state(result.new_state)), grown, T0 + timedelta(days=2)
+                brain.load_state(brain.dump_state(result.new_state)), grown, T0 + timedelta(days=7)
             )
             unstable = [p for p in second.surfaced if p.kind == "instability"]
         assert unstable
@@ -824,7 +833,7 @@ class TestMoodDynamics:
         # wobbles as the 180-day window slides, so loop a few days).
         state = brain.load_state(None)
         inertial = []
-        for k in range(4):
+        for k in range(9):  # spread >= 7 for window-stat replication (2026-09-29)
             result = brain.update(
                 brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
             )
@@ -1074,8 +1083,11 @@ class TestFullFamilyCorrection:
         residual_per = []
         for e in entries:
             tokens = brain.WORD_RE.findall(e.text.lower())
+            raw = brain.sentiment_score(tokens)
+            # 2026-09-29: _detect_themes carries (residual, raw, tagged) so
+            # the mood-tie test can de-contaminate text-scored theme-days.
             residual_per.append(
-                (e, tokens, brain.extract_themes(tokens), brain.sentiment_score(tokens))
+                (e, tokens, brain.extract_themes(tokens), raw, raw, e.sentiment is not None)
             )
         weekday_total: dict[int, int] = {}
         for e in entries:
@@ -1105,7 +1117,12 @@ class TestFullFamilyCorrection:
         residual_per = []
         for e in entries:
             tokens = brain.WORD_RE.findall(e.text.lower())
-            residual_per.append((e, tokens, brain.extract_themes(tokens), e.sentiment))
+            raw = e.sentiment if e.sentiment is not None else brain.sentiment_score(tokens)
+            # 2026-09-29: (residual, raw, tagged) — this corpus is fully
+            # tagged, so the de-contamination path never engages.
+            residual_per.append(
+                (e, tokens, brain.extract_themes(tokens), raw, raw, e.sentiment is not None)
+            )
         weekday_total = {
             d.weekday(): sum(1 for e in entries if e.entry_date.weekday() == d.weekday())
             for d in days
@@ -1700,7 +1717,10 @@ def _surface_inertia(entries, muted=None, unmuted=None, kinds=("inertia", "energ
     (the replication gate needs two qualification days; the window slides,
     so the recent-window correlation wobbles across the gate)."""
     state = brain.load_state(None)
-    for k in range(5):
+    # 2026-09-29 deep audit: window-stat replication needs qualification
+    # days >= WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS (7) apart — the loop
+    # spans 9 days so the spread gate can open.
+    for k in range(9):
         result = brain.update(
             brain.load_state(brain.dump_state(state)),
             entries,
@@ -1745,7 +1765,7 @@ class TestEnergyInertia:
         )
         state = brain.load_state(None)
         surfaced_kinds: set[str] = set()
-        for k in range(6):
+        for k in range(9):  # spread >= 7 for window-stat replication (2026-09-29)
             result = brain.update(
                 brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
             )
@@ -1897,7 +1917,7 @@ class TestPanaInertia:
         entries = self._pana_corpus("a calm and grateful day", "an anxious tired day")
         state = brain.load_state(None)
         na_surfaced = False
-        for k in range(6):
+        for k in range(9):  # spread >= 7 (2026-09-29)
             result = brain.update(
                 brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
             )
@@ -1968,7 +1988,7 @@ class TestEnergyMoodCoupling:
         entries = self._coupled_corpus()
         state = brain.load_state(None)
         coupled = None
-        for k in range(6):
+        for k in range(9):  # spread >= 7 (2026-09-29)
             result = brain.update(
                 brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
             )
@@ -2380,7 +2400,7 @@ class TestSpanishEngine:
             entries.append(JournalEntry(text, d))
         state = brain.load_state(None)
         surfaced_any = False
-        for k in range(6):
+        for k in range(9):  # spread >= 7 (2026-09-29)
             result = brain.update(
                 brain.load_state(brain.dump_state(state)), entries, T0 + timedelta(days=k)
             )

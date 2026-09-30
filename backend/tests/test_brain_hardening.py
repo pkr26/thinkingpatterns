@@ -45,14 +45,16 @@ def _run_twice(
     """Qualify + surface, at the cadence the replication gate demands.
 
     Window-stat kinds (mood_shift, inertia, instability) need
-    qualification days >= REPLICATION_MIN_SPREAD_DAYS (2) apart;
-    evidence-date kinds (temporal, mood_correlation, link) need a NEW
-    evidence day — pass ``extended`` (the corpus plus a fresh relevant
-    day) when pinning those.
+    qualification days >= WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS (7)
+    apart — the EWMA memory is ~5.5 days, so a 2-day spread re-scored
+    the same excursion (2026-09-29 deep audit); evidence-date kinds
+    (temporal, mood_correlation, link) need NEW evidence days — pass
+    ``extended`` (the corpus plus fresh relevant days) when pinning
+    those.
     """
     first = _run(corpus, today)
     return _run(
-        extended if extended is not None else corpus, today + timedelta(days=2), first.new_state
+        extended if extended is not None else corpus, today + timedelta(days=7), first.new_state
     )
 
 
@@ -395,9 +397,14 @@ class TestAuditRemediation2026_09_17:
         # (unsupported languages must not mint claims from noise) is
         # preserved with a German corpus: same shape, still suppressed.
         spanish = [
+            # 2026-09-29 sentiment walk fix: the old sentence crossed the
+            # rumination negativity bar only through double-counted "no"s
+            # (each "no" scored -1.2 AND negated). The polarity now rides
+            # real negative words inside negation scope, which is what the
+            # classifier should be pinned to.
             JournalEntry(
-                "No me siento bien hoy. No quiero ir al trabajo y no me "
-                "dejan en paz los pensamientos.",
+                "No me siento bien hoy. No quiero ir al trabajo y me "
+                "siento triste y solo con los pensamientos.",
                 T0 - timedelta(days=ago),
             )
             for ago in range(70, 0, -1)

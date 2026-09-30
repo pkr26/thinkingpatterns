@@ -65,6 +65,9 @@ def main() -> None:
             "negation_scalar": brain.NEGATION_SCALAR,
             "sentiment_scale": brain.SENTIMENT_SCALE,
             "booster_scope": brain.BOOSTER_SCOPE,
+            # 2026-09-29 deep audit: |v| >= this is a strong negative whose
+            # negation means ABSENCE (zero), never a damped positive.
+            "strong_negation_abs": brain.STRONG_NEGATION_ABS,
         },
         "word_sets": {
             "but_words": sorted(brain.BUT_WORDS),

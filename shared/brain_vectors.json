@@ -28,9 +28,9 @@
   },
   {
    "text": "no stress at all today",
-   "score": 0.07,
+   "score": 0.37,
    "pa": 0.37,
-   "na": 0.3
+   "na": 0.0
   },
   {
    "text": "felt happy and calm but tired",
@@ -41,7 +41,7 @@
   {
    "text": "extremely bad no good very anxious",
    "score": -1.0,
-   "pa": 0.6993,
+   "pa": 0.0,
    "na": 1.0
   },
   {
@@ -238,9 +238,9 @@
   },
   {
    "text": "no estoy bien",
-   "score": -0.596,
+   "score": -0.296,
    "pa": 0.0,
-   "na": 0.596
+   "na": 0.296
   },
   {
    "text": "nunca estoy tranquilo los domingos",
@@ -280,9 +280,9 @@
   },
   {
    "text": "no quiero vivir",
-   "score": -0.5035,
+   "score": -0.2035,
    "pa": 0.0,
-   "na": 0.5035
+   "na": 0.2035
   },
   {
    "text": "estoy muy cansado de vivir",
@@ -312,6 +312,60 @@
    "text": "constructor constructor constructor",
    "score": 0.0,
    "pa": 0.0,
+   "na": 0.0
+  },
+  {
+   "text": "i am not suicidal",
+   "score": 0.0,
+   "pa": 0.0,
+   "na": 0.0
+  },
+  {
+   "text": "not suicidal anymore and feeling okay",
+   "score": 0.35,
+   "pa": 0.35,
+   "na": 0.0
+  },
+  {
+   "text": "i am not depressed",
+   "score": 0.0,
+   "pa": 0.0,
+   "na": 0.0
+  },
+  {
+   "text": "i do not want to die",
+   "score": -0.0555,
+   "pa": 0.0,
+   "na": 0.0555
+  },
+  {
+   "text": "no no no it is fine",
+   "score": -0.748,
+   "pa": 0.0,
+   "na": 0.748
+  },
+  {
+   "text": "i have no energy today",
+   "score": -0.20350000000000001,
+   "pa": 0.0,
+   "na": 0.2035
+  },
+  {
+   "text": "no appetite, no point, no one would notice",
+   "score": -0.8999999999999999,
+   "pa": 0.0,
+   "na": 0.9
+  },
+  {
+   "text": "dying inside a little every day",
+   "score": -0.725,
+   "pa": 0.0,
+   "na": 0.725
+  },
+  {
+   "text": "the food wasn't bad at all",
+   "score": 0.3515,
+   "pa": 0.3515,
    "na": 0.0
   },
   {

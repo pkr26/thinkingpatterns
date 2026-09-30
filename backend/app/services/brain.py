@@ -184,6 +184,16 @@ WINDOW_STAT_KINDS = frozenset(
 )
 REPLICATION_MIN_SPREAD_DAYS = 2
 
+# 2026-09-29 deep-audit HIGH: for WINDOW-STAT kinds, 2 days of spread is
+# persistence-of-excursion, not independence. mood_shift's rule reads the
+# last 5 points; qualification on day N and day N+2 share 3 of those 5
+# points, and the EWMA's own memory is 1/lambda ~= 5.5 days — the "second
+# observation" is the SAME excursion, one day older. The spread for
+# window-stat kinds must exceed that memory before two qualifications can
+# claim to be independent observations of the person rather than one long
+# excursion scored twice.
+WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS = 7
+
 # The complete kind taxonomy the engine itself can emit (item 12, 2026-09-26
 # statistical review). A stored record whose kind is NOT in this set is a
 # foreign/hand-crafted payload: it must never flow into lifecycle promotion
@@ -1348,6 +1358,13 @@ INTENSIFIERS: dict[str, float] = {
     "little": 0.9,
 }
 NEGATION_SCALAR = -0.74  # VADER's damped flip: "not good" < "bad"
+
+# 2026-09-29 deep audit (engine MEDIUM x2): |valence| at or beyond this is a
+# STRONG word whose negation means ABSENCE, not a flipped positive —
+# "i am not suicidal" must never score positive (it measured +0.5; "not
+# suicidal anymore" and "feeling okay" hit the +1.0 clamp). Applies to the
+# negative side only: "not happy" staying mildly negative is VADER-correct.
+STRONG_NEGATION_ABS = 2.5
 BUT_WORDS_EN = frozenset({"but", "however", "although", "though", "yet"})
 BUT_WORDS = BUT_WORDS_EN | BUT_WORDS_ES
 INTENSIFIERS = {**INTENSIFIERS_ES, **INTENSIFIERS}
@@ -1888,6 +1905,9 @@ IRREGULAR_FORMS: dict[str, str] = {
     "grieved": "grieve",
     "missed": "miss",
     "loathed": "loathe",
+    # 2026-09-29 deep audit: "dying" is 5 letters, so the >5 -ing stemmer
+    # skipped it and "i am dying inside" scored ZERO ("die" is -2.9).
+    "dying": "die",
 }
 
 BOOSTER_SCOPE = 3  # tokens before a sentiment word that may boost or negate it
@@ -2217,6 +2237,32 @@ def _valence_walk(tokens: list[str], language: str | None = None) -> list[float]
 
     for seg, seg_weight in segments:
         for i, token in enumerate(seg):
+            # 2026-09-29 deep audit: a negator DOING NEGATION WORK (a
+            # scored NON-negator word within BOOSTER_SCOPE ahead) carries
+            # no valence of its own. "no" both scored -1.2 AND negated the
+            # next word — double-counting the canonical depressive register
+            # and letting a preceding negator flip a bare "no" POSITIVE. A
+            # STRANDED negator ("no." as a whole answer, "no no no" as
+            # emphasis) is CONTENT, not grammar: it keeps its own valence,
+            # never negation-flipped by a preceding negator ("no no" is
+            # emphasis, not a logical double negative) — the flip was the
+            # measured artifact ("no appetite, no point" read POSITIVE).
+            # VADER special-cases "no" for exactly this class of collision.
+            if token in negators:
+                ahead = seg[i + 1 : i + 1 + BOOSTER_SCOPE]
+                working = any(
+                    t not in negators and _word_valence(t, language) != 0.0 for t in ahead
+                )
+                if working:
+                    continue
+                own = _word_valence(token, language)
+                if own != 0.0:
+                    boost = 1.0
+                    for prev in seg[max(0, i - BOOSTER_SCOPE) : i]:
+                        if prev in INTENSIFIERS:
+                            boost *= INTENSIFIERS[prev]
+                    sentiments.append(max(-4.0, min(4.0, own * boost)) * seg_weight)
+                continue
             valence = _word_valence(token, language)
             if valence == 0.0:
                 continue
@@ -2232,6 +2278,12 @@ def _valence_walk(tokens: list[str], language: str | None = None) -> list[float]
                     negated = True
             valence *= boost
             if negated:
+                # A negated STRONG negative is the ABSENCE of the state —
+                # "i am not suicidal" contributes nothing instead of a
+                # damped positive (2026-09-29 deep audit; the "stop" fix
+                # of 2026-09-26 generalized to every |v| >= 2.5 word).
+                if valence <= -STRONG_NEGATION_ABS:
+                    continue
                 valence *= NEGATION_SCALAR
             valence = max(-4.0, min(4.0, valence)) * seg_weight
             sentiments.append(valence)
@@ -2867,10 +2919,11 @@ def _person_candidates_es(window: list[JournalEntry]) -> set[str]:
 
 
 def _detect_themes(
-    per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
+    per_entry: list[tuple[JournalEntry, list[str], set[str], float, float, bool]],
     weekday_days: dict[int, int],
     total_days: int,
     lag1: float | None = None,
+    language: str = "en",
 ) -> list[_Signal]:
     """Base-rate-corrected weekday concentration + within-person mood ties.
 
@@ -2895,16 +2948,49 @@ def _detect_themes(
     independent observations when mood carries over day to day.
     """
     signals: list[_Signal] = []
-    themes = sorted({theme for _, _, themes, _ in per_entry for theme in themes})
+    themes = sorted({theme for _, _, themes, _, _, _ in per_entry for theme in themes})
     for theme in themes:
-        with_theme = [(e, s) for e, _, themes, s in per_entry if theme in themes]
-        without_theme = [(e, s) for e, _, themes, s in per_entry if theme not in themes]
+        all_with = [(e, t, th, s, raw, tagged) for e, t, th, s, raw, tagged in per_entry if theme in th]
+        without_theme = [(e, s) for e, _, th, s, _, _ in per_entry if theme not in th]
+
+        # 2026-09-29 deep audit (HIGH — idiographic integrity): a
+        # text-scored mood on a theme-bearing day was computed over the
+        # SAME tokens that minted the theme, and theme words ARE strong
+        # sentiment words ("insomnia" -2.6, "exhausted" -2.8, "lonely"
+        # -2.4) — so the tie test read the LEXICON, not the person, and
+        # every tag-less journal mentioning sleep got "entries read lower
+        # when 'sleep' comes up" as a personalized discovery. For UNTAGGED
+        # entries the tie mood is re-scored without the theme's own
+        # tokens (a first-order residual adjustment: the global baseline
+        # and weekday centering stay as computed); an entry whose kept
+        # tokens are empty contributed nothing but the theme itself and
+        # carries no independent mood evidence. Explicit client tags are
+        # the user's own report and are never re-scored; tag-minted and
+        # rating-minted themes (no lexicon words) are unaffected by
+        # construction.
+        def _tie_mood(
+            entry: JournalEntry, tokens: list[str], residual: float, raw: float, tagged: bool
+        ) -> float | None:
+            if tagged or not tokens:
+                return residual
+            kept = [t for t in tokens if theme_for(t, language) != theme]
+            if len(kept) == len(tokens):
+                return residual
+            if not kept:
+                return None
+            return residual + (sentiment_score(kept, language) - raw)
+
+        with_theme: list[tuple[JournalEntry, float]] = []
+        for e, toks, _th, s, raw, tagged in all_with:
+            tie = _tie_mood(e, toks, s, raw, tagged)
+            if tie is not None:
+                with_theme.append((e, tie))
         # Day-level Bernoulli (2026-09-17): a user who writes 4 entries
         # every Sunday contributes 4 CORRELATED trials to one weekday —
         # one calendar day, one observation. The entry-level version
         # over-counted clustered journals and inflated significance;
         # TEMPORAL_MIN_N now reads in theme-DAYS, honestly.
-        days = sorted({e.entry_date for e, _ in with_theme})
+        days = sorted({e.entry_date for e, _, _th, _s, _raw, _tagged in all_with})
         count = len(days)
         if count < TEMPORAL_MIN_N:
             continue
@@ -2940,7 +3026,7 @@ def _detect_themes(
             tod_detail: dict[str, str] = {}
             tod_seen = [
                 e.tod
-                for e, _ in with_theme
+                for e, _t, _th, _s, _raw, _tagged in all_with
                 if e.entry_date.weekday() == weekday and e.tod is not None
             ]
             if len(tod_seen) >= TEMPORAL_MIN_TOD_N:
@@ -4087,6 +4173,23 @@ def _detect_topics(
     recent_idx = {i for i, (d, _) in enumerate(doc_tokens) if d >= split}
     earlier_n = n - len(recent_idx)
 
+    # 2026-09-29 deep-audit HIGH: the rising binomial used to count ENTRIES
+    # ("one entry, one trial"), the exact clustered-journal flaw the weekday
+    # detector was already fixed for ("a user who writes 4 entries every
+    # Sunday contributes 4 correlated trials"). A 10-entries-a-day writer
+    # multiplied n ~10x and minted "significantly rising" cards out of any
+    # word slightly more frequent per entry. The trial is now ONE CALENDAR
+    # DAY (day-level Bernoulli, mirroring _detect_themes): a day counts if
+    # ANY entry that day mentions the topic, and both halves' denominators
+    # are distinct journaling days. Presence stays entry-based by design —
+    # it is a direct measurement of "share of entries", never a tested
+    # claim, so clustered entries do not inflate a p-value there.
+    all_days = {d for d, _ in doc_tokens}
+    recent_days = {d for d in all_days if d >= split}
+    earlier_days = all_days - recent_days
+    recent_days_n = len(recent_days)
+    earlier_days_n = len(earlier_days)
+
     # 2026-09-21 audit D-2: TOPIC_STOPWORDS is English-only, so on a
     # Spanish corpus the eligibility filter let every function word
     # through ("para", "cuando", "porque", "ahora" …) and presence cards
@@ -4126,14 +4229,17 @@ def _detect_topics(
                     followers.setdefault(cand, set()).add(following)
             prev = tok
 
-    candidates: list[tuple[str, int, int, int]] = []  # label, total, days, recent_df
+    candidates: list[tuple[str, int, int, int, int, int]] = []  # label, total, days, recent_df, recent_dd, earlier_dd
     for label, docs_hit in df_docs.items():
         total = len(docs_hit)
         days_n = len(df_days[label])
         if total < TOPIC_MIN_ENTRIES or days_n < TOPIC_MIN_DISTINCT_DAYS:
             continue
         recent_df = sum(1 for i in docs_hit if i in recent_idx)
-        candidates.append((label, total, days_n, recent_df))
+        label_days = df_days[label]
+        recent_dd = len(label_days & recent_days)
+        earlier_dd = len(label_days & earlier_days)
+        candidates.append((label, total, days_n, recent_df, recent_dd, earlier_dd))
     # Highest-document-frequency first: when "guitar" and "guitar practice"
     # both qualify downstream, the broader one wins and nested labels are
     # dropped (the dedupe itself happens post-correction in update()).
@@ -4142,26 +4248,31 @@ def _detect_topics(
 
     recent_n = len(recent_idx)
     signals: list[_Signal] = []
-    for label, total, days_n, recent_df in candidates:
+    for label, total, days_n, recent_df, recent_dd, earlier_dd in candidates:
         share = total / n
+        # The TESTED rising claim is day-level: what fraction of the half's
+        # JOURNALING DAYS mention the topic (clustered entries cannot
+        # inflate it). Entry shares stay in the detail for display.
+        day_share_recent = recent_dd / recent_days_n if recent_days_n else 0.0
+        day_share_earlier = earlier_dd / earlier_days_n if earlier_days_n else 0.0
         share_recent = recent_df / recent_n if recent_n else 0.0
         share_earlier = (total - recent_df) / earlier_n if earlier_n else 0.0
         pvalue: float | None = None
         gate_ok = False
-        if recent_n >= TOPIC_MIN_PER_HALF and earlier_n >= TOPIC_MIN_PER_HALF:
-            base = ((total - recent_df) + 0.5) / (earlier_n + 1)
-            pvalue = statsig.binomial_sf(recent_df, recent_n, base)
+        if recent_days_n >= TOPIC_MIN_PER_HALF and earlier_days_n >= TOPIC_MIN_PER_HALF:
+            base = (earlier_dd + 0.5) / (earlier_days_n + 1)
+            pvalue = statsig.binomial_sf(recent_dd, recent_days_n, base)
             gate_ok = (
-                recent_df >= TOPIC_RISING_MIN_RECENT
-                and share_recent >= TOPIC_RISING_MIN_SHARE
-                and share_recent >= base + TOPIC_RISING_MIN_GAIN
+                recent_dd >= TOPIC_RISING_MIN_RECENT
+                and day_share_recent >= TOPIC_RISING_MIN_SHARE
+                and day_share_recent >= base + TOPIC_RISING_MIN_GAIN
                 # AND a substantial RELATIVE gain: the binomial p-value
                 # conditions on a base estimated from the same window's
                 # earlier half, so a chance-low earlier half makes an
                 # ordinary recent half look "rising". Demanding the
                 # recent rate roughly double the base keeps chance-low
                 # baselines from manufacturing claims.
-                and share_recent >= 2.0 * base + 0.05
+                and day_share_recent >= 2.0 * base + 0.05
             )
         is_presence = (
             total >= TOPIC_PRESENCE_MIN_ENTRIES
@@ -4185,6 +4296,10 @@ def _detect_topics(
             "share": round(share, 3),
             "share_earlier": round(share_earlier, 3),
             "share_recent": round(share_recent, 3),
+            # The day-level rates the rising test actually ran (2026-09-29
+            # deep audit): one calendar day, one trial.
+            "day_share_earlier": round(day_share_earlier, 3),
+            "day_share_recent": round(day_share_recent, 3),
         }
         fallback: _Signal | None = None
         if is_presence:
@@ -4358,7 +4473,18 @@ def _replication_satisfied(record: StoredPattern, signal: _Signal) -> bool:
         date.fromisoformat(record.qualification_days[-1])
         - date.fromisoformat(record.qualification_days[0])
     ).days
-    return spread >= REPLICATION_MIN_SPREAD_DAYS
+    # 2026-09-29 deep-audit HIGH: window-stat kinds need the window to have
+    # moved BEYOND the EWMA memory (see WINDOW_STAT_REPLICATION_MIN_SPREAD_
+    # DAYS) — a 2-day spread re-scores the same excursion. Evidence-date
+    # kinds keep the 2-day bar (their replication gate is the >=2 NEW
+    # evidence days above, which window-stat kinds cannot use because the
+    # sliding window's evidence is not "new" in that sense).
+    minimum = (
+        WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS
+        if record.kind in WINDOW_STAT_KINDS
+        else REPLICATION_MIN_SPREAD_DAYS
+    )
+    return spread >= minimum
 
 
 def _merge_lifecycle(store: dict, qualified: list[_Signal], today: date) -> None:
@@ -4611,7 +4737,16 @@ def update(
         store = fresh_state()
 
     cutoff = today - timedelta(days=WINDOW_DAYS)
-    ordered = sorted(entries, key=lambda e: e.entry_date)
+    # 2026-09-29 deep audit (determinism): Python's stable sort preserved
+    # CALLER order for same-date entries, so day means summed floats in
+    # caller order — float addition is not associative, and the same
+    # corpus presented in a different order could flip a BH-boundary
+    # decision in the last ULP. The server path was deterministic only
+    # because the DB cursor orders by (entry_date, received_at, id); the
+    # TS ports and any future caller had no enforced tie-break. The text
+    # is the canonical tie-break: same-date entries are fully ordered by
+    # content, and identical texts sum identically in any order.
+    ordered = sorted(entries, key=lambda e: (e.entry_date, e.text))
     # Calendar validity boundary (independent audit 2026-09-27): update()
     # is a pure transform over the entries it is GIVEN and deliberately
     # does NOT clamp entry_date to `today` — the engine's own contract
@@ -4871,7 +5006,10 @@ def update(
     # against the baseline quarter, not a between-days contrast).
     assoc_residuals = _strip_weekday_effects(day_residuals)
     weekday_adjustment = {day: day_residuals[day] - assoc_residuals[day] for day in day_residuals}
-    residual_per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = [
+    # 2026-09-29 deep audit: the raw score and the tagged flag ride along
+    # so the mood-tie test can de-contaminate text-scored theme-days (see
+    # _detect_themes) — the residual itself stays exactly as computed.
+    residual_per_entry: list[tuple[JournalEntry, list[str], set[str], float, float, bool]] = [
         (
             entry,
             tokens,
@@ -4879,6 +5017,8 @@ def update(
             sentiment
             - baselines.get(entry.entry_date, sentiment)
             - weekday_adjustment.get(entry.entry_date, 0.0),
+            sentiment,
+            entry.sentiment is not None,
         )
         for entry, tokens, themes, sentiment in mood_entries
     ]
@@ -4898,7 +5038,9 @@ def update(
         # explains is the same measurement twice) — computed once per run.
         clusters = _phrase_clusters(window)
         signals.extend(
-            _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1)
+            _detect_themes(
+                residual_per_entry, weekday_days, len(day_buckets), resid_lag1, language
+            )
         )
         signals.extend(
             _detect_phrases(clusters, allow_rumination=language_ok, language=language)

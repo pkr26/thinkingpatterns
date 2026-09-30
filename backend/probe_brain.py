@@ -354,7 +354,10 @@ _f_entries, _g_entries = _mixed_corpora()
 _f_state = update(load_state(None), _f_entries, end)
 _f_ok = any(p.kind == "inertia" for p in _f_state.surfaced)
 if not _f_ok:  # a marginal day can miss the gates; the next recompute lands it
-    _f_state = update(_f_state.new_state, _f_entries, end + timedelta(days=2))
+    # 2026-09-29: window-stat replication needs qualification days >= 7
+    # apart (the EWMA-family memory makes a 2-day spread re-score the same
+    # excursion).
+    _f_state = update(_f_state.new_state, _f_entries, end + timedelta(days=7))
     _f_ok = any(p.kind == "inertia" for p in _f_state.surfaced)
 check("F inertia (mixed corpus, surfaced)", _f_ok)
 _g_state = update(load_state(None), _g_entries, end)
@@ -363,10 +366,11 @@ if not _g_ok:  # candidate on first qualification; a later recompute surfaces it
     # (The retry must thread .new_state — update() takes the state dict,
     # not the BrainUpdate envelope. The pre-replication-gate probe never
     # noticed: STRONG_EVIDENCE surfaced it on first contact. The retry is
-    # TWO days on, not one: window-stat kinds replicate only when the
-    # qualification days span >= 2 calendar days — a next-day recompute
-    # re-scores the same sliding window.)
-    _g_state = update(_g_state.new_state, _g_entries, end + timedelta(days=2))
+    # SEVEN days on, not one or two: window-stat kinds replicate only when
+    # the qualification days span >= WINDOW_STAT_REPLICATION_MIN_SPREAD_
+    # DAYS (7) — a shorter gap re-scores the same sliding excursion
+    # (2026-09-29 deep audit).)
+    _g_state = update(_g_state.new_state, _g_entries, end + timedelta(days=7))
     _g_ok = any(p.kind == "instability" for p in _g_state.surfaced)
 check("G instability (mixed corpus, surfaced)", _g_ok)
 false_pos = [
@@ -379,6 +383,68 @@ false_topics = [p for p in pats.values() if p.kind == "topic" and p.label != "gu
 # disjunct (str(list) is never ""), so the condition silently reduced to
 # `not false_pos` — which IS the intended check; stated plainly now.
 check("H no confound/false associations", not false_pos and not false_topics)
+
+# I and J (deep audit 2026-09-29): the TAG-LESS path — the probe always
+# planted mood via client tags, so the default user's text-scored mood was
+# never ground-truthed. I: a genuine tie (theme days also carry real
+# non-theme negative content) MUST surface. J: pure lexical overlap (the
+# theme words ARE the only mood content) must mint NOTHING — the audit
+# measured this firing pre-fix at mood_delta=0.408, a "personalized
+# discovery" that was a population-level lexical identity.
+_TAGLESS_NEUTRALS = (
+    "ordinary day notes, chores and paperwork",
+    "errands and laundry day, ordinary notes",
+    "paperwork day, ordinary chores and notes",
+    "ordinary sunday notes and bills",
+)
+_TAGLESS_THEME = (
+    "slept badly and woke up tired all morning",
+    "restless night, drowsy and yawning by noon",
+    "tossed and turned, sleepy and drained",
+)
+_TAGLESS_NEGATIVES = (
+    "and felt awful and hopeless the whole day",
+    "but grim and miserable anyway",
+    "yet everything felt terrible and bleak",
+)
+
+
+def _tagless_corpus(genuine: bool) -> list[JournalEntry]:
+    entries: list[JournalEntry] = []
+    for i in range(104):
+        d = end - timedelta(days=103 - i)
+        if i % 3 == 1:
+            extra = _TAGLESS_NEGATIVES[i % 3] if genuine else ""
+            entries.append(JournalEntry(_TAGLESS_THEME[i % 3] + extra, d))
+        else:
+            entries.append(JournalEntry(_TAGLESS_NEUTRALS[i % 4], d))
+    return entries
+
+
+def _tagless_surface(corpus: list[JournalEntry]) -> list:
+    state = update(load_state(None), corpus, end)
+    grown = corpus + [
+        JournalEntry("bad night, tired again", end + timedelta(days=1)),
+        JournalEntry("restless and drowsy again", end + timedelta(days=2)),
+    ]
+    second = update(state.new_state, grown, end + timedelta(days=2))
+    return list(second.surfaced)
+
+
+_i_surfaced = _tagless_surface(_tagless_corpus(genuine=True))
+check(
+    "I tag-less genuine tie surfaces (text-scored mood path)",
+    any(
+        p.kind == "mood_correlation" and p.label == "sleep"
+        and p.detail.get("direction") == "lower"
+        for p in _i_surfaced
+    ),
+)
+_j_surfaced = _tagless_surface(_tagless_corpus(genuine=False))
+check(
+    "J tag-less lexical overlap alone mints nothing (tautology broken)",
+    not [p for p in _j_surfaced if p.kind == "mood_correlation"],
+)
 
 # A FAILing probe must fail CI: exit nonzero so the ground-truth check can
 # gate builds instead of only printing.

@@ -34,10 +34,13 @@ def _run_twice(
     evidence days, so ``extra`` appends fresh relevant days."""
     first = brain.update(brain.load_state(None), corpus, today)
     second_corpus = corpus + (extra if extra is not None else [])
+    # 2026-09-29 deep audit: window-stat kinds (cadence, mood_shift, ...)
+    # need qualification days >= 7 apart — the EWMA-family memory makes a
+    # 2-day spread re-score the same excursion.
     return brain.update(
         brain.load_state(brain.dump_state(first.new_state)),
         second_corpus,
-        today + timedelta(days=2),
+        today + timedelta(days=7),
     )
 
 
@@ -323,20 +326,29 @@ class TestAvoidance:
 
 class TestCadence:
     def test_irregular_recent_rhythm_surfaces(self):
-        # Early: metronome daily writing. Recent 35 days: gaps of 1-5 days.
+        # Early: metronome daily writing. Recent span: gaps of 1-5 days,
+        # continued through BOTH observations so the recent window still
+        # sees the irregular rhythm at each recompute.
         entries = [JournalEntry("day", T0 - timedelta(days=ago), 0.1) for ago in range(84, 35, -1)]
         day = T0 - timedelta(days=35)
         gaps = [1, 4, 1, 5, 2, 1, 4, 1, 3, 1, 5, 1]
+        end = T0 + timedelta(days=13)
         i = 0
-        while day <= T0:
+        while day <= end:
             entries.append(JournalEntry("day", day, 0.1))
             day += timedelta(days=gaps[i % len(gaps)])
             i += 1
-        # window-stat kind: run twice 2+ days apart, fixed corpus is fine.
-        result = _run_twice(entries, T0)
-        assert any(p.kind == "cadence" for p in result.surfaced), [
-            (p.kind, p.label) for p in result.surfaced
+        # window-stat kind: qualification days >= 7 apart (2026-09-29 deep
+        # audit — the EWMA-family memory makes a 2-day spread re-score the
+        # same excursion).
+        first = brain.update(brain.load_state(None), entries, T0 + timedelta(days=6))
+        second = brain.update(
+            brain.load_state(brain.dump_state(first.new_state)), entries, end
+        )
+        surfaced = [p for p in first.surfaced if p.kind == "cadence"] + [
+            p for p in second.surfaced if p.kind == "cadence"
         ]
+        assert surfaced, [(p.kind, p.label) for p in second.surfaced]
 
     def test_steady_rhythm_makes_no_claim(self):
         entries = [JournalEntry("day", T0 - timedelta(days=ago), 0.1) for ago in range(84, 0, -1)]
