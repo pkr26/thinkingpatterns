@@ -58,9 +58,7 @@ def test_stats_vectors_match_the_live_engine():
     for xs, ys, expected in payload["stats"]["pearson"]:
         assert brain._pearson(xs, ys) == pytest.approx(expected, abs=1e-9)
     for r1, n1, r2, n2, expected in payload["stats"]["fisher_z"]:
-        assert statsig.fisher_z_difference_p(r1, n1, r2, n2) == pytest.approx(
-            expected, abs=1e-9
-        )
+        assert statsig.fisher_z_difference_p(r1, n1, r2, n2) == pytest.approx(expected, abs=1e-9)
 
 
 def test_full_engine_update_vectors_match_the_live_engine():
