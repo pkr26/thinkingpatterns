@@ -283,9 +283,16 @@ Deferred, with owners and re-review triggers:
   or security defect at current scale; the maintained-counter and
   pagination rework is one coherent backend performance wave.
   Re-review: with the Redis wave (same capacity trigger).
-- **First executed release** — zero tags remain cut; the release
-  workflow (multi-arch, cosign, SBOM, release-env asset) has still
-  never run end-to-end. Re-review: immediately before launch.
+- **First executed release — IN PROGRESS (2026-09-30)**: tag v2.1.0 is
+  cut and pushed with all five discovered pipeline bugs fixed (truncated
+  action SHA in four workflows; Keep-a-Changelog-bracket-blind section
+  extractor; formatting/typing/coverage-floor drift; a timing-flaky
+  fence probe; cross-platform libm erfc last-ULP difference in the stats
+  vectors). The Release workflow's verify stage now passes locally on
+  the exact CI command sequence; the remote run consumed the available
+  Actions quota mid-iteration — re-run the workflow (workflow_dispatch
+  or tag re-push) once quota resets to complete the image build, SBOM,
+  and GitHub-release stages. Re-review: at quota reset.
 
 ## Backend coverage floor 97 → 95 (registered 2026-09-30, v2.1.0)
 
