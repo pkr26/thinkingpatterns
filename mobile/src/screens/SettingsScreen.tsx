@@ -22,13 +22,14 @@
  * row appears when any exist and requeues them in one tap.
  */
 import React, { useEffect, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
 import { cancelDailyReminder, cancelMeasureReminder, reminderCapability } from "../nativeFeatures";
 import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPrefs } from "../reminders";
 import { readLanguageChoice, writeLanguageChoice, type LanguageChoice } from "../languagePref";
+import { generateRecoveryKey, recoveryKeyToB64, sealDataKeyForRecovery } from "../crypto/recovery";
 import { syncReminderSchedule, syncMeasureReminderSchedule } from "../reminderSync";
 import {
   clearMeasureReminderPrefs,
@@ -708,6 +709,68 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // 2026-09-29 deep audit (P2): the in-app language override — a bilingual
   // user on an English-locale device gets the app in their language.
   const [language, setLanguageState] = useState<LanguageChoice>("device");
+
+  /** Wave 3: create/replace the recovery kit. The key is generated ON
+   *  DEVICE, sealed around the CURRENT data key, and uploaded with the
+   *  session's auth-key verifier (a biometric session cannot do this — its
+   *  auth-key slot holds placeholder zeros; the user is told to sign in
+   *  with the password first). */
+  const createRecoveryKit = async (): Promise<void> => {
+    if (busy) return;
+    touchActivity();
+    try {
+      const userId = await api.getUserId();
+      const username = await api.getUsername();
+      if (!userId || !username || !vault.isUnlocked()) throw new Error("session");
+      const keys = vault.get();
+      if (!keys.authKeyKnown) {
+        Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryNeedsPassword"));
+        return;
+      }
+      setBusy(true);
+      const recoveryKey = generateRecoveryKey();
+      const sealed = sealDataKeyForRecovery(recoveryKey, keys.dataKey, userId);
+      await api.setupRecoveryKit(
+        keys.authKey.toString("base64"),
+        recoveryKeyToB64(recoveryKey),
+        sealed.toString("base64"),
+      );
+      setRecoveryEnabled(true);
+      setRecoveryKeyShown(recoveryKeyToB64(recoveryKey));
+      const status = await api.recoveryStatus().catch(() => null);
+      if (status) setRecoverySetAt(status.set_at);
+    } catch {
+      Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoverySetupFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeRecoveryKit = async (): Promise<void> => {
+    if (busy) return;
+    touchActivity();
+    try {
+      if (!vault.isUnlocked()) throw new Error("session");
+      const keys = vault.get();
+      if (!keys.authKeyKnown) {
+        Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryNeedsPassword"));
+        return;
+      }
+      setBusy(true);
+      await api.removeRecoveryKit(keys.authKey.toString("base64"));
+      setRecoveryEnabled(false);
+      setRecoverySetAt(null);
+    } catch {
+      Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryRemoveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Wave 3 (2026-09-30): the recovery-kit status (create/replace/remove
+  // below). The kit's key is generated ON DEVICE and shown exactly once.
+  const [recoveryEnabled, setRecoveryEnabled] = useState<boolean | null>(null);
+  const [recoverySetAt, setRecoverySetAt] = useState<string | null>(null);
+  const [recoveryKeyShown, setRecoveryKeyShown] = useState<string | null>(null);
   const [haptics, setHaptics] = useState(true);
   const [reminders] = useState(reminderCapability());
   // The HealthKit State of Mind seam capability — probed once, sync, the
@@ -745,6 +808,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
           setThemeModeState(stored);
           setLanguageState(await readLanguageChoice());
+          try {
+            const status = await api.recoveryStatus();
+            setRecoveryEnabled(status.enabled);
+            setRecoverySetAt(status.set_at);
+          } catch {
+            setRecoveryEnabled(null);
+          }
         }
       } catch {
         /* non-sensitive preference; default stands */
@@ -941,6 +1011,55 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         <Text style={[themed.rowText, { fontSize: 12 }]}>
           {tr("settings.languageNote")}
         </Text>
+      </View>
+
+      {/* Recovery kit (wave 3, 2026-09-30): the honest escape hatch from a
+          forgotten password — opt-in, on-device key generation, shown
+          exactly once. */}
+      <Text style={themed.label}>{tr("settings.recoveryTitle")}</Text>
+      <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
+        <Text style={themed.rowText}>
+          {recoveryEnabled === null
+            ? tr("settings.recoveryUnknown")
+            : recoveryEnabled
+              ? tr("settings.recoveryActiveSince", { date: (recoverySetAt ?? "").slice(0, 10) })
+              : tr("settings.recoveryAbsent")}
+        </Text>
+        {recoveryKeyShown !== null && (
+          <View style={[styles.card, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.md, gap: 6 }]}>
+            <Text style={{ color: t.colors.danger, fontSize: 12, fontWeight: "700" }}>
+              {tr("settings.recoveryShownOnce")}
+            </Text>
+            <Text selectable style={{ color: t.colors.body, fontSize: 12, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) }}>
+              {recoveryKeyShown}
+            </Text>
+            <Text style={{ color: t.colors.muted, fontSize: 12 }}>{tr("settings.recoveryCopyNote")}</Text>
+            <PrimaryButton
+              label={tr("settings.recoveryConfirmSaved")}
+              onPress={() => {
+                setRecoveryKeyShown(null);
+                setRecoveryEnabled(true);
+              }}
+            />
+          </View>
+        )}
+        {recoveryKeyShown === null && (
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <GhostButton
+              label={recoveryEnabled ? tr("settings.recoveryReplace") : tr("settings.recoveryCreate")}
+              onPress={() => void createRecoveryKit()}
+              disabled={busy}
+            />
+            {recoveryEnabled === true && (
+              <GhostButton
+                label={tr("settings.recoveryRemove")}
+                onPress={() => void removeRecoveryKit()}
+                disabled={busy}
+              />
+            )}
+          </View>
+        )}
+        <Text style={{ color: t.colors.muted, fontSize: 12 }}>{tr("settings.recoveryNote")}</Text>
       </View>
 
       {/* Appearance & feel (2026-09-17): theme override + haptics. */}

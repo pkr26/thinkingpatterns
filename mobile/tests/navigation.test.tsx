@@ -80,7 +80,7 @@ describe("AppNavigator", () => {
     sessionState = { authStatus: "loggedOut", unlocked: false };
     const root = await render(<AppNavigator />);
     await flush();
-    expect(screenNames(root)).toEqual(["Login", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Login", "Recovery", "Crisis"]);
     expect(textOf(root)).toContain("MindPattern");
     expect(screenOptions(root, "Login")).toEqual({ headerShown: false });
     // Crisis is a first-class screen even before sign-in (M7).
@@ -314,7 +314,7 @@ describe("AppNavigator", () => {
       root.update(<AppNavigator />);
     });
     await flush();
-    expect(screenNames(root)).toEqual(["Login", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Login", "Recovery", "Crisis"]);
 
     // A new registration on the same device queues onboarding again.
     const { queueOnboarding } = await import("../src/onboarding");

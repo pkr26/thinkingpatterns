@@ -1115,6 +1115,51 @@ export const api = {
    *  fields. Nothing here is a client secret — the wrapped key is
    *  password-locked ciphertext — so it ships as a plain GET. */
   keyEnvelope: (): Promise<KeyEnvelopeResponse> => request("GET", `${API_PREFIX}/auth/key-envelope`),
+  // --- key-recovery envelope (wave 3, 2026-09-30) -------------------------
+  recoveryStatus: (): Promise<{ enabled: boolean; set_at: string | null }> =>
+    request("GET", `${API_PREFIX}/account/recovery`),
+  setupRecoveryKit: (
+    passwordVerifierB64: string,
+    recoveryKeyB64: string,
+    wrappedKeyB64: string,
+  ) =>
+    request(
+      "PUT",
+      `${API_PREFIX}/account/recovery`,
+      { password_verifier: passwordVerifierB64, verifier: recoveryKeyB64, wrapped_key: wrappedKeyB64 },
+      {},
+      { sensitive: true },
+    ),
+  removeRecoveryKit: (passwordVerifierB64: string) =>
+    request(
+      "DELETE",
+      `${API_PREFIX}/account/recovery`,
+      undefined,
+      { verifier: passwordVerifierB64 },
+      { sensitive: true },
+    ),
+  recoverLogin: (username: string, recoveryKeyB64: string) =>
+    // noBearer: like login, a 401 here means the recovery key was wrong —
+    // the vault-lock hook must not fire on it.
+    request(
+      "POST",
+      `${API_PREFIX}/auth/recover`,
+      { username, verifier: recoveryKeyB64 },
+      {},
+      { sensitive: true, noBearer: true },
+    ),
+  resetPasswordWithRecovery: (
+    proofB64: string,
+    body: { new_salt: string; new_verifier: string; new_kdf_params?: object; wrapped_data_key: string },
+    processingToken: string,
+  ) =>
+    request(
+      "PUT",
+      `${API_PREFIX}/account/recovery/password`,
+      { proof: proofB64, ...body },
+      { "X-Processing-Token": processingToken },
+      { sensitive: true },
+    ),
   /** Per-device sign-out (2026-09-26): the server revokes THIS bearer's
    *  jti; other devices' sessions for the account stay valid. The
    *  account-wide epoch bump now lives only where invalidating everything

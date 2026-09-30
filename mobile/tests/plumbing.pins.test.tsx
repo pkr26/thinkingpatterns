@@ -126,7 +126,7 @@ describe("navigation pins: inMain conjunction and pending onboarding", () => {
     sessionState = { authStatus: "loggedOut", unlocked: true };
     const root = await render(<AppNavigator />);
     await flush();
-    expect(screenNames(root)).toEqual(["Login", "Crisis"]);
+    expect(screenNames(root)).toEqual(["Login", "Recovery", "Crisis"]);
 
     // A loading hop resets any early showOnboarding state…
     sessionState = { authStatus: "loading", unlocked: false };

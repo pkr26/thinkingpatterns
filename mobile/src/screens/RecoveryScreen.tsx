@@ -1,0 +1,195 @@
+/**
+ * Account recovery with the recovery key (wave 3, 2026-09-30).
+ *
+ * Reached from the login screen ("Forgot password? Use a recovery key").
+ * The user proves the username + recovery key, chooses a NEW password,
+ * and one button runs the whole sequence (recoverAccountWithKey): the
+ * journal's data key is recovered, the new password takes over
+ * server-side, the local caches follow, and the vault unlocks — every
+ * word intact. Calm copy throughout: this screen is used on a bad day.
+ */
+import React, { useState } from "react";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+
+import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
+import { InlineStatus, InlineStatusTone } from "../components/InlineStatus";
+import { useTheme } from "../theme";
+import { t as tr } from "../strings";
+import { vault } from "../vault";
+import { useSession } from "../store";
+import { recoverAccountWithKey } from "../recoveryFlow";
+
+export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.Element {
+  const t = useTheme();
+  const { markLoggedIn } = useSession();
+  const [username, setUsername] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [statusTone, setStatusTone] = useState<InlineStatusTone>("neutral");
+  const [done, setDone] = useState(false);
+
+  const showStatus = (message: string, tone: InlineStatusTone) => {
+    setStatusTone(tone);
+    setStatus(message);
+  };
+
+  const run = async () => {
+    if (busy || done) return;
+    if (!username.trim() || !recoveryKey.trim()) {
+      showStatus(tr("recovery.missingFields"), "neutral");
+      return;
+    }
+    if (newPassword.length < 12) {
+      showStatus(tr("recovery.passwordTooShort"), "neutral");
+      return;
+    }
+    if (newPassword !== confirm) {
+      showStatus(tr("recovery.passwordMismatch"), "neutral");
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const outcome = await recoverAccountWithKey(username, recoveryKey, newPassword);
+      vault.unlock(
+        {
+          masterKey: Buffer.alloc(32), // placeholder — zeroized by unlock
+          authKey: Buffer.alloc(32), // the new password's auth key is re-derived on next login
+          dataKey: outcome.dataKey,
+        },
+        outcome.userId,
+      );
+      markLoggedIn(); // the vault subscription flips `unlocked` on unlock
+      setDone(true);
+      showStatus(tr("recovery.doneBody"), "ok");
+      setTimeout(() => navigation.navigate("Entry"), 900);
+    } catch (err) {
+      showStatus(
+        err instanceof Error && err.message ? err.message : tr("recovery.failedBody"),
+        "neutral",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        style={[styles.container, { backgroundColor: t.colors.bg }]}
+        contentContainerStyle={{ padding: 20, gap: 16 }}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={{ gap: 6 }}>
+          <Text style={{ color: t.colors.body, fontSize: t.type.display.fontSize, fontWeight: "700" }}>
+            {tr("recovery.title")}
+          </Text>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+            {tr("recovery.subtitle")}
+          </Text>
+        </View>
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+            {tr("recovery.usernameLabel")}
+          </Text>
+          <TextInput
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            textContentType="none"
+            accessibilityLabel={tr("recovery.usernameLabel")}
+            style={[styles.input, { backgroundColor: t.colors.card, color: t.colors.body, borderColor: t.colors.border }]}
+          />
+        </View>
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+            {tr("recovery.keyLabel")}
+          </Text>
+          <TextInput
+            value={recoveryKey}
+            onChangeText={setRecoveryKey}
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            multiline
+            style={[styles.input, styles.keyInput, { backgroundColor: t.colors.card, color: t.colors.body, borderColor: t.colors.border }]}
+            accessibilityLabel={tr("recovery.keyLabel")}
+          />
+          <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+            {tr("recovery.keyHint")}
+          </Text>
+        </View>
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+            {tr("recovery.newPasswordLabel")}
+          </Text>
+          <TextInput
+            value={newPassword}
+            onChangeText={setNewPassword}
+            secureTextEntry
+            autoCapitalize="none"
+            textContentType="newPassword"
+            accessibilityLabel={tr("recovery.newPasswordLabel")}
+            style={[styles.input, { backgroundColor: t.colors.card, color: t.colors.body, borderColor: t.colors.border }]}
+          />
+        </View>
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
+            {tr("recovery.confirmLabel")}
+          </Text>
+          <TextInput
+            value={confirm}
+            onChangeText={setConfirm}
+            secureTextEntry
+            autoCapitalize="none"
+            textContentType="newPassword"
+            accessibilityLabel={tr("recovery.confirmLabel")}
+            style={[styles.input, { backgroundColor: t.colors.card, color: t.colors.body, borderColor: t.colors.border }]}
+          />
+        </View>
+        <InlineStatus message={status} tone={statusTone} />
+        <PrimaryButton
+          label={busy ? tr("common.working") : tr("recovery.action")}
+          onPress={() => void run()}
+          disabled={busy || done}
+        />
+        <GhostButton
+          label={tr("recovery.backToLogin")}
+          onPress={() => navigation.navigate("Login")}
+          disabled={busy}
+        />
+        <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  input: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    minHeight: 44,
+  },
+  keyInput: { minHeight: 72, textAlignVertical: "top" },
+});

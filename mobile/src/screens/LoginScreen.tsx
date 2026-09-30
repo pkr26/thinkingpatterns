@@ -445,6 +445,14 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         }}
       />
       {/* Crisis help needs no account and no network. */}
+      {/* Wave 3 (2026-09-30): the recovery-kit entry — a forgotten password
+          no longer means a lost journal for accounts with a kit. */}
+      {mode === "login" && (
+        <GhostButton
+          label={tr("login.useRecoveryKey")}
+          onPress={() => navigation.navigate("Recovery")}
+        />
+      )}
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />
       </ScrollView>
     </KeyboardAvoidingView>

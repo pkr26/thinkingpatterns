@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useSession } from "./store";
 import { useTheme } from "./theme";
 import { LoginScreen } from "./screens/LoginScreen";
+import { RecoveryScreen } from "./screens/RecoveryScreen";
 import { UnlockScreen } from "./screens/UnlockScreen";
 import { OnboardingScreen } from "./screens/OnboardingScreen";
 import { EntryScreen } from "./screens/EntryScreen";
@@ -45,6 +46,7 @@ function withShell(current: NavDestination) {
 export type RootStackParamList = {
   Booting: undefined; // transient splash while a saved session resolves
   Login: undefined;
+  Recovery: undefined;
   Unlock: undefined;
   Onboarding: undefined;
   Entry: undefined;
@@ -183,6 +185,7 @@ export function AppNavigator(): React.JSX.Element {
       ) : authStatus === "loggedOut" ? (
         <>
           <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Recovery" component={RecoveryScreen} options={{ headerShown: false }} />
           {/* Crisis help must be reachable BEFORE any sign-in: it is offline
               static content and never needs the vault or the network. */}
           <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />
