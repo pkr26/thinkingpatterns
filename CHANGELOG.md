@@ -14,6 +14,8 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-30
+
 ### Added / Changed — Waves 1–4 (2026-09-30)
 
 - **Wave 1 — mobile history date-jump**: the calendar's month navigation
