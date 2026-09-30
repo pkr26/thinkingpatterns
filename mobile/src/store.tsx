@@ -17,6 +17,7 @@ import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
+import { flushAudioQueue } from "./audioQueue";
 import { clearCrisisDialogStamp } from "./crisisDialog";
 import { syncReminderSchedule, syncMeasureReminderSchedule } from "./reminderSync";
 import { clearLastMeasureDate, clearMeasureReminderPrefs } from "./measureReminders";
@@ -203,9 +204,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       } else if (state === "active") {
         touchActivity();
         // Reconnect sync: foregrounding with a live session flushes the
-        // offline queue. Ciphertext-only uploads — a locked vault is fine —
-        // and flushQueueOnReconnect throttles foreground/background flaps.
+        // offline queue (and, since wave 2 2026-09-30, the kept-recording
+        // queue). Ciphertext-only uploads — a locked vault is fine — and
+        // flushQueueOnReconnect throttles foreground/background flaps.
         void flushQueueOnReconnect();
+        void flushAudioQueue().catch(() => {});
         // E-10 (2026-09-21): an always-open app used to keep a stale
         // activeDays count across midnight (it refreshed only at
         // login/unlock and on insights loads). Foregrounding re-reads the

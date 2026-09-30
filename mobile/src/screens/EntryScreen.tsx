@@ -53,6 +53,7 @@ import { useSession, stashDraft, takeStashedDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
 import { discardTakeFile, useVoiceRecorder } from "../audio/recorder";
 import { encryptAudio } from "../crypto/MindPatternCrypto";
+import { enqueueAudio } from "../audioQueue";
 import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
 import { mirrorMoodCheckIn } from "../healthkit";
 import {
@@ -567,17 +568,40 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       setSelectedEnergy(null);
       setSleepQuality(null);
       setSelectedTags([]);
-      // The kept recording rides only a SENT entry; the offline queue is
-      // the TEXT ciphertext's safety net, not an audio transport (O-5).
+      // The kept recording rides only a SENT entry (O-5) — and since wave 2
+      // (2026-09-30) an offline-queued or failed upload no longer DESTROYS
+      // the take: the audio ciphertext joins the on-device audio queue and
+      // uploads on reconnect, exactly like the text queue. Voice-first
+      // users keep their primary artifact.
       if (voice) {
-        const kept = !queuedOffline
+        const uploaded = !queuedOffline
           ? await uploadKeptAudio(saveKeys, userId, clientEntryId, voice, voiceRecorder.take?.base64 ?? null)
           : false;
+        let kept = uploaded;
+        if (!uploaded && voice.keepAudio && voiceRecorder.take?.base64) {
+          try {
+            const { blobB64: audioBlob } = encryptAudio(
+              saveKeys,
+              userId,
+              clientEntryId,
+              Buffer.from(voiceRecorder.take.base64, "base64"),
+            );
+            await enqueueAudio({
+              userId,
+              clientEntryId,
+              blobB64: audioBlob,
+              mime: "audio/m4a",
+              durationSeconds: voiceRecorder.take.durationSeconds ?? 60,
+            });
+            kept = true;
+          } catch {
+            kept = false; // queue full or take too large: the honest notice
+          }
+        }
         if (!kept && voice.keepAudio && voiceRecorder.take) {
-          showStatus(
-            queuedOffline ? tr("entry.voiceAudioQueuedNote") : tr("entry.voiceAudioNotKept"),
-            "neutral",
-          );
+          showStatus(tr("entry.voiceAudioNotKept"), "neutral");
+        } else if (kept && !uploaded && voice.keepAudio) {
+          showStatus(tr("entry.voiceAudioQueuedNote"), "neutral");
         }
         await discardTakeFile(voiceRecorder.take);
         setVoice(null);

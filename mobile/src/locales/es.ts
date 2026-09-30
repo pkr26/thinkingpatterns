@@ -1014,7 +1014,7 @@ export const es: Record<string, string> = {
   "entry.voiceRecordFailed": "La grabación falló — inténtelo de nuevo.",
   "entry.voiceTranscribeFailed": "La transcripción falló — inténtelo de nuevo.",
   "entry.voiceAudioNotKept": "La entrada se guardó, pero no se pudo conservar la grabación.",
-  "entry.voiceAudioQueuedNote": "Guardado sin conexión. La grabación necesita conexión y no se conservó — la transcripción está a salvo.",
+  "entry.voiceAudioQueuedNote": "Guardado sin conexión. La grabación queda cifrada en este dispositivo y se subirá cuando vuelvas a tener conexión.",
   // M3: una transcripción reemplaza lo escrito — confirmar antes de perderlo.
   "entry.voiceReplaceTitle": "¿Grabar en lugar de escribir?",
   "entry.voiceReplaceBody":

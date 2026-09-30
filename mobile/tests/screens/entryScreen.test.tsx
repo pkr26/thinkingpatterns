@@ -48,6 +48,11 @@ vi.mock("../../src/healthkit", () => ({
 // mini-brain refresh is an explicit, user-initiated act only. EntryScreen no
 // longer imports brainSync at all, so nothing here can trigger a recompute.
 
+const enqueueAudioMock = vi.fn(async () => {});
+vi.mock("../../src/audioQueue", () => ({
+  enqueueAudio: (...args: unknown[]) => enqueueAudioMock(...(args as [Record<string, unknown>])),
+}));
+
 vi.mock("../../src/offlineQueue", () => ({
   QueueFullError,
   QueueAbandonedError,
@@ -459,6 +464,18 @@ describe("EntryScreen save pipeline", () => {
     // The interruptive "Saved offline" modal became an inline status line.
     expect(Alert.alert).not.toHaveBeenCalled();
     expect(textOf(root)).toContain("Saved — will sync when online");
+  });
+
+  it("wave 2 (2026-09-30): an offline save without a take never touches the audio queue", async () => {
+    vi.mocked(api.createEntry).mockRejectedValue(new ApiError(0, "server unreachable"));
+    enqueueAudioMock.mockClear();
+    const root = await render(<EntryScreen navigation={nav} />);
+    await writeEntry(root, "offline thought");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    // No take existed: nothing queued for audio, no false "kept" claim.
+    expect(enqueueAudioMock).not.toHaveBeenCalled();
   });
 
   it("protects the queue instead of overflowing it", async () => {

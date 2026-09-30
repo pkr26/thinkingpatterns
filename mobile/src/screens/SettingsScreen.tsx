@@ -363,10 +363,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       // retry can never work) — the user is told the truth instead.
       try {
         const { clearQueue } = await import("../offlineQueue");
+        const { clearAudioQueue } = await import("../audioQueue");
         const { clearMoodLog } = await import("../moodLog");
         const { clearRecomputeStamp } = await import("../brainSync");
         const { clearUnlockProof } = await import("../unlockProof");
         if (userId) await clearQueue(userId);
+        if (userId) await clearAudioQueue(userId); // kept takes are erasure-bound too
         if (userId) {
           await clearMoodLog(userId);
           await clearRecomputeStamp(userId);

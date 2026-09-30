@@ -1019,7 +1019,7 @@ export const en: Record<string, string> = {
   "entry.voiceRecordFailed": "Recording failed — please try again.",
   "entry.voiceTranscribeFailed": "Transcription failed — please try again.",
   "entry.voiceAudioNotKept": "The entry was saved, but the recording could not be stored.",
-  "entry.voiceAudioQueuedNote": "Saved offline. The recording itself needs a connection and was not kept — the transcript is safe.",
+  "entry.voiceAudioQueuedNote": "Saved offline. The recording is kept encrypted on this device and will upload when you're back online.",
   // M3: a transcript replaces typed words — confirm before they are lost.
   "entry.voiceReplaceTitle": "Record instead of typing?",
   "entry.voiceReplaceBody":
