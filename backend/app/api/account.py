@@ -483,33 +483,40 @@ async def export_account(
                         rendered = []
                         used_blob_bytes = 0
                         last_processed = None
-                        # Fetch selected blobs one at a time.  The lifecycle
-                        # fence prevents normal writers from changing their
-                        # size; one-at-a-time is also a defensive cap if a
-                        # deployment ever bypasses that in-process invariant.
-                        for metadata in selected:
-                            row = (
+                        # Wave 4 (2026-09-30): fetch selected blobs in ONE
+                        # batched IN query per metadata page (the per-row
+                        # SELECT made a 10k-entry export 10k round trips).
+                        # The byte budget still admits rows one at a time in
+                        # the server's stable (received_at, id) order; rows
+                        # beyond the page budget stay for the next page.
+                        by_id: dict = {}
+                        if selected:
+                            rows_page = (
                                 (
                                     await page_session.execute(
                                         select(Entry).where(
                                             Entry.user_id == fresh.id,
-                                            Entry.id == metadata[0],
+                                            Entry.id.in_([m[0] for m in selected]),
                                         )
                                     )
                                 )
                                 .scalars()
-                                .first()
+                                .all()
                             )
+                            for row in rows_page:
+                                by_id[row.id] = row
+                        for metadata in selected:
+                            row = by_id.get(metadata[0])
                             if row is None:
                                 last_processed = metadata
                                 continue
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
-                                page_session.expunge(row)
                                 break
                             rendered.append(entry_out(row).model_dump(mode="json"))
                             used_blob_bytes += blob_bytes
                             last_processed = metadata
+                        for row in by_id.values():
                             page_session.expunge(row)
                         if last_processed is not None:
                             entry_cursor = (last_processed[2], last_processed[0])
@@ -561,19 +568,26 @@ async def export_account(
                         used_blob_bytes = 0
                         position_by_id = {row_id: pos for pos, row_id in enumerate(chunk_ids)}
                         processed_pos = -1
-                        for metadata in selected:
-                            row = (
+                        # Wave 4 (2026-09-30): ONE batched IN fetch for the
+                        # selected rows (was a per-row SELECT round trip);
+                        # the ordered consumption below is unchanged.
+                        selected_rows: dict = {}
+                        if selected:
+                            for row in (
                                 (
                                     await page_session.execute(
                                         select(Insight).where(
                                             Insight.user_id == fresh.id,
-                                            Insight.id == metadata[0],
+                                            Insight.id.in_([m[0] for m in selected]),
                                         )
                                     )
                                 )
                                 .scalars()
-                                .first()
-                            )
+                                .all()
+                            ):
+                                selected_rows[row.id] = row
+                        for metadata in selected:
+                            row = selected_rows.get(metadata[0])
                             if row is None:
                                 # Deleted since the snapshot (an undated row a
                                 # recompute replaced between pages): nothing
@@ -584,7 +598,6 @@ async def export_account(
                                 continue
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
-                                page_session.expunge(row)
                                 break
                             rendered.append(
                                 InsightOut(
@@ -599,6 +612,7 @@ async def export_account(
                             )
                             used_blob_bytes += blob_bytes
                             processed_pos = position_by_id[metadata[0]]
+                        for row in selected_rows.values():
                             page_session.expunge(row)
                         # Consume the chunk through the last row the blob
                         # loop actually PROCESSED (emitted or confirmed
@@ -660,29 +674,34 @@ async def export_account(
                         rendered = []
                         used_blob_bytes = 0
                         last_processed = None
-                        for metadata in selected:
-                            row = (
+                        # Wave 4: ONE batched IN fetch per metadata page.
+                        measure_rows: dict = {}
+                        if selected:
+                            for row in (
                                 (
                                     await page_session.execute(
                                         select(Measure).where(
                                             Measure.user_id == fresh.id,
-                                            Measure.id == metadata[0],
+                                            Measure.id.in_([m[0] for m in selected]),
                                         )
                                     )
                                 )
                                 .scalars()
-                                .first()
-                            )
+                                .all()
+                            ):
+                                measure_rows[row.id] = row
+                        for metadata in selected:
+                            row = measure_rows.get(metadata[0])
                             if row is None:
                                 last_processed = metadata
                                 continue
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
-                                page_session.expunge(row)
                                 break
                             rendered.append(_measure_out(row).model_dump(mode="json"))
                             used_blob_bytes += blob_bytes
                             last_processed = metadata
+                        for row in measure_rows.values():
                             page_session.expunge(row)
                         if last_processed is not None:
                             measure_cursor = (last_processed[1], last_processed[0])

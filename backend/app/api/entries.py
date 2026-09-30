@@ -217,14 +217,11 @@ def _blob_length(session: AsyncSession):
 
 
 async def _assert_within_quota(session: AsyncSession, user: User, incoming: int, settings) -> None:
-    stats = (
-        await session.execute(
-            select(func.count(Entry.id), func.coalesce(func.sum(_blob_length(session)), 0)).where(
-                Entry.user_id == user.id
-            )
-        )
-    ).one()
-    count, total_bytes = stats[0], int(stats[1])
+    # Wave 4 (2026-09-30): O(1) — the counters are maintained in the same
+    # transaction as every write (this used to be an O(corpus) COUNT+SUM
+    # scan per POST/PUT).
+    count = int(user.entry_count or 0)
+    total_bytes = int(user.entry_blob_bytes or 0)
     if count >= settings.max_entries_per_user:
         raise ApiError(
             status_code=413,
@@ -242,16 +239,9 @@ async def _assert_within_quota(session: AsyncSession, user: User, incoming: int,
 async def _assert_replacement_within_quota(
     session: AsyncSession, user: User, old_size: int, incoming: int, settings
 ) -> None:
-    """The entry count is unchanged by PUT; enforce only the adjusted bytes."""
-    total = int(
-        (
-            await session.execute(
-                select(func.coalesce(func.sum(_blob_length(session)), 0)).where(
-                    Entry.user_id == user.id
-                )
-            )
-        ).scalar_one()
-    )
+    """The entry count is unchanged by PUT; enforce only the adjusted bytes
+    (O(1) against the maintained counter — wave 4)."""
+    total = int(user.entry_blob_bytes or 0)
     if total - old_size + incoming > settings.max_user_blob_bytes:
         raise ApiError(
             status_code=413,
@@ -380,10 +370,20 @@ async def create_entry(
             )
             session.add(row)
             try:
-                # The insert and revision advance must commit together: a
-                # page reader can only trust its marker if every collection
-                # mutation is represented by it.
+                # The insert, the revision advance and the quota counters
+                # must commit together: a page reader can only trust its
+                # marker if every collection mutation is represented by it,
+                # and the quota check can only trust counters that moved
+                # with every write (wave 4).
                 await _increment_entries_revision(session, fresh_user)
+                await session.execute(
+                    update(User)
+                    .where(User.id == fresh_user.id)
+                    .values(
+                        entry_count=User.entry_count + 1,
+                        entry_blob_bytes=User.entry_blob_bytes + len(blob),
+                    )
+                )
                 await session.commit()
             except IntegrityError as exc:
                 await session.rollback()
@@ -464,12 +464,20 @@ async def replace_entry(
             await _assert_replacement_within_quota(
                 session, fresh_user, len(bytes(row.blob)), len(blob), request.app.state.settings
             )
+            old_size = len(bytes(row.blob))
             changed = bytes(row.blob) != blob or row.entry_date != body.entry_date
             if changed:
                 row.blob = blob
                 row.entry_date = body.entry_date
                 row.content_version = body.content_version or row.content_version + 1
                 await _increment_entries_revision(session, fresh_user)
+                if len(blob) != old_size:
+                    # Wave 4: keep the byte counter moving with the write.
+                    await session.execute(
+                        update(User)
+                        .where(User.id == fresh_user.id)
+                        .values(entry_blob_bytes=User.entry_blob_bytes + (len(blob) - old_size))
+                    )
             await session.commit()
             await session.refresh(row)
             response = entry_out(row)
@@ -668,6 +676,17 @@ async def delete_entry(
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         async with _user_locks.hold(f"entries:{user.id}"):
             fresh_user = await _fresh_active_entry_user(session, user.id, expected_epoch)
+            # Wave 4: the counter decrement needs the row's byte size — one
+            # indexed read before the delete (the blob itself is never
+            # materialized).
+            doomed_size = (
+                await session.execute(
+                    select(_blob_length(session)).where(
+                        Entry.user_id == fresh_user.id,
+                        Entry.client_entry_id == client_entry_id,
+                    )
+                )
+            ).scalar()
             result = await session.execute(
                 delete(Entry).where(
                     Entry.user_id == fresh_user.id, Entry.client_entry_id == client_entry_id
@@ -675,6 +694,14 @@ async def delete_entry(
             )
             if db_rowcount(result) == 0:
                 raise ApiError(status_code=404, detail="entry not found", code="not_found")
+            await session.execute(
+                update(User)
+                .where(User.id == fresh_user.id)
+                .values(
+                    entry_count=User.entry_count - 1,
+                    entry_blob_bytes=User.entry_blob_bytes - int(doomed_size or 0),
+                )
+            )
             # VOICE_PLAN (2026-09-29): a kept recording dies with its entry
             # — object first, then row, inside the same transaction/lock.
             await delete_attachment_for_entry(

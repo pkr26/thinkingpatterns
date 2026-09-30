@@ -25,7 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Query, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -218,8 +218,11 @@ def _consent_out(consent: Consent, therapist: User) -> ConsentOut:
     ],
 )
 async def list_consents(
+    response: Response,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=200, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=100_000),
 ):
     # Round 2 audit fix F-9 (2026-09-21): the CAP must count ACTIVE consents
     # only, mirroring the grant path's B-5 rule — revoked rows impose no
@@ -249,14 +252,25 @@ async def list_consents(
             detail="sharing history exceeds the supported list size",
             code="payload_too_large",
         )
+    # Wave 4 (2026-09-30): the retained history is PAGED now — a long
+    # career's revoked rows used to make this one unbounded response (and
+    # one unbounded audit of it). The limit+1 probe carries the
+    # continuation in X-Next-Offset exactly like the other opaque lists;
+    # the 200-row default covers every realistic list in one page, so
+    # existing clients are unaffected.
     rows = (
         await session.execute(
             select(Consent, User)
             .join(User, Consent.therapist_id == User.id)
             .where(Consent.user_id == user.id)
             .order_by(Consent.granted_at.desc(), Consent.id.desc())
+            .offset(offset)
+            .limit(limit + 1)
         )
     ).all()
+    if len(rows) > limit:
+        rows = rows[:limit]
+        response.headers["X-Next-Offset"] = str(offset + limit)
     return [_consent_out(consent, therapist) for consent, therapist in rows]
 
 

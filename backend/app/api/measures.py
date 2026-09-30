@@ -243,13 +243,9 @@ async def create_measure(
             if existing.scalar_one_or_none() is not None:
                 raise ApiError(status_code=409, detail="measure already exists", code="conflict")
 
-            count = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(Measure)
-                    .where(Measure.user_id == fresh_user.id)
-                )
-            ).scalar_one()
+            # Wave 4 (2026-09-30): O(1) against the maintained counter
+            # (was an O(corpus) COUNT per create).
+            count = int(fresh_user.measure_count or 0)
             if count >= MAX_MEASURES_PER_USER:
                 raise ApiError(
                     status_code=413,
@@ -267,7 +263,13 @@ async def create_measure(
             # 2026-09-21 audit A-3: the create advances the measure marker
             # in the same transaction, so a mid-pagination client sees
             # collection_changed instead of silently shifted offsets.
+            # Wave 4: the quota counter moves with the write, same transaction.
             await _increment_measures_revision(session, fresh_user)
+            await session.execute(
+                update(User)
+                .where(User.id == fresh_user.id)
+                .values(measure_count=User.measure_count + 1)
+            )
             try:
                 await session.commit()
             except IntegrityError as exc:

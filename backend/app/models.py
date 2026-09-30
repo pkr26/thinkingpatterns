@@ -202,6 +202,12 @@ class User(Base):
     recovery_verifier: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     recovery_wrapped_data_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     recovery_set_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # Maintained quota counters (wave 4, 2026-09-30): every entry/measure
+    # write used to run an O(corpus) COUNT+SUM scan; these are updated in
+    # the SAME transaction as the write and read by the quota checks.
+    entry_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    entry_blob_bytes: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    measure_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     # Canonical JSON of the client's kdf_params blob (see security.kdf) —
     # which KDF produced the keys, at what cost. Echoed back to
     # authenticated clients (GET /auth/key-envelope) and embedded in the

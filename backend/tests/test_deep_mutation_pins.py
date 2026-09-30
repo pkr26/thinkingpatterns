@@ -385,10 +385,13 @@ async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, sett
             # Call order follows the handler: the duplicate idempotency
             # pre-check runs BEFORE the quota read (audit L-6, 2026-09-20 —
             # a retry at the quota boundary must answer 409, not 413).
+            # Wave 4 (2026-09-30): the quota read is now O(1) off the User
+            # row (no corpus SELECT) — execution #2 is the revision advance
+            # and #3 the counter UPDATE, both modeled as successful DML.
             if self.executions == 1:
                 return PreCheckResult()
             if self.executions == 2:
-                return QuotaResult()
+                return RevisionResult()
             return RevisionResult()
 
         def add(self, row):

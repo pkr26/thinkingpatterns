@@ -410,11 +410,11 @@ async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch)
         fresh=fresh,
         pages=[
             # No shares (empty share snapshot): no share page consumed.
+            # Wave 4: the row fetch is ONE batched IN per metadata page.
             _PageSession(
                 [
                     _Result(rows=first_metadata),
-                    _Result(scalar_rows=[first]),
-                    _Result(scalar_rows=[second]),
+                    _Result(scalar_rows=[first, second]),
                 ]
             ),
             _PageSession([_Result(rows=second_metadata), _Result(scalar_rows=[second])]),
@@ -457,11 +457,11 @@ async def test_export_repages_insights_when_blob_grew_after_metadata(monkeypatch
         pages=[
             # No shares (empty share snapshot): no share page consumed.
             _PageSession([_Result(rows=[])]),
+            # Wave 4: the row fetch is ONE batched IN per metadata page.
             _PageSession(
                 [
                     _Result(rows=first_metadata),
-                    _Result(scalar_rows=[first]),
-                    _Result(scalar_rows=[second]),
+                    _Result(scalar_rows=[first, second]),
                 ]
             ),
             _PageSession([_Result(rows=second_metadata), _Result(scalar_rows=[second])]),
@@ -682,16 +682,14 @@ def test_entries_classifies_missing_driver_context_as_nonunique():
 async def test_entry_replacement_quota_rejects_growth_without_changing_row(settings):
     from app.api import entries as entries_api
 
-    class QuotaSession:
-        bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
-
-        async def execute(self, statement):
-            return SimpleNamespace(scalar_one=lambda: 10)
-
+    # Wave 4 (2026-09-30): the replacement quota check is O(1) off the
+    # User row's maintained byte counter — no session query happens.
     settings.max_user_blob_bytes = 10
+    heavy = _race_user("replace-quota")
+    heavy.entry_blob_bytes = 10
     with pytest.raises(ApiError) as raised:
         await entries_api._assert_replacement_within_quota(
-            QuotaSession(), _race_user("replace-quota"), old_size=1, incoming=2, settings=settings
+            None, heavy, old_size=1, incoming=2, settings=settings
         )
     assert raised.value.code == "blob_quota_exceeded"
 
@@ -719,10 +717,13 @@ async def test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict(sett
             # Call order follows the handler: the duplicate idempotency
             # check runs BEFORE the quota read (audit L-6, 2026-09-20 — a
             # retry at the quota boundary must answer 409, not 413).
+            # Wave 4 (2026-09-30): the quota read is O(1) off the User row
+            # now (no corpus SELECT) — #2 is the revision advance and #3 the
+            # counter UPDATE, both successful DML.
             if self.executions == 1:
                 return SimpleNamespace(scalar_one_or_none=lambda: None)
             if self.executions == 2:
-                return SimpleNamespace(one=lambda: (0, 0))
+                return SimpleNamespace(rowcount=1)
             return SimpleNamespace(rowcount=1)
 
         async def refresh(self, user, attribute_names=None):

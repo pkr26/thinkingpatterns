@@ -14,6 +14,29 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added / Changed — Waves 1–4 (2026-09-30)
+
+- **Wave 1 — mobile history date-jump**: the calendar's month navigation
+  fetches that month's window on demand (backend `until` bound + client
+  `listEntriesWindow` + merge) — the 500-row cap is no longer a dead end.
+- **Wave 2 — audio offline queue**: kept recordings survive offline saves
+  and failed uploads (ciphertext-only, per-account rows, bounded, honest
+  flush semantics); reconnect drains it with the text queue.
+- **Wave 3 — key-recovery envelope (backend + mobile)**: opt-in recovery
+  kit (scrypt verifier + client-sealed data-key copy), recovery login
+  (decoy-burn opacity, epoch kill, patients only), recovery-proven
+  password reset with the possession probe; mobile Settings kit
+  management (key shown once) + RecoveryScreen. A forgotten password no
+  longer destroys the journal for kit holders.
+- **Wave 4 — backend performance**: maintained quota counters
+  (`users.entry_count/entry_blob_bytes/measure_count`, one backfilling
+  migration) make every entry/measure write O(1) instead of an O(corpus)
+  COUNT+SUM; the consent list is paginated (X-Next-Offset, additive);
+  the export's per-row fetches became one batched IN per metadata page
+  (entries, insights, measures). `list_patients`'s per-patient fencing
+  and per-patient audit commits are DELIBERATE (documented audit
+  remediations H-14/item 19) and were left as designed.
+
 ### Fixed — Phase 3 hardening wave (2026-09-29 deep audit)
 
 - **S3 transport budgets (HIGH F2)**: the audio store's boto3 client
