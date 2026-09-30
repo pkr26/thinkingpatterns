@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import math
+
+import pytest
 from pathlib import Path
 
 from app.services import brain, statsig
@@ -45,13 +47,20 @@ def test_sentiment_vectors_match_the_live_engine():
 
 
 def test_stats_vectors_match_the_live_engine():
+    # 2026-09-30 (first Linux CI run of regenerated vectors): math.erfc
+    # differs between libm implementations in the last ULP (macOS
+    # 0.15729920705028516 vs glibc 0.15729920705028513 for erfc(1.0)), so
+    # the STATISTICS vectors compare at the documented 1e-9 tolerance (the
+    # generator's own contract) — sentiment keeps exact equality above.
     payload = json.loads(VECTORS.read_text())
     for z, expected in payload["stats"]["erfc"]:
-        assert math.erfc(z) == expected
+        assert math.erfc(z) == pytest.approx(expected, abs=1e-9)
     for xs, ys, expected in payload["stats"]["pearson"]:
-        assert brain._pearson(xs, ys) == expected
+        assert brain._pearson(xs, ys) == pytest.approx(expected, abs=1e-9)
     for r1, n1, r2, n2, expected in payload["stats"]["fisher_z"]:
-        assert statsig.fisher_z_difference_p(r1, n1, r2, n2) == expected
+        assert statsig.fisher_z_difference_p(r1, n1, r2, n2) == pytest.approx(
+            expected, abs=1e-9
+        )
 
 
 def test_full_engine_update_vectors_match_the_live_engine():
