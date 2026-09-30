@@ -36,17 +36,15 @@ def _transcription_body() -> dict:
     }
 
 
-async def _locked_out_flag(user_id: str) -> bool:
-    """Try to take the same lifecycle lock withdrawal takes. Returns True
-    when the attempt times out — i.e. the request is HOLDING the lock."""
-    try:
-        await asyncio.wait_for(lifecycle_locks.hold(f"llm-lifecycle:{user_id}").__aenter__(), 0.2)
-    except asyncio.TimeoutError:
-        return True
-    # Not held (test failure mode): release immediately so the request can
-    # proceed and fail on its own assertions.
-    await lifecycle_locks.hold(f"llm-lifecycle:{user_id}").__aexit__(None, None, None)
-    return False
+def _locked_out_flag(user_id: str) -> bool:
+    """Deterministic held-check (2026-09-30: the 0.2s wait_for probe was
+    timing-flaky on loaded CI runners). The registry's refcount for the
+    key is > 0 exactly while a caller holds or is acquiring the guard —
+    the same invariant the registry's own eviction relies on."""
+    registry = getattr(lifecycle_locks, "_locks", None)
+    assert registry is not None, "lifecycle lock registry not introspectable"
+    entry = registry.get(f"llm-lifecycle:{user_id}")
+    return entry is not None and entry.refs > 0
 
 
 @pytest.mark.asyncio
@@ -58,11 +56,11 @@ class TestTranscriptionDispatchIsFenced:
         observed: dict[str, bool] = {}
 
         async def fake_post_audio(self, files, data):
-            observed["locked_during_stt"] = await _locked_out_flag(emu.user_id)
+            observed["locked_during_stt"] = _locked_out_flag(emu.user_id)
             return {"text": "Texto privado del diario.", "language": "spanish"}
 
         async def fake_translate(s_settings, text, source_lang):
-            observed["locked_during_translate"] = await _locked_out_flag(emu.user_id)
+            observed["locked_during_translate"] = _locked_out_flag(emu.user_id)
             return "Private journal text."
 
         monkeypatch.setattr(SpeechToText, "_post_audio", fake_post_audio)
@@ -91,7 +89,7 @@ class TestTranscriptionDispatchIsFenced:
         observed: dict[str, bool] = {}
 
         async def fake_translate(s_settings, text, source_lang):
-            observed["locked"] = await _locked_out_flag(emu.user_id)
+            observed["locked"] = _locked_out_flag(emu.user_id)
             return "Private journal text."
 
         monkeypatch.setattr(stt_service, "translate_to_english", fake_translate)
