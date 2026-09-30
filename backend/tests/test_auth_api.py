@@ -153,13 +153,9 @@ async def test_logout_revokes_only_the_presented_token(client):
     acting = acting_login["token"]
     sibling_login = await emu.login(client)
     sibling = sibling_login["token"]
-    response = await client.post(
-        "/api/auth/logout", headers={"Authorization": f"Bearer {acting}"}
-    )
+    response = await client.post("/api/auth/logout", headers={"Authorization": f"Bearer {acting}"})
     assert response.status_code == 204
-    sibling_alive = await client.get(
-        "/api/entries", headers={"Authorization": f"Bearer {sibling}"}
-    )
+    sibling_alive = await client.get("/api/entries", headers={"Authorization": f"Bearer {sibling}"})
     assert sibling_alive.status_code == 200, (
         "logout killed a sibling token — kill-all semantics regressed"
     )

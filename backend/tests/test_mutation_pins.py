@@ -1552,9 +1552,7 @@ def test_llm_prompt_and_payload_shape_are_pinned():
     from app.services.patterns import Pattern
 
     findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
-    analyzer.extract_patterns(
-        [_entry(0, "a work day", sentiment=-0.25)], findings=findings
-    )
+    analyzer.extract_patterns([_entry(0, "a work day", sentiment=-0.25)], findings=findings)
 
     payload = posted[0]
     # 2026-09-16 remediation (D2): generation is bounded.

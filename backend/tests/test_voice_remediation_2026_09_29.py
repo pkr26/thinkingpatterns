@@ -138,9 +138,7 @@ async def test_translation_flows_with_llm_consent(client, settings, monkeypatch)
     assert response.json()["english_text"] == "Private journal text."
 
 
-async def test_retranslation_route_suppressed_without_llm_consent(
-    client, settings, monkeypatch
-):
+async def test_retranslation_route_suppressed_without_llm_consent(client, settings, monkeypatch):
     """The edited-transcript re-translation route has the same gate."""
     settings.audio_enabled = True
     settings.stt_url = "https://stt.example.com/v1"
@@ -329,9 +327,7 @@ def fake_boto3(monkeypatch):
 
 
 async def test_s3_store_endpoint_and_sse_wiring(fake_boto3):
-    store = S3AudioStore(
-        "bucket", "us-east-1", "key", "secret", endpoint="http://minio:9000"
-    )
+    store = S3AudioStore("bucket", "us-east-1", "key", "secret", endpoint="http://minio:9000")
     await store.put("audio/u/abc.enc", b"bytes")
     kwargs = fake_boto3["client"].client_kwargs
     assert kwargs["endpoint_url"] == "http://minio:9000"
@@ -435,9 +431,7 @@ async def test_patient_list_carries_share_voice_grant_state(client, settings):
     therapist = TherapistEmulator("drroster", "correct horse battery staple")
     await therapist.register(client)
     code = await therapist.create_pairing_code(client)
-    grant = await patient.grant_consent(
-        client, code, therapist.wrap_pub_key, therapist.user_id
-    )
+    grant = await patient.grant_consent(client, code, therapist.wrap_pub_key, therapist.user_id)
     assert grant["status"] == 201, grant["body"]
     consent_id = grant["body"]["id"]
 

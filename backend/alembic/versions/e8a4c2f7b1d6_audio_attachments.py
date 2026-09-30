@@ -45,16 +45,12 @@ def upgrade() -> None:
         sa.Column("size_bytes", sa.Integer(), nullable=False),
         sa.Column("mime_type", sa.String(64), nullable=False),
         sa.Column("duration_seconds", sa.Integer(), nullable=False),
-        sa.Column(
-            "content_version", sa.Integer(), nullable=False, server_default=sa.text("1")
-        ),
+        sa.Column("content_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("user_id", "client_entry_id", name="uq_audio_user_client_entry"),
     )
-    op.create_index(
-        "ix_audio_user_expires", "audio_attachments", ["user_id", "expires_at"]
-    )
+    op.create_index("ix_audio_user_expires", "audio_attachments", ["user_id", "expires_at"])
     with op.batch_alter_table("consents") as batch_op:
         batch_op.add_column(
             sa.Column("share_voice", sa.Boolean(), nullable=False, server_default=sa.text("0"))

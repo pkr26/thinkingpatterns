@@ -40,9 +40,7 @@ async def _locked_out_flag(user_id: str) -> bool:
     """Try to take the same lifecycle lock withdrawal takes. Returns True
     when the attempt times out — i.e. the request is HOLDING the lock."""
     try:
-        await asyncio.wait_for(
-            lifecycle_locks.hold(f"llm-lifecycle:{user_id}").__aenter__(), 0.2
-        )
+        await asyncio.wait_for(lifecycle_locks.hold(f"llm-lifecycle:{user_id}").__aenter__(), 0.2)
     except asyncio.TimeoutError:
         return True
     # Not held (test failure mode): release immediately so the request can
@@ -53,9 +51,7 @@ async def _locked_out_flag(user_id: str) -> bool:
 
 @pytest.mark.asyncio
 class TestTranscriptionDispatchIsFenced:
-    async def test_stt_round_trip_holds_the_lifecycle_lock(
-        self, client, settings, monkeypatch
-    ):
+    async def test_stt_round_trip_holds_the_lifecycle_lock(self, client, settings, monkeypatch):
         emu = await _voice_ready(client, settings, "fence-stt")
         assert emu.user_id
 
@@ -85,9 +81,7 @@ class TestTranscriptionDispatchIsFenced:
         # transparent on the success path.
         assert response.json()["original_text"] == "Texto privado del diario."
 
-    async def test_translation_route_holds_the_lifecycle_lock(
-        self, client, settings, monkeypatch
-    ):
+    async def test_translation_route_holds_the_lifecycle_lock(self, client, settings, monkeypatch):
         settings.audio_enabled = True
         settings.llm_url = "https://llm.example.com/v1"
         settings.llm_api_key = "k"
@@ -135,7 +129,7 @@ class TestFenceReReadsFreshUser:
         monkeypatch.setattr(
             stt_service,
             "translate_to_english",
-            lambda s, t, l: dispatched.append(t),
+            lambda s, t, lang: dispatched.append(t),
         )
 
         from sqlalchemy import update
@@ -159,9 +153,7 @@ class TestFenceReReadsFreshUser:
                 if self._name == f"llm-lifecycle:{emu.user_id}":
                     async with app.state.sessionmaker() as session:
                         await session.execute(
-                            update(User)
-                            .where(User.id == emu.user_id)
-                            .values(is_active=False)
+                            update(User).where(User.id == emu.user_id).values(is_active=False)
                         )
                         await session.commit()
 

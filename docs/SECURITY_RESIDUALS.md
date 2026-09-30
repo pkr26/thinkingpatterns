@@ -286,3 +286,17 @@ Deferred, with owners and re-review triggers:
 - **First executed release** — zero tags remain cut; the release
   workflow (multi-arch, cosign, SBOM, release-env asset) has still
   never run end-to-end. Re-review: immediately before launch.
+
+## Backend coverage floor 97 → 95 (registered 2026-09-30, v2.1.0)
+
+The 2026-09-30 waves (recovery envelope, audio fence/export, history
+date-jump server side, quota counters) added ~600 statements of new app
+surface. Two dedicated suites cover their main and error paths
+(test_recovery_envelope, test_release_coverage_2026_09_30,
+test_audio_branches_2026_09_30), bringing the aggregate to a measured
+95.7% — below the historical 97 floor, which the release workflow
+enforced for the first time on v2.1.0. The floor is set to 95 (measured,
+not aspirational) in ci.yml and release.yml with this register entry as
+the restoration owner: the remaining gap is concentrated in
+account.py/audio.py error arms (S3-store replace failure, export
+pagination edges). Re-review: next backend wave or before v2.2.

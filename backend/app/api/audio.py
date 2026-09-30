@@ -189,9 +189,7 @@ async def transcribe_recording(
         try:
             result = await engine.transcribe(audio, mime)
         except Exception as exc:  # noqa: BLE001 — every upstream failure is one outcome
-            logger.warning(
-                "stt upstream failed for user %s (%s)", user.id, type(exc).__name__
-            )
+            logger.warning("stt upstream failed for user %s (%s)", user.id, type(exc).__name__)
             raise ApiError(
                 status_code=502,
                 detail="speech-to-text provider failed; try again",
@@ -336,9 +334,7 @@ def _attachment_out(row: AudioAttachment, blob: bytes) -> AudioAttachmentOut:
     status_code=201,
     dependencies=[
         Depends(
-            make_rate_limiter(
-                "audio-upload", "audio_upload_rate_limit", "audio_upload_rate_window"
-            )
+            make_rate_limiter("audio-upload", "audio_upload_rate_limit", "audio_upload_rate_window")
         ),
     ],
 )
@@ -367,9 +363,7 @@ async def upload_attachment(
         )
     mime = normalize_mime(body.mime)
     if mime not in ALLOWED_AUDIO_MIMES:
-        raise ApiError(
-            status_code=422, detail="unsupported audio format", code="validation_error"
-        )
+        raise ApiError(status_code=422, detail="unsupported audio format", code="validation_error")
     if not 0 < body.duration_seconds <= settings.audio_max_duration_seconds:
         raise ApiError(
             status_code=422,
@@ -478,9 +472,7 @@ async def upload_attachment(
 @router.get(
     "/attachments/{attachment_id}",
     response_model=AudioAttachmentOut,
-    dependencies=[
-        Depends(make_rate_limiter("audio-read", "read_rate_limit", "read_rate_window"))
-    ],
+    dependencies=[Depends(make_rate_limiter("audio-read", "read_rate_limit", "read_rate_window"))],
 )
 async def fetch_attachment(
     attachment_id: str,
@@ -544,8 +536,6 @@ async def delete_attachment(
         raise ApiError(
             status_code=502, detail="audio storage failed", code="audio_storage_failed"
         ) from None
-    await session.execute(
-        sa_delete(AudioAttachment).where(AudioAttachment.id == row.id)
-    )
+    await session.execute(sa_delete(AudioAttachment).where(AudioAttachment.id == row.id))
     await session.commit()
     return Response(status_code=204)

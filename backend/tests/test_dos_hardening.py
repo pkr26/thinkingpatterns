@@ -213,9 +213,7 @@ def test_tag_cardinality_work_is_bounded(monkeypatch):
     def counting_detect(per_entry, weekday_days, total_days, lag1=None, language="en"):
         # 2026-09-29: _detect_themes carries (residual, raw, tagged) rows
         # and the corpus language for the mood-tie de-contamination.
-        themes_seen.append(
-            len({theme for _, _, themes, _, _, _ in per_entry for theme in themes})
-        )
+        themes_seen.append(len({theme for _, _, themes, _, _, _ in per_entry for theme in themes}))
         return real_detect(per_entry, weekday_days, total_days, lag1, language)
 
     monkeypatch.setattr(brain, "_detect_themes", counting_detect)

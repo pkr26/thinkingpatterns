@@ -41,9 +41,7 @@ class TestExportIncludesKeptAudio:
         settings.stt_api_key = "k"
         emu = await _voice_ready(client, settings, "export-audio")
         audio = b"RIFF-fake-take-bytes" * 8
-        await emu.create_entry(
-            client, "a recorded day", TODAY, client_entry_id="e-export-1"
-        )
+        await emu.create_entry(client, "a recorded day", TODAY, client_entry_id="e-export-1")
         created = await client.post(
             "/api/v1/audio/attachments",
             headers=emu.headers,
@@ -68,9 +66,7 @@ class TestExportIncludesKeptAudio:
         # the data key.
         assert base64.b64decode(row["blob"]) == audio
 
-    async def test_no_audio_store_configured_exports_an_empty_section(
-        self, client, settings
-    ):
+    async def test_no_audio_store_configured_exports_an_empty_section(self, client, settings):
         """Additive contract: the key always exists, old consumers of the
         bundle are unaffected."""
         settings.audio_enabled = True

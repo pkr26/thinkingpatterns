@@ -169,9 +169,7 @@ async def test_upload_replaces_previous_object(client, app, settings):
     )
     assert base64.b64decode(fetched.json()["blob"]) == b"take-two-longer" + b"b" * 40
 
-    rows = (
-        await _run(app, select(AudioAttachment).where(AudioAttachment.user_id == emu.user_id))
-    )
+    rows = await _run(app, select(AudioAttachment).where(AudioAttachment.user_id == emu.user_id))
     assert len(rows) == 1
 
 
@@ -350,10 +348,10 @@ async def test_local_store_prunes_empty_user_dirs(tmp_path):
     assert u1.is_dir() and (u1 / "bbb.enc").exists()  # one object left
 
     await store.delete("audio/u1/bbb.enc")
-    assert not u1.exists()                             # last object: pruned
-    assert u2.is_dir() and (u2 / "ccc.enc").exists()   # others untouched
+    assert not u1.exists()  # last object: pruned
+    assert u2.is_dir() and (u2 / "ccc.enc").exists()  # others untouched
 
-    await store.delete("audio/u1/bbb.enc")             # idempotent re-delete
+    await store.delete("audio/u1/bbb.enc")  # idempotent re-delete
     assert not u1.exists()
 
 
@@ -390,9 +388,7 @@ async def _patient_with_therapist(client, settings, name="shared"):
     therapist = TherapistEmulator(f"dr{name}", "correct horse battery staple")
     await therapist.register(client)
     code = await therapist.create_pairing_code(client)
-    grant = await patient.grant_consent(
-        client, code, therapist.wrap_pub_key, therapist.user_id
-    )
+    grant = await patient.grant_consent(client, code, therapist.wrap_pub_key, therapist.user_id)
     assert grant["status"] == 201, grant["body"]
     return patient, therapist, grant["body"]["id"]
 

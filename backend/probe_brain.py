@@ -435,8 +435,7 @@ _i_surfaced = _tagless_surface(_tagless_corpus(genuine=True))
 check(
     "I tag-less genuine tie surfaces (text-scored mood path)",
     any(
-        p.kind == "mood_correlation" and p.label == "sleep"
-        and p.detail.get("direction") == "lower"
+        p.kind == "mood_correlation" and p.label == "sleep" and p.detail.get("direction") == "lower"
         for p in _i_surfaced
     ),
 )

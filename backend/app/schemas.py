@@ -311,6 +311,9 @@ class RecoveryLoginResponse(BaseModel):
     user_id: str
     expires_in: int
     role: str = "user"
+    # Same additive contract as TokenResponse: which client crypto flow
+    # the account is on.
+    key_scheme: str = "v1"
     # The client-sealed data-key copy: only the recovery key opens it.
     recovery_wrapped_data_key: str
 
@@ -465,9 +468,7 @@ class AudioTranslationRequest(StrictRequestModel):
     english_text in sync with the saved text)."""
 
     text: str = Field(min_length=1, max_length=MAX_TRANSLATION_TEXT_CHARS)
-    source_lang: str | None = Field(
-        default=None, pattern=LANGUAGE_CODE_PATTERN
-    )
+    source_lang: str | None = Field(default=None, pattern=LANGUAGE_CODE_PATTERN)
 
 
 class AudioTranslationResponse(BaseModel):

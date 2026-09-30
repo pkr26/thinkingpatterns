@@ -232,8 +232,13 @@ class SpeechToText:
 
     name = "stt"
 
-    def __init__(self, url: str, api_key: str, model: str = "whisper-1",
-                 total_timeout_seconds: float = STT_TOTAL_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        url: str,
+        api_key: str,
+        model: str = "whisper-1",
+        total_timeout_seconds: float = STT_TOTAL_TIMEOUT_SECONDS,
+    ) -> None:
         self.url = url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -283,7 +288,9 @@ class SpeechToText:
                         if len(response_bytes) + len(chunk) > STT_MAX_RESPONSE_BYTES:
                             raise ValueError("STT response exceeds size limit")
                         response_bytes.extend(chunk)
-        return json.loads(bytes(response_bytes))
+        # An empty body (0-byte stream) is a protocol violation from the
+        # provider, not a parseable document.
+        return json.loads(bytes(response_bytes) or b"{}")
 
     async def _post_audio_with_retry(self, files: dict, data: dict) -> dict:
         """One bounded retry on a transient upstream refusal (429/5xx).
@@ -307,6 +314,9 @@ class SpeechToText:
                     await asyncio.sleep(max(delay, STT_RETRY_BACKOFF_SECONDS))
                     continue
                 raise
+        # Unreachable in practice (attempt 1 either returns or raises), but
+        # the exhaustiveness is explicit, never a None-shaped dict.
+        raise RuntimeError("stt retry loop exhausted")
 
     async def transcribe(self, audio: bytes, mime: str) -> TranscriptionResult:
         """Transcribe in the spoken language; the provider detects it.
@@ -369,9 +379,7 @@ async def translate_to_english(
             {"role": "system", "content": _TRANSLATE_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": json.dumps(
-                    {"source_language": source_lang or "auto", "text": bounded}
-                ),
+                "content": json.dumps({"source_language": source_lang or "auto", "text": bounded}),
             },
         ],
     }

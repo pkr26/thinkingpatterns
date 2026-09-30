@@ -40,18 +40,19 @@ class TestClusteredJournalsCannotInflateTopics:
             mentions = (i % 7) in (0, 1, 2)  # same day pattern both halves
             per_day = 6 if recent else 1
             for k in range(per_day):
-                text = "cozy blanket evening" if (mentions and k == 0) else "quiet walk and tea and letters"
+                text = (
+                    "cozy blanket evening"
+                    if (mentions and k == 0)
+                    else "quiet walk and tea and letters"
+                )
                 entries.append(JournalEntry(text, d))
-        topics = {
-            p.label: p for p in _detect_topics_for(entries, start + timedelta(days=60))
-        }
+        topics = {p.label: p for p in _detect_topics_for(entries, start + timedelta(days=60))}
         # 'blanket' may appear as a presence card (it is a steady share of
         # entries), but NEVER as a rising trend.
         blanket = topics.get("blanket")
         if blanket is not None:
             assert blanket.detail.get("trend") != "rising", (
-                "clustered entries must not manufacture a rising topic: "
-                f"{blanket.detail}"
+                f"clustered entries must not manufacture a rising topic: {blanket.detail}"
             )
 
     def test_genuine_day_level_rise_still_surfaces(self) -> None:

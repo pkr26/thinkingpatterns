@@ -1383,9 +1383,7 @@ async def read_patient_entries(
             audio_meta = await audio_meta_map(
                 session, consent.user_id, [row.client_entry_id for row in rows]
             )
-            result = [
-                entry_out(row, audio=audio_meta.get(row.client_entry_id)) for row in rows
-            ]
+            result = [entry_out(row, audio=audio_meta.get(row.client_entry_id)) for row in rows]
             final_revision = await current_entries_revision(session, consent.user_id)
             if final_revision != revision:
                 raise collection_changed_error("entries", ENTRIES_REVISION_HEADER, final_revision)
@@ -1474,26 +1472,20 @@ async def read_patient_audio(
                 )
             row = await session.get(AudioAttachment, attachment_id)
             if row is None or row.user_id != consent.user_id:
-                raise ApiError(
-                    status_code=404, detail="attachment not found", code="not_found"
-                )
+                raise ApiError(status_code=404, detail="attachment not found", code="not_found")
             if row.expires_at <= utcnow():
                 # Same lazy-expiry contract as the patient path; the audit
                 # row below only records SERVED ciphertext.
                 try:
                     await store.delete(row.storage_key)
                 except AudioStoreError:
-                    logger.warning(
-                        "lazy expiry could not delete object for %s; row kept", row.id
-                    )
+                    logger.warning("lazy expiry could not delete object for %s; row kept", row.id)
                     raise ApiError(
                         status_code=410, detail="recording expired", code="audio_expired"
                     ) from None
                 await session.delete(row)
                 await session.commit()
-                raise ApiError(
-                    status_code=410, detail="recording expired", code="audio_expired"
-                )
+                raise ApiError(status_code=410, detail="recording expired", code="audio_expired")
             try:
                 blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
             except AudioStoreError:

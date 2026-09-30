@@ -156,7 +156,9 @@ class TestRecoveryPasswordReset:
     async def test_full_flow_reset_proven_by_the_recovery_key(self, client, recovery_key):
         emu = EnvelopeClientEmulator("rec-reset", "correct horse battery staple")
         await emu.register(client)
-        await emu.create_entry(client, "words that must survive", __import__("datetime").date.today())
+        await emu.create_entry(
+            client, "words that must survive", __import__("datetime").date.today()
+        )
         sealed = os.urandom(WRAPPED)
         await _setup_kit(client, emu, recovery_key, sealed)
 
@@ -233,7 +235,9 @@ class TestRecoveryPasswordReset:
     async def test_reset_refuses_an_envelope_over_the_wrong_key(self, client, recovery_key):
         emu = EnvelopeClientEmulator("rec-wrongkey", "correct horse battery staple")
         await emu.register(client)
-        await emu.create_entry(client, "the real data key owns these words", __import__("datetime").date.today())
+        await emu.create_entry(
+            client, "the real data key owns these words", __import__("datetime").date.today()
+        )
         await _setup_kit(client, emu, recovery_key)
         # A session opened with a WRONG key: the probe must refuse the swap.
         token = await emu.open_processing_session_for(client, os.urandom(32))

@@ -29,9 +29,7 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
-    op.create_index(
-        "ix_token_revocation_expiry", "token_revocation", ["expires_at"], unique=False
-    )
+    op.create_index("ix_token_revocation_expiry", "token_revocation", ["expires_at"], unique=False)
 
 
 def downgrade() -> None:

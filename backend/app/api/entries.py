@@ -123,9 +123,7 @@ async def audio_meta_map(
         )
     ).all()
     return {
-        row.client_entry_id: AudioAttachmentMeta(
-            attachment_id=row.id, expires_at=row.expires_at
-        )
+        row.client_entry_id: AudioAttachmentMeta(attachment_id=row.id, expires_at=row.expires_at)
         for row in rows
     }
 
@@ -591,8 +589,7 @@ async def list_entries(
                 session, fresh_user.id, [row.client_entry_id for row in ordered_rows]
             )
             result = [
-                entry_out(row, audio=audio_meta.get(row.client_entry_id))
-                for row in ordered_rows
+                entry_out(row, audio=audio_meta.get(row.client_entry_id)) for row in ordered_rows
             ]
             final_revision = await current_entries_revision(session, fresh_user.id)
             if final_revision != revision:

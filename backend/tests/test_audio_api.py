@@ -28,16 +28,12 @@ from app.services.stt import (
 )
 from tests.helpers import ClientEmulator, TherapistEmulator
 
-SHARED_VECTORS = (
-    pathlib.Path(__file__).resolve().parents[2] / "shared" / "audio_vectors.json"
-)
+SHARED_VECTORS = pathlib.Path(__file__).resolve().parents[2] / "shared" / "audio_vectors.json"
 
 FAKE_AUDIO = b"RIFF-fake-webm-bytes" * 64
 
 
-def audio_body(
-    audio: bytes = FAKE_AUDIO, mime: str = "audio/webm", duration: int = 60
-) -> dict:
+def audio_body(audio: bytes = FAKE_AUDIO, mime: str = "audio/webm", duration: int = 60) -> dict:
     return {
         "audio_b64": base64.b64encode(audio).decode("ascii"),
         "mime": mime,
@@ -82,9 +78,7 @@ async def test_audio_routes_are_404_when_flag_off(client, settings):
     # Flat 404 — the deployment must not advertise the disabled feature.
     assert response.status_code == 404
     assert response.json()["code"] == "not_found"
-    legacy = await client.post(
-        "/api/audio/transcriptions", headers=emu.headers, json=audio_body()
-    )
+    legacy = await client.post("/api/audio/transcriptions", headers=emu.headers, json=audio_body())
     assert legacy.status_code == 404
 
 
@@ -171,9 +165,7 @@ async def test_consent_state_roundtrip_and_withdraw(client, voice_settings):
     assert body["enabled"] is True
     assert body["active_for_current_policy"] is True
     assert body["voice_consent_at"] is not None
-    assert body["voice_consent_policy"] == stt_service.processing_policy_fingerprint(
-        voice_settings
-    )
+    assert body["voice_consent_policy"] == stt_service.processing_policy_fingerprint(voice_settings)
     state = await client.get("/api/account/voice-consent", headers=emu.headers)
     assert state.json()["enabled"] is True
 
@@ -256,9 +248,7 @@ async def test_transcription_happy_path(client, voice_settings, monkeypatch):
     assert captured["translate_input"][1] == "es"
 
 
-async def test_transcription_degrades_without_translation_llm(
-    client, voice_settings, monkeypatch
-):
+async def test_transcription_degrades_without_translation_llm(client, voice_settings, monkeypatch):
     emu = await _register_and_consent(
         client, ClientEmulator("notranslate", "correct horse battery staple")
     )
@@ -565,11 +555,31 @@ async def test_recompute_corpus_routes_voice_languages():
     ]
     with pytest.raises(ValueError, match="input_mode"):
         _parse_entries(
-            [plain({"v": 3, "text": "x", "sentiment": None, "created_at": "2026-09-29", "input_mode": "shout"})],
+            [
+                plain(
+                    {
+                        "v": 3,
+                        "text": "x",
+                        "sentiment": None,
+                        "created_at": "2026-09-29",
+                        "input_mode": "shout",
+                    }
+                )
+            ],
             [day],
         )
     with pytest.raises(ValueError, match="transcript_lang"):
         _parse_entries(
-            [plain({"v": 3, "text": "x", "sentiment": None, "created_at": "2026-09-29", "transcript_lang": "français"})],
+            [
+                plain(
+                    {
+                        "v": 3,
+                        "text": "x",
+                        "sentiment": None,
+                        "created_at": "2026-09-29",
+                        "transcript_lang": "français",
+                    }
+                )
+            ],
             [day],
         )

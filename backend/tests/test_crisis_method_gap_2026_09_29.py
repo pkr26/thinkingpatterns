@@ -72,8 +72,7 @@ class TestSpanishHangingParity:
     the investment the repo already made in Spanish coverage."""
 
     def test_ahorcar_forms_fire_dialog(self) -> None:
-        for phrase in ("me quiero ahorcar", "quiero ahorcarme",
-                       "me voy a ahorcar"):
+        for phrase in ("me quiero ahorcar", "quiero ahorcarme", "me voy a ahorcar"):
             assert matches_dialog(phrase), f"dialog tier missed: {phrase!r}"
             assert matches_suppress(phrase), f"suppress tier missed: {phrase!r}"
 

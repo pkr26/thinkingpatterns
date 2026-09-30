@@ -33,8 +33,8 @@ from ..db import rowcount as db_rowcount
 from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
 from ..models import (
-     KEY_SCHEME_V1,
-     KEY_SCHEME_V2,
+    KEY_SCHEME_V1,
+    KEY_SCHEME_V2,
     AccessLog,
     AudioAttachment,
     Consent,
@@ -726,7 +726,9 @@ async def export_account(
             # state (the require_sharing_enabled idiom, line ~184) — no
             # settings means no audio store, and the section is empty.
             export_settings = getattr(request.app.state, "settings", None)
-            audio_store = get_audio_store_cached(export_settings) if export_settings is not None else None
+            audio_store = (
+                get_audio_store_cached(export_settings) if export_settings is not None else None
+            )
             audio_cursor: tuple | None = None
             if audio_store is not None:
                 while True:
@@ -778,7 +780,10 @@ async def export_account(
                             # and fetch): the row is skipped, not fabricated.
                             continue
                         yield ("" if first else ",") + json.dumps(
-                            {**{k: v for k, v in meta.items()}, "blob": base64.b64encode(blob).decode("ascii")},
+                            {
+                                **{k: v for k, v in meta.items()},
+                                "blob": base64.b64encode(blob).decode("ascii"),
+                            },
                             default=str,
                         )
                         first = False
@@ -1021,9 +1026,7 @@ async def set_recovery_envelope(
         fresh = (
             (
                 await session.execute(
-                    select(User)
-                    .where(User.id == user.id)
-                    .execution_options(populate_existing=True)
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -1068,18 +1071,14 @@ async def clear_recovery_envelope(
 
     # Header-shaped proof (mirrors DELETE /account): require the verifier.
     if not verifier:
-        raise ApiError(
-            status_code=422, detail="verifier header required", code="validation_error"
-        )
+        raise ApiError(status_code=422, detail="verifier header required", code="validation_error")
     expected_epoch = user.token_epoch
     await _require_verifier(user, verifier, request, session)
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         fresh = (
             (
                 await session.execute(
-                    select(User)
-                    .where(User.id == user.id)
-                    .execution_options(populate_existing=True)
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -1107,7 +1106,9 @@ async def clear_recovery_envelope(
     "/recovery/password",
     status_code=204,
     dependencies=[
-        Depends(make_rate_limiter("account-recovery-password", "auth_rate_limit", "auth_rate_window"))
+        Depends(
+            make_rate_limiter("account-recovery-password", "auth_rate_limit", "auth_rate_window")
+        )
     ],
 )
 async def reset_password_with_recovery_key(
@@ -1143,14 +1144,20 @@ async def reset_password_with_recovery_key(
             code="validation_error",
         ) from None
     if len(recovery_key) != 32:
-        raise ApiError(status_code=422, detail="proof must be exactly 32 bytes", code="validation_error")
+        raise ApiError(
+            status_code=422, detail="proof must be exactly 32 bytes", code="validation_error"
+        )
     if len(new_salt_bytes) != SALT_BYTES:
         raise ApiError(
-            status_code=422, detail=f"new_salt must be exactly {SALT_BYTES} bytes", code="validation_error"
+            status_code=422,
+            detail=f"new_salt must be exactly {SALT_BYTES} bytes",
+            code="validation_error",
         )
     if len(new_verifier_bytes) != AUTH_KEY_SIZE:
         raise ApiError(
-            status_code=422, detail=f"new_verifier must be {AUTH_KEY_SIZE} bytes", code="validation_error"
+            status_code=422,
+            detail=f"new_verifier must be {AUTH_KEY_SIZE} bytes",
+            code="validation_error",
         )
     if len(wrapped_key_bytes) != envelope.WRAPPED_DATA_KEY_BYTES:
         raise ApiError(
@@ -1158,17 +1165,18 @@ async def reset_password_with_recovery_key(
             detail=f"wrapped_data_key must be exactly {envelope.WRAPPED_DATA_KEY_BYTES} bytes",
             code="validation_error",
         )
-    if user.recovery_verifier is None:
+    if user.recovery_verifier is None or user.recovery_salt is None:
         raise ApiError(
             status_code=409,
             detail="no recovery kit on this account",
             code="recovery_not_configured",
         )
     # Recovery-key proof (off the event loop, same limiter as login).
+    recovery_salt = bytes(user.recovery_salt)
     async with auth_work_slot(request):
         candidate = await hash_verifier_off_loop(
             recovery_key,
-            user.recovery_salt,
+            recovery_salt,
             limiter=_auth_limiter(request),
             n=request.app.state.settings.scrypt_n,
         )
@@ -1223,9 +1231,7 @@ async def reset_password_with_recovery_key(
         fresh = (
             (
                 await session.execute(
-                    select(User)
-                    .where(User.id == user.id)
-                    .execution_options(populate_existing=True)
+                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -1746,7 +1752,11 @@ async def upgrade_key_envelope(
             await session.execute(
                 update(User)
                 .where(User.id == fresh.id)
-                .values(key_scheme=KEY_SCHEME_V2, wrapped_data_key=wrapped_key_bytes, kdf_params=params_json)
+                .values(
+                    key_scheme=KEY_SCHEME_V2,
+                    wrapped_data_key=wrapped_key_bytes,
+                    kdf_params=params_json,
+                )
             )
             await append_access_log(
                 session,

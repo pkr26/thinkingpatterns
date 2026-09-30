@@ -342,9 +342,7 @@ class TestCadence:
         # audit — the EWMA-family memory makes a 2-day spread re-score the
         # same excursion).
         first = brain.update(brain.load_state(None), entries, T0 + timedelta(days=6))
-        second = brain.update(
-            brain.load_state(brain.dump_state(first.new_state)), entries, end
-        )
+        second = brain.update(brain.load_state(brain.dump_state(first.new_state)), entries, end)
         surfaced = [p for p in first.surfaced if p.kind == "cadence"] + [
             p for p in second.surfaced if p.kind == "cadence"
         ]

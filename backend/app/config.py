@@ -522,7 +522,6 @@ class Settings:
     audio_local_dir: str = ""
     audio_sweep_interval_seconds: int = 900
 
-
     # Therapist sharing is intentionally development-convenient but
     # production-fail-closed. A production operator must explicitly enable
     # it and supply a controlled enrollment secret; there is no anonymous
@@ -1069,9 +1068,7 @@ class Settings:
             audio_upload_rate_limit=_int_env("MINDPATTERN_AUDIO_UPLOAD_RATE_LIMIT", 30),
             audio_upload_rate_window=_int_env("MINDPATTERN_AUDIO_UPLOAD_RATE_WINDOW", 3600),
             audio_retention_days=_int_env("MINDPATTERN_AUDIO_RETENTION_DAYS", 30),
-            audio_max_user_bytes=_int_env(
-                "MINDPATTERN_AUDIO_MAX_USER_BYTES", 64 * 1024 * 1024
-            ),
+            audio_max_user_bytes=_int_env("MINDPATTERN_AUDIO_MAX_USER_BYTES", 64 * 1024 * 1024),
             audio_bucket=os.getenv("MINDPATTERN_AUDIO_BUCKET", "").strip(),
             audio_bucket_region=os.getenv("MINDPATTERN_AUDIO_BUCKET_REGION", "").strip(),
             audio_s3_endpoint=os.getenv("MINDPATTERN_AUDIO_S3_ENDPOINT", "").strip(),

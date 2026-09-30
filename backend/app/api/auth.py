@@ -436,10 +436,14 @@ async def recover_login(
         except _b64_decode_error:
             recovery_key = b""
         verifier_hash = user.recovery_verifier if user is not None else None
+        recovery_salt = user.recovery_salt if user is not None else None
+        sealed_key = user.recovery_wrapped_data_key if user is not None else None
         if (
             user is None
             or not user.is_active
             or verifier_hash is None
+            or recovery_salt is None
+            or sealed_key is None
             or user.role != "user"
             or len(recovery_key) != 32
         ):
@@ -457,7 +461,7 @@ async def recover_login(
             )
         candidate = await hash_verifier_off_loop(
             recovery_key,
-            user.recovery_salt,
+            recovery_salt,
             limiter=_auth_limiter(request),
             n=request.app.state.settings.scrypt_n,
         )
@@ -478,16 +482,18 @@ async def recover_login(
             purpose=tokens.PURPOSE_PATIENT,
             ksv=settings.auth_secret_version,
         )
-        return RecoveryLoginResponse(
+        # key_scheme travels via the response model's default contract;
+        # the sealed copy is non-None on this branch (the guard above
+        # rejected accounts without a kit).
+        response = RecoveryLoginResponse(
             token=token,
             user_id=user.id,
             expires_in=settings.token_ttl_seconds,
             role=user.role,
-            key_scheme=user.key_scheme if user.key_scheme else "v1",
-            recovery_wrapped_data_key=base64.b64encode(
-                bytes(user.recovery_wrapped_data_key)
-            ).decode("ascii"),
+            recovery_wrapped_data_key=base64.b64encode(bytes(sealed_key)).decode("ascii"),
         )
+        response.key_scheme = user.key_scheme if user.key_scheme else "v1"
+        return response
 
 
 @router.post(

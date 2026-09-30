@@ -23,9 +23,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     with op.batch_alter_table("users") as batch:
-        batch.add_column(
-            sa.Column("entry_count", sa.Integer(), nullable=False, server_default="0")
-        )
+        batch.add_column(sa.Column("entry_count", sa.Integer(), nullable=False, server_default="0"))
         batch.add_column(
             sa.Column("entry_blob_bytes", sa.BigInteger(), nullable=False, server_default="0")
         )

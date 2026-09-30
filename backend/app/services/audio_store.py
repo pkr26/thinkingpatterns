@@ -73,8 +73,14 @@ class S3AudioStore:
 
     backend = "s3"
 
-    def __init__(self, bucket: str, region: str = "", access_key_id: str = "",
-                 secret_access_key: str = "", endpoint: str = "") -> None:
+    def __init__(
+        self,
+        bucket: str,
+        region: str = "",
+        access_key_id: str = "",
+        secret_access_key: str = "",
+        endpoint: str = "",
+    ) -> None:
         self.bucket = bucket
         self.region = region
         self.endpoint = endpoint.strip()

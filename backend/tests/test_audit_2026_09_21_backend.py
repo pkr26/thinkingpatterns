@@ -500,7 +500,7 @@ async def test_revoke_maps_stale_consent_to_404(client, app):
                         # 2026-09-26: _require_verifier reads the configured
                         # scrypt work factor from settings (LOW c).
                         settings=SimpleNamespace(scrypt_n=2**17),
-                        rate_counter=SlidingWindowCounter()
+                        rate_counter=SlidingWindowCounter(),
                     )
                 )
             ),
@@ -540,7 +540,7 @@ async def test_rewrap_maps_stale_consent_to_404(client, app):
                         # 2026-09-26: _require_verifier reads the configured
                         # scrypt work factor from settings (LOW c).
                         settings=SimpleNamespace(scrypt_n=2**17),
-                        rate_counter=SlidingWindowCounter()
+                        rate_counter=SlidingWindowCounter(),
                     )
                 )
             ),
@@ -612,7 +612,7 @@ async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
                         # 2026-09-26: _require_verifier reads the configured
                         # scrypt work factor from settings (LOW c).
                         settings=SimpleNamespace(scrypt_n=2**17),
-                        rate_counter=SlidingWindowCounter()
+                        rate_counter=SlidingWindowCounter(),
                     )
                 )
             ),

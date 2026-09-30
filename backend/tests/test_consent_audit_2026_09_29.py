@@ -36,9 +36,7 @@ async def _actions(client, emu) -> list[str]:
 
 @pytest.mark.asyncio
 class TestConsentTogglesAreAudited:
-    async def test_voice_consent_toggle_writes_on_and_off_rows(
-        self, client, settings
-    ):
+    async def test_voice_consent_toggle_writes_on_and_off_rows(self, client, settings):
         emu = await _register(client, settings, "consent-audit-v")
         on = await client.put(
             "/api/account/voice-consent",
@@ -56,9 +54,7 @@ class TestConsentTogglesAreAudited:
         assert "voice_consent_on" in actions
         assert "voice_consent_off" in actions
 
-    async def test_llm_consent_toggle_writes_on_and_off_rows(
-        self, client, settings
-    ):
+    async def test_llm_consent_toggle_writes_on_and_off_rows(self, client, settings):
         emu = await _register(client, settings, "consent-audit-l")
         await _grant_llm_consent(client, emu)
         off = await client.put(
@@ -71,9 +67,7 @@ class TestConsentTogglesAreAudited:
         assert "llm_consent_on" in actions
         assert "llm_consent_off" in actions
 
-    async def test_rows_are_patient_visible_and_attributed_to_self(
-        self, client, settings
-    ):
+    async def test_rows_are_patient_visible_and_attributed_to_self(self, client, settings):
         """The rows land in the patient's own WHO-ACCESSED-MY-DATA view,
         attributed to "self" — visible evidence, not a hidden column."""
         emu = await _register(client, settings, "consent-audit-c")

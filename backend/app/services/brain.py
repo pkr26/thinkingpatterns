@@ -2950,7 +2950,9 @@ def _detect_themes(
     signals: list[_Signal] = []
     themes = sorted({theme for _, _, themes, _, _, _ in per_entry for theme in themes})
     for theme in themes:
-        all_with = [(e, t, th, s, raw, tagged) for e, t, th, s, raw, tagged in per_entry if theme in th]
+        all_with = [
+            (e, t, th, s, raw, tagged) for e, t, th, s, raw, tagged in per_entry if theme in th
+        ]
         without_theme = [(e, s) for e, _, th, s, _, _ in per_entry if theme not in th]
 
         # 2026-09-29 deep audit (HIGH — idiographic integrity): a
@@ -3716,9 +3718,7 @@ def _detect_phrases(
         # collision words the per-language selectors exist to fix, and a
         # negativity detail inconsistent with the corpus's own mood
         # scoring two functions up.
-        member_sentiments = [
-            sentiment_score(ref.text.split(), language) for ref in cluster.members
-        ]
+        member_sentiments = [sentiment_score(ref.text.split(), language) for ref in cluster.members]
         member_negators = [
             sum(1 for t in ref.text.split() if t in _negators_for(language))
             for ref in cluster.members
@@ -4229,7 +4229,9 @@ def _detect_topics(
                     followers.setdefault(cand, set()).add(following)
             prev = tok
 
-    candidates: list[tuple[str, int, int, int, int, int]] = []  # label, total, days, recent_df, recent_dd, earlier_dd
+    candidates: list[
+        tuple[str, int, int, int, int, int]
+    ] = []  # label, total, days, recent_df, recent_dd, earlier_dd
     for label, docs_hit in df_docs.items():
         total = len(docs_hit)
         days_n = len(df_days[label])
@@ -5038,13 +5040,9 @@ def update(
         # explains is the same measurement twice) — computed once per run.
         clusters = _phrase_clusters(window)
         signals.extend(
-            _detect_themes(
-                residual_per_entry, weekday_days, len(day_buckets), resid_lag1, language
-            )
+            _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1, language)
         )
-        signals.extend(
-            _detect_phrases(clusters, allow_rumination=language_ok, language=language)
-        )
+        signals.extend(_detect_phrases(clusters, allow_rumination=language_ok, language=language))
         # EWMA baseline re-anchor: once a stored shift is established, the
         # chart re-learns the new normal from post-shift data only.
         anchor = _mood_reanchor_day(store, today)
