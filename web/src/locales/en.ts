@@ -1135,6 +1135,10 @@ export const en: Record<string, string> = {
   "measures.progressA11y": "{answered} of {total} answered",
   "measures.progressNote": "{answered} of {total} answered",
   "measures.trendA11y": "Score trend",
+  "measures.trendA11yWithValue":
+    "Score trend over {count} records ({first} to {last}); lowest {low}% of maximum, highest {high}%, latest {latest} of {max}",
+  "measures.trendSingle": "One record — {date}: {score} of {max}.",
+  "measures.trendSingleA11y": "One record — {date}: {score} of {max}.",
   "settings.appearanceTitle": "Appearance",
   "settings.themeNote": "Dark is easier on evening eyes. Auto follows your device.",
   "settings.languageNote": "Language — applies immediately; Automatic follows your device.",

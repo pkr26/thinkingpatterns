@@ -134,18 +134,30 @@ describe("HistoryView", () => {
     // The log holds a strongly negative estimate for BOTH days — the pick
     // must override it on its day, and stand in on the unpicked day.
     await recordMood(DATA_KEY, USER, pickDay, -0.8);
-    await recordMood(DATA_KEY, USER, noPickDay, -0.8);
+    await recordMood(DATA_KEY, USER, noPickDay, -1.8);
     stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
     const root = await render(<HistoryView />);
     await settle(40, 5);
+    // 2026-09-29 a11y fix: the mood level rides the accessible name now,
+    // so tiles match by ISO PREFIX (iso — <mood> — entry — …).
     const tile = (iso: string) =>
       root.root.findAllByType("button").find(
-        (node) => node.props["aria-label"] === iso || node.props["aria-label"] === `${iso} — entry`,
+        (node) =>
+          typeof node.props["aria-label"] === "string" &&
+          (node.props["aria-label"] === iso || node.props["aria-label"].startsWith(`${iso} — `)),
       );
     // Explicit pick 0.6 → the warm sage "lighter" fill, not the log's dark rose.
     expect(tile(pickDay)?.props.style.backgroundColor).toBe("#8fb98d");
-    // No pick → the mood log's -0.8 shows through instead of a blank tile.
+    // No pick → the mood log's strong negative shows through instead of
+    // a blank tile.
     expect(tile(noPickDay)?.props.style.backgroundColor).toBe("#cd8f82");
+    // The mood LEVEL is in the accessible name (color-only was WCAG 1.4.1).
+    expect(String(tile(pickDay)?.props["aria-label"])).toContain(" — ");
+    expect(String(tile(noPickDay)?.props["aria-label"])).toContain(" — ");
+    // And in a NON-color channel: the strong day (-1.8 → 2px) carries a
+    // heavier underline than the mild day (0.6 → 1px).
+    expect(String(tile(noPickDay)?.props.style.borderBottom)).toMatch(/^2px solid /);
+    expect(String(tile(pickDay)?.props.style.borderBottom)).toMatch(/^1px solid /);
   });
 
   it("an edit race (409) shows both versions and never silently overwrites", async () => {

@@ -14,6 +14,38 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed — Phase 2 UX/a11y wave (2026-09-29 deep audit)
+
+- **HIGH (clinical utility) — portal phrase highlight marks the PHRASE,
+  not the entry.** The evidence drilldown used to wrap the WHOLE entry
+  paragraph in `<mark>` whenever the pattern label appeared anywhere in
+  it — highlighting everything is highlighting nothing for a clinician
+  scanning 20 entries. Normalized matches now map back to RAW-text
+  offsets (parallel walk under the exact per-char normalization rules)
+  and every occurrence is marked, only the matched span. Pinned by
+  `portal/tests/phraseHighlight.test.tsx` (punctuation, accents,
+  multi-occurrence).
+- **HIGH (a11y) — the web History calendar's mood level is no longer
+  color-only** (WCAG 1.4.1): the level rides the day button's accessible
+  name AND a non-color underline ramp (1–3px by intensity).
+- **MEDIUM (data-viz) — the measures trend chart is readable at low N**:
+  a dashed baseline, a taller plot, a last-value number that survives,
+  a quantitative aria-label (low/high/latest, the portal chart's better
+  pattern), and — with fewer than two records — a stat line instead of
+  a 14px bar floating in a 140px box.
+- **The web coverage gate is green again** (functions 85.15% ≥ 85): the
+  voice wave had shipped the entry voice UI, recorder failure paths,
+  Share/Question success flows, the theme module's DOM half and the
+  crypto/stats guards under-tested. New suites drive the REAL
+  mic→record→stop→transcribe→review→save flow through a minimal
+  MediaRecorder mock.
+- **MEDIUM (i18n) — mobile gains an in-app language override** (Settings
+  → Language: device / English / Español), persisted in the encrypted
+  secure store and applied at startup and on change. The two module-load
+  `tr()` tables (BottomNav, Onboarding) — the exact drift hazard the
+  2026-09-26 i18n guard warned about — are per-render now, pinned by
+  `tests/languageOverride.test.tsx`.
+
 ### Changed — Phase 1 statistical integrity wave (2026-09-29 deep audit)
 
 Five engine corrections, each pinned by a regression test that fails on

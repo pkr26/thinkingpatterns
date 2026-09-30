@@ -27,24 +27,25 @@ interface Panel {
   body: string;
 }
 
-// Resolved at module load — the app locale is resolved once at startup, so
-// the panels cannot drift between languages mid-session.
-// 2026-09-26 audit (i18n guard): startup-fixed locale — this module-load
-// tr() table MUST be revisited if runtime language switching ever ships.
-const PANELS: readonly Panel[] = [
-  {
-    title: tr("onboarding.panel1Title"),
-    body: tr("onboarding.panel1Body"),
-  },
-  {
-    title: tr("onboarding.panel2Title"),
-    body: tr("onboarding.panel2Body"),
-  },
-  {
-    title: tr("onboarding.panel3Title"),
-    body: tr("onboarding.panel3Body"),
-  },
-];
+// Per render (2026-09-29 deep audit, P2): the in-app language override
+// changes currentLocale at runtime; a module-load table froze the
+// import-time locale (the 2026-09-26 i18n guard's warning, now resolved).
+function panels(): readonly Panel[] {
+  return [
+    {
+      title: tr("onboarding.panel1Title"),
+      body: tr("onboarding.panel1Body"),
+    },
+    {
+      title: tr("onboarding.panel2Title"),
+      body: tr("onboarding.panel2Body"),
+    },
+    {
+      title: tr("onboarding.panel3Title"),
+      body: tr("onboarding.panel3Body"),
+    },
+  ];
+}
 
 export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -75,7 +76,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
     // E-10 (2026-09-21): M-18's re-entry restored the screen but not the
     // dismissed-panel position — resume where the user left off instead
     // of restarting at panel 1.
-    void loadOnboardingPanel(PANELS.length).then((restored) => {
+    void loadOnboardingPanel(panels().length).then((restored) => {
       if (!cancelled && restored > 0) setIndex(restored);
     });
     return () => {
@@ -97,8 +98,8 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
     navigation.replace("Entry");
   };
 
-  const last = index === PANELS.length - 1;
-  const panel = PANELS[index]!;
+  const last = index === panels().length - 1;
+  const panel = panels()[index]!;
 
   /** Persist the reminder opt-in per account. The onboarding flow runs
    *  right after registration, so the account exists — but if the id read
@@ -126,7 +127,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
         onTouchStart={touchActivity}
       >
       <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
-        {tr("onboarding.stepOf", { current: index + 1, total: PANELS.length })}
+        {tr("onboarding.stepOf", { current: index + 1, total: panels().length })}
       </Text>
       <Text style={[styles.title, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
         {panel.title}
@@ -170,7 +171,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
         accessibilityLabel={
           last
             ? tr("onboarding.start")
-            : tr("onboarding.continueA11y", { next: index + 2, total: PANELS.length })
+            : tr("onboarding.continueA11y", { next: index + 2, total: panels().length })
         }
       />
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />

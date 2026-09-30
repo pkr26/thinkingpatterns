@@ -6,6 +6,7 @@ import { SessionProvider } from "./src/store";
 import { AppNavigator } from "./src/navigation";
 import { ThemeProvider, useTheme } from "./src/theme";
 import { startNotificationPressRouting } from "./src/nativeFeatures";
+import { applyStoredLanguageChoice } from "./src/languagePref";
 
 /**
  * Privacy shield: while the app is backgrounded, the iOS app-switcher
@@ -29,6 +30,10 @@ function ThemedApp(): React.JSX.Element {
   const [shielded, setShielded] = useState(AppState.currentState !== "active");
 
   useEffect(() => {
+    // 2026-09-29 deep audit (P2): apply the stored language override
+    // before the first meaningful render (unreadable storage keeps the
+    // device-detected locale — boot never blocks on it).
+    void applyStoredLanguageChoice();
     const sub = AppState.addEventListener("change", (state) => {
       setShielded(state !== "active");
     });

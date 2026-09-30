@@ -28,19 +28,20 @@ export interface BottomNavItem {
   help?: boolean;
 }
 
-// Labels resolve ONCE at module load: the locale itself is resolved once at
-// startup (there is no in-app language switch this wave), so per-render
-// lookups would only invite drift between this table and the rendered bar.
-// 2026-09-26 audit (i18n guard): startup-fixed locale — this module-load
-// tr() block MUST be revisited if runtime language switching ever ships.
-export const BOTTOM_NAV_ITEMS: readonly BottomNavItem[] = [
-  { key: "Entry", label: tr("nav.today") },
-  { key: "History", label: tr("nav.history") },
-  { key: "Insights", label: tr("nav.patterns") },
-  { key: "Question", label: tr("nav.question") },
-  { key: "Settings", label: tr("nav.settings") },
-  { key: "Crisis", label: tr("nav.getHelp"), help: true },
-] as const;
+// Labels resolve PER RENDER (2026-09-29 deep audit, P2): the in-app
+// language override changes currentLocale at runtime, and a module-load
+// table froze whatever locale happened to be active at import time —
+// the exact drift the 2026-09-26 i18n guard warned about.
+export function bottomNavItems(): readonly BottomNavItem[] {
+  return [
+    { key: "Entry", label: tr("nav.today") },
+    { key: "History", label: tr("nav.history") },
+    { key: "Insights", label: tr("nav.patterns") },
+    { key: "Question", label: tr("nav.question") },
+    { key: "Settings", label: tr("nav.settings") },
+    { key: "Crisis", label: tr("nav.getHelp"), help: true },
+  ];
+}
 
 export function BottomNav({
   current,
@@ -56,7 +57,7 @@ export function BottomNav({
       accessibilityRole="tablist"
       accessibilityLabel={tr("nav.a11y")}
     >
-      {BOTTOM_NAV_ITEMS.map((item) => {
+      {bottomNavItems().map((item) => {
         const active = item.key === current;
         const help = item.help === true;
         return (

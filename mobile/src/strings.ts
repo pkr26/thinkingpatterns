@@ -51,6 +51,12 @@ export function setLocale(locale: Locale): void {
   currentLocale = locale;
 }
 
+/** 2026-09-29 deep audit (P2): the in-app language override's "Device"
+ * option returns to the startup detection. */
+export function resetToDeviceLocale(): void {
+  currentLocale = detectLocale();
+}
+
 export function getLocale(): Locale {
   return currentLocale;
 }

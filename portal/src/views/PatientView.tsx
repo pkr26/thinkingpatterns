@@ -418,6 +418,65 @@ function normalizeForMatch(text: string): string {
   return folded.replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+/** 2026-09-29 deep audit (HIGH, clinical utility): the drilldown used to
+ *  <mark> the WHOLE entry when the label appeared anywhere in it —
+ *  highlighting everything is highlighting nothing; a clinician scanning
+ *  20 entries got zero help finding the phrase. Map every normalized
+ *  match back to RAW-text offsets (walking both strings in parallel under
+ *  the exact per-char rules of normalizeForMatch: NFD fold, mark strip,
+ *  lowercase, non-alnum runs collapse to one space, edges trimmed) and
+ *  mark only the matched spans — every occurrence, not just the first. */
+export function rawMatchSpans(text: string, label: string): Array<readonly [number, number]> {
+  const needle = normalizeForMatch(label);
+  if (needle.length === 0) return [];
+  const hay = normalizeForMatch(text);
+  const spans: Array<readonly [number, number]> = [];
+  let from = 0;
+  for (;;) {
+    const at = hay.indexOf(needle, from);
+    if (at < 0) break;
+    const chars = Array.from(text);
+    let hayIdx = 0;
+    let lastSpace = true; // mirrors normalizeForMatch's collapse/trim
+    let start = -1;
+    let end = -1;
+    for (let i = 0; i < chars.length; i += 1) {
+      const ch = chars[i]!;
+      const folded = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const alnum = folded.replace(/[^a-z0-9]/g, "");
+      if (alnum) {
+        if (hayIdx === at && start < 0) start = i;
+        hayIdx += 1;
+        lastSpace = false;
+        if (hayIdx === at + needle.length && end < 0) end = i + 1;
+      } else if (!lastSpace) {
+        hayIdx += 1; // one collapsed separator space
+        lastSpace = true;
+      }
+      if (end >= 0) break;
+    }
+    if (start >= 0 && end >= start) spans.push([start, end]);
+    from = at + needle.length;
+  }
+  return spans;
+}
+
+/** Render the entry text with every label occurrence <mark>ed — only the
+ *  matched span, never the whole paragraph. */
+export function HighlightedEntry({ text, label }: { text: string; label: string }): React.ReactNode {
+  const spans = rawMatchSpans(text, label);
+  if (spans.length === 0) return text;
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach(([start, end], i) => {
+    if (start > cursor) parts.push(text.slice(cursor, start));
+    parts.push(<mark key={i}>{text.slice(start, end)}</mark>);
+    cursor = end;
+  });
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return parts;
+}
+
 function patternKey(pattern: PatternPayload, index: number): string {
   return pattern.detail.pattern_pid ?? `${pattern.kind}:${pattern.label}:${index}`;
 }
@@ -1408,7 +1467,13 @@ export function PatientView(props: {
                 {/* Audit fix 16 (2026-09-21): journal entries are multi-line;
                     pre-wrap keeps the patient's line breaks (.entry-text). */}
                 <p className="entry-text">
-                  {selected && labelMatches(entry.text, selected.label) ? <mark>{displayText}</mark> : displayText}
+                  {/* 2026-09-29 deep audit: only the matched span is
+                      highlighted (every occurrence), not the whole entry. */}
+                  {selected && labelMatches(entry.text, selected.label) ? (
+                    <HighlightedEntry text={displayText} label={selected.label} />
+                  ) : (
+                    displayText
+                  )}
                 </p>
                 {entry.audio && entry.client_entry_id && (
                   <div className="entry-audio">

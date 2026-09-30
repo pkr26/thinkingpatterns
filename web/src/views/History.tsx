@@ -556,6 +556,16 @@ export function HistoryView(): React.JSX.Element {
             const filled = day.hasEntry || day.value !== null;
             const fill = filled ? moodFill(day.value) : undefined;
             const selected = selectedDay === day.iso;
+            // 2026-09-29 deep audit (a11y HIGH): the mood level was
+            // color-ONLY (WCAG 1.4.1 failure — colorblind and screen-
+            // reader users got a heatmap with no data in it). The level
+            // now rides the accessible name AND a non-color underline
+            // ramp (1-3px by intensity bucket).
+            const moodText = day.value !== null ? moodLabel(day.value) : null;
+            const moodEdge =
+              day.value !== null && Math.abs(day.value) >= 0.5
+                ? `${Math.min(3, 1 + Math.floor(Math.abs(day.value)))}px solid ${moodInk(day.value)}`
+                : undefined;
             return (
               <button
                 key={day.iso}
@@ -566,8 +576,11 @@ export function HistoryView(): React.JSX.Element {
                   day.iso === today ? "cal-day--today" : "",
                   selected ? "cal-day--selected" : "",
                 ].filter(Boolean).join(" ")}
-                style={fill !== undefined ? { backgroundColor: fill, color: moodInk(day.value) } : undefined}
-                aria-label={`${day.iso}${day.hasEntry ? ` — ${t("history.dayHasEntry")}` : ""}${day.iso === today ? ` — ${t("history.todayA11y")}` : ""}`}
+                style={{
+                  ...(fill !== undefined ? { backgroundColor: fill, color: moodInk(day.value) } : {}),
+                  ...(moodEdge !== undefined ? { borderBottom: moodEdge } : {}),
+                }}
+                aria-label={`${day.iso}${moodText ? ` — ${moodText}` : ""}${day.hasEntry ? ` — ${t("history.dayHasEntry")}` : ""}${day.iso === today ? ` — ${t("history.todayA11y")}` : ""}`}
                 aria-pressed={selected}
                 onClick={() => day.hasEntry && setSelectedDay(selected ? null : day.iso)}
                 disabled={!day.hasEntry}

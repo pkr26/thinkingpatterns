@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { currentPaletteVersion, notifyPaletteChanged, subscribePalette } from "../src/tokens";
-import { resolveTheme, THEME_STORAGE_KEY, type ThemePref } from "../src/theme";
+import { resolveTheme, THEME_STORAGE_KEY, type ThemePref , applyThemePref, initTheme, readThemePref, writeThemePref } from "../src/theme";
 
 describe("resolveTheme (pure)", () => {
   it("explicit preferences win regardless of the OS setting", () => {
@@ -69,5 +69,88 @@ describe("palette change notification", () => {
     notifyPaletteChanged(); // off() unsubscribed: no further calls
     expect(seen).toEqual([before + 1]);
     expect(currentPaletteVersion()).toBe(before + 2);
+  });
+});
+
+// 2026-09-29 (P2 coverage gate): the DOM-touching half of the module —
+// writeThemePref / applyThemePref / initTheme — was untested (22%
+// functions). Minimal document/window stubs exercise them in node.
+describe("applyThemePref / initTheme / writeThemePref (DOM half)", () => {
+  function stubDom(prefersDark: boolean): { restore: () => void; dataset: Record<string, string> } {
+    const dataset: Record<string, string> = {};
+    const listeners: Array<() => void> = [];
+    const documentStub = { documentElement: { dataset } } as unknown as Document;
+    const windowStub = {
+      matchMedia: (q: string) => ({
+        matches: q.includes("dark") ? prefersDark : false,
+        addEventListener: (_: string, fn: () => void) => listeners.push(fn),
+        removeEventListener: (_: string, fn: () => void) => {
+          const at = listeners.indexOf(fn);
+          if (at >= 0) listeners.splice(at, 1);
+        },
+      }),
+    } as unknown as Window & typeof globalThis;
+    const store: Record<string, string> = {};
+    const localStorageStub = {
+      getItem: (k: string) => (k in store ? store[k]! : null),
+      setItem: (k: string, v: string) => {
+        store[k] = String(v);
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    };
+    const realDocument = globalThis.document;
+    const realWindow = globalThis.window;
+    const realStorage = (globalThis as { localStorage?: Storage }).localStorage;
+    Object.defineProperty(globalThis, "document", { value: documentStub, configurable: true });
+    Object.defineProperty(globalThis, "window", { value: windowStub, configurable: true });
+    Object.defineProperty(globalThis, "localStorage", { value: localStorageStub, configurable: true });
+    return {
+      restore: () => {
+        Object.defineProperty(globalThis, "document", { value: realDocument, configurable: true });
+        Object.defineProperty(globalThis, "window", { value: realWindow, configurable: true });
+        Object.defineProperty(globalThis, "localStorage", { value: realStorage, configurable: true });
+      },
+      dataset,
+    };
+  }
+
+  it("applyThemePref resolves and writes the document attribute", () => {
+    const dom = stubDom(true);
+    try {
+      applyThemePref("light");
+      expect(dom.dataset.theme).toBe("light");
+      applyThemePref("auto"); // OS prefers dark
+      expect(dom.dataset.theme).toBe("dark");
+    } finally {
+      dom.restore();
+    }
+  });
+
+  it("initTheme installs the OS listener for auto and the cleanup removes it", () => {
+    const dom = stubDom(false);
+    try {
+      const cleanup = initTheme();
+      expect(typeof cleanup).toBe("function");
+      // Default pref (auto, no stored value) follows the OS verdict.
+      expect(dom.dataset.theme).toBe("light");
+      cleanup();
+      expect(() => cleanup()).not.toThrow();
+    } finally {
+      dom.restore();
+    }
+  });
+
+  it("writeThemePref round-trips through storage", () => {
+    const dom = stubDom(false);
+    try {
+      writeThemePref("dark");
+      expect(readThemePref()).toBe("dark");
+      writeThemePref("auto");
+      expect(readThemePref()).toBe("auto");
+    } finally {
+      dom.restore();
+    }
   });
 });

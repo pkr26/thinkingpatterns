@@ -760,3 +760,11 @@ h1, h2, h3, p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* 2026-09-29 deep audit: the single-record measures "chart" is a stat
+   line, not a 14px bar in a 140px box. */
+.chart-stat {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--body);
+}

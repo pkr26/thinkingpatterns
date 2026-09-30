@@ -11,13 +11,13 @@ import { describe, expect, it, vi } from "vitest";
 
 const navigate = vi.fn();
 
-const { BottomNav, BOTTOM_NAV_ITEMS, MainShell } = await import("../src/components/BottomNav");
+const { BottomNav, bottomNavItems, MainShell } = await import("../src/components/BottomNav");
 const { Text } = await import("react-native");
 const { render, textOf, touchableByLabel, pressLabel } = await import("./helpers/rtr");
 
 describe("BottomNav", () => {
   it("always renders all six destinations, Get help last", async () => {
-    const labels = BOTTOM_NAV_ITEMS.map((i) => i.label);
+    const labels = bottomNavItems().map((i) => i.label);
     expect(labels).toEqual(["Today", "History", "Patterns", "Question", "Settings", "Get help"]);
     const root = await render(<BottomNav current="Entry" navigation={{ navigate }} />);
     for (const label of labels) {

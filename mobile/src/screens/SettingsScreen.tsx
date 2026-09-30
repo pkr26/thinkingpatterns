@@ -28,6 +28,7 @@ import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
 import { cancelDailyReminder, cancelMeasureReminder, reminderCapability } from "../nativeFeatures";
 import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPrefs } from "../reminders";
+import { readLanguageChoice, writeLanguageChoice, type LanguageChoice } from "../languagePref";
 import { syncReminderSchedule, syncMeasureReminderSchedule } from "../reminderSync";
 import {
   clearMeasureReminderPrefs,
@@ -702,6 +703,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // dark-OS device must not select "Dark" as if it were the override).
   const setThemeMode = useSetThemeMode();
   const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
+  // 2026-09-29 deep audit (P2): the in-app language override — a bilingual
+  // user on an English-locale device gets the app in their language.
+  const [language, setLanguageState] = useState<LanguageChoice>("device");
   const [haptics, setHaptics] = useState(true);
   const [reminders] = useState(reminderCapability());
   // The HealthKit State of Mind seam capability — probed once, sync, the
@@ -738,6 +742,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         const stored = await AsyncStorage.getItem(themeStorageKey());
         if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
           setThemeModeState(stored);
+          setLanguageState(await readLanguageChoice());
         }
       } catch {
         /* non-sensitive preference; default stands */
@@ -889,6 +894,52 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           />
         </View>
       )}
+
+      {/* Language (2026-09-29 deep audit P2): in-app override of the
+          device locale — device-level preference, applied immediately. */}
+      <Text style={themed.label}>{tr("settings.languageTitle")}</Text>
+      <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg }]}>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {(["device", "en", "es"] as LanguageChoice[]).map((choice) => {
+            const choiceLabel =
+              choice === "device"
+                ? tr("settings.languageDevice")
+                : choice === "en"
+                  ? tr("settings.languageEnglish")
+                  : tr("settings.languageSpanish");
+            return (
+              <TouchableOpacity
+                key={choice}
+                style={[
+                  {
+                    paddingHorizontal: 14,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: language === choice ? t.colors.primary : t.colors.cardDeep,
+                    borderRadius: t.radius.md,
+                    minHeight: t.minTouch,
+                  },
+                ]}
+                onPress={() => {
+                  touchActivity();
+                  setLanguageState(choice);
+                  void writeLanguageChoice(choice);
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: language === choice }}
+                accessibilityLabel={tr("settings.languageA11y", { choice: choiceLabel })}
+              >
+                <Text style={{ color: language === choice ? t.colors.onPrimary : t.colors.body, fontSize: 13 }}>
+                  {choiceLabel}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={[themed.rowText, { fontSize: 12 }]}>
+          {tr("settings.languageNote")}
+        </Text>
+      </View>
 
       {/* Appearance & feel (2026-09-17): theme override + haptics. */}
       <Text style={themed.label}>{tr("settings.appearanceLabel")}</Text>

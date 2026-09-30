@@ -61,16 +61,44 @@ function samePicks(a: readonly (number | null)[], b: readonly (number | null)[])
 }
 
 /** The patient's own trend: plain bars, dates visible, latest highlighted.
- *  No severity bands, no interpretation (charter). */
+ *  No severity bands, no interpretation (charter).
+ *
+ *  2026-09-29 deep audit (data-viz MEDIUM): one record used to render a
+ *  single ~14px bar in a 140px box — visually an EMPTY card. With < 2
+ *  points the chart is a stat line instead (date + score, no SVG), and
+ *  the chart itself gains a baseline and a taller plot so early trends
+ *  are actually readable. The aria-label carries the numbers (the old
+ *  label announced nothing quantitative to screen readers). */
 function TrendChart({ points }: { points: TrendPoint[] }): React.JSX.Element {
+  if (points.length < 2) {
+    const only = points[0];
+    return (
+      <p className="chart-stat" role="img" aria-label={t("measures.trendSingleA11y", only ? { date: only.date, score: only.score, max: only.max } : { date: "", score: 0, max: 0 })}>
+        {only ? t("measures.trendSingle", { date: only.date, score: only.score, max: only.max }) : ""}
+      </p>
+    );
+  }
   const barWidth = 14;
   const gap = 6;
   const width = points.length * (barWidth + gap);
-  const height = 64;
+  const height = 96; // was 64: a minimum plot height that reads as data
+  const values = points.map((p) => p.score / p.max);
+  const a11y = t("measures.trendA11yWithValue", {
+    count: points.length,
+    first: points[0]!.date,
+    last: points[points.length - 1]!.date,
+    low: Math.round(Math.min(...values) * 100),
+    high: Math.round(Math.max(...values) * 100),
+    latest: points[points.length - 1]!.score,
+    max: points[points.length - 1]!.max,
+  });
   return (
-    <svg className="chart" viewBox={`0 0 ${Math.max(width, 140)} ${height + 16}`} role="img" aria-label={t("measures.trendA11y")} style={{ maxWidth: 560 }}>
+    <svg className="chart" viewBox={`0 0 ${Math.max(width, 140)} ${height + 16}`} role="img" aria-label={a11y} style={{ maxWidth: 560 }}>
+      {/* The dashed baseline the Patterns chart already has: without it a
+          single row of bars floats in empty space. */}
+      <line x1={0} y1={height} x2={Math.max(width, 140)} y2={height} className="chart__baseline" />
       {points.map((point, index) => {
-        const magnitude = Math.max(3, Math.round((point.score / point.max) * (height - 8)));
+        const magnitude = Math.max(6, Math.round((point.score / point.max) * (height - 10)));
         const x = index * (barWidth + gap);
         const isLast = index === points.length - 1;
         return (

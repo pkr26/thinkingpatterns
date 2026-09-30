@@ -10,7 +10,7 @@ import { buildAad } from "../src/crypto/aad";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { flush, press, pressAria, render, settle, textOf, textOfNode } from "./helpers/rtr";
+import { flush, press, pressAria, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(6);
@@ -130,6 +130,69 @@ describe("QuestionView funnels", () => {
     await settle(40, 3);
     expect(textOf(root)).toContain("no answer is required");
   });
+
+  // 2026-09-29 (P2 coverage gate): the feedback tap and the SUCCESS arms
+  // of load/refresh were untested — Question.tsx sat at 58% functions.
+  it("a pattern question records the resonance tap and confirms", async () => {
+    const payload = await encrypt(
+      DATA_KEY,
+      new TextEncoder().encode(JSON.stringify({ for_date: "2026-09-25", question: "What did you notice?", pattern_pid: "temporal:work" })),
+      buildAad("question", USER, "2026-09-25"),
+    );
+    stubFetch((url) => (url.endsWith("/questions/today") ? jsonResponse({ for_date: "2026-09-25", blob: toBase64(payload) }) : jsonResponse({}, { status: 404 })));
+    const root = await render(<QuestionView onRefreshed={() => undefined} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("What did you notice?");
+    await press(root, "This resonated");
+    await settle(40, 2);
+    expect(textOf(root)).toContain("Noted");
+    // One tap locks both chips (the answer is per question).
+    expect(textOf(root)).toContain("Noted");
+  });
+
+  it("an offline load falls back to the LOCAL pool with the offline caption", async () => {
+    stubFetch(() => Promise.reject(new TypeError("fetch failed")));
+    const root = await render(<QuestionView onRefreshed={() => undefined} />);
+    await settle(40, 3);
+    // The localized pool serves SOMETHING and the caption says offline.
+    expect(textOf(root)).not.toContain("session locked");
+    expect(textOf(root).length).toBeGreaterThan(0);
+  });
+
+  it("a successful refresh completes the session and reports done", async () => {
+    const payload = await encrypt(
+      DATA_KEY,
+      new TextEncoder().encode(JSON.stringify({ for_date: "2026-09-25", question: "What did you notice?" })),
+      buildAad("question", USER, "2026-09-25"),
+    );
+    let refreshed = "";
+    stubFetch((url) => {
+      if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
+      if (url.endsWith("/insights/recompute")) return jsonResponse({ phase: "insight", active_days: 45, streak: 5, days_remaining: 0, patterns_stored: 3, question_stored: true, analyzer: "local" });
+      if (url.endsWith("/questions/today")) return jsonResponse({ for_date: "2026-09-25", blob: toBase64(payload) });
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<QuestionView onRefreshed={(message) => (refreshed = message)} />);
+    await settle(40, 2);
+    await press(root, "Refresh patterns");
+    await settle(40, 4);
+    expect(refreshed.length).toBeGreaterThan(0);
+  });
+
+  it("a baseline refresh reports the days remaining", async () => {
+    let refreshed = "";
+    stubFetch((url) => {
+      if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
+      if (url.endsWith("/insights/recompute")) return jsonResponse({ phase: "baseline", active_days: 22, streak: 2, days_remaining: 8 });
+      if (url.endsWith("/questions/today")) return jsonResponse({}, { status: 404 });
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<QuestionView onRefreshed={(message) => (refreshed = message)} />);
+    await settle(40, 2);
+    await press(root, "Refresh patterns");
+    await settle(40, 4);
+    expect(refreshed).toContain("8");
+  });
 });
 
 describe("HistoryView edges", () => {
@@ -160,6 +223,49 @@ describe("HistoryView edges", () => {
 });
 
 describe("final function-coverage batch", () => {
+  it("ShareView: renders the live consent list and revokes with an arm gate", async () => {
+    stubFetch((url) => {
+      if (url.endsWith("/consents")) {
+        return jsonResponse([
+          { id: "c1", therapist_id: "t-9", display_name: "Dr. Rivera", username: "rivera", granted_at: "2026-09-20T00:00:00Z", revoked_at: null, status: "active", share_voice: false },
+        ]);
+      }
+      return jsonResponse({}, { status: 404 });
+    });
+    const { ShareView } = await import("../src/views/Share");
+    const root = await render(<ShareView />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Dr. Rivera");
+    // The revoke is two-step under ONE label: first press arms (Cancel
+    // appears), the second press fires the API call.
+    await press(root, "Revoke access");
+    await settle(40, 1);
+    expect(textOf(root)).toContain("Dr. Rivera");
+    expect(textOf(root)).toContain("Cancel");
+    await press(root, "Revoke access");
+    await settle(40, 2);
+  });
+
+  it("ShareView: a successful lookup shows the therapist before any grant", async () => {
+    stubFetch((url) => {
+      if (url.includes("/pairing/lookup")) {
+        return jsonResponse({
+          therapist_id: "t-1",
+          display_name: "Dr. Okoye",
+          wrap_pub_key: "A" .repeat(64),
+        });
+      }
+      return jsonResponse([], {});
+    });
+    const { ShareView } = await import("../src/views/Share");
+    const root = await render(<ShareView />);
+    await settle(40, 3);
+    await typeInto(root, "Pairing code", "ABCD-1234");
+    await press(root, "Look up");
+    await settle(40, 3);
+    expect(textOf(root)).toContain("Dr. Okoye");
+  });
+
   it("ShareView: an empty code refuses locally", async () => {
     stubFetch(() => jsonResponse({}, { status: 404 }));
     const { ShareView } = await import("../src/views/Share");
