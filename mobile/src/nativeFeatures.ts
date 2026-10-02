@@ -44,8 +44,16 @@ export interface NativeCapability {
 
 function probe(moduleName: string): unknown | null {
   try {
+    // Metro resolves only string-literal require() specifiers — a variable
+    // argument fails the entire bundle ("Invalid call at line N:
+    // require(moduleName)"), so this seam's optional module is enumerated
+    // as a literal rather than required through the parameter. In vitest's
+    // ESM runner `require` is not defined, so the ReferenceError reads as
+    // "absent" and probeAsync falls through to the mock-interceptable
+    // import() below.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require(moduleName);
+    const mod =
+      moduleName === "@notifee/react-native" ? require("@notifee/react-native") : null;
     return mod ?? null;
   } catch {
     return null;
@@ -53,15 +61,18 @@ function probe(moduleName: string): unknown | null {
 }
 
 /** Async resolution for the ACTION seams: the synchronous require first
- *  (the RN bundler path — a linked module resolves statically), then a
- *  dynamic import so test builds can inject the module through the module
- *  runner (vi.mock intercepts `import()`, not `require()`). Both failures
- *  read as "absent" — never a throw. */
+ * (the RN bundler path — a linked module resolves statically), then a
+ * dynamic import so test builds can inject the module through the module
+ * runner (vi.mock intercepts `import()`, not `require()`). Both failures
+ * read as "absent" — never a throw. The import specifier is a literal for
+ * the same Metro reason as the require above. */
 async function probeAsync(moduleName: string): Promise<unknown | null> {
   const mod = probe(moduleName);
   if (mod !== null) return mod;
   try {
-    return await import(moduleName);
+    return moduleName === "@notifee/react-native"
+      ? await import("@notifee/react-native")
+      : null;
   } catch {
     return null;
   }
@@ -142,14 +153,14 @@ function reminderNotification(): {
 } {
   return {
     id: REMINDER_NOTIFICATION_ID,
-    title: "MindPattern",
+    title: "Fathom",
     body: t("notify.reminderBody"),
     android: { channelId: REMINDER_CHANNEL_ID },
   };
 }
 
 /** The measure check-in nudge: same brand title, same channel (one honest
- *  "MindPattern reminders" surface in system settings), its own stable id
+ *  "Fathom reminders" surface in system settings), its own stable id
  *  and its own calm body — an invitation to re-run a questionnaire, never
  *  a debt (no "overdue", no streak, nothing to feel bad about). */
 function measureReminderNotification(): {
@@ -160,7 +171,7 @@ function measureReminderNotification(): {
 } {
   return {
     id: MEASURE_REMINDER_NOTIFICATION_ID,
-    title: "MindPattern",
+    title: "Fathom",
     body: t("notify.measureReminderBody"),
     android: { channelId: REMINDER_CHANNEL_ID },
   };

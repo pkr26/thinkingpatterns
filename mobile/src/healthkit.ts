@@ -35,12 +35,12 @@
  *  - A linked module that lacks saveStateOfMind (pre-iOS-18 State of Mind
  *    support) reads as unavailable with its own reason, not as broken.
  *
- * PRIVACY POSTURE — v1 scope is WRITE-ONLY: MindPattern mirrors the
+ * PRIVACY POSTURE — v1 scope is WRITE-ONLY: Fathom mirrors the
  * user's own explicit mood check-in OUT to the Health app on this device;
  * it never reads anything from Health. No read permission is requested,
- * no Health data crosses into MindPattern, and the Settings copy says so.
+ * no Health data crosses into Fathom, and the Settings copy says so.
  * Turning the preference off stops future writes; what the Health app
- * already holds stays in Health (MindPattern cannot and will not delete
+ * already holds stays in Health (Fathom cannot and will not delete
  * from it).
  *
  * The preference record (mirrorMoodToHealth, default OFF) follows the
@@ -59,8 +59,16 @@ const HEALTH_MODULE = "react-native-health";
 
 function probe(moduleName: string): unknown | null {
   try {
+    // Metro resolves only string-literal require() specifiers — a variable
+    // argument fails the entire bundle ("Invalid call at line N:
+    // require(moduleName)"), so this seam's optional module is enumerated
+    // as a literal rather than required through the parameter. In vitest's
+    // ESM runner `require` is not defined, so the ReferenceError reads as
+    // "absent" and probeAsync falls through to the mock-interceptable
+    // import() below. (Same idiom as nativeFeatures.ts.)
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require(moduleName);
+    const mod =
+      moduleName === HEALTH_MODULE ? require("react-native-health") : null;
     return mod ?? null;
   } catch {
     return null;
@@ -68,22 +76,24 @@ function probe(moduleName: string): unknown | null {
 }
 
 /** Async resolution for the ACTION seams: the synchronous require first
- *  (the RN bundler path — a linked module resolves statically), then a
- *  dynamic import so test builds can inject the module through the module
- *  runner (vi.mock intercepts `import()`, not `require()`). Both failures
- *  read as "absent" — never a throw. (Same idiom as nativeFeatures.ts.) */
+ * (the RN bundler path — a linked module resolves statically), then a
+ * dynamic import so test builds can inject the module through the module
+ * runner (vi.mock intercepts `import()`, not `require()`). Both failures
+ * read as "absent" — never a throw. The import specifier is a literal for
+ * the same Metro reason as the require above. (Same idiom as
+ * nativeFeatures.ts.) */
 async function probeAsync(moduleName: string): Promise<unknown | null> {
   const mod = probe(moduleName);
   if (mod !== null) return mod;
   try {
-    return await import(moduleName);
+    return moduleName === HEALTH_MODULE ? await import("react-native-health") : null;
   } catch {
     return null;
   }
 }
 
 /** The five HKStateOfMind valence classifications, most unpleasant first.
- *  HealthKit's valence is a DISCRETE -2..2 classification; MindPattern's
+ *  HealthKit's valence is a DISCRETE -2..2 classification; Fathom's
  *  check-in scale is CONTINUOUS [-1, 1] (src/mood.ts), so the mirror
  *  quantizes before writing. */
 export type StateOfMindKind =

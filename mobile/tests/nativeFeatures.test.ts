@@ -53,7 +53,7 @@ describe("scheduleDailyReminder", () => {
     // trigger; a stable id replaces the previous schedule instead.
     expect(notification).toEqual({
       id: "mindpattern-daily-reminder",
-      title: "MindPattern",
+      title: "Fathom",
       body: "A quiet moment to write, whenever it suits you.",
       android: { channelId: "mindpattern-reminders" },
     });
@@ -227,7 +227,7 @@ describe("notification copy resolves through the catalog (audit fix 22, 2026-09-
         name: "Recordatorios del diario",
       });
       // …but the app-name title is the brand and never translates.
-      expect(notification.title).toBe("MindPattern");
+      expect(notification.title).toBe("Fathom");
     } finally {
       __setLocaleForTests("en");
     }
