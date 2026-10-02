@@ -15,24 +15,24 @@
 import { useState, type ReactNode } from "react";
 
 /** Mirrors the CSS custom properties in public/portal.css (guarded by
- *  tests/designTokens.test.ts). 2026-09-29 user-directed wave: the violet
- *  accent retired for TEAL (#0c7268 family); gold/orange/red tones stay
- *  (see the token block in the CSS for the recomputed WCAG ratios). The
- *  tone keys still mirror the colors those tones actually RENDER text
- *  with (the *-strong variants). */
+ *  tests/designTokens.test.ts). 2026-10-02 palette wave: the portal
+ *  adopts the patient web app's DARK theme (warm charcoal + sage — the
+ *  web app's [data-theme="dark"] tokens ported verbatim); the tone keys
+ *  still mirror the colors those tones actually RENDER text with (the
+ *  *-strong variants). */
 export const theme = {
-  bg: "#0d1219",
-  card: "#151b28",
-  cardDeep: "#101622",
-  text: "#e8edf6",
-  body: "#c6cfdd",
-  muted: "#8a95a3",
-  accent: "#0c7268",
-  accentBright: "#7ce4d2",
-  danger: "#f0a89e",
-  ok: "#e3c87d",
-  warn: "#e8a36b",
-  border: "#232b3b",
+  bg: "#211e1a",
+  card: "#2a2620",
+  cardDeep: "#232019",
+  text: "#ede8df",
+  body: "#cfc7ba",
+  muted: "#a29a8c",
+  accent: "#a9cba4",
+  accentBright: "#b7d5b2",
+  danger: "#eba49b",
+  ok: "#93c7a6",
+  warn: "#dcae6c",
+  border: "#3a352c",
   radius: 12,
 };
 

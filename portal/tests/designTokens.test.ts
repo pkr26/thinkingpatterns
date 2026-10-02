@@ -81,9 +81,12 @@ describe("design tokens: JS mirrors CSS", () => {
   it("the token set this suite depends on exists (guards against silent renames)", () => {
     // 2026-09-26 audit P3: --body (renamed from --body-c to match web)
     // and --info-accent (the de-hardcoded info accent) are load-bearing.
+    // 2026-10-02 wave: --primary-contrast/--danger-contrast are the
+    // button label colors (the dark-theme fill inversion).
     for (const name of [
       "body", "info-accent", "primary", "primary-hover", "primary-strong",
-      "primary-focus", "danger", "danger-hover", "danger-strong",
+      "primary-focus", "primary-contrast", "danger", "danger-hover",
+      "danger-strong", "danger-contrast",
       "warn-strong", "warn-soft", "ok-strong", "surface", "surface-deep",
     ]) {
       expect(cssToken(name), `--${name} defined`).toMatch(/^#[0-9a-f]{6}$/);
@@ -99,15 +102,17 @@ function cssTokenPx(name: string): string {
 }
 
 describe("design tokens: WCAG contrast floors (computed from the parsed CSS)", () => {
-  const WHITE = "#ffffff"; // the .btn label color
-
+  // 2026-10-02 palette wave (ported from the patient web app's dark
+  // theme): buttons are LIGHT sage/coral fills carrying DARK
+  // *-contrast labels — the label color is itself a resolved token
+  // pair, exactly like web/tests/designTokens.test.ts's
+  // "primary button label" cases.
   const cases: { fg: string; bg: string; min: number; label: string }[] = [
-    // The four button pairs the audit failed (P2): white labels on the
-    // primary/danger rest AND hover states.
-    { fg: WHITE, bg: cssToken("primary"), min: 4.5, label: "btn label on --primary" },
-    { fg: WHITE, bg: cssToken("primary-hover"), min: 4.5, label: "btn label on --primary-hover" },
-    { fg: WHITE, bg: cssToken("danger"), min: 4.5, label: "danger btn label on --danger" },
-    { fg: WHITE, bg: cssToken("danger-hover"), min: 4.5, label: "danger btn label on --danger-hover" },
+    // The four button pairs (rest AND hover states).
+    { fg: cssToken("primary-contrast"), bg: cssToken("primary"), min: 4.5, label: "btn label on --primary" },
+    { fg: cssToken("primary-contrast"), bg: cssToken("primary-hover"), min: 4.5, label: "btn label on --primary-hover" },
+    { fg: cssToken("danger-contrast"), bg: cssToken("danger"), min: 4.5, label: "danger btn label on --danger" },
+    { fg: cssToken("danger-contrast"), bg: cssToken("danger-hover"), min: 4.5, label: "danger btn label on --danger-hover" },
     // Body/muted text roles.
     { fg: cssToken("body"), bg: cssToken("bg"), min: 4.5, label: "body text on --bg" },
     { fg: cssToken("muted"), bg: cssToken("surface"), min: 4.5, label: "muted text on card (--surface)" },
@@ -145,9 +150,9 @@ describe("design tokens: WCAG contrast floors (computed from the parsed CSS)", (
     expect(contrast(fg, bg)).toBeGreaterThanOrEqual(min);
   });
 
-  it("hover states DARKEN (contrast increases on hover), mirroring the web app's pattern", () => {
-    expect(contrast(WHITE, cssToken("primary-hover"))).toBeGreaterThan(contrast(WHITE, cssToken("primary")));
-    expect(contrast(WHITE, cssToken("danger-hover"))).toBeGreaterThan(contrast(WHITE, cssToken("danger")));
+  it("hover states BRIGHTEN while label contrast still increases (the web app's dark-theme pattern)", () => {
+    expect(contrast(cssToken("primary-contrast"), cssToken("primary-hover"))).toBeGreaterThan(contrast(cssToken("primary-contrast"), cssToken("primary")));
+    expect(contrast(cssToken("danger-contrast"), cssToken("danger-hover"))).toBeGreaterThan(contrast(cssToken("danger-contrast"), cssToken("danger")));
   });
 
   it("2026-09-29 audit follow-up: the checkbox accent-color is --primary-focus, never the base accent", () => {

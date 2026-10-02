@@ -1,5 +1,5 @@
 /* ============================================================================
-   MindPattern Therapist Portal — design system (redesign 2026-09-26).
+   Fathom Therapist Portal — design system (redesign 2026-09-26).
 
    The portal keeps its clinical dark identity but moves onto the same
    token architecture as the patient app: CSS custom properties in this
@@ -14,69 +14,61 @@
 :root {
   color-scheme: dark;
 
-  --bg: #0d1219;
-  --surface: #151b28;
-  --surface-deep: #101622;
+  /* 2026-10-02 palette wave: the portal adopts the patient web app's
+   * DARK theme verbatim (web/public/app.css [data-theme="dark"]) — warm
+   * charcoal surfaces, sage primary, lavender quiet cues — so both
+   * Fathom surfaces speak the same visual language. The button pattern
+   * follows the web app too: LIGHT sage/coral fills with dark
+   * *-contrast labels (the dark-theme inversion), instead of dark fills
+   * with white labels. */
+  --bg: #211e1a;
+  --surface: #2a2620;
+  --surface-deep: #232019;
 
-  --text: #e8edf6;
-  --body: #c6cfdd;
-  --muted: #8a95a3;
+  --text: #ede8df;
+  --body: #cfc7ba;
+  --muted: #a29a8c;
 
-  /* --------------------------------------------------------------- *
-   *  Button palette (2026-09-29 user-directed wave — teal accent on
-   *  the unchanged dark base; the gold/orange/red tones stay). Every
-   *  pair below was verified against the WCAG 2.x relative-luminance
-   *  formula — L = 0.2126·R' + 0.7152·G' + 0.0722·B', where each
-   *  channel is c/12.92 when c ≤ 0.04045, else ((c+0.055)/1.055)^2.4,
-   *  and the contrast ratio is (L1+0.05)/(L2+0.05) — with a #fff label:
-   *
-   *    --primary        #0c7268  L = 0.13112  → 5.80:1
-   *    --primary-hover  #085b53  L = 0.08158  → 7.98:1
-   *    --danger         #c2483a  L = 0.16411  → 4.90:1
-   *    --danger-hover   #a83a2e  L = 0.11550  → 6.35:1
-   *
-   *  Hovers stay DARKER than the rest state so contrast INCREASES on
-   *  hover. --primary-strong is the accent safe as TEXT on dark
-   *  surfaces (#7ce4d2 = 12.42:1 on --bg, 11.39:1 on --surface and
- *  9.90:1 on --primary-soft; plain --primary there reaches only
- *  2.97–3.24:1, so ghost-button labels and other accent text use the
- *  strong form). --primary-focus is the focus-indicator teal: 7.73–9.70:1
-   *  on EVERY dark surface — the page bg, both card surfaces AND the
-   *  banner softs (warn/danger/primary) — far above the 3:1 WCAG
-   *  1.4.11 non-text floor; it is also the checkbox accent-color.
-   *  --------------------------------------------------------------- */
-  --primary: #0c7268;
-  --primary-hover: #085b53;
-  --primary-strong: #7ce4d2;
-  --primary-focus: #3fcfb9;
-  --primary-soft: #122b28;
-  --primary-border: #2f5d55;
-  --primary-ring: rgba(63, 207, 185, 0.30);
+  /* Button palette (ported; every pair is enforced ≥4.5:1 by
+   * tests/designTokens.test.ts, computed from these values):
+   *    --primary-contrast  on --primary       and --primary-hover
+   *    --danger-contrast   on --danger        and --danger-hover
+   *  --primary-strong is the accent safe as TEXT on dark surfaces (the
+   * ghost-button label and sparkline stroke). --primary-focus is the
+   * focus indicator and checkbox accent-color, held ≥3:1 on every dark
+   * surface including the banner softs (WCAG 1.4.11 non-text). */
+  --primary: #a9cba4;
+  --primary-hover: #b7d5b2;
+  --primary-strong: #b7d5b2;
+  --primary-contrast: #1e1c17;
+  --primary-focus: #b7d5b2;
+  --primary-soft: #31402f;
+  --primary-border: #445742;
+  --primary-ring: rgba(169, 203, 164, 0.26);
 
-  --danger: #c2483a;
-  --danger-hover: #a83a2e;
-  --danger-strong: #f0a89e;
-  --danger-soft: #2c1a17;
-  --danger-border: #5e332c;
+  --danger: #d98a80;
+  --danger-hover: #e09a91;
+  --danger-strong: #eba49b;
+  --danger-contrast: #2a1210;
+  --danger-soft: #452723;
+  --danger-border: #6e3a33;
 
-  /* Success stays warm GOLD and warn ORANGE (2026-09-28 wave, kept).
-   * 2026-09-29: the unused base --ok/--warn tokens are GONE — nothing
-   * has rendered with them since the pw-meter fills moved to the
-   * *-strong variants; only the *-strong text tones exist now
-   * (#e3c87d on --bg = 11.47:1; #e8a36b on --warn-soft = 7.47:1). The
-   * pw-meter ladder is red/orange/teal/gold — four distinct hues that
-   * never lean on color alone (bar count + label carry the level). */
-  --ok-strong: #e3c87d;
+  /* Success/warn keep their tone roles in the web app's dark values
+   * (only the *-strong text tones exist; the pw-meter ladder is
+   * red/orange/sage/gold — four distinct hues that never lean on color
+   * alone; bar count + label carry the level). */
+  --ok-strong: #93c7a6;
 
-  --warn-strong: #e8a36b;
-  --warn-soft: #2c2013;
+  --warn-strong: #dcae6c;
+  --warn-soft: #40331f;
 
-  /* Info accent: the one pale-aqua info text color (#aeebe0 on
-   * --primary-soft = 11.24:1 and on --surface-deep = 13.59:1). */
-  --info-accent: #aeebe0;
+  /* Info accent: the web app's lavender quiet/sensitive cue in its
+   * text-grade strong form (safe on --primary-soft and every dark
+   * surface; enforced by tests/designTokens.test.ts). */
+  --info-accent: #c7bdee;
 
-  --border: #232b3b;
-  --border-strong: #323c50;
+  --border: #3a352c;
+  --border-strong: #4a443a;
 
   --radius-sm: 8px;
   --radius: 12px;
@@ -88,8 +80,8 @@
   --text-md: 15px;
   --text-lg: 17px;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.25), 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
 * { box-sizing: border-box; }
@@ -129,16 +121,17 @@ h1, h2, h3, h4, p { margin: 0; }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: none; cursor: pointer; font: inherit; font-weight: 600;
   border-radius: var(--radius-pill); padding: 10px 18px; font-size: var(--text-md);
-  background: var(--primary); color: #fff; box-shadow: var(--shadow-sm);
+  background: var(--primary); color: var(--primary-contrast); box-shadow: var(--shadow-sm);
   transition: background-color 140ms ease, transform 120ms ease, opacity 140ms ease, box-shadow 200ms ease;
 }
 .btn:hover:not(:disabled) { background: var(--primary-hover); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-.btn--danger { background: var(--danger); }
+.btn--danger { background: var(--danger); color: var(--danger-contrast); }
 .btn--danger:hover:not(:disabled) { background: var(--danger-hover); }
-/* Ghost label uses --primary-strong: it is TEXT on the page background,
- * where the raw button accent misses AA (4.00:1 — see the token block). */
+/* Ghost label uses --primary-strong: it is TEXT on the page background
+ * (the dark-theme pattern: light-sage fill buttons carry dark
+ * *-contrast labels; text accents use the strong form). */
 .btn--ghost { background: transparent; color: var(--primary-strong); border: 1.5px solid var(--border-strong); box-shadow: none; }
 .btn--ghost:hover:not(:disabled) { background: var(--primary-soft); border-color: var(--primary); }
 .btn--small { padding: 6px 13px; font-size: var(--text-sm); }

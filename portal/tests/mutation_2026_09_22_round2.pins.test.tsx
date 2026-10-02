@@ -424,20 +424,20 @@ describe("round 2: App idle lock and session races", () => {
 // ---------------------------------------------------------------------------
 
 describe("round 2: ui theme and tones", () => {
-  it("the theme table is exactly the clinical palette (2026-09-29 teal wave: teal accent, gold ok, orange warn — every tone ≥4.5:1 as text on the dark surfaces, see tests/designTokens.test.ts)", () => {
+  it("the theme table is exactly the patient web app's dark palette (2026-10-02 wave: warm charcoal + sage ported from web/public/app.css — every tone ≥4.5:1 as text on the dark surfaces, see tests/designTokens.test.ts)", () => {
     expect(ui.theme).toEqual({
-      bg: "#0d1219",
-      card: "#151b28",
-      cardDeep: "#101622",
-      text: "#e8edf6",
-      body: "#c6cfdd",
-      muted: "#8a95a3",
-      accent: "#0c7268",
-      accentBright: "#7ce4d2",
-      danger: "#f0a89e",
-      ok: "#e3c87d",
-      warn: "#e8a36b",
-      border: "#232b3b",
+      bg: "#211e1a",
+      card: "#2a2620",
+      cardDeep: "#232019",
+      text: "#ede8df",
+      body: "#cfc7ba",
+      muted: "#a29a8c",
+      accent: "#a9cba4",
+      accentBright: "#b7d5b2",
+      danger: "#eba49b",
+      ok: "#93c7a6",
+      warn: "#dcae6c",
+      border: "#3a352c",
       radius: 12,
     });
   });
