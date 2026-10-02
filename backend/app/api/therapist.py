@@ -2104,7 +2104,7 @@ async def rekey_notes(
         )
     await _require_verifier(user, verifier, request, session)
 
-    decoded: list[tuple[TherapistNote, bytes, list[tuple[object, bytes]]]] = []
+    decoded: list[tuple[TherapistNote, bytes, list[tuple[TherapistNoteRevision, bytes]]]] = []
     # Decode + ownership + length-parity checks FIRST, one transaction;
     # the swaps then run under the therapist-wide notes lock.
     for item in body.items:
@@ -2133,7 +2133,7 @@ async def rekey_notes(
                 detail="rekey blob length mismatch (the content must be unchanged)",
                 code="validation_error",
             )
-        rev_pairs: list[tuple[object, bytes]] = []
+        rev_pairs: list[tuple[TherapistNoteRevision, bytes]] = []
         for rev_item in item.revision_blobs:
             try:
                 rev_blob = base64.b64decode(rev_item.blob, validate=True)

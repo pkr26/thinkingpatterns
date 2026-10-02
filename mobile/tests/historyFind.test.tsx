@@ -2,7 +2,7 @@
  * History search + mood calendar (2026-09-17): pure-function pins for the
  * filter and the month grid, plus component behavior for the calendar.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { filterEntries, monthGrid, monthLabel, stepMonth } = await import("../src/historyFind");
 const { MoodCalendar } = await import("../src/components/MoodCalendar");
@@ -85,6 +85,16 @@ describe("monthGrid", () => {
 });
 
 describe("MoodCalendar", () => {
+  // The calendar opens on the CURRENT month and these fixtures journal
+  // September 2026 — pin the clock (Date only; timers stay real) so the
+  // journaled-day taps are deterministic on any day the suite runs.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 15, 12, 0, 0) });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const dayMoods = { "2026-09-01": 0.5, "2026-09-02": -0.8 };
 
   async function calendar(overrides?: Partial<Parameters<typeof MoodCalendar>[0]>) {

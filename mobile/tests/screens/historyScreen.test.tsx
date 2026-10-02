@@ -1597,6 +1597,18 @@ describe("HistoryScreen edit: the two-writer conflict dialog (audit 2026-09-25)"
 });
 
 describe("history date-jump (2026-09-30 wave 1): month navigation loads older windows", () => {
+  // The fixtures place "today" in September 2026 (newest entry 09-20, the
+  // covered-window test's oldest loaded day 08-05); pin the clock to the
+  // wave's own date so the covered/uncovered-month arithmetic is
+  // deterministic on any later day (Date only — flush()'s real timers
+  // keep working).
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 30, 12, 0, 0) });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("navigating the calendar to an older month fetches exactly that window and merges its rows", async () => {
     // The newest window holds one recent entry; the older month's row is
     // unreachable through the linear newest-first pages.

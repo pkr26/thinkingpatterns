@@ -714,3 +714,39 @@ describe("QuestionScreen feedback attribution (pattern_pid)", () => {
     expect(textOf(root)).not.toContain("Not me");
   });
 });
+
+describe("lossy-write and broken-session degradation (2026-10-01 coverage debt)", () => {
+  it("a consent write that fails still proceeds — the explainer is lossy, the flow is not", async () => {
+    await storage.removeItem(CONSENT_KEY);
+    vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+    vi.mocked(api.questionToday)
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // mount auto-load: stops at the key step
+      .mockRejectedValueOnce(new ApiError(404, "not found")) // the press's phase-2 read
+      .mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("What repeats?") } as never);
+    vi.mocked(api.recompute).mockResolvedValue({ question_stored: true } as never);
+    const root = await render(<QuestionScreen />);
+    await flush();
+    await pressLabel(root, "Show today's question");
+    await flush();
+    // The acknowledgment write fails; its catch must swallow exactly that.
+    const setItem = vi.spyOn(storage, "setItem").mockRejectedValueOnce(new Error("disk full"));
+    await pressAlertButton("Continue");
+    await flush();
+    expect(setItem).toHaveBeenCalled();
+    expect(await storage.getItem(CONSENT_KEY)).toBeNull(); // the write really was lost
+    expect(textOf(root)).toContain("What repeats?"); // the question still computed
+    setItem.mockRestore();
+  });
+
+  it("'Write about this' with a broken session id degrades to the session-damaged dialog", async () => {
+    vi.mocked(api.insights).mockResolvedValue({ phase: "baseline", active_days: 4, days_remaining: 26 } as never);
+    const nav = { navigate: vi.fn() };
+    const root = await render(<QuestionScreen navigation={nav} />);
+    await flush();
+    vi.mocked(api.getUserId).mockRejectedValueOnce(new Error("session gone"));
+    await pressLabel(root, "Write about this");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Session damaged", "Account id missing — please sign in again.");
+    expect(nav.navigate).not.toHaveBeenCalled();
+  });
+});

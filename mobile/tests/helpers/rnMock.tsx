@@ -115,3 +115,11 @@ export const AppState = {
   currentState: "active" as string,
   addEventListener: vi.fn((_type: string, _listener: (state: string) => void) => ({ remove: vi.fn() })),
 };
+
+/** Pressable host: the ErrorBoundary fallback's buttons (and any future
+ *  Pressable call sites) keep their handler props reachable for tests. */
+export const Pressable = host("Pressable");
+
+/** Linking spy: crisis-resource escapes (ErrorBoundary, crisis screens)
+ *  must never follow a real URL from a test; the spy records the target. */
+export const Linking = { openURL: vi.fn(async () => true) };

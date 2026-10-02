@@ -64,10 +64,13 @@ function stubRecorderGlobals(): void {
     window: Window & typeof globalThis & Record<string, unknown>;
   }).window;
   if (win && typeof win.setInterval !== "function") {
-    win.setInterval = (fn: () => void, _ms?: number) => {
+    // The window timer here is the DOM∩NodeJS intersection type (DOM
+    // returns number, @types/node returns Timeout), which no real
+    // implementation can satisfy — the mock's shape is safe by construction.
+    win.setInterval = ((fn: () => void, _ms?: number) => {
       void fn();
       return 0 as unknown as number;
-    };
+    }) as unknown as typeof win.setInterval;
     win.clearInterval = () => undefined;
     win.requestAnimationFrame = () => 0;
     win.cancelAnimationFrame = () => undefined;

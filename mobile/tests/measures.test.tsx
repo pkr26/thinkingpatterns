@@ -30,7 +30,7 @@ const {
   phq9Item9Endorsed,
   phq9Payload,
 } = await import("../src/phq9");
-const { render, flush, textOf, pressLabel, touchableByLabel, act } = await import("./helpers/rtr");
+const { render, flush, textOf, pressLabel, pressAlertButton, touchableByLabel, act } = await import("./helpers/rtr");
 const { resetApi } = await import("./helpers/apiMock");
 const storage = (await import("./helpers/storageMock")).default;
 
@@ -535,5 +535,50 @@ describe("MeasuresScreen pending-measure persistence (2026-09-26 audit LOW)", ()
       );
       expect(await loadPendingMeasure(dataKey, USER)).toBeNull();
     });
+  });
+});
+
+describe("the item-9 crisis dialog's escapes (2026-10-01 coverage debt)", () => {
+  // The dialog itself is pinned above (copy, Spanish, dismissibility) — but
+  // its button onPress arrows never fired in any test: the support routing
+  // was asserted only by absence. These fire both buttons on both paths.
+
+  async function answerAll(root: Awaited<ReturnType<typeof render>>, item9: string): Promise<void> {
+    for (let i = 0; i < PHQ9_ITEMS.length; i++) {
+      await pressOption(root, `Question ${i + 1}: ${i === 8 ? item9 : "Not at all"}`);
+    }
+  }
+
+  it("online: View support resources → Crisis, Make a safety plan → SafetyPlan", async () => {
+    const nav = { navigate: vi.fn(), goBack: vi.fn() };
+    const root = await render(<MeasuresScreen navigation={nav} />);
+    await flush();
+    await answerAll(root, "Several days");
+    await pressLabel(root, "Record this check-in");
+    await flush();
+    expect(Alert.alert).toHaveBeenCalledWith("Support is available", expect.anything(), expect.anything());
+    await pressAlertButton("View support resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+    await pressAlertButton("Make a safety plan");
+    expect(nav.navigate).toHaveBeenCalledWith("SafetyPlan");
+  });
+
+  it("offline (M4): an endorsed safety item still offers support, routed the same way", async () => {
+    vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
+    const nav = { navigate: vi.fn(), goBack: vi.fn() };
+    const root = await render(<MeasuresScreen navigation={nav} />);
+    await flush();
+    await answerAll(root, "More than half the days");
+    await pressLabel(root, "Record this check-in");
+    await flush();
+    // The pending record persisted BEFORE the send — the answers are safe,
+    // so the support pointer is owed in the moment, not after a retry.
+    expect(Alert.alert).toHaveBeenCalledWith("Support is available", expect.anything(), expect.anything());
+    await pressAlertButton("View support resources");
+    expect(nav.navigate).toHaveBeenCalledWith("Crisis");
+    await pressAlertButton("Make a safety plan");
+    expect(nav.navigate).toHaveBeenCalledWith("SafetyPlan");
+    // The honest offline status still follows the dialog.
+    expect(textOf(root)).toContain("needs a connection");
   });
 });

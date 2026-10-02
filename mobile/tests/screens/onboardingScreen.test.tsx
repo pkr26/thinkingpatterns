@@ -271,3 +271,32 @@ describe("E-10 panel resume (audit round 2, 2026-09-21, F-11)", () => {
     expect(await storage.getItem(PANEL_KEY)).toBeNull();
   });
 });
+
+describe("degradation paths (2026-10-01 coverage debt): a failing account read never blocks", () => {
+  it("the final button still lands on Entry when the account read fails", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush(); // the mount seen-check used the default (resolved) mock
+    await pressLabel(root, "Continue");
+    await pressLabel(root, "Continue");
+    vi.mocked(api.getUserId).mockRejectedValueOnce(new Error("storage gone"));
+    await pressLabel(root, "I understand — start writing");
+    await flush();
+    // The completion write is best-effort by design; the route swap is not.
+    expect(nav.replace).toHaveBeenCalledWith("Entry");
+  });
+
+  it("toggling the reminder with a failed account read opts out silently", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    const find = () =>
+      root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder")!;
+    vi.mocked(api.getUserId).mockRejectedValueOnce(new Error("storage gone"));
+    await act(async () => {
+      find().props.onValueChange?.(true);
+    });
+    await flush();
+    // The row toggled visually, nothing persisted, nothing threw.
+    expect(await storage.getItem("@mindpattern/reminders_user-1")).toBeNull();
+    expect(find().props.value).toBe(true);
+  });
+});
