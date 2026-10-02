@@ -1,4 +1,4 @@
-# One Mind PsyberGuide self-assessment — MindPattern
+# One Mind PsyberGuide self-assessment — Fathom
 
 PsyberGuide's three criteria: **credibility, user experience, data
 security** (expert scores do not track star ratings — Neary et al. 2021:

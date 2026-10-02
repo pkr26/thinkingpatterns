@@ -1,4 +1,4 @@
-# Operator & compliance pack — MindPattern
+# Operator & compliance pack — Fathom
 
 Everything an operator needs to review, complete, and sign before
 serving this product to the public. Each document states what the

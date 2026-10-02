@@ -1,4 +1,4 @@
-# MindPattern web client (patient)
+# Fathom web client (patient)
 
 The patient-facing web app — the mobile app's journaling experience in
 the browser, against the same FastAPI backend, with the same

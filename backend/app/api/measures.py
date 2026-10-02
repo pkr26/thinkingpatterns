@@ -7,7 +7,7 @@ calendar date, the ciphertext, and its size. The PATIENT decides to share
 by the same therapist-consent machinery as patterns and entries — the
 therapist portal decrypts with the per-consent unwrapped data key.
 
-Why the app never interprets a score: MindPattern's charter is
+Why the app never interprets a score: Fathom's charter is
 observations, not diagnosis. A patient-entered measure shared with THEIR
 clinician keeps interpretation where it belongs — the clinician's — while
 giving them trend data between sessions. The sharing disclosure copy

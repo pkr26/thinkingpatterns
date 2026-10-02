@@ -78,7 +78,7 @@ function BootSplash(): React.JSX.Element {
   return (
     <View style={[styles.splash, { backgroundColor: t.colors.bg }]}>
       <Text style={[styles.brand, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
-        MindPattern
+        Fathom
       </Text>
       <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
         {/* 2026-09-26 audit M-M4: the tagline was hardcoded English while

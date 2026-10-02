@@ -69,7 +69,7 @@ describe("password policy", () => {
     // 17 chars, three classes — passes length+variety, dies on "password":
     expect(passwordPolicyError("passwordpassword1!")).toContain("too common");
     expect(passwordPolicyError("MyJournal2026!x")).toContain("too common"); // "journal"
-    expect(passwordPolicyError("correct-horse-MindPattern-7")).toContain("too common"); // "mindpattern"
+    expect(passwordPolicyError("correct-horse-Fathom-7")).toContain("too common"); // "mindpattern"
     expect(passwordPolicyError("welcome-to-the-Jungle99")).toContain("too common"); // "welcome"
     expect(passwordPolicyError("qwerty123456!X")).toContain("too common"); // keyboard walk "qwer"
     expect(passwordPolicyError("12345678abcd!Q")).toContain("too common"); // keyboard walk "1234"

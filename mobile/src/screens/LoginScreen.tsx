@@ -328,7 +328,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         keyboardShouldPersistTaps="handled"
       >
       <Text style={[styles.title, { color: t.colors.text }]} maxFontSizeMultiplier={1.6}>
-        MindPattern
+        Fathom
       </Text>
       <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
         {tr("login.subtitle")}

@@ -1,4 +1,4 @@
-# MindPattern web client — threat model (WEB_PLAN P9.1, 2026-09-25)
+# Fathom web client — threat model (WEB_PLAN P9.1, 2026-09-25)
 
 The patient web client carries the same zero-knowledge contract as the
 mobile app, plus the browser's own threat surface. This document names the

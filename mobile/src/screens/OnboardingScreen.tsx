@@ -1,6 +1,6 @@
 /**
  * First-run onboarding — three short, calm panels shown ONCE after a
- * registration (state in src/onboarding.ts): what MindPattern is, how the
+ * registration (state in src/onboarding.ts): what Fathom is, how the
  * encryption protects the journal (with the one honest exception), and the
  * no-recovery warning with the 18+ line (2026-09-27: the age floor moved
  * from 13+ to 18+ with the registration age gate — audit 2026-09-28 fixed

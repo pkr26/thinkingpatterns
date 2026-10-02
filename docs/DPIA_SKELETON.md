@@ -1,4 +1,4 @@
-# DPIA template — MindPattern deployment
+# DPIA template — Fathom deployment
 
 *(Renamed in content 2026-09-26: this file was "DPIA skeleton" — it is
 now a fill-in-and-SIGN template. The filename stays

@@ -1,4 +1,4 @@
-# Subprocessor / BAA register — MindPattern deployment (TEMPLATE)
+# Subprocessor / BAA register — Fathom deployment (TEMPLATE)
 
 Complete for YOUR deployment before enabling each processor. The
 product's defaults engage NONE of these rows (no LLM URL set, backups

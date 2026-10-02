@@ -1,6 +1,6 @@
 /**
  * The patient payload layer — entry envelopes (payload v1/v2), insights
- * and question blobs. Ported from mobile's MindPatternCrypto.ts (same
+ * and question blobs. Ported from mobile's FathomCrypto.ts (same
  * wire contract, same loud-fail version guards); the AEAD/AAD primitives
  * come from ./core (portal's WebCrypto implementation).
  */

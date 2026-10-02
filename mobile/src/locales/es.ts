@@ -122,7 +122,7 @@ export const es: Record<string, string> = {
   "crisis.go": "Ir",
   "crisis.actionA11y": "{label} — {detail}",
   "crisis.disclaimer":
-    "MindPattern es un diario que le muestra sus propios patrones. No es terapia, no es un dispositivo médico y no es un servicio de emergencia. Hablar con un profesional nunca es un paso equivocado.",
+    "Fathom es un diario que le muestra sus propios patrones. No es terapia, no es un dispositivo médico y no es un servicio de emergencia. Hablar con un profesional nunca es un paso equivocado.",
 
   // ---------------------------------------------------------------- unlock
   "unlock.title": "Bloqueado",
@@ -238,7 +238,7 @@ export const es: Record<string, string> = {
   // 2026-09-27: el mínimo de edad pasó a 18 con la puerta de edad del
   // registro (login.ageConfirm) — esta línea declara el mismo mínimo para
   // que nunca se contradigan.
-  "onboarding.ageNotice": "MindPattern es para personas de 18 años o más — al continuar, usted lo confirma.",
+  "onboarding.ageNotice": "Fathom es para personas de 18 años o más — al continuar, usted lo confirma.",
   "onboarding.start": "Entiendo — empezar a escribir",
   "onboarding.continueA11y": "Continuar al panel {next} de {total}",
 
@@ -816,7 +816,7 @@ export const es: Record<string, string> = {
   "settings.healthMirrorRow": "Reflejar mis registros de ánimo en la app Salud",
   "settings.healthMirrorA11y": "Reflejar mis registros de ánimo en la app Salud",
   "settings.healthMirrorNote":
-    "Cuando está activado, cada registro de ánimo explícito también se escribe en la app Salud de este dispositivo. MindPattern nunca lee nada de Salud. Al desactivarlo se detienen las futuras escrituras; lo que Salud ya guardó se queda ahí.",
+    "Cuando está activado, cada registro de ánimo explícito también se escribe en la app Salud de este dispositivo. Fathom nunca lee nada de Salud. Al desactivarlo se detienen las futuras escrituras; lo que Salud ya guardó se queda ahí.",
   "settings.healthMirrorUnavailableNote": "{reason}. La preferencia se guarda y el reflejo comenzará cuando esta versión incorpore el módulo de Salud.",
   "settings.reasonHealthModule": "El módulo de Salud no está incluido en esta versión",
   "settings.reasonHealthIOS18": "Estado de Ánimo de Apple Salud requiere iOS 18 o posterior",
@@ -838,7 +838,7 @@ export const es: Record<string, string> = {
   "settings.signOut": "Cerrar sesión",
   "settings.aboutLabel": "Acerca de",
   "settings.aboutBody":
-    "MindPattern {version}{server}. Todo lo que escribe se cifra en este dispositivo antes de salir de él. La única excepción — el análisis de patrones — corre en una sesión de un solo uso que usted mismo inicia. Sin consejos, sin diagnósticos, nunca.",
+    "Fathom {version}{server}. Todo lo que escribe se cifra en este dispositivo antes de salir de él. La única excepción — el análisis de patrones — corre en una sesión de un solo uso que usted mismo inicia. Sin consejos, sin diagnósticos, nunca.",
   "settings.serverVersionTag": " · servidor {version}",
   "settings.privacyPolicy": "Política de privacidad",
   "settings.privacyPolicyA11y": "Leer la política de privacidad",
@@ -852,7 +852,7 @@ export const es: Record<string, string> = {
   "measures.intro":
     // 2026-09-26 audit LOW: nombrar los tres instrumentos (desde 2026-09-21
     // la pantalla ofrece también GAD-7 y PHQ-2, no solo PHQ-9).
-    "Cuestionarios de bienestar estándar (PHQ-9, GAD-7 y PHQ-2), completados por usted. MindPattern guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
+    "Cuestionarios de bienestar estándar (PHQ-9, GAD-7 y PHQ-2), completados por usted. Fathom guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
   "measures.offlineNote":
     "Su historial registrado necesita conexión para cargarse. Completar el cuestionario también la necesita — nada aquí funciona aún sin conexión.",
   "measures.loadFailed": "No se pudieron cargar sus cuestionarios.",

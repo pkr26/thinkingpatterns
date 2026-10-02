@@ -106,7 +106,7 @@ export const en: Record<string, string> = {
   "crisis.go": "Go",
   "crisis.actionA11y": "{label} — {detail}",
   "crisis.disclaimer":
-    "MindPattern is a journal that shows you your own patterns. It is not therapy, not a medical device, and not an emergency service. Talking to a professional is never a wrong move.",
+    "Fathom is a journal that shows you your own patterns. It is not therapy, not a medical device, and not an emergency service. Talking to a professional is never a wrong move.",
 
   // ---------------------------------------------------------------- unlock
   "unlock.title": "Locked",
@@ -179,7 +179,7 @@ export const en: Record<string, string> = {
   "onboarding.stepOf": "{current} of {total}",
   "onboarding.remindQuestion": "Want a gentle reminder each day? You can change it anytime in Settings.",
   "onboarding.readPrivacy": "Read the privacy policy",
-  "onboarding.ageNotice": "MindPattern is for people 13 and older — by continuing you confirm that you are.",
+  "onboarding.ageNotice": "Fathom is for people 13 and older — by continuing you confirm that you are.",
   "onboarding.start": "I understand — start writing",
   "onboarding.continueA11y": "Continue to panel {next} of {total}",
 
@@ -665,7 +665,7 @@ export const en: Record<string, string> = {
   "settings.healthMirrorRow": "Mirror mood check-ins to the Health app",
   "settings.healthMirrorA11y": "Mirror mood check-ins to the Health app",
   "settings.healthMirrorNote":
-    "When on, each explicit mood check-in is also written to the Health app on this device. MindPattern never reads anything from Health. Turning this off stops future writes; what the Health app already holds stays there.",
+    "When on, each explicit mood check-in is also written to the Health app on this device. Fathom never reads anything from Health. Turning this off stops future writes; what the Health app already holds stays there.",
   "settings.healthMirrorUnavailableNote": "{reason}. The preference is saved and mirroring starts once this build links the Health module.",
   "settings.biometricLabel": "BIOMETRIC UNLOCK",
   "settings.biometricRow": "Unlock with your face or fingerprint",
@@ -684,7 +684,7 @@ export const en: Record<string, string> = {
   "settings.signOut": "Sign out",
   "settings.aboutLabel": "About",
   "settings.aboutBody":
-    "MindPattern {version}{server}. Everything you write is encrypted on this device before it leaves. The one exception — pattern analysis — runs in a single-use session you start yourself. No advice, no diagnosis, ever.",
+    "Fathom {version}{server}. Everything you write is encrypted on this device before it leaves. The one exception — pattern analysis — runs in a single-use session you start yourself. No advice, no diagnosis, ever.",
   "settings.serverVersionTag": " · server {version}",
   "settings.privacyPolicy": "Privacy policy",
   "settings.privacyPolicyA11y": "Read the privacy policy",
@@ -699,7 +699,7 @@ export const en: Record<string, string> = {
   // most safety-adjacent string class in the app and was hardcoded English
   // before the 2026-09-20 audit fix.
   "measures.intro":
-    "A standard wellbeing questionnaire (PHQ-9), completed by you. MindPattern stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
+    "A standard wellbeing questionnaire (PHQ-9), completed by you. Fathom stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
   "measures.offlineNote":
     "Your recorded history needs a connection to load. Completing the questionnaire also needs one — nothing here works offline yet.",
   "measures.loadFailed": "Could not load your measures.",
@@ -999,7 +999,7 @@ export const en: Record<string, string> = {
   "onboarding.webPanel1Title": "A journal that is yours alone",
   "onboarding.webPanel1Body": "Write daily. Everything you write is encrypted on this device before it leaves — the server stores only opaque ciphertext, forever. Not advice, not diagnosis: observations, each with its evidence.",
   "onboarding.webPanel2Title": "Thirty honest days",
-  "onboarding.webPanel2Body": "Patterns need data. For your first 30 active days you will see your streak and your local mood trend — and nothing else. After the threshold, MindPattern surfaces the patterns too slow for a human to notice: weekday themes, day-after links, returning worries.",
+  "onboarding.webPanel2Body": "Patterns need data. For your first 30 active days you will see your streak and your local mood trend — and nothing else. After the threshold, Fathom surfaces the patterns too slow for a human to notice: weekday themes, day-after links, returning worries.",
   "onboarding.webPanel3Title": "You are in control",
   "onboarding.webPanel3Body": "Share with a therapist only if you choose (revocable, encrypted end to end). Crisis help is one tap away on every screen, offline. Export or delete everything at any time — deletion is real and immediate.",
   "onboarding.webStart": "Start journaling",

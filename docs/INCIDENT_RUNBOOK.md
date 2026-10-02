@@ -1,4 +1,4 @@
-# MindPattern incident response runbook
+# Fathom incident response runbook
 
 **For a mental-health product, an outage or a safety defect is a safety
 issue, not just an SLO miss.** This runbook is the operator's checklist.
@@ -22,7 +22,7 @@ below plus a human watching them; wiring them to an on-call channel
 
 | Signal | Source | Notes |
 |---|---|---|
-| `MindPatternAPIDown`, `MindPatternHigh5xxRatio`, `MindPatternRecomputeP95Slow`, `MindPatternKeystoreSessionsStuck`, `MindPatternLLMFailureRatioHigh` | `deploy/monitoring/alerts.yml` | Check the Prometheus `/alerts` view (the keystore alert is the S1 plaintext-exposure tripwire — an unconsumed processing session). The rule set is drift-gated in CI: the `monitoring-verify` job runs `deploy/monitoring/verify.sh` on every PR. |
+| `FathomAPIDown`, `FathomHigh5xxRatio`, `FathomRecomputeP95Slow`, `FathomKeystoreSessionsStuck`, `FathomLLMFailureRatioHigh` | `deploy/monitoring/alerts.yml` | Check the Prometheus `/alerts` view (the keystore alert is the S1 plaintext-exposure tripwire — an unconsumed processing session). The rule set is drift-gated in CI: the `monitoring-verify` job runs `deploy/monitoring/verify.sh` on every PR. |
 | Liveness / readiness | `/healthz`, `/readyz` | Blackbox probe rules are shipped commented-out in `alerts.yml` — enable at deploy time. |
 | Backup freshness | `deploy/monitoring/check-backup-freshness.sh` + heartbeat rules | Run during any incident touching the host or DB (step 4 below). |
 | Attack-surface regression | weekly `redteam` CI job (Saturdays) | Fails on any new FINDING; the accepted standing set is registered in `docs/SECURITY_RESIDUALS.md`. |

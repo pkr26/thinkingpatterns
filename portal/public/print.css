@@ -1,5 +1,5 @@
 /* ============================================================================
-   MindPattern Therapist Portal — print stylesheet (2026-09-26 CSP
+   Fathom Therapist Portal — print stylesheet (2026-09-26 CSP
    hardening). Loaded via <link rel="stylesheet" media="print"> in
    index.html, so these rules apply ONLY under print; portal.css keeps the
    .print-only session summary hidden on screen.

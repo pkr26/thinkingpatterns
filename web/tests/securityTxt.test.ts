@@ -11,7 +11,7 @@ import {
   securityTxtPlaceholderFindings,
 } from "../tools/securityTxt.mjs";
 
-const TEMPLATE = `# RFC 9116 security contact for the MindPattern patient web client.
+const TEMPLATE = `# RFC 9116 security contact for the Fathom patient web client.
 Contact: mailto:security@example.com
 Expires: 2027-09-26T00:00:00.000Z
 Preferred-Languages: en, es

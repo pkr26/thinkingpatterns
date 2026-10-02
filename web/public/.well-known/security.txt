@@ -1,4 +1,4 @@
-# RFC 9116 security contact for the MindPattern patient web client.
+# RFC 9116 security contact for the Fathom patient web client.
 # Served from /.well-known/security.txt (and /.well-known/security.txt via
 # the SPA fallback) by the static host / nginx.
 #

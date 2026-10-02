@@ -358,7 +358,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
     <div className="login-wrap">
       <div className="login-hero">
         <Logo size={56} />
-        <span className="login-hero__title">MindPattern</span>
+        <span className="login-hero__title">Fathom</span>
         <span className="login-hero__tagline">{t("login.brandTagline")}</span>
       </div>
       <Card title={mode === "signin" ? t("login.webSignInTitle") : t("login.webRegisterTitle")}>

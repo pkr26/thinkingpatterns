@@ -121,7 +121,7 @@ export const en: Record<string, string> = {
   "crisis.go": "Go",
   "crisis.actionA11y": "{label} — {detail}",
   "crisis.disclaimer":
-    "MindPattern is a journal that shows you your own patterns. It is not therapy, not a medical device, and not an emergency service. Talking to a professional is never a wrong move.",
+    "Fathom is a journal that shows you your own patterns. It is not therapy, not a medical device, and not an emergency service. Talking to a professional is never a wrong move.",
 
   // ---------------------------------------------------------------- unlock
   "unlock.title": "Locked",
@@ -237,7 +237,7 @@ export const en: Record<string, string> = {
   // 2026-09-27: the age floor moved to 18 with the registration age gate
   // (login.ageConfirm) — the onboarding line states the same floor so the
   // two never disagree.
-  "onboarding.ageNotice": "MindPattern is for people 18 and older — by continuing you confirm that you are.",
+  "onboarding.ageNotice": "Fathom is for people 18 and older — by continuing you confirm that you are.",
   "onboarding.start": "I understand — start writing",
   "onboarding.continueA11y": "Continue to panel {next} of {total}",
 
@@ -811,7 +811,7 @@ export const en: Record<string, string> = {
   "settings.healthMirrorRow": "Mirror mood check-ins to the Health app",
   "settings.healthMirrorA11y": "Mirror mood check-ins to the Health app",
   "settings.healthMirrorNote":
-    "When on, each explicit mood check-in is also written to the Health app on this device. MindPattern never reads anything from Health. Turning this off stops future writes; what the Health app already holds stays there.",
+    "When on, each explicit mood check-in is also written to the Health app on this device. Fathom never reads anything from Health. Turning this off stops future writes; what the Health app already holds stays there.",
   "settings.healthMirrorUnavailableNote": "{reason}. The preference is saved and mirroring starts once this build links the Health module.",
   "settings.reasonHealthModule": "The Health module is not linked in this build",
   "settings.reasonHealthIOS18": "Apple Health State of Mind requires iOS 18 or later",
@@ -833,7 +833,7 @@ export const en: Record<string, string> = {
   "settings.signOut": "Sign out",
   "settings.aboutLabel": "About",
   "settings.aboutBody":
-    "MindPattern {version}{server}. Everything you write is encrypted on this device before it leaves. The one exception — pattern analysis — runs in a single-use session you start yourself. No advice, no diagnosis, ever.",
+    "Fathom {version}{server}. Everything you write is encrypted on this device before it leaves. The one exception — pattern analysis — runs in a single-use session you start yourself. No advice, no diagnosis, ever.",
   "settings.serverVersionTag": " · server {version}",
   "settings.privacyPolicy": "Privacy policy",
   "settings.privacyPolicyA11y": "Read the privacy policy",
@@ -850,7 +850,7 @@ export const en: Record<string, string> = {
   "measures.intro":
     // 2026-09-26 audit LOW: name all three instruments — the screen has
     // offered GAD-7 and PHQ-2 since 2026-09-21, the copy still said PHQ-9 only.
-    "Standard wellbeing questionnaires (PHQ-9, GAD-7 and PHQ-2), completed by you. MindPattern stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
+    "Standard wellbeing questionnaires (PHQ-9, GAD-7 and PHQ-2), completed by you. Fathom stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
   "measures.offlineNote":
     "Your recorded history needs a connection to load. Completing the questionnaire also needs one — nothing here works offline yet.",
   "measures.loadFailed": "Could not load your measures.",

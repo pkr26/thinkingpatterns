@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>MindPattern</string>
+	<string>Fathom</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -35,11 +35,11 @@
 		<true/>
 	</dict>
 	<key>NSHealthShareUsageDescription</key>
-	<string>MindPattern never reads your Health data. This permission is only checked so the app can confirm its write access.</string>
+	<string>Fathom never reads your Health data. This permission is only checked so the app can confirm its write access.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>MindPattern can write your mood check-ins to the Health app on this device, when you turn that on in Settings. It never reads anything from Health.</string>
+	<string>Fathom can write your mood check-ins to the Health app on this device, when you turn that on in Settings. It never reads anything from Health.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MindPattern uses the microphone only while you are recording a voice journal entry. The recording stays on this device until you save the entry, and it is never shared with anyone without your explicit consent.</string>
+	<string>Fathom uses the microphone only while you are recording a voice journal entry. The recording stays on this device until you save the entry, and it is never shared with anyone without your explicit consent.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

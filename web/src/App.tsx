@@ -308,7 +308,7 @@ export function App(): React.JSX.Element {
   const activeMore = MORE_KINDS.has(view.kind) ? [view.kind as string] : [];
 
   return (
-    <AppFrame title="MindPattern" onCrisis={() => setCrisisOpen(true)}>
+    <AppFrame title="Fathom" onCrisis={() => setCrisisOpen(true)}>
       {view.kind === "booting" ? (
         <div className="view-enter">
           <Card>

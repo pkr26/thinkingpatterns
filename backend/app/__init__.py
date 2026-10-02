@@ -1,4 +1,4 @@
-"""MindPattern backend package."""
+"""Fathom backend package."""
 
 # Single source for the app version inside the code (pyproject.toml carries
 # the same value for packaging; importlib.metadata is unusable because the

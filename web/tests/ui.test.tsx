@@ -121,7 +121,7 @@ describe("AppFrame", () => {
   it("renders the sticky header, the crisis entry point, and children", async () => {
     const onCrisis = vi.fn();
     const root = await render(
-      <AppFrame title="MindPattern" onCrisis={onCrisis}>
+      <AppFrame title="Fathom" onCrisis={onCrisis}>
         <Note>content</Note>
       </AppFrame>,
     );

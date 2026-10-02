@@ -1,4 +1,4 @@
-# MindPattern Mobile (React Native)
+# Fathom Mobile (React Native)
 
 The client half of the zero-knowledge contract:
 
@@ -135,12 +135,12 @@ disturbing `package.json`, `App.tsx`, `index.js`, `src/`, `tests/` or
 
 ```bash
 # In a scratch directory next to (NOT inside) mobile/:
-npx @react-native-community/cli@<cli-version-from-devDependencies> init MindPattern \
+npx @react-native-community/cli@<cli-version-from-devDependencies> init Fathom \
   --version <react-native-version-from-package.json> --skip-install
 
 # Copy only the generated native scaffolding into mobile/:
-cp -R MindPattern/ios mobile/ios
-cp -R MindPattern/android mobile/android
+cp -R Fathom/ios mobile/ios
+cp -R Fathom/android mobile/android
 
 # Then, inside mobile/ (node_modules already installed by `npm ci`):
 cd ios && bundle install && bundle exec pod install && cd ..
@@ -175,12 +175,12 @@ executed, not a record of anything already run.
    `react-native-keychain` pod. What to check after linking: (a) the pod
    version is the one in `package.json` (10.x — older versions silently
    ignore `accessible` on write); (b) on device, a device-to-device
-   encrypted backup restore must NOT carry the MindPattern session into
+   encrypted backup restore must NOT carry the Fathom session into
    the new device (sign-in should be required there) — if it does, the
    accessibility attribute is not being applied and the release stops.
 2. **`NSURLIsExcludedFromBackupKey` on the AsyncStorage directory.**
    AsyncStorage on iOS lives under `Library/LocalDatabase` (RN 0.7x+,
-   `RCTAsyncLocalStorage`) — and everything MindPattern writes there is
+   `RCTAsyncLocalStorage`) — and everything Fathom writes there is
    either ciphertext (`secureStore` envelope, offline queue, mood log —
    all AES-256-GCM under the Keychain-held device key) or non-sensitive
    preferences (theme, reminder time, Health-mirror opt-in). The trade:
@@ -200,16 +200,16 @@ executed, not a record of anything already run.
    after unlock.
 3. **The two Health usage strings** (enforced by the preflight once
    `src/healthkit.ts` is imported anywhere — it is). Add to
-   `ios/MindPattern/Info.plist`, in the same calm register as the
+   `ios/Fathom/Info.plist`, in the same calm register as the
    in-app copy (`src/locales/`), and keep them truthful — App Review
    compares them to observed behavior:
    - `NSHealthUpdateUsageDescription` (the write path the mirror uses):
-     > "MindPattern can write your mood check-ins to the Health app on
+     > "Fathom can write your mood check-ins to the Health app on
      > this device, when you turn that on in Settings. It never reads
      > anything from Health."
    - `NSHealthShareUsageDescription` (present because the module's
      authorization-status query covers the category; nothing is ever
-     read): > "MindPattern never reads your Health data. This
+     read): > "Fathom never reads your Health data. This
      > permission is only checked so the app can confirm its write
      > access."
 4. **Notification permission prompt timing (reminders).** The
@@ -223,7 +223,7 @@ executed, not a record of anything already run.
    declare HealthKit usage, the data type as **State of Mind** (mood
    valence), direction **write only**, and answer the privacy questions
    accordingly (data is written to Health by explicit user opt-in and
-   never collected off-device by MindPattern). A mismatch between the
+   never collected off-device by Fathom). A mismatch between the
    declaration and the usage strings above is a rejection risk — update
    both together.
 6. **Native app-switcher shield (2026-09-26, audit F-3).**
@@ -324,7 +324,7 @@ Where the pin belongs, when it lands:
   delegate interceptor) that performs the classic challenge-handler
   dance: evaluate the default trust, then compare the leaf/intermediate
   SPKI hashes against the pinned set, failing the request on mismatch.
-- **The self-hoster bypass is a requirement, not a nicety.** MindPattern
+- **The self-hoster bypass is a requirement, not a nicety.** Fathom
   is self-hostable; a client hard-pinned to one server's leaf key would
   lock an operator out of their own server on any certificate renewal.
   Pinning must therefore be **optional per build**: a build-config flag
@@ -389,19 +389,19 @@ a crash — when the bridge is absent. v1 scope is **write-only**: each
 explicit mood check-in (a tap on the mood row, never the text-derived
 estimate) can be mirrored OUT to the Health app when the per-account
 `mirrorMoodToHealth` preference is ON (default OFF, Settings toggle,
-honest disclosure copy). MindPattern never reads anything from Health.
+honest disclosure copy). Fathom never reads anything from Health.
 The native-module contract (methods the bridge must expose) is documented
 in the module header of `src/healthkit.ts`.
 
 The bridge itself is
-`ios/MindPattern/HealthBridge/RCTAppleHealthKit+MindPatternStateOfMind.m`
+`ios/Fathom/HealthBridge/RCTAppleHealthKit+FathomStateOfMind.m`
 (2026-09-22 audit round 3): `react-native-health@1.19.0` — the newest
 published version — links and autolinks but predates iOS 18 and carries
 **no State of Mind path** (`initHealthKit`/`isAvailable`/`getAuthStatus`
 only), so the category adds exactly the three contract methods onto the
 pod's module, promise-based, `@available(iOS 18.0, *)`-gated, writing
 `HKStateOfMindKindDailyMood` samples with the discrete -2..2 valence.
-The HealthKit entitlement (`ios/MindPattern/MindPattern.entitlements`,
+The HealthKit entitlement (`ios/Fathom/Fathom.entitlements`,
 signed by both target configurations) is required for any of it to run.
 `npm run verify:native-release` fails if the bridge file, its three
 exported methods, the entitlement, or the pbxproj wiring regresses, and

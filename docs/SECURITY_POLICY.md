@@ -1,4 +1,4 @@
-# Security policy (operator-side) — MindPattern deployment
+# Security policy (operator-side) — Fathom deployment
 
 What the CODE enforces (so the operator does not have to), and what
 the OPERATING ORGANIZATION must own. Adopt, adapt to your

@@ -1,4 +1,4 @@
-# Data retention schedule — MindPattern
+# Data retention schedule — Fathom
 
 Every retention/deletion number in the product, verified against the
 code and configs on 2026-09-26 (file:line given for each). Operators:

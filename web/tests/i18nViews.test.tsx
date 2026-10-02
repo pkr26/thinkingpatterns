@@ -115,7 +115,7 @@ describe("views consume the active locale (M-W5, audit 2026-09-26)", () => {
   // just the view bodies.
   it("the chrome's crisis button and skip link are Spanish under es", async () => {
     __setLocaleForTests("es");
-    const root = await render(<AppFrame title="MindPattern" onCrisis={() => undefined}><p>content</p></AppFrame>);
+    const root = await render(<AppFrame title="Fathom" onCrisis={() => undefined}><p>content</p></AppFrame>);
     expect(textOf(root)).toContain("Ayuda");
     expect(textOf(root)).not.toContain("Get help");
     // The skip link is an <a>, which textOf's node set skips — assert

@@ -446,7 +446,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 await app.state.engine.dispose()
 
     app = FastAPI(
-        title="MindPattern API",
+        title="Fathom API",
         version=APP_VERSION,
         description="Zero-knowledge personal pattern recognition for mental state.",
         lifespan=lifespan,

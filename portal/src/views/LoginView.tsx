@@ -302,7 +302,7 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
     // remain anywhere in the portal, so style-src drops 'unsafe-inline'.
     <main className="login-main">
       <div className="login-wrap">
-        <h1 className="login-title">MindPattern · Therapist portal</h1>
+        <h1 className="login-title">Fathom · Therapist portal</h1>
         <Card title={mode === "login" ? "Sign in" : "Create a therapist account"}>
           <form onSubmit={submit} className="login-form">
             {mode === "register" && (

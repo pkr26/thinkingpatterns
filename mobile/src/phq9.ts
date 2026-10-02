@@ -8,7 +8,7 @@
  * therapist through the existing consent — the same zero-knowledge path
  * as entries and patterns.
  *
- * The app's charter holds: MindPattern never interprets a score. No
+ * The app's charter holds: Fathom never interprets a score. No
  * severity bands are computed or displayed to the patient, no advice is
  * given — the screen says plainly that interpretation belongs to a
  * clinician. Item 9 (self-harm thoughts) is a SAFETY item: any non-zero

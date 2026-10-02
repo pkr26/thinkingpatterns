@@ -1,4 +1,4 @@
-# MindPattern
+# Fathom
 
 A personal pattern-recognition engine for your mental state. Journal daily
 (text, on-device encrypted), and after 30 active days the app surfaces the

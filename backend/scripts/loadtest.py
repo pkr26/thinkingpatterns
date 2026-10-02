@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load probe for a running MindPattern API (2026-09-17).
+"""Load probe for a running Fathom API (2026-09-17).
 
 The first load picture anyone could produce was incidental (the red-team
 measured scrypt RSS under 8 concurrent registrations). This script is the

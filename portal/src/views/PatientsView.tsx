@@ -1417,7 +1417,7 @@ export function PatientsView(props: {
                           onPress={() =>
                             downloadTextFile(
                               "mindpattern-recovery-codes.txt",
-                              "MindPattern therapist portal — one-time recovery codes\n\n"
+                              "Fathom therapist portal — one-time recovery codes\n\n"
                                 + `${totpBackupCodes.join("\n")}\n\n`
                                 + "Each code works one time in place of a 6-digit sign-in code.\n"
                                 + "They are shown only once; keep this file somewhere safe.",

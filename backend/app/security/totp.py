@@ -126,7 +126,7 @@ def verify_code(
     return None
 
 
-def otpauth_uri(secret_b32: str, username: str, issuer: str = "MindPattern") -> str:
+def otpauth_uri(secret_b32: str, username: str, issuer: str = "Fathom") -> str:
     """The manual-enrollment URI (no QR dependency — the portal renders the
     secret and this URI as copyable text)."""
     from urllib.parse import quote

@@ -1,4 +1,4 @@
-# MindPattern Therapist Portal
+# Fathom Therapist Portal
 
 A browser app for clinicians: **read-only, zero-knowledge access to shared
 patient patterns**, plus the therapist's own encrypted notes.

@@ -1,4 +1,4 @@
-# Privacy policy template — MindPattern deployment
+# Privacy policy template — Fathom deployment
 
 > **STATUS: TEMPLATE — LEGAL-REVIEW REQUIRED.** Plain-language text an
 > operator can adapt and publish. Every bracket is a decision only the
@@ -13,7 +13,7 @@ EU/EEA.`
 
 ## What we are
 
-MindPattern is a personal journaling and pattern-observation app. You
+Fathom is a personal journaling and pattern-observation app. You
 write journal entries; after 30 active days the app shows you patterns
 from your OWN writing (for example, that a topic tends to appear on
 Sundays, or that the day after poor sleep your entries read lower). It

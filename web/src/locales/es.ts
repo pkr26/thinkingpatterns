@@ -106,7 +106,7 @@ export const es: Record<string, string> = {
   "crisis.go": "Ir",
   "crisis.actionA11y": "{label} — {detail}",
   "crisis.disclaimer":
-    "MindPattern es un diario que le muestra sus propios patrones. No es terapia, no es un dispositivo médico y no es un servicio de emergencia. Hablar con un profesional nunca es un paso equivocado.",
+    "Fathom es un diario que le muestra sus propios patrones. No es terapia, no es un dispositivo médico y no es un servicio de emergencia. Hablar con un profesional nunca es un paso equivocado.",
 
   // ---------------------------------------------------------------- unlock
   "unlock.title": "Bloqueado",
@@ -177,7 +177,7 @@ export const es: Record<string, string> = {
   "onboarding.stepOf": "{current} de {total}",
   "onboarding.remindQuestion": "¿Quiere un recordatorio amable cada día? Puede cambiarlo cuando quiera en Ajustes.",
   "onboarding.readPrivacy": "Leer la política de privacidad",
-  "onboarding.ageNotice": "MindPattern es para personas de 13 años o más — al continuar, usted confirma que lo es.",
+  "onboarding.ageNotice": "Fathom es para personas de 13 años o más — al continuar, usted confirma que lo es.",
   "onboarding.start": "Entiendo — empezar a escribir",
   "onboarding.continueA11y": "Continuar al panel {next} de {total}",
 
@@ -660,7 +660,7 @@ export const es: Record<string, string> = {
   "settings.healthMirrorRow": "Reflejar mis registros de ánimo en la app Salud",
   "settings.healthMirrorA11y": "Reflejar mis registros de ánimo en la app Salud",
   "settings.healthMirrorNote":
-    "Cuando está activado, cada registro de ánimo explícito también se escribe en la app Salud de este dispositivo. MindPattern nunca lee nada de Salud. Al desactivarlo se detienen las futuras escrituras; lo que Salud ya guardó se queda ahí.",
+    "Cuando está activado, cada registro de ánimo explícito también se escribe en la app Salud de este dispositivo. Fathom nunca lee nada de Salud. Al desactivarlo se detienen las futuras escrituras; lo que Salud ya guardó se queda ahí.",
   "settings.healthMirrorUnavailableNote": "{reason}. La preferencia se guarda y el reflejo comenzará cuando esta versión incorpore el módulo de Salud.",
   "settings.biometricLabel": "DESBLOQUEO BIOMÉTRICO",
   "settings.biometricRow": "Desbloquear con su rostro o su huella",
@@ -679,7 +679,7 @@ export const es: Record<string, string> = {
   "settings.signOut": "Cerrar sesión",
   "settings.aboutLabel": "Acerca de",
   "settings.aboutBody":
-    "MindPattern {version}{server}. Todo lo que escribe se cifra en este dispositivo antes de salir de él. La única excepción — el análisis de patrones — corre en una sesión de un solo uso que usted mismo inicia. Sin consejos, sin diagnósticos, nunca.",
+    "Fathom {version}{server}. Todo lo que escribe se cifra en este dispositivo antes de salir de él. La única excepción — el análisis de patrones — corre en una sesión de un solo uso que usted mismo inicia. Sin consejos, sin diagnósticos, nunca.",
   "settings.serverVersionTag": " · servidor {version}",
   "settings.privacyPolicy": "Política de privacidad",
   "settings.privacyPolicyA11y": "Leer la política de privacidad",
@@ -691,7 +691,7 @@ export const es: Record<string, string> = {
 
   // --------------------------------------------------------- measures (M-16)
   "measures.intro":
-    "Un cuestionario de bienestar estándar (PHQ-9), completado por usted. MindPattern guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
+    "Un cuestionario de bienestar estándar (PHQ-9), completado por usted. Fathom guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
   "measures.offlineNote":
     "Su historial registrado necesita conexión para cargarse. Completar el cuestionario también la necesita — nada aquí funciona aún sin conexión.",
   "measures.loadFailed": "No se pudieron cargar sus cuestionarios.",
@@ -983,7 +983,7 @@ export const es: Record<string, string> = {
   "onboarding.webPanel1Title": "Un diario que es solo suyo",
   "onboarding.webPanel1Body": "Escriba a diario. Todo lo que escribe se cifra en este dispositivo antes de salir — el servidor guarda solo texto cifrado opaco, para siempre. No consejos, no diagnósticos: observaciones, cada una con su evidencia.",
   "onboarding.webPanel2Title": "Treinta días honestos",
-  "onboarding.webPanel2Body": "Los patrones necesitan datos. Durante sus primeros 30 días con actividad verá su racha y su tendencia local de ánimo — y nada más. Tras el umbral, MindPattern revela los patrones demasiado lentos para que una persona los note: temas por día de la semana, vínculos al día siguiente, preocupaciones que vuelven.",
+  "onboarding.webPanel2Body": "Los patrones necesitan datos. Durante sus primeros 30 días con actividad verá su racha y su tendencia local de ánimo — y nada más. Tras el umbral, Fathom revela los patrones demasiado lentos para que una persona los note: temas por día de la semana, vínculos al día siguiente, preocupaciones que vuelven.",
   "onboarding.webPanel3Title": "Usted tiene el control",
   "onboarding.webPanel3Body": "Comparta con un terapeuta solo si lo decide (revocable, cifrado de extremo a extremo). La ayuda en crisis está a un toque en cada pantalla, sin conexión. Exporte o elimine todo en cualquier momento — la eliminación es real e inmediata.",
   "onboarding.webStart": "Empezar a escribir",

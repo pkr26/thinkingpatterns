@@ -679,7 +679,7 @@ async def test_rate_limiter_buckets_clients_independently(settings):
 
 
 async def test_app_metadata_and_healthz(app, client):
-    assert app.title == "MindPattern API"
+    assert app.title == "Fathom API"
     assert app.version == "1.0.0"
     assert app.description == "Zero-knowledge personal pattern recognition for mental state."
 
@@ -743,7 +743,7 @@ async def test_validation_errors_expose_only_loc_and_msg(app, client):
 
 async def test_module_level_app_is_a_real_app():
     assert module_level_app is not None
-    assert module_level_app.title == "MindPattern API"
+    assert module_level_app.title == "Fathom API"
 
 
 async def test_lifespan_context_is_an_async_context_manager(settings):
