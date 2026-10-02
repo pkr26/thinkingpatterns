@@ -29,7 +29,12 @@ import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptic
 import { cancelDailyReminder, cancelMeasureReminder, reminderCapability } from "../nativeFeatures";
 import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPrefs } from "../reminders";
 import { readLanguageChoice, writeLanguageChoice, type LanguageChoice } from "../languagePref";
-import { generateRecoveryKey, recoveryKeyToB64, sealDataKeyForRecovery } from "../crypto/recovery";
+import {
+  generateRecoveryKey,
+  recoveryKeyToB64,
+  recoveryVerifierKeyV2,
+  sealDataKeyForRecoveryV2,
+} from "../crypto/recovery";
 import { syncReminderSchedule, syncMeasureReminderSchedule } from "../reminderSync";
 import {
   clearMeasureReminderPrefs,
@@ -403,6 +408,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         if (username) {
           await api.clearCachedSalt(username);
           await api.clearCachedKeyEnvelope(username);
+          // 2026-10-01 audit LOW: the per-username unlock-backoff counter
+          // survived deletion (a recreated same-name account inherited the
+          // old account's escalating lockout delays).
+          const { clearUnlockFailures } = await import("../unlockBackoff");
+          await clearUnlockFailures(username);
         }
       } catch {
         // Reported in the success dialog below.
@@ -729,12 +739,22 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       }
       setBusy(true);
       const recoveryKey = generateRecoveryKey();
-      const sealed = sealDataKeyForRecovery(recoveryKey, keys.dataKey, userId);
-      await api.setupRecoveryKit(
-        keys.authKey.toString("base64"),
-        recoveryKeyToB64(recoveryKey),
-        sealed.toString("base64"),
-      );
+      // 2026-10-01 audit C1: v2 — seal under the never-sent seal label and
+      // transmit ONLY the domain-separated verifier (the raw key used to
+      // be sent as the verifier, and it WAS the seal-KEK input: a server
+      // that observed one request could open the journal).
+      const sealed = sealDataKeyForRecoveryV2(recoveryKey, keys.dataKey, userId);
+      const verifierKey = recoveryVerifierKeyV2(recoveryKey);
+      try {
+        await api.setupRecoveryKit(
+          keys.authKey.toString("base64"),
+          verifierKey.toString("base64"),
+          sealed.toString("base64"),
+          "v2",
+        );
+      } finally {
+        verifierKey.fill(0);
+      }
       setRecoveryEnabled(true);
       setRecoveryKeyShown(recoveryKeyToB64(recoveryKey));
       const status = await api.recoveryStatus().catch(() => null);
@@ -807,6 +827,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         const stored = await AsyncStorage.getItem(themeStorageKey());
         if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
           setThemeModeState(stored);
+        }
+        // 2026-10-01 audit M8: the language preference and recovery-kit
+        // status used to load ONLY when a theme had ever been stored — a
+        // fresh install (stored === null) permanently showed "recovery
+        // unknown" and hid the kit-removal UI. Both load unconditionally.
+        if (!cancelled) {
           setLanguageState(await readLanguageChoice());
           try {
             const status = await api.recoveryStatus();

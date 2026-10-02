@@ -132,6 +132,16 @@ export async function decryptEntry(
    *  metadata still declares version 1); omitted → legacy binding only. A
    *  blob that fails BOTH bindings is genuinely tampered and throws. */
   contentVersion?: number,
+  opts: {
+    /** 2026-10-01 audit M1: refuse the legacy version-free fallback — the
+     *  caller has POSITIVE knowledge (the v2-bound mark) that this id has
+     *  authenticated under the v2 binding before, so a blob that now fails
+     *  it is a stale-ciphertext replay, not a legacy row. */
+    forbidLegacyAad?: boolean;
+    /** Fired when the v2 binding authenticated (the caller records the
+     *  v2-bound mark). */
+    onV2Bound?: () => void;
+  } = {},
 ): Promise<EntryPayload> {
   const blob = fromBase64(blobB64);
   let plaintext: Bytes | null = null;
@@ -139,7 +149,9 @@ export async function decryptEntry(
     if (contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1) {
       try {
         plaintext = await decrypt(dataKey, blob, buildAad("entry", userId, clientEntryId, String(contentVersion)));
-      } catch {
+        opts.onV2Bound?.();
+      } catch (v2Error) {
+        if (opts.forbidLegacyAad) throw v2Error;
         plaintext = await decrypt(dataKey, blob, buildAad("entry", userId, clientEntryId));
       }
     } else {

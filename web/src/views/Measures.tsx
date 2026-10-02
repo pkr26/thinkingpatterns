@@ -369,6 +369,10 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         // The picks stay selected and the pending record stays persisted —
         // the next mount restores and retries them under the same id
         // (audit 2026-09-26 LOW; mobile parity).
+        // 2026-10-01 audit M4: the answers ARE safely stored (the encrypted
+        // pending record above), so an item-9 endorsement shows the support
+        // card NOW — offline must not delay the pointer indefinitely.
+        if (safetyItemEndorsed(record.kind, record.picks)) setItem9(true);
         setSavedNote(t("measures.pendingOfflineNote"));
         return;
       }

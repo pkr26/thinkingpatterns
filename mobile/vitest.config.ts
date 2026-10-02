@@ -35,7 +35,7 @@ export default defineConfig({
         "src/rotation.ts": { lines: 85 },
         "src/crypto/aad.ts": { lines: 95 },
         "src/crypto/envelope.ts": { lines: 95 },
-        "src/kdf.ts": { lines: 95 },
+        "src/crypto/kdf.ts": { lines: 95 },
       },
     },
   },

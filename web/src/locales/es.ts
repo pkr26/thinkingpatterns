@@ -847,7 +847,7 @@ export const es: Record<string, string> = {
   "entry.empty": "Escriba algo primero — incluso una frase honesta cuenta.",
   "entry.crisisPromptTitle": "Antes de guardar",
   "entry.crisisPromptBody": "Lo que escribió suena pesado. Usted merece apoyo — los recursos de abajo están a un toque, en cualquier momento.",
-  "entry.crisisPromptProceed": "Aún puede guardar esta entrada. Pulse Guardar de nuevo para continuar.",
+  "entry.crisisPromptProceed": "Su entrada se está guardando. Los recursos de apoyo siguen disponibles en el menú cuando los necesite.",
   "entry.queuedOne": "{count} entrada esperando para sincronizar — guardada en este dispositivo, cifrada.",
   "entry.queuedMany": "{count} entradas esperando para sincronizar — guardadas en este dispositivo, cifradas.",
   "entry.onDeviceRead": "Lectura en el dispositivo: esta entrada se inclina {leaning}.",

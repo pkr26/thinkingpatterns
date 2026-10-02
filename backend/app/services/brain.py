@@ -1365,6 +1365,17 @@ NEGATION_SCALAR = -0.74  # VADER's damped flip: "not good" < "bad"
 # suicidal anymore" and "feeling okay" hit the +1.0 clamp). Applies to the
 # negative side only: "not happy" staying mildly negative is VADER-correct.
 STRONG_NEGATION_ABS = 2.5
+# 2026-10-01 deep audit (stats M5): a perseverative frame in the negator
+# window means the negated state IS ongoing — "can't stop crying" /
+# "won't stop the tears" / "can't stop smiling". The negation flip (and
+# the strong-absence zero) are both suppressed for that word: crying
+# keeps -2.4 (it measured +0.444 through the x-0.74 flip — a direction
+# inversion the module's own invariant forbids), and smiling keeps its
+# positive valence ("can't stop smiling" is joy, which the old flip also
+# got backwards). "dejar" covers the Spanish frame ("no puedo dejar de
+# llorar"). Pinned in shared/brain_lexicon.json word_sets by the dump
+# script; mirrored in both on-device engines.
+PERSEVERATIVE_FRAMES = frozenset({"stop", "quit", "dejar"})
 BUT_WORDS_EN = frozenset({"but", "however", "although", "though", "yet"})
 BUT_WORDS = BUT_WORDS_EN | BUT_WORDS_ES
 INTENSIFIERS = {**INTENSIFIERS_ES, **INTENSIFIERS}
@@ -2269,15 +2280,21 @@ def _valence_walk(tokens: list[str], language: str | None = None) -> list[float]
             window = seg[max(0, i - BOOSTER_SCOPE) : i]
             # Boosters compound; a negator in scope flips the valence ONCE
             # with damping (VADER's x-0.74: "not good" is mildly negative).
+            # A perseverative frame in the same window ("can't stop
+            # crying") suppresses the flip — the state is ongoing, so the
+            # word keeps its own valence (2026-10-01 deep audit, stats M5).
             boost = 1.0
             negated = False
+            perseverative = False
             for prev in window:
                 if prev in INTENSIFIERS:
                     boost *= INTENSIFIERS[prev]
                 if prev in negators:
                     negated = True
+                if prev in PERSEVERATIVE_FRAMES:
+                    perseverative = True
             valence *= boost
-            if negated:
+            if negated and not perseverative:
                 # A negated STRONG negative is the ABSENCE of the state —
                 # "i am not suicidal" contributes nothing instead of a
                 # damped positive (2026-09-29 deep audit; the "stop" fix

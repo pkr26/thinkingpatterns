@@ -36,7 +36,7 @@ const memoryBackend = (): KvBackend => {
   };
 };
 
-const insightsResponse = async (patterns: unknown[], phase = "active", stateSeq = 3): Promise<Response> => {
+const insightsResponse = async (patterns: unknown[], phase = "insight", stateSeq = 3): Promise<Response> => {
   const payload = JSON.stringify({ v: 2, stats: { patterns }, state_seq: stateSeq });
   const blob = await encrypt(DATA_KEY, new TextEncoder().encode(payload), buildAad("insights", USER, "patterns"));
   return jsonResponse({ phase, active_days: 40, streak: 3, days_remaining: 0, blob: toBase64(blob), state_seq: stateSeq });
@@ -267,8 +267,8 @@ describe("QuestionView", () => {
     stubFetch((url, init) => {
       calls.push({ url, init });
       if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst-1", expires_in: 300 });
-      if (url.endsWith("/insights/recompute")) return jsonResponse({ phase: "active", days_remaining: 0 });
-      if (url.endsWith("/insights")) return jsonResponse({ phase: "active", active_days: 40, streak: 2, days_remaining: 0, blob: null });
+      if (url.endsWith("/insights/recompute")) return jsonResponse({ phase: "insight", days_remaining: 0 });
+      if (url.endsWith("/insights")) return jsonResponse({ phase: "insight", active_days: 40, streak: 2, days_remaining: 0, blob: null });
       if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return jsonResponse([], { headers: { "X-Entries-Revision": "1" } });
       return jsonResponse({ detail: "unmatched" }, { status: 404 });
     });

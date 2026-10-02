@@ -17,7 +17,7 @@ const securityHeaders = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Cache-Control": "no-store",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), display-capture=(), idle-detection=(), browsing-topics=(), serial=(), bluetooth=()",
+  "Permissions-Policy": "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), display-capture=(), idle-detection=(), browsing-topics=(), serial=(), bluetooth=()",
   "Cross-Origin-Opener-Policy": "same-origin",
   "Cross-Origin-Resource-Policy": "same-origin",
   "Cross-Origin-Embedder-Policy": "require-corp",

@@ -90,20 +90,17 @@ describe("EntryView", () => {
     expect(await queueLength("user-1")).toBe(1);
   });
 
-  it("the crisis tier fires BEFORE any encrypt or send, then lets a confirmed save through", async () => {
+  it("the crisis tier rides ALONGSIDE the save (2026-10-01 M3: mobile parity — an unsaved crisis disclosure must not be one abandoned screen away from lost)", async () => {
     const mock = stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
     const root = await render(<EntryView onSaved={() => undefined} />);
     await typeArea(root, "How was today?", "I want to kill myself");
     await press(root, "Save entry");
-    await settle(40, 3);
-    // The resource prompt appeared and NOTHING was sent yet.
-    expect(textOf(root)).toContain("sounds heavy");
-    expect(mock).not.toHaveBeenCalled();
-    expect(await queueLength("user-1")).toBe(0);
-    // The user confirms; the save proceeds.
-    await press(root, "Save entry");
     await settle(40, 4);
+    // The resource prompt appeared AND the entry was safely sent in the
+    // same press — the entry never sits unsaved behind a confirmation.
+    expect(textOf(root)).toContain("sounds heavy");
     expect(mock).toHaveBeenCalledTimes(1);
+    expect(await queueLength("user-1")).toBe(0);
   });
 
   it("ordinary heavy language does not trigger the crisis tier", async () => {
@@ -274,17 +271,18 @@ describe("EntryView crisis-prompt cadence (LOW c, audit 2026-09-26)", () => {
   it("prompts once per (account, day): a second crisis entry the same day saves without re-prompting", async () => {
     const mock = stubFetch(() => jsonResponse({ id: "row" }, { status: 201 }));
     const root = await render(<EntryView onSaved={() => undefined} />);
-    // First crisis draft of the day: the support prompt gates the save.
+    // First crisis draft of the day: the support prompt rides the save
+    // (2026-10-01 M3) and the per-day stamp is recorded before the card.
     await typeArea(root, "How was today?", "I want to kill myself");
     await press(root, "Save entry");
-    await settle(40, 3);
-    expect(textOf(root)).toContain("sounds heavy");
-    expect(mock).not.toHaveBeenCalled();
-    expect(await crisisDialogShownOn("user-1", localDateISO())).toBe(true);
-    // The user confirms; the save proceeds.
-    await press(root, "Save entry");
     await settle(40, 4);
+    expect(textOf(root)).toContain("sounds heavy");
     expect(mock).toHaveBeenCalledTimes(1);
+    expect(await crisisDialogShownOn("user-1", localDateISO())).toBe(true);
+    // The card is dismissed explicitly now (2026-10-01 M3: it rides past
+    // the save instead of being cleared by it).
+    await press(root, "Not now");
+    await settle(40, 2);
     // A SECOND crisis entry the same day: throttled — straight through,
     // no prompt card, no dismissal training.
     await typeArea(root, "How was today?", "I want to kill myself again");

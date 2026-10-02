@@ -88,6 +88,7 @@ const session = {
   username: "drportal",
   userId: "therapist-1",
   noteKey: new Uint8Array(32),
+      noteKeyV2: new Uint8Array(32),
   privateKey: {} as CryptoKey,
   publicKeyB64: "P".repeat(124),
 };

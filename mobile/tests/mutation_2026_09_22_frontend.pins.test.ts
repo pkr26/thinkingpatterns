@@ -96,11 +96,20 @@ describe("mutation pins 2026-09-22: crisis normalization", () => {
     expect(detectCrisisLanguage("i can\u2019t go on")).toBe(true);
   });
 
-  it("punctuation becomes spaces and tokens collapse", () => {
-    expect(normalizeCrisisText("kill,myself")).toBe("kill myself");
+  it("punctuation folds (2026-10-01: intra-word runs DROP, edges space)", () => {
+    // A non-kept run STRICTLY between kept characters is dropped, not
+    // spaced (audit C2: "k😊ll" must reach the fold as one token); the
+    // merged token still detects through the concat twin channel.
+    expect(normalizeCrisisText("kill,myself")).toBe("killmyself");
+    // Hyphens are kept characters — they still split at the token stage.
     expect(normalizeCrisisText("kill-myself")).toBe("kill myself");
     expect(normalizeCrisisText("kill  myself")).toBe("kill myself");
     expect(normalizeCrisisText("s.u.i.c.i.d.e")).toBe("suicide");
+    // The emoji class the drop was built for, and its vowel-reinsertion
+    // twin (a variant only, matched against the same tiers).
+    expect(normalizeCrisisText("k😊ll myself")).toBe("kll myself");
+    expect(detectCrisisLanguage("k😊ll myself")).toBe(true);
+    expect(detectCrisisLanguage("ki😍l myself")).toBe(true);
   });
 
   it("single-letter runs join at exactly four, ASCII a..z only", () => {

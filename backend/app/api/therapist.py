@@ -64,6 +64,7 @@ from ..schemas import (
     InsightsResponse,
     NoteCreateRequest,
     NoteOut,
+    NoteRekeyRequest,
     NoteUpdateRequest,
     EntryOut,
     PatientOut,
@@ -1526,9 +1527,13 @@ async def _note_target(session: AsyncSession, therapist: User, user_id: str) -> 
     consent = (
         (
             await session.execute(
-                select(Consent).where(
-                    Consent.therapist_id == therapist.id, Consent.user_id == user_id
+                select(Consent)
+                .where(
+                    Consent.therapist_id == therapist.id,
+                    Consent.user_id == user_id,
+                    User.is_active.is_(True),
                 )
+                .join(User, User.id == Consent.user_id)
             )
         )
         .scalars()
@@ -2053,6 +2058,152 @@ async def update_note(
         response = _note_out(row)
         await session.commit()
     return response
+
+
+@router.put(
+    "/notes/rekey",
+    status_code=204,
+    dependencies=[
+        Depends(require_sharing_enabled),
+        Depends(make_rate_limiter("therapist-note-rekey", "auth_rate_limit", "auth_rate_window")),
+    ],
+)
+async def rekey_notes(
+    request: Request,
+    body: NoteRekeyRequest,
+    user: User = Depends(require_therapist),
+    session: AsyncSession = Depends(get_session),
+    x_account_verifier: str | None = Header(default=None),
+):
+    """Batch re-seal of the therapist's OWN notes (2026-10-01 audit C3).
+
+    A one-time migration endpoint for the notes-v2 key scheme: the client
+    re-encrypts each legacy blob (and its revision history) under the new
+    password-independent identity key while BOTH keys are available during
+    a password change, then swaps them here in one verifier-gated batch.
+
+    Semantics (all fail-closed):
+      * verifier-gated (X-Account-Verifier) like every credential move;
+      * every note and revision row must belong to THIS therapist;
+      * ``base_version`` must match the live row (a concurrent edit means
+        the ciphertext is stale — 409, refetch and re-apply; the client
+        rekeys that note on its next password change or save);
+      * a rekey NEVER creates a revision, advances a version, or bumps the
+        notes revision counter — the content is unchanged, only its locker;
+      * every swapped blob must be the SAME LENGTH as the one it replaces
+        (GCM preserves plaintext length; an inequality means the client is
+        not re-sealing the same content — refuse rather than let the rekey
+        path smuggle edited text past the edit-history contract).
+    """
+    verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
+    if verifier is None:
+        raise ApiError(
+            status_code=403,
+            detail="account verifier required (X-Account-Verifier header)",
+            code="forbidden",
+        )
+    await _require_verifier(user, verifier, request, session)
+
+    decoded: list[tuple[TherapistNote, bytes, list[tuple[object, bytes]]]] = []
+    # Decode + ownership + length-parity checks FIRST, one transaction;
+    # the swaps then run under the therapist-wide notes lock.
+    for item in body.items:
+        try:
+            new_blob = base64.b64decode(item.blob, validate=True)
+        except (binascii.Error, ValueError):
+            raise ApiError(
+                status_code=422, detail="blob must be base64", code="validation_error"
+            ) from None
+        row = (
+            (
+                await session.execute(
+                    select(TherapistNote).where(
+                        TherapistNote.id == item.note_id, TherapistNote.therapist_id == user.id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if row is None:
+            raise ApiError(status_code=404, detail="note not found", code="not_found")
+        if len(new_blob) != len(bytes(row.blob)):
+            raise ApiError(
+                status_code=422,
+                detail="rekey blob length mismatch (the content must be unchanged)",
+                code="validation_error",
+            )
+        rev_pairs: list[tuple[object, bytes]] = []
+        for rev_item in item.revision_blobs:
+            try:
+                rev_blob = base64.b64decode(rev_item.blob, validate=True)
+            except (binascii.Error, ValueError):
+                raise ApiError(
+                    status_code=422,
+                    detail="revision blob must be base64",
+                    code="validation_error",
+                ) from None
+            rev = (
+                (
+                    await session.execute(
+                        select(TherapistNoteRevision).where(
+                            TherapistNoteRevision.id == rev_item.revision_id,
+                            TherapistNoteRevision.note_id == row.id,
+                            TherapistNoteRevision.therapist_id == user.id,
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if rev is None:
+                raise ApiError(
+                    status_code=404, detail="note revision not found", code="not_found"
+                )
+            if len(rev_blob) != len(bytes(rev.blob)):
+                raise ApiError(
+                    status_code=422,
+                    detail="rekey revision blob length mismatch",
+                    code="validation_error",
+                )
+            rev_pairs.append((rev, rev_blob))
+        decoded.append((row, new_blob, rev_pairs))
+    await session.commit()  # close the read transaction before the lock
+
+    async with _note_locks.hold(f"notes:{user.id}"):
+        for row, new_blob, rev_pairs in decoded:
+            fresh = (
+                (
+                    await session.execute(
+                        select(TherapistNote)
+                        .where(TherapistNote.id == row.id)
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if fresh is None:
+                raise ApiError(status_code=404, detail="note not found", code="not_found")
+            current_version = fresh.version if fresh.version is not None else 1
+            # The client re-sealed from the version it read; a mismatch is a
+            # concurrent EDIT — the rekey must not paper over it.
+            expected = next(
+                item.base_version for item in body.items if item.note_id == fresh.id
+            )
+            if expected != current_version:
+                raise ApiError(
+                    status_code=409,
+                    detail="note was modified by another device; refetch and retry",
+                    code="version_conflict",
+                    headers={"Retry-After": "1"},
+                )
+            fresh.blob = new_blob
+            for rev, rev_blob in rev_pairs:
+                rev.blob = rev_blob
+        await _audit(session, user, decoded[0][0].user_id, "rekey_notes")
+        await session.commit()
+    return None
 
 
 @router.get(

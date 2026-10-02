@@ -6,6 +6,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
+    SmallInteger,
     BigInteger,
     Boolean,
     Date,
@@ -158,7 +159,7 @@ class User(Base):
     # (services/stt.py judges currency); off by default. server_default
     # mirrors migration c3e7f1a9d2b4 (the L-33 parity rule).
     voice_consent: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("0")
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     voice_consent_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     voice_consent_disclosure: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -202,6 +203,15 @@ class User(Base):
     recovery_verifier: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     recovery_wrapped_data_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     recovery_set_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # 2026-10-01 audit C1: which verifier/seal scheme the kit uses.
+    # 1 (and NULL, pre-column rows) = the raw recovery key doubles as the
+    # server verifier AND the seal KEK input ("mindpattern/recovery/v1" —
+    # a server that observed the key could open the sealed data key).
+    # 2 = domain-separated: the server sees ONLY
+    # HKDF(key, "mindpattern/recovery-verifier/v2") (scrypt-hashed, unable
+    # to open anything); the data key is sealed under the never-sent
+    # HKDF(key, "mindpattern/recovery-seal/v2").
+    recovery_scheme: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     # Maintained quota counters (wave 4, 2026-09-30): every entry/measure
     # write used to run an O(corpus) COUNT+SUM scan; these are updated in
     # the SAME transaction as the write and read by the quota checks.
@@ -378,7 +388,7 @@ class Consent(Base):
     # Hard-enforced by the therapist audio route; every fetch is
     # audit-logged there.
     share_voice: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("0")
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
 
 

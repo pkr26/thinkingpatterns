@@ -9,6 +9,7 @@ vi.mock("../src/api/client", async (importOriginal) => {
     api: {
       recoverLogin: vi.fn(),
       setSession: vi.fn(async () => {}),
+      clearSession: vi.fn(async () => {}),
       openProcessingSession: vi.fn(async () => "pst-1"),
       resetPasswordWithRecovery: vi.fn(async () => ({})),
       keyEnvelope: vi.fn(async () => ({
@@ -27,9 +28,12 @@ import {
   generateRecoveryKey,
   recoveryKeyFromB64,
   recoveryKeyToB64,
+  recoveryVerifierKeyV2,
   sealDataKeyForRecovery,
+  sealDataKeyForRecoveryV2,
   unsealDataKeyWithRecovery,
 } from "../src/crypto/recovery";
+import { ApiError as ApiErrorCtor } from "../src/api/client";
 import { api } from "../src/api/client";
 
 const mockedApi = vi.mocked(api);
@@ -48,6 +52,21 @@ describe("recovery crypto", () => {
     // WRAPPED_DATA_KEY_BYTES contract).
     expect(sealed.length).toBe(60);
     expect(unsealDataKeyWithRecovery(recoveryKey, sealed, "user-9")).toEqual(dataKey);
+  });
+
+  it("v2 seal/verifier are domain-separated from each other and from v1", () => {
+    const recoveryKey = generateRecoveryKey();
+    const dataKey = Buffer.alloc(32, 9);
+    const sealedV2 = sealDataKeyForRecoveryV2(recoveryKey, dataKey, "user-9");
+    // The v2 seal opens ONLY under the v2 label...
+    expect(
+      unsealDataKeyWithRecovery(recoveryKey, sealedV2, "user-9"),
+    ).toBeNull(); // ...not the v1 label
+    const verifier = recoveryVerifierKeyV2(recoveryKey);
+    expect(verifier.length).toBe(32);
+    // The transmitted verifier is NOT the raw key and NOT either seal KEK:
+    expect(verifier.equals(recoveryKey)).toBe(false);
+    expect(verifier.equals(Buffer.alloc(32, 9))).toBe(false);
   });
 
   it("a wrong recovery key or wrong account never opens the seal", () => {
@@ -69,11 +88,11 @@ describe("recovery crypto", () => {
 });
 
 describe("recoverAccountWithKey (the full flow)", () => {
-  it("recovers, proves possession, swaps the credential, refreshes caches", async () => {
+  it("v2 kit: transmits ONLY the derived verifier, resets, refreshes caches", async () => {
     const { recoverAccountWithKey } = await import("../src/recoveryFlow");
     const recoveryKey = generateRecoveryKey();
     const dataKey = Buffer.alloc(32, 7);
-    const sealed = sealDataKeyForRecovery(recoveryKey, dataKey, "user-77");
+    const sealed = sealDataKeyForRecoveryV2(recoveryKey, dataKey, "user-77");
     mockedApi.recoverLogin!.mockResolvedValue({
       token: "tok",
       user_id: "user-77",
@@ -81,6 +100,7 @@ describe("recoverAccountWithKey (the full flow)", () => {
       role: "user",
       key_scheme: "v2",
       recovery_wrapped_data_key: sealed.toString("base64"),
+      recovery_scheme: "v2",
     } as never);
 
     const outcome = await recoverAccountWithKey(
@@ -91,26 +111,72 @@ describe("recoverAccountWithKey (the full flow)", () => {
 
     expect(outcome.userId).toBe("user-77");
     expect(outcome.dataKey).toEqual(dataKey);
+    // ONE recover call, carrying the DERIVED verifier (never the raw key)
+    // and the v2 scheme hint.
+    expect(mockedApi.recoverLogin).toHaveBeenCalledTimes(1);
+    const call = mockedApi.recoverLogin!.mock.calls[0]!;
+    expect(call[0]).toBe("someuser");
+    expect(call[1]).toBe(recoveryVerifierKeyV2(recoveryKey).toString("base64"));
+    expect(call[1]).not.toBe(recoveryKeyToB64(recoveryKey));
+    expect(call[2]).toBe("v2");
     // The recovery session was stored BEFORE any dependent call.
     expect(mockedApi.setSession).toHaveBeenCalledWith("tok", "user-77", "someuser");
     // Possession: the processing session carried the RECOVERED data key.
     expect(mockedApi.openProcessingSession).toHaveBeenCalledWith(dataKey.toString("base64"));
-    // The reset used the recovery key as its proof and swapped the envelope.
+    // The reset proof was the DERIVED verifier, and the envelope swapped.
     const reset = mockedApi.resetPasswordWithRecovery!.mock.calls[0]!;
-    expect(reset[0]).toBe(recoveryKeyToB64(recoveryKey));
+    expect(reset[0]).toBe(recoveryVerifierKeyV2(recoveryKey).toString("base64"));
     expect(reset[1].wrapped_data_key.length).toBeGreaterThan(0);
-    // Caches follow the new credential.
+    // Caches follow the new credential; no half-state cleanup ran.
     expect(mockedApi.cacheSalt).toHaveBeenCalledWith("someuser", expect.any(String));
     expect(mockedApi.cacheKeyEnvelope).toHaveBeenCalledWith(
       "someuser",
       expect.objectContaining({ scheme: "v2" }),
     );
+    expect(mockedApi.clearSession).not.toHaveBeenCalled();
   });
 
-  it("a wrong recovery key fails honestly before any reset", async () => {
+  it("v1 kit: scheme-mismatch retry falls back to the raw key form", async () => {
+    const { recoverAccountWithKey } = await import("../src/recoveryFlow");
+    const recoveryKey = generateRecoveryKey();
+    const dataKey = Buffer.alloc(32, 3);
+    const sealed = sealDataKeyForRecovery(recoveryKey, dataKey, "user-11");
+    mockedApi.recoverLogin!
+      .mockRejectedValueOnce(
+        new ApiErrorCtor(401, "recovery kit scheme mismatch; retry with the other scheme", "recovery_scheme_mismatch"),
+      )
+      .mockResolvedValueOnce({
+        token: "tok",
+        user_id: "user-11",
+        expires_in: 900,
+        role: "user",
+        key_scheme: "v2",
+        recovery_wrapped_data_key: sealed.toString("base64"),
+        recovery_scheme: "v1",
+      } as never);
+
+    const outcome = await recoverAccountWithKey(
+      "someuser",
+      recoveryKeyToB64(recoveryKey),
+      "a brand new passphrase",
+    );
+    expect(outcome.dataKey).toEqual(dataKey);
+    // First call: v2 derived verifier. Retry: v1 raw key.
+    const calls = mockedApi.recoverLogin!.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]![2]).toBe("v2");
+    expect(calls[0]![1]).not.toBe(recoveryKeyToB64(recoveryKey));
+    expect(calls[1]![2]).toBe("v1");
+    expect(calls[1]![1]).toBe(recoveryKeyToB64(recoveryKey));
+    // The reset proof is the form that VERIFIED (the raw key).
+    const reset = mockedApi.resetPasswordWithRecovery!.mock.calls[0]!;
+    expect(reset[0]).toBe(recoveryKeyToB64(recoveryKey));
+  });
+
+  it("a wrong recovery key fails honestly, clears the session, never resets", async () => {
     const { recoverAccountWithKey } = await import("../src/recoveryFlow");
     const realKey = generateRecoveryKey();
-    const sealed = sealDataKeyForRecovery(realKey, Buffer.alloc(32, 7), "user-1");
+    const sealed = sealDataKeyForRecoveryV2(realKey, Buffer.alloc(32, 7), "user-1");
     mockedApi.recoverLogin!.mockResolvedValue({
       token: "tok",
       user_id: "user-1",
@@ -118,10 +184,14 @@ describe("recoverAccountWithKey (the full flow)", () => {
       role: "user",
       key_scheme: "v2",
       recovery_wrapped_data_key: sealed.toString("base64"),
+      recovery_scheme: "v2",
     } as never);
     await expect(
       recoverAccountWithKey("someuser", recoveryKeyToB64(generateRecoveryKey()), "new passphrase"),
     ).rejects.toThrow(/did not open/i);
+    // M9: the stored bearer did not survive the failed flow.
+    expect(mockedApi.clearSession).toHaveBeenCalled();
     expect(mockedApi.resetPasswordWithRecovery).not.toHaveBeenCalled();
+    expect(mockedApi.cacheSalt).not.toHaveBeenCalled();
   });
 });

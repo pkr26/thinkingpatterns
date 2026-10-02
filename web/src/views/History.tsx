@@ -27,7 +27,7 @@ import { decryptEntry, encryptEntry, type EntryPayload, type VoiceFields } from 
 import { playAttachment, type PlayingAudio } from "../audio/player";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
-import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
+import { forgetEntryVersion, isV2Bound, noteV2Bound, observeEntryVersions } from "../entryVersions";
 import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind";
 import { recentMoods, removeMoodDay } from "../moodLog";
 import { localDateISO } from "../dates";
@@ -243,7 +243,20 @@ export function HistoryView(): React.JSX.Element {
           return;
         }
         try {
-          const payload = await decryptEntry(keys.dataKey, owner, row.client_entry_id, row.blob, row.content_version ?? undefined);
+          const payload = await decryptEntry(
+            keys.dataKey,
+            owner,
+            row.client_entry_id,
+            row.blob,
+            row.content_version ?? undefined,
+            {
+              // 2026-10-01 audit M1: once an id has EVER authenticated under
+              // the v2 binding, a blob that fails it is a stale replay — the
+              // legacy fallback is refused for that id forever after.
+              forbidLegacyAad: await isV2Bound(owner, keys.dataKey, row.client_entry_id),
+              onV2Bound: () => void noteV2Bound(owner, keys.dataKey, row.client_entry_id),
+            },
+          );
           decoded.push({
             clientEntryId: row.client_entry_id,
             entryDate: row.entry_date,
@@ -367,6 +380,13 @@ export function HistoryView(): React.JSX.Element {
     // press is a quiet no-op, never vault.get()'s throw.
     if (!owner || !vault.isUnlocked()) return;
     const keys = vault.get();
+    // 2026-10-01 audit L-4: snapshot the data key BEFORE the awaits below
+    // (translate/encrypt/upload) — vault.get()'s buffers are SHARED, and a
+    // lock landing mid-await zeroizes them (the M-3/P1/FE-4 idiom every
+    // sibling path already carried; today this is saved only incidentally
+    // because lockDown also clears the session, which no soft lock may).
+    const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
+    dataKey.set(keys.dataKey);
     setBusy(true);
     try {
       const nextVersion = target.contentVersion + 1;
@@ -396,7 +416,7 @@ export function HistoryView(): React.JSX.Element {
         };
       }
       const { blobB64 } = await encryptEntry(
-        keys.dataKey,
+        dataKey,
         owner,
         target.clientEntryId,
         editText,
@@ -437,7 +457,7 @@ export function HistoryView(): React.JSX.Element {
         // texts — the user decides; nothing is silently overwritten.
         try {
           const fresh = await api.getEntry(target.clientEntryId);
-          const freshPayload = await decryptEntry(keys.dataKey, owner, fresh.client_entry_id, fresh.blob, fresh.content_version ?? undefined);
+          const freshPayload = await decryptEntry(dataKey, owner, fresh.client_entry_id, fresh.blob, fresh.content_version ?? undefined);
           setConflict({
             theirs: {
               clientEntryId: fresh.client_entry_id,
@@ -463,6 +483,7 @@ export function HistoryView(): React.JSX.Element {
         setError(err instanceof Error ? err.message : t("history.editFailed"));
       }
     } finally {
+      zeroize(dataKey);
       setBusy(false);
     }
   };

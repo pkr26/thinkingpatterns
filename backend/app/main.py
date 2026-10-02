@@ -166,7 +166,14 @@ async def _prune_access_log_once(app: FastAPI) -> None:
     from .api._audit import compact_audit_journal, read_journal_heads
 
     journal_path = settings.audit_journal_path or None
-    journal_heads = read_journal_heads(journal_path) if journal_path else None
+    # 2026-10-01 audit M14: the full-file walk (and the rewrite+fsync below)
+    # are blocking I/O — off the event loop like every other long pole in
+    # the sweep (the journal is bounded only by retention, 730d default).
+    journal_heads = (
+        await anyio.to_thread.run_sync(read_journal_heads, journal_path)
+        if journal_path
+        else None
+    )
     async with app.state.sessionmaker() as session:
         user_ids = (
             (
@@ -203,7 +210,9 @@ async def _prune_access_log_once(app: FastAPI) -> None:
     if journal_path:
         compaction_cutoff = (retention_cutoff - timedelta(days=7)).isoformat()
         try:
-            kept, dropped = compact_audit_journal(journal_path, compaction_cutoff)
+            kept, dropped = await anyio.to_thread.run_sync(
+                compact_audit_journal, journal_path, compaction_cutoff
+            )
             if dropped:
                 logger.info(
                     "audit journal compacted: %d lines kept, %d older than %s dropped",

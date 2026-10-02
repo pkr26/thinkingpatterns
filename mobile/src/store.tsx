@@ -17,7 +17,7 @@ import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
-import { flushAudioQueue } from "./audioQueue";
+import { abortInFlightAudioFlush, flushAudioQueue } from "./audioQueue";
 import { clearCrisisDialogStamp } from "./crisisDialog";
 import { syncReminderSchedule, syncMeasureReminderSchedule } from "./reminderSync";
 import { clearLastMeasureDate, clearMeasureReminderPrefs } from "./measureReminders";
@@ -149,6 +149,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // suppress editor-unmount draft persistence before the new URL lands.
     setOriginChangeHandler(() => {
       abortInFlightFlush();
+      // 2026-10-01 audit H1: an in-flight AUDIO flush must stop too — its
+      // rows are origin-pinned and would otherwise refuse item-by-item.
+      abortInFlightAudioFlush();
       mayStashDraft = false;
       stashedDraft = null;
       vault.lock();

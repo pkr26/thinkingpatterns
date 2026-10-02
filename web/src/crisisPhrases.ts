@@ -130,6 +130,30 @@ export const CRISIS_DIALOG_PATTERNS: readonly string[] = [
   "मरना चाहती",
   "\\bintihar\\s+etmek\\s+istiyorum\\b",
   "\\bcanini\\s+almak\\s+istiyorum\\b",
+  // --- 2026-10-01 deep audit C2: EN wish/rather/burden/wake-up families
+  // and ES first-person conjugations that previously matched neither
+  // tier — suppress-only Spanish ideation produced NO support dialog
+  // anywhere (the dialog tier is client-side and shares this list). ----
+  "\\bwish\\s+(?:i\\s+)?to\\s+die\\b",
+  "\\bwish\\s+(?:i\\s+)?(?:was|were)\\s+gone\\b",
+  "\\bwish\\s+(?:i\\s+)?(?:could\\s+|to\\s+)?disappear\\b",
+  "\\b(?:can['\\u2019]?t|cannot)\\s+take\\s+(?:it|this)\\s+(?:any\\s?more|anymore)\\b",
+  "\\bhop(?:e|es|ed|ing)\\s+i\\s+(?:don['\\u2019]?t|do\\s+not|won['\\u2019]?t|never)\\s+wake\\s+up\\b",
+  "\\b(?:don['\\u2019]?t|do\\s+not)\\s+wanna\\s+(?:be\\s+here|be\\s+alive|live|exist|wake\\s+up)\\b",
+  "\\bwould\\s+be\\s+better\\s+(?:off\\s+)?without\\s+me\\b",
+  "\\bno\\s+reason\\s+to\\s+wake\\s+up\\b",
+  "\\bgoodbye\\s+cruel\\s+world\\b",
+  "\\bi\\s+would\\s+rather\\s+die\\b",
+  "\\bi['\\u2019]?d\\s+rather\\s+die\\b",
+  "\\b(?:nobody|no\\s+one)\\s+would\\s+(?:even\\s+)?miss\\s+me\\b",
+  "\\bmiss\\s+me\\s+when\\s+i['\\u2019]?m\\s+gone\\b",
+  "\\bsuicid(?:ar|arse)\\b",
+  "\\b(?:pienso|pensaba|debo|debria|tengo\\s+que|planeo)\\s+(?:matarme|suicidarme|cortarme|lastimarme|quemarme|ahorcarme|ahogarme)\\b",
+  "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo|tengo\\s+que|me\\s+voy\\s+a)\\s+acabar\\s+(?:con\\s+(?:todo|esta\\s+vida)|conmigo)\\b",
+  "\\bme\\s+gustaria\\s+(?:morir|estar\\s+muert[oa]|desaparecer)\\b",
+  "\\bno\\s+puedo\\s+seguir\\s+(?:asi|viviendo|con\\s+esto|de\\s+esta\\s+manera)\\b",
+  "\\b(?:estaria|estoy|estuve|seria|fuera|sera|soy)\\s+mejor\\s+muert[oa]s?\\b",
+  "\\b(?:sin|perdi\\s+las|he\\s+perdido\\s+las)\\s+ganas\\s+de\\s+vivir\\b",
 ];
 
 /** The broader suppression tier's EXTRA patterns (the effective suppress
@@ -164,6 +188,12 @@ export const CRISIS_SUPPRESS_EXTRA_PATTERNS: readonly string[] = [
   // method families (non-first-person jump mentions, meds wording). ----
   "\\b(?:jump(?:ed|ing)?)\\s+off\\s+(?:a\\s+|the\\s+)?(?:bridge|building|roof|balcony|cliff|overpass|ledge)\\b",
   "\\b(?:take|taking|took)\\s+all\\s+(?:of\\s+)?my\\s+(?:meds?|medication|medicine)\\b",
+  // --- 2026-10-01 deep audit C2: broad ES forms that must never echo on a
+  // card but whose mundane readings ("no puedo seguir esperando", "muerto
+  // de risa") must not raise a support dialog. ---------------------------
+  "\\bno\\s+puedo\\s+seguir\\b",
+  "\\bmejor\\s+muert[oa]s?\\b",
+  "\\bacabar\\s+(?:con\\s+todo|conmigo)\\b",
 ];
 
 /**

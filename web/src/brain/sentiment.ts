@@ -40,6 +40,9 @@ interface Tables {
   butWords: Set<string>;
   negators: Set<string>;
   negatorsEn: Set<string>;
+  /** 2026-10-01 deep audit (stats M5): frames whose presence in a negator
+   *  window means the negated state IS ongoing — suppress the flip. */
+  perseverativeFrames: Set<string>;
   intensifiers: Record<string, number>;
   irregularForms: Record<string, string>;
   sentimentLexicon: Record<string, number>;
@@ -64,7 +67,12 @@ function T(): Tables {
   if (tables === null) {
     const lex = LEXICON as unknown as Record<string, never> & {
       scalars: Tables["scalars"];
-      word_sets: { but_words: string[]; negators: string[]; negators_en: string[] };
+      word_sets: {
+      but_words: string[];
+      negators: string[];
+      negators_en: string[];
+      perseverative_frames: string[];
+    };
       intensifiers: Record<string, number>;
       irregular_forms: Record<string, string>;
       sentiment_lexicon: Record<string, number>;
@@ -83,6 +91,7 @@ function T(): Tables {
       butWords: new Set(lex.word_sets.but_words),
       negators: new Set(lex.word_sets.negators),
       negatorsEn: new Set(lex.word_sets.negators_en),
+      perseverativeFrames: new Set(lex.word_sets.perseverative_frames),
       intensifiers: nullProto(lex.intensifiers),
       irregularForms: nullProto(lex.irregular_forms),
       sentimentLexicon: nullProto(lex.sentiment_lexicon),
@@ -241,13 +250,15 @@ export function valenceWalk(tokens: string[], language?: string): number[] {
       const window = seg.slice(Math.max(0, i - T().scalars.booster_scope), i);
       let boost = 1.0;
       let negated = false;
+      let perseverative = false;
       for (const prev of window) {
         const intensifier = T().intensifiers[prev];
         if (intensifier !== undefined) boost *= intensifier;
         if (negatorsFor(language).has(prev)) negated = true;
+        if (T().perseverativeFrames.has(prev)) perseverative = true;
       }
       valence *= boost;
-      if (negated) {
+      if (negated && !perseverative) {
         // A negated STRONG negative is the ABSENCE of the state: "i am
         // not suicidal" must never score positive (it measured +0.5).
         if (valence <= -T().scalars.strong_negation_abs) continue;

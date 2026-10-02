@@ -43,6 +43,7 @@ vi.mock("../src/api", async (importOriginal) => {
 
 vi.mock("../src/crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/crypto")>();
+  const decryptNoteMock = vi.fn(async () => "");
   return {
     ...actual,
     deriveMasterKey: vi.fn(async () => new Uint8Array(32)),
@@ -56,11 +57,18 @@ vi.mock("../src/crypto", async (importOriginal) => {
       wrapKeyBlobB64: "SEALED==",
     })),
     unlockWrapPrivateKey: vi.fn(async () => ({ algorithm: { name: "ECDH" } } as unknown as CryptoKey)),
+    unlockWrapPrivateKeyWithNotesKey: vi.fn(async () => ({
+      privateKey: { algorithm: { name: "ECDH" } } as unknown as CryptoKey,
+      noteKeyV2: new Uint8Array(32),
+    })),
     unwrapPatientDataKey: vi.fn(async () => new Uint8Array(32)),
     decryptInsights: vi.fn(async () => ({ stats: { patterns: [] } })),
     decryptEntry: vi.fn(async () => ({ text: "" })),
     encryptNote: vi.fn(async () => ({ blobB64: "S==" })),
-    decryptNote: vi.fn(async () => ""),
+    decryptNote: decryptNoteMock,
+    decryptNoteAny: vi.fn(async (...args: unknown[]) =>
+      decryptNoteMock(...(args.slice(1) as Parameters<typeof decryptNoteMock>)),
+    ),
   };
 });
 

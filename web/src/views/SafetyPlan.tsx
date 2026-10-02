@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { EMPTY_SAFETY_PLAN, loadSafetyPlan, saveSafetyPlan, type SafetyPlan } from "../safetyPlan";
 import { t } from "../strings";
 import { vault } from "../vault";
+import { registerSafetyPlanSource } from "../safetyPlan";
 import { Button, Card, ErrorBanner, Note, TextArea } from "../ui";
 
 /** Display order + the locale key behind each field prompt. */
@@ -37,6 +38,18 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
   const [error, setError] = useState("");
   const [savedNote, setSavedNote] = useState<string | null>(null);
   const generation = useRef(0);
+  // 2026-10-01 audit M11: the live plan, dirty-tracked. planRef feeds the
+  // lock/crash/navigation seal (safetyPlan.registerSafetyPlanSource); the
+  // dirty flag keeps a CLEAN editor from re-sealing over itself, while a
+  // dirty one survives every lock/crash that used to destroy it.
+  const planRef = useRef<SafetyPlan>(plan);
+  planRef.current = plan;
+  const dirtyRef = useRef(false);
+  useEffect(
+    () =>
+      registerSafetyPlanSource(() => (dirtyRef.current ? planRef.current : null)),
+    [],
+  );
 
   useEffect(() => {
     const run = generation.current + 1;
@@ -61,6 +74,7 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
     setError("");
     try {
       await saveSafetyPlan(vault.get().dataKey, owner, plan);
+      dirtyRef.current = false;
       setSavedNote(t("plan.savedNote"));
     } catch (err) {
       setSavedNote(null);
@@ -80,6 +94,7 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
           value={plan[field]}
           onChange={(value) => {
             setSavedNote(null);
+            dirtyRef.current = true;
             setPlan((current) => ({ ...current, [field]: value }));
           }}
           placeholder={placeholderKey ? t(placeholderKey) : undefined}

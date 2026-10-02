@@ -31,9 +31,9 @@ afterEach(() => {
 
 describe("reconcileInsights funnels", () => {
   it("ok: decrypts, verifies the generation, and reports the phase", async () => {
-    stubFetch(async () => jsonResponse({ phase: "active", active_days: 40, streak: 3, days_remaining: 0, blob: await insightsBlob(7), state_seq: 7 }));
+    stubFetch(async () => jsonResponse({ phase: "insight", active_days: 40, streak: 3, days_remaining: 0, blob: await insightsBlob(7), state_seq: 7 }));
     const outcome = await reconcileInsights();
-    expect(outcome).toEqual({ kind: "ok", phase: "active", stateSeq: 7 });
+    expect(outcome).toEqual({ kind: "ok", phase: "insight", stateSeq: 7 });
   });
 
   it("baseline (blob null) reports ok with no generation to guard", async () => {
@@ -56,12 +56,12 @@ describe("reconcileInsights funnels", () => {
     const otherKey = new Uint8Array(new ArrayBuffer(32)).fill(9);
     const payload = JSON.stringify({ v: 2, stats: {}, state_seq: 11 });
     const blob = toBase64(await encryptWithFixedNonce(otherKey, new TextEncoder().encode(payload), fromBase64("AAAAAAAAAAAAAAAA"), buildAad("insights", USER, "patterns")));
-    stubFetch(() => jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob, state_seq: 11 }));
+    stubFetch(() => jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob, state_seq: 11 }));
     expect(await reconcileInsights()).toEqual({ kind: "credentialRotated" });
   });
 
   it("freshness: a tampered generation (echo ≠ payload) fails loudly", async () => {
-    stubFetch(async () => jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob: await insightsBlob(5), state_seq: 9 }));
+    stubFetch(async () => jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob: await insightsBlob(5), state_seq: 9 }));
     expect(await reconcileInsights()).toEqual({ kind: "freshness" });
   });
 
@@ -78,7 +78,7 @@ describe("reconcileInsights funnels", () => {
     const blob = await insightsBlob(5);
     stubFetch(() => {
       vault.lock(); // the lock lands mid-flight
-      return jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob, state_seq: 5 });
+      return jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob, state_seq: 5 });
     });
     expect(await reconcileInsights()).toEqual({ kind: "locked" });
   });

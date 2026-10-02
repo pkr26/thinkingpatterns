@@ -51,6 +51,7 @@ vi.mock("../src/api", async (importOriginal) => {
 
 vi.mock("../src/crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/crypto")>();
+  const decryptNoteMock = vi.fn(async () => "existing note text");
   return {
     ...actual,
     deriveMasterKey: vi.fn(async () => new Uint8Array(32)),
@@ -58,6 +59,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
       authKey: new Uint8Array(32),
       wrapKek: new Uint8Array(32),
       noteKey: new Uint8Array(32),
+      noteKeyV2: new Uint8Array(32),
     })),
     generateTherapistKeyPair: vi.fn(async () => ({
       publicKeySpkiB64: "P".repeat(124),
@@ -80,7 +82,10 @@ vi.mock("../src/crypto", async (importOriginal) => {
       sentiment: entry.client_entry_id === "e-1" ? 0.25 : null,
     })),
     encryptNote: vi.fn(async () => ({ blobB64: "SEALEDNOTE==" })),
-    decryptNote: vi.fn(async () => "existing note text"),
+    decryptNote: decryptNoteMock,
+    decryptNoteAny: vi.fn(async (...args: unknown[]) =>
+      decryptNoteMock(...(args.slice(1) as Parameters<typeof decryptNoteMock>)),
+    ),
   };
 });
 
@@ -107,6 +112,7 @@ const session = {
   username: "drportal",
   userId: "therapist-1",
   noteKey: new Uint8Array(32),
+      noteKeyV2: new Uint8Array(32),
   privateKey: {} as CryptoKey,
   publicKeyB64: "P".repeat(124),
 };

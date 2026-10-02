@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearSession, api, hasSession, setUnauthorizedHandler, type Patient } from "./api";
-import { unlockWrapPrivateKey } from "./crypto";
+import { unlockWrapPrivateKeyWithNotesKey } from "./crypto";
 import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView, resetScanConfirmation } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
@@ -35,10 +35,13 @@ const IDLE_LOCK_MS = 10 * 60 * 1000;
  * onLoginReady swallows its own error, so LoginView's finally-block
  * wipeKeys never ran. Every holder that reaches this function leaves
  * zeroed. */
-function wipePortalSession(value: { noteKey?: Uint8Array; wrapKek?: Uint8Array } | null): void {
+function wipePortalSession(
+  value: { noteKey?: Uint8Array; noteKeyV2?: Uint8Array; wrapKek?: Uint8Array } | null,
+): void {
   if (!value) return;
   value.wrapKek?.fill(0);
   value.noteKey?.fill(0);
+  value.noteKeyV2?.fill(0);
 }
 
 export function App(): React.JSX.Element {
@@ -220,7 +223,11 @@ export function App(): React.JSX.Element {
     setNotice(null);
     try {
       const me = await api.me();
-      const privateKey = await unlockWrapPrivateKey(keys.wrapKek, me.wrap_key_blob, keys.username);
+      const { privateKey, noteKeyV2 } = await unlockWrapPrivateKeyWithNotesKey(
+        keys.wrapKek,
+        me.wrap_key_blob,
+        keys.username,
+      );
       // The wrap KEK's only job is this one unwrap; the session keeps the
       // non-extractable private-key handle instead. Zero the raw KEK bytes
       // now so a memory disclosure for the rest of the session (extension,
@@ -237,6 +244,7 @@ export function App(): React.JSX.Element {
         username: keys.username,
         userId: keys.userId,
         noteKey: keys.noteKey,
+        noteKeyV2,
         privateKey,
         publicKeyB64: me.wrap_pub_key,
       });
@@ -288,7 +296,12 @@ export function App(): React.JSX.Element {
       // 2026-09-29 audit HIGH: a crash inside one patient's chart falls
       // back to a calm panel instead of unmounting the portal; the key
       // makes navigating back to the caselist recover without a reload.
-      <ViewBoundary resetKey={view.kind}>
+      <ViewBoundary
+        // 2026-10-01 audit L: every patient chart shared resetKey "patient"
+        // — a boundary that failed for patient A never reset when patient
+        // B opened. Reset per patient id.
+        resetKey={`patient:${view.patient.user_id}`}
+      >
         <PatientView
           patient={view.patient}
           session={session}

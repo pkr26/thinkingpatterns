@@ -146,3 +146,20 @@ describe("static-host security policy", () => {
     },
   );
 });
+
+
+describe("M12 (2026-10-01): the DEV/preview server ships the same mic policy", () => {
+  it("vite.config's Permissions-Policy allows the app's own microphone", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const vite = fs.readFileSync(
+      path.resolve(__dirname, "..", "vite.config.ts"),
+      "utf8",
+    );
+    // The dev/preview servers ship server.headers from this exact string —
+    // microphone=() there killed the voice feature with misleading
+    // permission-denied copy while both PRODUCTION sources passed.
+    expect(vite).toContain('"Permissions-Policy": "camera=(), microphone=(self)');
+    expect(vite).not.toContain("microphone=(),");
+  });
+});

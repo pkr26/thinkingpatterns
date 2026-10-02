@@ -13,9 +13,16 @@ vi.mock("../src/api/client", async (importOriginal) => {
       super(message);
     }
   }
+  class OriginPinnedError extends Error {
+    constructor(expected: string, actual: string) {
+      super(`refusing to send data pinned to ${expected} while ${actual} is selected`);
+      this.name = "OriginPinnedError";
+    }
+  }
   return {
     canonicalOrigin,
     ApiError,
+    OriginPinnedError,
     getBaseUrl: vi.fn(async () => baseUrl),
     api: {
       getUserId: vi.fn(async () => "alice"),
@@ -94,7 +101,8 @@ describe("flushAudioQueue", () => {
     await enqueueAudio({ userId: "alice", clientEntryId: "e9", blobB64: blob, mime: "audio/m4a", durationSeconds: 42 });
     const uploaded = await flushAudioQueue();
     expect(uploaded).toBe(1);
-    expect(api.uploadAudioAttachment).toHaveBeenCalledWith("e9", blob, "audio/m4a", 42);
+    // 2026-10-01 audit H1: every upload is pinned to the flush's origin.
+    expect(api.uploadAudioAttachment).toHaveBeenCalledWith("e9", blob, "audio/m4a", 42, baseUrl);
     expect(await audioQueueCount("alice")).toBe(0);
   });
 
@@ -125,6 +133,17 @@ describe("flushAudioQueue", () => {
     expect(await audioQueueCount("alice")).toBe(1);
     // The next healthy flush lands it.
     expect(await flushAudioQueue()).toBe(1);
+  });
+
+  it("an origin-pin refusal KEEPS the row (server switched mid-flush, 2026-10-01 H1)", async () => {
+    await enqueueAudio({ userId: "alice", clientEntryId: "e-pin", blobB64: take(), mime: "audio/m4a", durationSeconds: 30 });
+    const { OriginPinnedError } = await import("../src/api/client");
+    (api.uploadAudioAttachment as any).mockRejectedValueOnce(
+      new OriginPinnedError("https://one.example.test", "https://two.example.test"),
+    );
+    const uploaded = await flushAudioQueue();
+    expect(uploaded).toBe(0);
+    expect(await audioQueueCount("alice")).toBe(1); // NOT dropped — it stays queued
   });
 
   it("a corrupt row is dropped without blocking the rest", async () => {

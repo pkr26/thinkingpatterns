@@ -53,7 +53,7 @@ def upgrade() -> None:
     op.create_index("ix_audio_user_expires", "audio_attachments", ["user_id", "expires_at"])
     with op.batch_alter_table("consents") as batch_op:
         batch_op.add_column(
-            sa.Column("share_voice", sa.Boolean(), nullable=False, server_default=sa.text("0"))
+            sa.Column("share_voice", sa.Boolean(), nullable=False, server_default=sa.text("false"))
         )
 
 

@@ -26,6 +26,7 @@ import { t as tr } from "../strings";
 import { vault } from "../vault";
 import { useSession } from "../store";
 import { recoverAccountWithKey } from "../recoveryFlow";
+import { passwordPolicyError } from "./LoginScreen";
 
 export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -50,8 +51,12 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
       showStatus(tr("recovery.missingFields"), "neutral");
       return;
     }
-    if (newPassword.length < 12) {
-      showStatus(tr("recovery.passwordTooShort"), "neutral");
+    // 2026-10-01 audit LOW: the FULL registration policy (variety,
+    // common-word, sequence checks — LoginScreen's passwordPolicyError),
+    // not the old length-only gate a recovery-set password slipped under.
+    const policy = passwordPolicyError(newPassword);
+    if (policy) {
+      showStatus(policy, "neutral");
       return;
     }
     if (newPassword !== confirm) {
@@ -69,6 +74,12 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
           dataKey: outcome.dataKey,
         },
         outcome.userId,
+        // 2026-10-01 audit M7: the auth-key slot holds a placeholder, so
+        // the vault must NOT claim the password is known — reauth used to
+        // compare every later password against zeros ("Wrong password"
+        // on account deletion, consents, biometric enable, key upgrade
+        // and password rotation until a full sign-out/in).
+        { authKeyKnown: false },
       );
       markLoggedIn(); // the vault subscription flips `unlocked` on unlock
       setDone(true);

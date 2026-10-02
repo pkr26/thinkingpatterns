@@ -27,6 +27,68 @@ import { decrypt, encrypt } from "./crypto/envelope";
 
 const STORAGE_PREFIX = "mindpattern.entryVersions.";
 
+// --- 2026-10-01 audit M1: the v2-bound set (see web/src/entryVersions.ts
+// for the full rationale) — ids whose blob has EVER authenticated under
+// the version-bound v2 AAD; for those, the legacy version-free fallback
+// is refused (a stale-blob replay is not a legacy row). Encrypted at rest
+// under the data key, AAD-bound to the user; absent/corrupt = no memory.
+const V2_BOUND_PREFIX = "mindpattern.entryV2Bound.";
+const v2BoundMirror = new Map<string, Set<string>>();
+
+function v2BoundKey(userId: string): string {
+  return `${V2_BOUND_PREFIX}${userId}`;
+}
+
+async function loadV2Bound(userId: string, dataKey: Buffer): Promise<Set<string>> {
+  let bound = v2BoundMirror.get(userId);
+  if (!bound) {
+    bound = new Set();
+    v2BoundMirror.set(userId, bound);
+  }
+  let raw: string | null = null;
+  try {
+    raw = await AsyncStorage.getItem(v2BoundKey(userId));
+  } catch {
+    return bound;
+  }
+  if (!raw) return bound;
+  try {
+    const plaintext = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("entry-v2-bound", userId));
+    const parsed = JSON.parse(plaintext.toString("utf8")) as unknown;
+    if (Array.isArray(parsed)) {
+      for (const id of parsed) if (typeof id === "string") bound.add(id);
+    }
+  } catch {
+    // Corrupt/foreign ciphertext: treat as absent.
+  }
+  return bound;
+}
+
+async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string>): Promise<void> {
+  const payload = Buffer.from(JSON.stringify([...bound]), "utf8");
+  try {
+    const blob = encrypt(dataKey, payload, buildAad("entry-v2-bound", userId));
+    await AsyncStorage.setItem(v2BoundKey(userId), blob.toString("base64"));
+  } finally {
+    payload.fill(0);
+  }
+}
+
+/** Record that this id authenticated under the v2 binding — the legacy
+ *  fallback is refused for the id from now on. */
+export async function noteV2Bound(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
+  const bound = await loadV2Bound(userId, dataKey);
+  if (bound.has(clientEntryId)) return;
+  bound.add(clientEntryId);
+  await persistV2Bound(userId, dataKey, bound);
+}
+
+/** Whether this id has EVER authenticated under the v2 binding. */
+export async function isV2Bound(userId: string, dataKey: Buffer, clientEntryId: string): Promise<boolean> {
+  const bound = await loadV2Bound(userId, dataKey);
+  return bound.has(clientEntryId);
+}
+
 /** Process-lifetime mirror: user -> (clientEntryId -> max version). */
 const memoryMirror = new Map<string, Map<string, number>>();
 
@@ -137,14 +199,19 @@ export async function knownEntryVersion(
 export async function forgetEntryVersion(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
   const mirror = await loadStored(userId, dataKey);
   if (mirror.delete(clientEntryId)) await persist(userId, dataKey, mirror);
+  // 2026-10-01 audit M1: the mark dies with the row.
+  const bound = await loadV2Bound(userId, dataKey);
+  if (bound.delete(clientEntryId)) await persistV2Bound(userId, dataKey, bound);
 }
 
 /** Forget everything for a user (sign-out / account deletion / origin
  * switch / data-key rotation re-keys the store anyway). */
 export async function forgetAllEntryVersions(userId: string): Promise<void> {
   memoryMirror.delete(userId);
+  v2BoundMirror.delete(userId);
   try {
     await AsyncStorage.removeItem(storageKey(userId));
+    await AsyncStorage.removeItem(v2BoundKey(userId));
   } catch {
     /* nothing to forget */
   }
@@ -164,4 +231,5 @@ export async function rebindEntryVersions(userId: string, oldDataKey: Buffer, ne
 /** Test helper: drop every in-memory mirror (storage untouched). */
 export function resetEntryVersionMirrors(): void {
   memoryMirror.clear();
+  v2BoundMirror.clear();
 }

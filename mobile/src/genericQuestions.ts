@@ -135,9 +135,7 @@ export const GENERIC_QUESTIONS_ES: readonly string[] = [
   "¿Hay algo que espera con ilusión?",
   // Audit 2026-09-28 (LOW): usted-register pronoun — "la" was the only
   // person-referring feminine clitic in the pool; every other entry uses
-  // le/lo. (shared/generic_questions_es.json still carries the pre-fix
-  // string; genericQuestions.test.ts applies this one audited correction
-  // at the parity check until shared/ syncs.)
+  // le/lo. shared/ now carries the same fixed string (2026-10-01).
   "¿Qué le confortó hoy?",
   "¿Qué vale la pena conservar de hoy?",
   "¿Qué fue lo que más le importó hoy?",
@@ -170,8 +168,8 @@ export const GENERIC_QUESTIONS_ES: readonly string[] = [
   "¿Qué saboreó hoy y recuerda?",
   "¿Dónde se sintió más a gusto hoy?",
   "¿En qué lugar habría preferido estar hoy?",
-  "¿Qué se siente más como 'usted' en estos días?",
-  "¿Qué está cambiando en usted lenta y lentamente?",
+  "¿Qué se siente más 'suyo' en estos días?",
+  "¿Qué está cambiando en usted, poco a poco, últimamente?",
   "¿Qué se ha mantenido estable en usted últimamente?",
   "Si hoy fuera un clima, ¿cuál habría sido?",
   "¿Cómo sería mañana en un mundo ideal?",

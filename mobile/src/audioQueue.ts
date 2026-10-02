@@ -22,7 +22,7 @@
  *    and 5xx keep the row for the next reconnect.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api, ApiError, canonicalOrigin, getBaseUrl } from "./api/client";
+import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
 
 const KEY_PREFIX = "@mindpattern/audioqueue.v1";
 export const MAX_AUDIO_QUEUE_ITEMS = 12;
@@ -158,10 +158,23 @@ export async function flushAudioQueue(): Promise<number> {
     if (item.notBefore !== undefined && Date.now() < item.notBefore) continue;
     const entryId = key.slice(key.lastIndexOf(":") + 1);
     try {
-      await api.uploadAudioAttachment(entryId, item.blobB64, item.mime, item.durationSeconds);
+      // 2026-10-01 audit H1: re-pin EVERY item to the flush's origin. A
+      // server switch mid-flush refuses locally (OriginPinnedError) instead
+      // of uploading to the new origin where the entry does not exist —
+      // the 404 branch below would have destroyed the only copy.
+      await api.uploadAudioAttachment(
+        entryId,
+        item.blobB64,
+        item.mime,
+        item.durationSeconds,
+        origin,
+      );
       await AsyncStorage.removeItem(key);
       uploaded += 1;
     } catch (err) {
+      if (err instanceof OriginPinnedError) {
+        continue; // the row stays queued under its own origin's scope
+      }
       if (err instanceof ApiError && err.status === 401) {
         await AsyncStorage.setItem(key, JSON.stringify({ ...item, notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS }));
         continue;
@@ -181,6 +194,14 @@ export async function flushAudioQueue(): Promise<number> {
 
 /** Delete this account's queued takes (account deletion — the same policy
  *  as the text queue: sign-out KEEPS ciphertext, deletion erases). */
+/** 2026-10-01 audit H1: abort an in-flight flush when the API origin
+ *  changes (the store's origin-change handler calls this): bumping the
+ *  generation stops the loop before its next item — the text queue's
+ *  abortInFlightFlush twin. Rows stay queued under their own origin. */
+export function abortInFlightAudioFlush(): void {
+  audioGeneration += 1;
+}
+
 export async function clearAudioQueue(userId?: string): Promise<void> {
   const owner = userId ?? (await api.getUserId());
   if (!owner) return;

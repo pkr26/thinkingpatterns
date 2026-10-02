@@ -38,7 +38,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column(
         "users",
-        sa.Column("voice_consent", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("voice_consent", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
     op.add_column("users", sa.Column("voice_consent_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("users", sa.Column("voice_consent_disclosure", sa.String(64), nullable=True))

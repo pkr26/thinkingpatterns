@@ -76,7 +76,12 @@ function greetingKey(hour: number): string {
   return "entry.greetingEvening";
 }
 
-export function EntryView(props: { onSaved: (result: SaveResult, date: string) => void }): React.JSX.Element {
+export function EntryView(props: {
+  onSaved: (result: SaveResult, date: string) => void;
+  /** 2026-10-01 audit M3: the crisis prompt is a dead-end card without
+   *  this — its copy promises "resources below" while nothing follows. */
+  onCrisis?: () => void;
+}): React.JSX.Element {
   const [text, setText] = useState("");
   const [moodPick, setMoodPick] = useState<number | null>(null);
   const [energyPick, setEnergyPick] = useState<number | null>(null);
@@ -367,7 +372,6 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       if (!shownToday) {
         await recordCrisisDialogShown(owner, date).catch(() => undefined);
         setCrisisPrompt(true);
-        return; // the user confirms once; the next Save proceeds
       }
       // Already acknowledged today (or the stamp is unreadable): the save
       // proceeds without re-prompting.
@@ -469,7 +473,8 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
         setEnergyPick(null);
         setSleepPick(null);
         setTags([]);
-        setCrisisPrompt(false);
+        // 2026-10-01 audit M3: the crisis prompt is NOT cleared here — it
+        // rides past the save and stays until dismissed from the card.
         setDraftRestored(false);
         // The kept recording rides only a SENT entry (the offline queue is
         // the text ciphertext's safety net, not an audio transport —
@@ -542,6 +547,12 @@ export function EntryView(props: { onSaved: (result: SaveResult, date: string) =
       {crisisPrompt && (
         <Card title={t("entry.crisisPromptTitle")} tone="sensitive">
           <Note tone="danger">{t("entry.crisisPromptBody")}</Note>
+          {/* 2026-10-01 audit M3: the promised resources, one tap away,
+              plus the mobile dialog's not-now dismissal. */}
+          {props.onCrisis && (
+            <Button label={t("measures.getSupport")} onPress={props.onCrisis} small />
+          )}
+          <Button label={t("common.notNow")} onPress={() => setCrisisPrompt(false)} small variant="ghost" />
           <Note tone="muted">{t("entry.crisisPromptProceed")}</Note>
         </Card>
       )}

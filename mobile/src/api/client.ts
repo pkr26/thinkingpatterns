@@ -531,6 +531,23 @@ export const API_ERROR_CODES = [
   "audio_expired",
   "unknown_entry",
   "consent_voice_share_required",
+  // 2026-10-01 audit M17: six backend-emitted codes the allowlist missed.
+  // deps.py defaults: therapist-role tokens on journal endpoints, wrong
+  // HTTP method, the middleware's body-read deadline, and the last-ditch
+  // 500 (the envelope is generic by design, so the client must accept it).
+  "forbidden",
+  "method_not_allowed",
+  "request_timeout",
+  "internal_error",
+  // account.py: v2 key-scheme endpoints require the versioned body shape.
+  "version_required",
+  // auth.py/account.py: no recovery kit on this account — reachable from
+  // the shipped recovery flow; without the code the Spanish locale fell
+  // back to raw English detail.
+  "recovery_not_configured",
+  // auth.py (2026-10-01 audit C1): the stored recovery kit verifies under
+  // the OTHER scheme — retry once with it (protocol negotiation).
+  "recovery_scheme_mismatch",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -1116,17 +1133,28 @@ export const api = {
    *  password-locked ciphertext — so it ships as a plain GET. */
   keyEnvelope: (): Promise<KeyEnvelopeResponse> => request("GET", `${API_PREFIX}/auth/key-envelope`),
   // --- key-recovery envelope (wave 3, 2026-09-30) -------------------------
-  recoveryStatus: (): Promise<{ enabled: boolean; set_at: string | null }> =>
-    request("GET", `${API_PREFIX}/account/recovery`),
+  recoveryStatus: (): Promise<{
+    enabled: boolean;
+    set_at: string | null;
+    scheme: "v1" | "v2";
+  }> => request("GET", `${API_PREFIX}/account/recovery`),
   setupRecoveryKit: (
     passwordVerifierB64: string,
-    recoveryKeyB64: string,
+    recoveryVerifierB64: string,
     wrappedKeyB64: string,
+    scheme: "v1" | "v2" = "v2",
   ) =>
     request(
       "PUT",
       `${API_PREFIX}/account/recovery`,
-      { password_verifier: passwordVerifierB64, verifier: recoveryKeyB64, wrapped_key: wrappedKeyB64 },
+      {
+        password_verifier: passwordVerifierB64,
+        verifier: recoveryVerifierB64,
+        wrapped_key: wrappedKeyB64,
+        // 2026-10-01 audit C1: v2 = the verifier is domain-separated HKDF
+        // material; the raw recovery key never leaves the device.
+        scheme,
+      },
       {},
       { sensitive: true },
     ),
@@ -1138,13 +1166,15 @@ export const api = {
       { verifier: passwordVerifierB64 },
       { sensitive: true },
     ),
-  recoverLogin: (username: string, recoveryKeyB64: string) =>
+  recoverLogin: (username: string, recoveryVerifierB64: string, scheme: "v1" | "v2" = "v2") =>
     // noBearer: like login, a 401 here means the recovery key was wrong —
-    // the vault-lock hook must not fire on it.
+    // the vault-lock hook must not fire on it. `scheme` says which
+    // derivation the verifier used; a kit stored under the other scheme
+    // answers 401 recovery_scheme_mismatch (negotiation, not a miss).
     request(
       "POST",
       `${API_PREFIX}/auth/recover`,
-      { username, verifier: recoveryKeyB64 },
+      { username, verifier: recoveryVerifierB64, scheme },
       {},
       { sensitive: true, noBearer: true },
     ),
@@ -1569,13 +1599,24 @@ export const api = {
     blobB64: string,
     mime: string,
     durationSeconds: number,
+    expectedOrigin?: string,
   ) =>
-    request("POST", `${API_PREFIX}/audio/attachments`, {
-      client_entry_id: clientEntryId,
-      blob: blobB64,
-      mime,
-      duration_seconds: durationSeconds,
-    }),
+    request(
+      "POST",
+      `${API_PREFIX}/audio/attachments`,
+      {
+        client_entry_id: clientEntryId,
+        blob: blobB64,
+        mime,
+        duration_seconds: durationSeconds,
+      },
+      {},
+      // 2026-10-01 audit H1: a queued take is pinned to the origin it was
+      // recorded under — without the pin, a mid-flush server switch made
+      // the remaining rows upload to the NEW origin (404) and the 404
+      // handler below DELETED the only copy of the recording.
+      expectedOrigin !== undefined ? { expectedOrigin } : {},
+    ),
   fetchAudioAttachment: (attachmentId: string) =>
     request("GET", `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`),
   deleteAudioAttachment: (attachmentId: string) =>

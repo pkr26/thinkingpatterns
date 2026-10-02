@@ -44,6 +44,7 @@ vi.mock("../src/api", async (importOriginal) => {
 
 vi.mock("../src/crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/crypto")>();
+  const decryptNoteMock = vi.fn(async () => "");
   return {
     ...actual,
     deriveMasterKey: vi.fn(async () => new Uint8Array(32)),
@@ -53,17 +54,25 @@ vi.mock("../src/crypto", async (importOriginal) => {
       authKey: new Uint8Array(32),
       wrapKek: new Uint8Array(32),
       noteKey: new Uint8Array(32),
+      noteKeyV2: new Uint8Array(32),
     })),
     generateTherapistKeyPair: vi.fn(async () => ({
       publicKeySpkiB64: "P".repeat(124),
       wrapKeyBlobB64: "SEALED==",
     })),
     unlockWrapPrivateKey: vi.fn(async () => ({ algorithm: { name: "ECDH" } })),
+    unlockWrapPrivateKeyWithNotesKey: vi.fn(async () => ({
+      privateKey: { algorithm: { name: "ECDH" } } as unknown as CryptoKey,
+      noteKeyV2: new Uint8Array(32),
+    })),
     unwrapPatientDataKey: vi.fn(async () => new Uint8Array(32)),
     decryptInsights: vi.fn(async () => ({ stats: { patterns: [] } })),
     decryptEntry: vi.fn(async () => ({ text: "" })),
     encryptNote: vi.fn(async () => ({ blobB64: "S==" })),
-    decryptNote: vi.fn(async () => ""),
+    decryptNote: decryptNoteMock,
+    decryptNoteAny: vi.fn(async (...args: unknown[]) =>
+      decryptNoteMock(...(args.slice(1) as Parameters<typeof decryptNoteMock>)),
+    ),
   };
 });
 
@@ -95,10 +104,10 @@ describe("App", () => {
   });
 
   it("a failed key unlock returns to login with an honest message", async () => {
-    const { unlockWrapPrivateKey } = vi.mocked(await import("../src/crypto"));
+    const { unlockWrapPrivateKeyWithNotesKey } = vi.mocked(await import("../src/crypto"));
     const err = new Error("blob failed authentication");
     err.name = "TamperError";
-    unlockWrapPrivateKey.mockRejectedValueOnce(err);
+    unlockWrapPrivateKeyWithNotesKey.mockRejectedValueOnce(err);
     const root = await login();
     await flush();
     expect(textOf(root)).toContain("could not be unlocked with this password");
@@ -110,8 +119,8 @@ describe("App", () => {
   });
 
   it("a non-tamper unlock failure reports the raw message", async () => {
-    const { unlockWrapPrivateKey } = vi.mocked(await import("../src/crypto"));
-    unlockWrapPrivateKey.mockRejectedValueOnce(new Error("network down"));
+    const { unlockWrapPrivateKeyWithNotesKey } = vi.mocked(await import("../src/crypto"));
+    unlockWrapPrivateKeyWithNotesKey.mockRejectedValueOnce(new Error("network down"));
     const root = await login();
     await flush();
     expect(textOf(root)).toContain("network down");
@@ -495,7 +504,7 @@ describe("App", () => {
     const noteKey = new Uint8Array(32).fill(9);
     const authKey = new Uint8Array(32).fill(5);
     crypto.derivePortalKeys.mockResolvedValueOnce({ authKey, wrapKek, noteKey });
-    crypto.unlockWrapPrivateKey.mockRejectedValueOnce(new Error("network down"));
+    crypto.unlockWrapPrivateKeyWithNotesKey.mockRejectedValueOnce(new Error("network down"));
     const root = await login();
     await flush();
     expect(textOf(root)).toContain("network down");

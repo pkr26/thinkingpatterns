@@ -46,9 +46,13 @@ describe("language detection (brain heuristic port)", () => {
     expect(detectLanguage("nunca estoy bien")).toBe("es");
   });
 
-  it("keeps the English default only for a corpus where nothing scored", () => {
+  it("keeps the English default ONLY for a fully empty corpus (2026-10-01 parity)", () => {
     expect(detectLanguage("")).toBe("en");
-    expect(detectLanguage("😊😊")).toBe("en");
+    // Emoji-only text exists but scored nothing — the honest verdict is
+    // "other" (the server's rule, and the web twin's since 2026-09-26);
+    // the old unconditional "en" scored CJK/emoji corpora against the EN
+    // lexicon from nothing.
+    expect(detectLanguage("😊😊")).toBe("other");
   });
 });
 

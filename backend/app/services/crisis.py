@@ -208,6 +208,41 @@ DIALOG_PATTERNS: tuple[str, ...] = (
     # tier. The folded spelling matches on BOTH engines; the misspelling
     # ("canini…") still matches too.
     "\\bcanini\\s+almak\\s+istiyorum\\b",
+    # --- 2026-10-01 deep audit C2 (executed-engine false negatives): common
+    # first-person ideation phrasings that matched NEITHER tier — the wish
+    # family beyond "was dead"/"could die", "cannot take it anymore" (only
+    # "do this anymore" was listed), "would be better without me" (only
+    # "better off without me"), "rather die", "no reason to wake up",
+    # burden phrasings ("nobody would miss me"), and the hyperbole-safe
+    # first-person restriction on "rather die" ("he'd rather die" stays
+    # unmatched on purpose). -------------------------------------------------
+    "\\bwish\\s+(?:i\\s+)?to\\s+die\\b",
+    "\\bwish\\s+(?:i\\s+)?(?:was|were)\\s+gone\\b",
+    "\\bwish\\s+(?:i\\s+)?(?:could\\s+|to\\s+)?disappear\\b",
+    "\\b(?:can['\\u2019]?t|cannot)\\s+take\\s+(?:it|this)\\s+(?:any\\s?more|anymore)\\b",
+    "\\bhop(?:e|es|ed|ing)\\s+i\\s+(?:don['\\u2019]?t|do\\s+not|won['\\u2019]?t|never)\\s+wake\\s+up\\b",
+    "\\b(?:don['\\u2019]?t|do\\s+not)\\s+wanna\\s+(?:be\\s+here|be\\s+alive|live|exist|wake\\s+up)\\b",
+    "\\bwould\\s+be\\s+better\\s+(?:off\\s+)?without\\s+me\\b",
+    "\\bno\\s+reason\\s+to\\s+wake\\s+up\\b",
+    "\\bgoodbye\\s+cruel\\s+world\\b",
+    "\\bi\\s+would\\s+rather\\s+die\\b",
+    "\\bi['\\u2019]?d\\s+rather\\s+die\\b",
+    "\\b(?:nobody|no\\s+one)\\s+would\\s+(?:even\\s+)?miss\\s+me\\b",
+    "\\bmiss\\s+me\\s+when\\s+i['\\u2019]?m\\s+gone\\b",
+    # --- 2026-10-01 deep audit C2, Spanish: first-person conjugations that
+    # fired suppress-only ("me voy a suicidar", "pienso matarme" — the
+    # dialog never appeared anywhere because the dialog tier is client-side
+    # and shares this list) or nothing ("acabar con todo/conmigo" — the
+    # equally idiomatic twin of the listed "terminar con todo"; "me
+    # gustaría morir"; "sin ganas de vivir"; "mejor muerto"). Accented
+    # spellings are written post-fold (í/á -> i/a normalization). ---------
+    "\\bsuicid(?:ar|arse)\\b",
+    "\\b(?:pienso|pensaba|debo|debria|tengo\\s+que|planeo)\\s+(?:matarme|suicidarme|cortarme|lastimarme|quemarme|ahorcarme|ahogarme)\\b",
+    "\\b(?:quiero|quisiera|voy\\s+a|pienso|pensaba|debo|tengo\\s+que|me\\s+voy\\s+a)\\s+acabar\\s+(?:con\\s+(?:todo|esta\\s+vida)|conmigo)\\b",
+    "\\bme\\s+gustaria\\s+(?:morir|estar\\s+muert[oa]|desaparecer)\\b",
+    "\\bno\\s+puedo\\s+seguir\\s+(?:asi|viviendo|con\\s+esto|de\\s+esta\\s+manera)\\b",
+    "\\b(?:estaria|estoy|estuve|seria|fuera|sera|soy)\\s+mejor\\s+muert[oa]s?\\b",
+    "\\b(?:sin|perdi\\s+las|he\\s+perdido\\s+las)\\s+ganas\\s+de\\s+vivir\\b",
 )
 
 SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
@@ -254,6 +289,16 @@ SUPPRESS_EXTRA_PATTERNS: tuple[str, ...] = (
     # (adherence) still matches NOTHING on either tier, by design. --------
     "\\b(?:jump(?:ed|ing)?)\\s+off\\s+(?:a\\s+|the\\s+)?(?:bridge|building|roof|balcony|cliff|overpass|ledge)\\b",
     "\\b(?:take|taking|took)\\s+all\\s+(?:of\\s+)?my\\s+(?:meds?|medication|medicine)\\b",
+    # --- 2026-10-01 deep audit C2: the broad Spanish can't-go-on form is
+    # suppress-only (mundane continuations exist — "no puedo seguir
+    # esperando" — so the DIALOG tier takes only the qualified forms
+    # above, while the bare form at least never echoes on a card). The
+    # bare "mejor muerto" (copula-anchored form is dialog above; "muerto
+    # de risa" hyperbole must not raise a dialog) and the elliptical
+    # "acabar conmigo" join the same broader tier. ------------------------
+    "\\bno\\s+puedo\\s+seguir\\b",
+    "\\bmejor\\s+muert[oa]s?\\b",
+    "\\bacabar\\s+(?:con\\s+todo|conmigo)\\b",
 )
 
 # The effective suppression tier: dialog + suppress_extra (per the JSON).
@@ -468,6 +513,62 @@ _PUNCT_TO_SPACE_RE = re.compile(
     r"\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]"
 )
 
+_PUNCT_RUN_RE = re.compile(_PUNCT_TO_SPACE_RE.pattern + "+")
+
+# 2026-10-01 deep audit C2 (emoji-inside-word bypass): "k😊ll" folds to
+# "kll" when the intra-word symbol is dropped — the emoji REPLACED a
+# letter, and the information is gone. Vowel reinsertion recovers exactly
+# this class: the dropped position is retried with each ASCII vowel
+# ("k😊ll" -> "kill"), matched only against the EXISTING tier patterns,
+# so a variant fires only when the reinserted text forms a full crisis
+# phrase. Benign symbol-inside words ("r😊n away") match nothing either
+# way. Max 2 reinserted runs per text bounds the variant count.
+_VOWEL_REINSERTION = ("a", "e", "i", "o", "u")
+_VOWEL_REINSERTION_RUN_CAP = 2
+_VOWEL_MARK = "\x00"
+
+
+def _punct_variants(text: str) -> tuple[str, ...]:
+    """Punctuation-fold variants of the pre-punct form. The CANONICAL
+    variant (first) drops every intra-word non-kept run ("k😊ll" ->
+    "kll", "s.u.i.c.i.d.e" -> "suicide") and spaces token-edge runs.
+    Each intra-word run (up to the cap) additionally yields a variant
+    with ONE vowel reinserted at the dropped position ("k😊ll" ->
+    "kill"). Must stay behavior-identical to the ECMAScript engine's
+    punctVariants (the JSON fixtures pin both)."""
+    runs: list[tuple[int, int]] = []
+
+    def _fold(m: re.Match[str]) -> str:
+        s, e = m.start(), m.end()
+        prev_kept = s > 0 and _PUNCT_TO_SPACE_RE.match(text, s - 1, s) is None
+        next_kept = e < len(text) and _PUNCT_TO_SPACE_RE.match(text, e, e + 1) is None
+        if prev_kept and next_kept:
+            runs.append((s, e))
+            return _VOWEL_MARK
+        return " "
+
+    marked = _PUNCT_RUN_RE.sub(_fold, text)
+    base = marked.replace(_VOWEL_MARK, "")
+    if not runs:
+        return (base,)
+    variants = [base]
+    # Translate the first <=cap marked runs into their offsets in `base`
+    # (every mark contributes zero characters there).
+    offsets: list[int] = []
+    seen_marks = 0
+    base_pos = 0
+    for ch in marked:
+        if ch == _VOWEL_MARK:
+            if seen_marks < _VOWEL_REINSERTION_RUN_CAP:
+                offsets.append(base_pos)
+            seen_marks += 1
+        else:
+            base_pos += 1
+    for off in offsets:
+        for vowel in _VOWEL_REINSERTION:
+            variants.append(base[:off] + vowel + base[off:])
+    return tuple(variants)
+
 
 def _leet_fold(text: str) -> str:
     # Loop until stable: "su1c1de" needs two passes (each replacement makes
@@ -514,12 +615,42 @@ def _fold_latin_marks(text: str) -> str:
     return "".join(out)
 
 
-# A letter/digit sitting directly against a non-ASCII letter is a script
+# A letter/digit sitting directly against a non-ASCII LETTER is a script
 # boundary: separate them with a space so \b means the same thing under
 # Python re (Unicode \w: "suicideम" has NO boundary after "suicide") and
 # ECMAScript (ASCII \w: it does). Both engines then agree on every input.
+# 2026-10-01 deep audit C2: only LETTERS (Unicode category L*) get the
+# boundary — a non-letter symbol (emoji, math, symbols) directly between
+# ASCII letters stays intra-word so the punctuation fold can DROP it
+# ("k😊ll" must reach the fold as one token, not be pre-split into
+# "k 😊 ll" where the drop can no longer see both kept neighbors).
+_NONASCII_LETTER_RE = re.compile(r"[^\x00-\x7f]")
 _SCRIPT_BOUNDARY_RE = re.compile(r"([a-z0-9])([^\x00-\x7f])")
 _SCRIPT_BOUNDARY_RE2 = re.compile(r"([^\x00-\x7f])([a-z0-9])")
+
+
+def _is_nonascii_letter(ch: str) -> bool:
+    return unicodedata.category(ch).startswith("L")
+
+
+def _insert_script_boundaries(text: str) -> str:
+    def _ascii_alnum(ch: str) -> bool:
+        return ("0" <= ch <= "9") or ("a" <= ch <= "z")
+
+    out: list[str] = []
+    n = len(text)
+    for i, ch in enumerate(text):
+        if _NONASCII_LETTER_RE.match(ch) and _is_nonascii_letter(ch):
+            prev = text[i - 1] if i > 0 else ""
+            nxt = text[i + 1] if i + 1 < n else ""
+            if _ascii_alnum(prev):
+                out.append(" ")
+            out.append(ch)
+            if _ascii_alnum(nxt):
+                out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _normalize_pre_punct(text: str) -> str:
@@ -538,19 +669,30 @@ def _normalize_pre_punct(text: str) -> str:
     # Curly apostrophe to ASCII before punctuation folding (the patterns'
     # ['\u2019]? classes accept both, but only ASCII ' survives the fold).
     out = out.replace("\u2019", "'")
-    out = _SCRIPT_BOUNDARY_RE.sub(r"\1 \2", out)
-    out = _SCRIPT_BOUNDARY_RE2.sub(r"\1 \2", out)
+    out = _insert_script_boundaries(out)
     out = _leet_fold(out)
     return out
 
 
-def _normalize_to_tokens(text: str) -> list[str]:
-    out = _PUNCT_TO_SPACE_RE.sub(" ", _normalize_pre_punct(text))
-    tokens = [t for t in re.split(r"[\s\-]+", out) if t]
+def _tokens_from_folded(form: str) -> list[str]:
+    tokens = [t for t in re.split(r"[\s\-]+", form) if t]
     # 2026-09-20 audit H-7: SMS shorthand — a standalone "2" token IS "to"
     # ("i want 2 die", "no reason 2 live"). Folded at the TOKEN level, so 2
     # stays an unmapped leet digit everywhere else (2=z is ambiguous).
     return ["to" if t == "2" else t for t in tokens]
+
+
+def _normalize_to_tokens(text: str) -> list[str]:
+    """Tokens of the CANONICAL punctuation-fold variant (the historical
+    normalize_crisis_text behavior)."""
+    return _tokens_from_folded(_punct_variants(_normalize_pre_punct(text))[0])
+
+
+def _variant_token_sets(pre: str) -> tuple[list[str], ...]:
+    """Token lists for every punctuation-fold variant of a pre-punct form.
+    MUST stay behavior-compatible with the ECMAScript engine's
+    variantTokenSets (the JSON fixtures pin both)."""
+    return tuple(_tokens_from_folded(v) for v in _punct_variants(pre))
 
 
 def _is_ascii_single(token: str) -> bool:
@@ -829,56 +971,61 @@ _BENIGN_MASK_FOLDED_RES: tuple[re.Pattern[str], ...] = tuple(
 
 
 def _folded_variants(text: str) -> tuple[str, ...]:
-    """The letter-run-collapsed twins of the three canonical variants
-    (audit H-7). Matched only against the FOLDED tier twins above — the
-    canonical channel is untouched, so every pre-existing verdict keeps
-    its exact form."""
+    """The letter-run-collapsed twins of every canonical variant (audit
+    H-7). Matched only against the FOLDED tier twins below — the canonical
+    channel is untouched, so every pre-existing verdict keeps its exact
+    form. The historical re-run of _normalize_pre_punct on the folded form
+    is preserved (idempotent, but exact behavior is pinned by tests)."""
     pre = _mask_benign(_normalize_pre_punct(text))
     folded = _dedup_fold(pre)
     for mask in _BENIGN_MASK_FOLDED_RES:
         folded = mask.sub(" ", folded)
-    tokens = _normalize_to_tokens(folded)
-    return (
-        _primary_join(tokens),
-        _orphan_glue(tokens),
-        _concat_join(tokens),
-    )
+    out: list[str] = []
+    for tokens in _variant_token_sets(_normalize_pre_punct(folded)):
+        out.extend((_primary_join(tokens), _orphan_glue(tokens), _concat_join(tokens)))
+    return tuple(out)
 
 
 def _match_variants(text: str) -> tuple[str, ...]:
-    """Every normalized form the tiers match against. MUST stay
-    behavior-compatible with the mobile engine's matchVariants (the shared
-    fixtures pin both)."""
-    tokens = _normalize_to_tokens(_mask_benign(_normalize_pre_punct(text)))
-    return (
-        _primary_join(tokens),
-        _orphan_glue(tokens),
-        _concat_join(tokens),
-    )
+    """Every normalized form the tiers match against, grouped per
+    punctuation-fold variant as (primary, orphan, concat) triples. MUST
+    stay behavior-compatible with the mobile engine's matchVariants (the
+    shared fixtures pin both)."""
+    pre = _mask_benign(_normalize_pre_punct(text))
+    out: list[str] = []
+    for tokens in _variant_token_sets(pre):
+        out.extend((_primary_join(tokens), _orphan_glue(tokens), _concat_join(tokens)))
+    return tuple(out)
+
+
+def _tier_matches(
+    regex: re.Pattern[str],
+    concat_regex: re.Pattern[str],
+    variants: tuple[str, ...],
+) -> bool:
+    """A tier fires when ANY variant group's primary/orphan form matches
+    the tier, or its concat form matches the tier's concat twin. The
+    triples stay contiguous so one tier check covers every group."""
+    for i in range(0, len(variants) - 2, 3):
+        if regex.search(variants[i]) or regex.search(variants[i + 1]):
+            return True
+        if concat_regex.search(variants[i + 2]):
+            return True
+    return False
 
 
 def matches_dialog(text: str) -> bool:
     """True when the (conservative) client dialog tier fires."""
-    variants = _match_variants(text)
-    if any(DIALOG_RE.search(v) for v in variants[:2]) or DIALOG_CONCAT_RE.search(variants[2]):
+    if _tier_matches(DIALOG_RE, DIALOG_CONCAT_RE, _match_variants(text)):
         return True
     # H-7 letter-doubling channel: only reached when the canonical forms
     # are clean, so it can only ever ADD a catch.
-    folded = _folded_variants(text)
-    return bool(
-        any(DIALOG_FOLDED_RE.search(v) for v in folded[:2])
-        or DIALOG_FOLDED_CONCAT_RE.search(folded[2])
-    )
+    return _tier_matches(DIALOG_FOLDED_RE, DIALOG_FOLDED_CONCAT_RE, _folded_variants(text))
 
 
 def matches_suppress(text: str) -> bool:
     """True when the (broader) suppression tier fires: never quote this
     back as a pattern card or reflective question."""
-    variants = _match_variants(text)
-    if any(SUPPRESS_RE.search(v) for v in variants[:2]) or SUPPRESS_CONCAT_RE.search(variants[2]):
+    if _tier_matches(SUPPRESS_RE, SUPPRESS_CONCAT_RE, _match_variants(text)):
         return True
-    folded = _folded_variants(text)
-    return bool(
-        any(SUPPRESS_FOLDED_RE.search(v) for v in folded[:2])
-        or SUPPRESS_FOLDED_CONCAT_RE.search(folded[2])
-    )
+    return _tier_matches(SUPPRESS_FOLDED_RE, SUPPRESS_FOLDED_CONCAT_RE, _folded_variants(text))

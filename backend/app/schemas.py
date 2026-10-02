@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from datetime import date, datetime
-from typing import Annotated, TYPE_CHECKING
+from typing import Annotated, Literal, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -292,18 +292,33 @@ class RecoverySetupRequest(StrictRequestModel):
     password_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
     wrapped_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
+    # 2026-10-01 audit C1: "v2" = the verifier is the domain-separated
+    # HKDF(recovery_key, "…/recovery-verifier/v2") — the server never sees
+    # key material able to open wrapped_key. "v1" (default) is the legacy
+    # raw-key kit, kept verifiable until replaced.
+    scheme: Literal["v1", "v2"] = "v1"
 
 
 class RecoveryStatusResponse(BaseModel):
     enabled: bool
     set_at: datetime | None = None
+    # 2026-10-01 audit C1: which scheme the stored kit verifies under.
+    scheme: Literal["v1", "v2"] = "v1"
 
 
 class RecoveryLoginRequest(StrictRequestModel):
-    """POST /auth/recover — username + the recovery key (as the verifier)."""
+    """POST /auth/recover — username + the scheme-appropriate verifier.
+
+    scheme "v2": verifier = HKDF(recovery_key, "…/recovery-verifier/v2")
+    (the raw key never leaves the device). scheme "v1" (legacy kits):
+    verifier = the raw recovery key. A hint that mismatches the stored kit
+    answers 401 recovery_scheme_mismatch so the client can retry once
+    with the other scheme — protocol negotiation, not a credential miss.
+    """
 
     username: str = Field(min_length=1, max_length=64)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    scheme: Literal["v1", "v2"] = "v1"
 
 
 class RecoveryLoginResponse(BaseModel):
@@ -316,6 +331,9 @@ class RecoveryLoginResponse(BaseModel):
     key_scheme: str = "v1"
     # The client-sealed data-key copy: only the recovery key opens it.
     recovery_wrapped_data_key: str
+    # 2026-10-01 audit C1: the stored kit's scheme — the client unseals
+    # with the matching HKDF label.
+    recovery_scheme: Literal["v1", "v2"] = "v1"
 
 
 class RecoveryPasswordResetRequest(StrictRequestModel):
@@ -888,6 +906,36 @@ class NoteCreateRequest(StrictRequestModel):
     # any error. Explicit null remains the only way to say "no pattern".
     pattern_pid: str | None = Field(default=None, min_length=1, max_length=200)
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+
+
+class NoteRekeyRevisionItem(StrictRequestModel):
+    """One revision row to swap during a note rekey (2026-10-01 audit C3)."""
+
+    revision_id: str = Field(min_length=1, max_length=32)
+    blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+
+
+class NoteRekeyItem(StrictRequestModel):
+    """One note to re-seal (current blob + its revision history)."""
+
+    note_id: str = Field(min_length=1, max_length=32)
+    blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
+    base_version: int = Field(ge=1, le=2**63 - 1)
+    revision_blobs: list[NoteRekeyRevisionItem] = Field(default_factory=list, max_length=50)
+
+
+class NoteRekeyRequest(StrictRequestModel):
+    """PUT /therapist/notes/rekey payload (2026-10-01 audit C3).
+
+    The portal's notes used to be sealed directly under the password-
+    derived key, so a password change permanently orphaned every note and
+    revision. New notes seal under a password-INDEPENDENT identity key;
+    this batch endpoint performs the one-time migration of legacy blobs
+    while both keys are available, WITHOUT creating revisions (a rekey
+    preserves content, it is not an edit) or advancing versions.
+    """
+
+    items: list[NoteRekeyItem] = Field(min_length=1, max_length=50)
 
 
 class NoteUpdateRequest(StrictRequestModel):

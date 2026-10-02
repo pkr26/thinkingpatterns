@@ -1,3 +1,20 @@
+> **ERRATUM (2026-10-01 deep audit).** Three corrections to this report's
+> headline claims, none affecting the committed pin suites (which are
+> genuine, green, and CI-run):
+> 1. The scope numbers are not fully consistent: the pin-suite docstring
+>    says 34,924 mutants and the ES lexicon count appears as both 1,752 and
+>    1,552; the funnel counts are off by one against the residual ledger.
+>    The authoritative counts are the committed registry itself.
+> 2. CI's scheduled mutation run mutates only `app/security/ + app/services/`
+>    and tolerates up to 25 survivors, so "every killable survivor pinned,
+>    final residual 7" is verified by the author's local campaign
+>    (`~/Desktop/mh_mutcamp`, deliberately out of repo), not re-provable
+>    from CI as shipped.
+> 3. A "still running" verification pass and the "final" residual ledger
+>    coexist in the text below; treat the ledger as provisional.
+> The 2026-09-30 campaign's 12 client-dir Python copies (never collectable
+> by any runner) were deleted 2026-10-01.
+
 # MindPattern — Deep Mutation Testing Report (backend, 2026-09-30)
 
 **Scope:** the pyproject deep scope (`app/security/`, `app/services/`, `app/api/`,

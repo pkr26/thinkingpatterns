@@ -73,6 +73,10 @@ def main() -> None:
         "word_sets": {
             "but_words": sorted(brain.BUT_WORDS),
             "negators": sorted(brain.NEGATORS),
+            # 2026-10-01 deep audit (stats M5): tokens whose presence in a
+            # negator window means the negated state IS ongoing — the
+            # negation flip (and strong-absence zero) are suppressed.
+            "perseverative_frames": sorted(brain.PERSEVERATIVE_FRAMES),
             # L-3 (2026-09-26): the EN-only view of the union above — the
             # union stays the default set; "en" scoring excludes the ES-only
             # negators ("sin", "ni", ...) that are English letter strings too.

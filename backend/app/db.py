@@ -34,7 +34,7 @@ from .models import Base
 
 # Keep readiness independent of Alembic's CLI/runtime import path. Update
 # this with the newest single Alembic head whenever a revision is added.
-SCHEMA_HEAD = "c8d5f2b6a4e7"
+SCHEMA_HEAD = "a3f7c1d9b5e2"
 
 
 def rowcount(result: Any) -> int:
@@ -97,8 +97,12 @@ def build_engine(
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             if not in_memory:
-                cursor.execute("PRAGMA journal_mode=WAL")
+                # 2026-10-01 audit LOW: busy_timeout FIRST — the WAL switch
+                # needs a momentary exclusive lock, and a concurrent first
+                # boot used to be able to eat SQLITE_BUSY while the timeout
+                # was still the default 0 (set only by the next statement).
                 cursor.execute("PRAGMA busy_timeout=30000")
+                cursor.execute("PRAGMA journal_mode=WAL")
             cursor.close()
 
         return engine

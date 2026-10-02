@@ -98,10 +98,21 @@ describe("downloadTextFile seam", () => {
       createObjectURL: () => "blob:opaque",
       revokeObjectURL: (url: string) => revoked.push(url),
     });
-    expect(downloadTextFile("export.json", "{}", "application/json")).toBe(true);
-    expect(clicks).toEqual([{ href: "blob:opaque", download: "export.json", rel: "noopener" }]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(revoked).toEqual(["blob:opaque"]);
+    // 2026-10-01 audit L-5: the revoke moved to a 60 s delay — the
+    // next-macrotask revoke could abort an in-progress multi-MB download.
+    // Fake timers BEFORE the call so the delay is observable without
+    // waiting a real minute; nothing is revoked immediately, the URL is
+    // reclaimed after the window.
+    vi.useFakeTimers();
+    try {
+      expect(downloadTextFile("export.json", "{}", "application/json")).toBe(true);
+      expect(clicks).toEqual([{ href: "blob:opaque", download: "export.json", rel: "noopener" }]);
+      expect(revoked).toEqual([]);
+      vi.advanceTimersByTime(60_000);
+      expect(revoked).toEqual(["blob:opaque"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("degrades to false with no window / no document / no URL factory", () => {

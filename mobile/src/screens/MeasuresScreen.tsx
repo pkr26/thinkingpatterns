@@ -302,6 +302,30 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       // backgrounding locks the vault and unmounts this screen; the next
       // mount restores and retries them — see the effect below).
       if (err instanceof ApiError && err.status === 0) {
+        // 2026-10-01 audit M4: offline is not a reason to withhold the
+        // support pointer — the answers ARE safely stored (the encrypted
+        // pending record was saved before the send), so an item-9
+        // endorsement shows the dialog now, with the same per-day throttle
+        // as the online path. Without this, a self-harm endorsement with
+        // no network got nothing in the moment.
+        const offlinePending = pendingRef.current; // still set: only success/409 clear it
+        if (offlinePending !== null && safetyItemEndorsed(offlinePending.kind, offlinePending.picks)) {
+          const owner = sentUserId;
+          const flagged =
+            owner !== null ? await crisisDialogShownOn(owner, offlinePending.date).catch(() => false) : false;
+          if (!flagged && owner !== null) {
+            await recordCrisisDialogShown(owner, offlinePending.date).catch(() => {});
+            Alert.alert(
+              tr("measures.crisisTitle"),
+              tr("measures.crisisBody"),
+              [
+                { text: tr("measures.viewResources"), onPress: () => navigation.navigate("Crisis") },
+                { text: tr("common.makeSafetyPlan"), onPress: () => navigation.navigate("SafetyPlan") },
+                { text: tr("common.notNow"), style: "cancel" },
+              ],
+            );
+          }
+        }
         showStatus(tr("measures.recordOfflineBody"), "neutral");
         return;
       }

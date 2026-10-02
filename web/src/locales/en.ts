@@ -863,7 +863,7 @@ export const en: Record<string, string> = {
   "entry.empty": "Write something first — even one honest sentence counts.",
   "entry.crisisPromptTitle": "Before you save",
   "entry.crisisPromptBody": "What you wrote sounds heavy. You deserve support — the resources below are one tap away, any time.",
-  "entry.crisisPromptProceed": "You can still save this entry. Press Save again to continue.",
+  "entry.crisisPromptProceed": "Your entry is saving. The support resources stay open in the menu whenever you want them.",
   "entry.queuedOne": "{count} entry waiting to sync — saved on this device, encrypted.",
   "entry.queuedMany": "{count} entries waiting to sync — saved on this device, encrypted.",
   "entry.onDeviceRead": "On-device read: this entry leans {leaning}.",

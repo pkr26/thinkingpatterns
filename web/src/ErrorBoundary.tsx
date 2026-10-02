@@ -18,10 +18,13 @@
 import { Component, type ReactNode } from "react";
 import { Button, Card, Note } from "./ui";
 import { preserveActiveDraft } from "./entryDraft";
+import { preserveSafetyPlan } from "./safetyPlan";
 import { t } from "./strings";
 
 function sealDraft(): void {
   void preserveActiveDraft().catch(() => undefined);
+  // 2026-10-01 audit M11: the safety plan survives a crash the same way.
+  void preserveSafetyPlan().catch(() => undefined);
 }
 
 /** Shared fallback body: calm copy, one action, no error text. */

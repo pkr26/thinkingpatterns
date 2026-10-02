@@ -107,3 +107,10 @@ deploy/secrets/*
 # Alertmanager receiver config (fail-closed mount): only the example ships.
 deploy/monitoring/alertmanager/alertmanager.yml
 deploy/secrets/rclone_config
+
+
+# 2026-10-01 audit M20: GUI-test screenshots render decrypted (synthetic)
+# journal content and a TOTP secret — generated artifacts, never source.
+gui-test-screenshots/
+e2e_gui/screenshots/
+e2e_gui/audit_screenshots/

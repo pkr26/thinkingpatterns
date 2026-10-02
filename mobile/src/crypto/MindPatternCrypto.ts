@@ -151,13 +151,23 @@ export function decryptEntry(
    *  where the rollback protection actually lives. Omitted version →
    *  legacy binding only (pre-2026-09-20 servers). */
   contentVersion?: number,
+  opts: {
+    /** 2026-10-01 audit M1: refuse the legacy fallback — the caller has
+     *  POSITIVE knowledge (the v2-bound mark) this id authenticated under
+     *  the v2 binding before; a failing blob is a stale replay. */
+    forbidLegacyAad?: boolean;
+    /** Fired when the v2 binding authenticated (record the mark). */
+    onV2Bound?: () => void;
+  } = {},
 ): EntryPayload {
   const blob = Buffer.from(blobB64, "base64");
   let plaintext: Buffer;
   if (contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1) {
     try {
       plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId, String(contentVersion)));
-    } catch {
+      opts.onV2Bound?.();
+    } catch (v2Error) {
+      if (opts.forbidLegacyAad) throw v2Error;
       plaintext = decrypt(keys.dataKey, blob, buildAad("entry", userId, clientEntryId));
     }
   } else {

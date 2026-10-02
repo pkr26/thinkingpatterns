@@ -459,13 +459,43 @@ async def recover_login(
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
             )
+        # 2026-10-01 audit C1: scheme negotiation. The client's hint says
+        # which verifier DERIVATION it sent (v2 = domain-separated HKDF,
+        # never the raw key; v1 = legacy raw key). A mismatch is protocol
+        # negotiation, not a credential miss: a distinct code lets the
+        # client retry once with the other scheme WITHOUT the attempt
+        # counting against the keyed failure budget.
+        stored_scheme = 2 if (user.recovery_scheme or 1) == 2 else 1
+        hint_scheme = 2 if body.scheme == "v2" else 1
+        if hint_scheme != stored_scheme:
+            raise ApiError(
+                status_code=401,
+                detail="recovery kit scheme mismatch; retry with the other scheme",
+                code="recovery_scheme_mismatch",
+            )
+        # 2026-10-01 audit LOW (D-4 asymmetry): per-USERNAME failure budget
+        # for recovery-key guessing — reachable only past the existence-blind
+        # gate above (decoy burn for unknown accounts), so there is no
+        # lockout oracle for unauthenticated spray; only ACTUAL failures
+        # spend it, like the TOTP and verifier buckets.
+        settings = request.app.state.settings
+        recovery_fail_key = f"recovery-fail:{user.username}"
+        check_keyed_limit_without_count(
+            request,
+            recovery_fail_key,
+            settings.verifier_failure_limit,
+            settings.auth_rate_window,
+        )
         candidate = await hash_verifier_off_loop(
             recovery_key,
             recovery_salt,
             limiter=_auth_limiter(request),
-            n=request.app.state.settings.scrypt_n,
+            n=settings.scrypt_n,
         )
         if not hmac.compare_digest(candidate, bytes(verifier_hash)):
+            record_keyed_failure(
+                request, recovery_fail_key, settings.auth_rate_window
+            )
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
             )
@@ -473,7 +503,6 @@ async def recover_login(
         user.token_epoch += 1
         session.add(user)
         await session.commit()
-        settings = request.app.state.settings
         token = issue_token(
             user.id,
             settings.auth_token_secret,
@@ -491,6 +520,7 @@ async def recover_login(
             expires_in=settings.token_ttl_seconds,
             role=user.role,
             recovery_wrapped_data_key=base64.b64encode(bytes(sealed_key)).decode("ascii"),
+            recovery_scheme="v2" if stored_scheme == 2 else "v1",
         )
         response.key_scheme = user.key_scheme if user.key_scheme else "v1"
         return response

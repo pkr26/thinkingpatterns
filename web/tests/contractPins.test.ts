@@ -20,15 +20,15 @@ describe("crisis-language contract (shared/crisis_phrases.json)", () => {
   };
 
   it("the dialog tier matches the shared contract", () => {
-    expect([...CRISIS_DIALOG_PATTERNS].sort()).toEqual([...shared.dialog].sort());
+    expect([...CRISIS_DIALOG_PATTERNS]).toEqual([...shared.dialog]);
   });
 
   it("the suppress tier matches the shared contract", () => {
-    expect([...CRISIS_SUPPRESS_EXTRA_PATTERNS].sort()).toEqual([...shared.suppress_extra].sort());
+    expect([...CRISIS_SUPPRESS_EXTRA_PATTERNS]).toEqual([...shared.suppress_extra]);
   });
 
   it("the benign compounds match the shared contract", () => {
-    expect([...CRISIS_BENIGN_COMPOUNDS].sort()).toEqual([...shared.benign_compounds].sort());
+    expect([...CRISIS_BENIGN_COMPOUNDS]).toEqual([...shared.benign_compounds]);
   });
 
   it("the shared fixture corpus behaves identically through our detector", () => {

@@ -135,6 +135,52 @@ const LEET_TRAIL_RE = /([a-z])([0134578@!$]+)(?=[^a-z]|$)/g;
 const PUNCT_TO_SPACE =
   /[^0-9a-z'\-\s\u00c0-\u02af\u0370-\u04ff\u0600-\u06ff\u0900-\u097f\u1e00-\u1fff\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff\uff66-\uff9f]/g;
 
+const PUNCT_RUN = new RegExp(PUNCT_TO_SPACE.source + "+", "g");
+const KEPT_CHAR = new RegExp(PUNCT_TO_SPACE.source);
+
+// 2026-10-01 deep audit C2 (emoji-inside-word bypass): "k😊ll" folds to
+// "kll" when the intra-word symbol is dropped — the emoji REPLACED a
+// letter, and the information is gone. Vowel reinsertion recovers exactly
+// this class: the dropped position is retried with each ASCII vowel
+// ("k😊ll" -> "kill"), matched only against the EXISTING tier patterns,
+// so a variant fires only when the reinserted text forms a full crisis
+// phrase. MUST mirror the backend's _punct_variants (same cap).
+const VOWEL_REINSERTION = ["a", "e", "i", "o", "u"] as const;
+const VOWEL_REINSERTION_RUN_CAP = 2;
+const VOWEL_MARK = "\x00";
+
+/** Punctuation-fold variants of the pre-punct form. The CANONICAL variant
+ *  (first) drops every intra-word non-kept run ("k😊ll" -> "kll",
+ *  "s.u.i.c.i.d.e" -> "suicide") and spaces token-edge runs. Each
+ *  intra-word run (up to the cap) additionally yields a variant with ONE
+ *  vowel reinserted at the dropped position ("k😊ll" -> "kill"). MUST
+ *  stay behavior-identical to the backend's _punct_variants. */
+function punctVariants(text: string): string[] {
+  const kept = (c: string | undefined) => c !== undefined && !KEPT_CHAR.test(c);
+  const marked = text.replace(PUNCT_RUN, (run: string, offset: number) => {
+    if (kept(text[offset - 1]) && kept(text[offset + run.length])) return VOWEL_MARK;
+    return " ";
+  });
+  const base = marked.split(VOWEL_MARK).join("");
+  if (!marked.includes(VOWEL_MARK)) return [base];
+  const variants = [base];
+  let seenMarks = 0;
+  let basePos = 0;
+  for (const ch of marked) {
+    if (ch === VOWEL_MARK) {
+      if (seenMarks < VOWEL_REINSERTION_RUN_CAP) {
+        for (const vowel of VOWEL_REINSERTION) {
+          variants.push(base.slice(0, basePos) + vowel + base.slice(basePos));
+        }
+      }
+      seenMarks += 1;
+    } else {
+      basePos += ch.length;
+    }
+  }
+  return variants;
+}
+
 /** A single-letter token run this long is a spelled-out word ("s u i c i d
  *  e"), not prose — ordinary English never strings 4+ one-letter words
  *  together ("i am so sad" keeps its shape; "u s a won gold" is only 3). */
@@ -186,12 +232,39 @@ function foldLatinMarks(text: string): string {
   return out;
 }
 
-// A letter/digit sitting directly against a non-ASCII letter is a script
+// A letter/digit sitting directly against a non-ASCII LETTER is a script
 // boundary: separate them with a space so \b means the same thing under
 // Python re (Unicode \w: "suicideम" has NO boundary after "suicide") and
 // ECMAScript (ASCII \w: it does). Both engines then agree on every input.
-const SCRIPT_BOUNDARY_1 = /([a-z0-9])([^\x00-\x7f])/g;
-const SCRIPT_BOUNDARY_2 = /([^\x00-\x7f])([a-z0-9])/g;
+// 2026-10-01 deep audit C2: only LETTERS (Unicode category L*) get the
+// boundary — a non-letter symbol (emoji, math, symbols) directly between
+// ASCII letters stays intra-word so the punctuation fold can DROP it
+// ("k😊ll" must reach the fold as one token, not be pre-split into
+// "k 😊 ll" where the drop can no longer see both kept neighbors).
+const NONASCII_LETTER = /\p{L}/u;
+
+function insertScriptBoundaries(text: string): string {
+  const asciiAlnum = (c: string) => (c >= "0" && c <= "9") || (c >= "a" && c <= "z");
+  // Iterate by code POINT ([...text]) so an astral letter is one unit on
+  // both engines (Python iterates code points natively).
+  const cps = [...text];
+  let out = "";
+  for (let i = 0; i < cps.length; i++) {
+    const ch = cps[i] as string;
+    if (ch.charCodeAt(0) > 0x7f && NONASCII_LETTER.test(ch)) {
+      const prev = i > 0 ? (cps[i - 1] as string) : "";
+      const next = i + 1 < cps.length ? (cps[i + 1] as string) : "";
+      const prevBound = prev.length === 1 && asciiAlnum(prev);
+      const nextBound = next.length === 1 && asciiAlnum(next);
+      if (prevBound) out += " ";
+      out += ch;
+      if (nextBound) out += " ";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
 
 /** The shared pipeline up to (but not including) the punctuation fold.
  *  Benign-compound masking runs HERE (see matchVariants): at this point a
@@ -208,7 +281,7 @@ function normalizePrePunct(text: string): string {
     .normalize("NFKC")
     .replace(/\u2019/g, "'");
   out = foldLatinMarks(out);
-  out = out.replace(SCRIPT_BOUNDARY_1, "$1 $2").replace(SCRIPT_BOUNDARY_2, "$1 $2");
+  out = insertScriptBoundaries(out);
   return leetFold(out);
 }
 
@@ -219,14 +292,26 @@ export function normalizeCrisisText(text: string): string {
   return primaryJoin(normalizeToTokens(text));
 }
 
-/** The shared pipeline from pre-punct form to tokens. */
-function normalizeToTokens(text: string): string[] {
-  const out = normalizePrePunct(text).replace(PUNCT_TO_SPACE, " ");
-  const tokens = out.split(/[\s-]+/).filter((t) => t.length > 0);
+/** Tokens of one already-punct-folded form. */
+function tokensFromFolded(form: string): string[] {
   // 2026-09-20 audit H-7: SMS shorthand — a standalone "2" token IS "to"
   // ("i want 2 die", "no reason 2 live"). Folded at the TOKEN level, so 2
   // stays an unmapped leet digit everywhere else (2=z is ambiguous).
-  return tokens.map((t) => (t === "2" ? "to" : t));
+  return form
+    .split(/[\s-]+/)
+    .filter((t) => t.length > 0)
+    .map((t) => (t === "2" ? "to" : t));
+}
+
+/** The shared pipeline from pre-punct form to tokens (canonical variant). */
+function normalizeToTokens(text: string): string[] {
+  return tokensFromFolded(punctVariants(normalizePrePunct(text))[0] as string);
+}
+
+/** Token lists for EVERY punctuation-fold variant of a pre-punct form.
+ *  MUST stay behavior-compatible with the backend's _variant_token_sets. */
+function variantTokenSets(pre: string): string[][] {
+  return punctVariants(pre).map((v) => tokensFromFolded(v));
 }
 
 /** ASCII single letters only — the backend engine's rule; non-Latin
@@ -498,49 +583,68 @@ const BENIGN_MASKS_FOLDED: readonly RegExp[] = [...CRISIS_BENIGN_COMPOUNDS]
   .sort((a, b) => b.length - a.length)
   .map(benignMask);
 
-/** The letter-run-collapsed twins of the three canonical variants (audit
- *  H-7). MUST mirror the backend's _folded_variants. Exported for the
- *  parity suite. */
-export function foldedVariants(text: string): [string, string, string] {
+/** The letter-run-collapsed twins of every canonical variant (audit
+ *  H-7). MUST mirror the backend's _folded_variants. Groups of
+ *  (primary, orphan, concat) per punctuation-fold variant; exported for
+ *  the parity suite. */
+export function foldedVariants(text: string): string[] {
   let folded = dedupFold(maskBenign(normalizePrePunct(text)));
   for (const mask of BENIGN_MASKS_FOLDED) folded = folded.replace(mask, " ");
-  const tokens = normalizeToTokens(folded);
-  return [primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens)];
+  const out: string[] = [];
+  for (const tokens of variantTokenSets(normalizePrePunct(folded))) {
+    out.push(primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens));
+  }
+  return out;
 }
 
-/** Every normalized form the tiers match against — MUST stay
- *  behavior-compatible with the backend's _match_variants (the shared
- *  fixtures pin both engines). Exported for the parity suite. */
-export function matchVariants(text: string): [string, string, string] {
-  const tokens = normalizeToTokens(maskBenign(normalizePrePunct(text)));
-  return [primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens)];
+/** Every normalized form the tiers match against, grouped as
+ *  (primary, orphan, concat) triples per punctuation-fold variant — MUST
+ *  stay behavior-compatible with the backend's _match_variants (the
+ *  shared fixtures pin both engines). Exported for the parity suite. */
+export function matchVariants(text: string): string[] {
+  const pre = maskBenign(normalizePrePunct(text));
+  const out: string[] = [];
+  for (const tokens of variantTokenSets(pre)) {
+    out.push(primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens));
+  }
+  return out;
+}
+
+/** A tier fires when ANY variant group's primary/orphan form matches the
+ *  tier, or its concat form matches the tier's concat twin. MUST mirror
+ *  the backend's _tier_matches. */
+function tierMatches(
+  patterns: readonly RegExp[],
+  concatPatterns: readonly RegExp[],
+  variants: readonly string[],
+): boolean {
+  for (let i = 0; i + 2 < variants.length; i += 3) {
+    const primary = variants[i] as string;
+    const orphan = variants[i + 1] as string;
+    const concat = variants[i + 2] as string;
+    if (patterns.some((p) => p.test(primary) || p.test(orphan))) return true;
+    if (concatPatterns.some((p) => p.test(concat))) return true;
+  }
+  return false;
 }
 
 /** True when `text` contains crisis language (dialog tier — fire the
  *  gentle support dialog). Pure: no I/O, no state. */
 export function detectCrisisLanguage(text: string): boolean {
-  const [primary, orphan, concat] = matchVariants(text);
-  if (DIALOG_PATTERNS.some((p) => p.test(primary) || p.test(orphan))) return true;
-  if (DIALOG_CONCAT_PATTERNS.some((p) => p.test(concat))) return true;
+  if (tierMatches(DIALOG_PATTERNS, DIALOG_CONCAT_PATTERNS, matchVariants(text))) return true;
   // H-7 letter-doubling channel: only reached when the canonical forms
   // are clean, so it can only ever ADD a catch.
-  const [fPrimary, fOrphan, fConcat] = foldedVariants(text);
-  return (
-    DIALOG_FOLDED_PATTERNS.some((p) => p.test(fPrimary) || p.test(fOrphan)) ||
-    DIALOG_FOLDED_CONCAT_PATTERNS.some((p) => p.test(fConcat))
-  );
+  return tierMatches(DIALOG_FOLDED_PATTERNS, DIALOG_FOLDED_CONCAT_PATTERNS, foldedVariants(text));
 }
 
 /** True when `text` belongs to the broader suppression tier — the caller
  *  renders a NON-QUOTING card (or suppresses a generated question) for
  *  crisis-adjacent patterns. Pure: no I/O, no state. */
 export function matchesCrisisSuppress(text: string): boolean {
-  const [primary, orphan, concat] = matchVariants(text);
-  if (SUPPRESS_PATTERNS.some((p) => p.test(primary) || p.test(orphan))) return true;
-  if (SUPPRESS_CONCAT_PATTERNS.some((p) => p.test(concat))) return true;
-  const [fPrimary, fOrphan, fConcat] = foldedVariants(text);
-  return (
-    SUPPRESS_FOLDED_PATTERNS.some((p) => p.test(fPrimary) || p.test(fOrphan)) ||
-    SUPPRESS_FOLDED_CONCAT_PATTERNS.some((p) => p.test(fConcat))
+  if (tierMatches(SUPPRESS_PATTERNS, SUPPRESS_CONCAT_PATTERNS, matchVariants(text))) return true;
+  return tierMatches(
+    SUPPRESS_FOLDED_PATTERNS,
+    SUPPRESS_FOLDED_CONCAT_PATTERNS,
+    foldedVariants(text),
   );
 }

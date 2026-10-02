@@ -892,6 +892,25 @@ export const api = {
    * note edit. baseVersion is the version of the note this edit was
    * based on (Note.version); the server answers 409 version_conflict
    * when a colleague's edit landed first. */
+  /** 2026-10-01 audit C3: one-time batch re-seal of legacy note blobs
+   *  (and their revision history) under the v2 identity key, during a
+   *  password change while both keys are available. Verifier-gated like
+   *  every credential move; all-or-nothing per request. */
+  rekeyNotes: (
+    verifierB64: string,
+    items: Array<{
+      note_id: string;
+      blob: string;
+      base_version: number;
+      revision_blobs: Array<{ revision_id: string; blob: string }>;
+    }>,
+  ) =>
+    request<null>(
+      "PUT",
+      "/therapist/notes/rekey",
+      { items },
+      { "X-Account-Verifier": verifierB64 },
+    ),
   updateNote: (noteId: string, blob: string, baseVersion: number) =>
     request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, {
       blob,

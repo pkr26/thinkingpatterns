@@ -38,7 +38,7 @@ import { api, ApiError, ENTRY_PAGE_BYTES } from "../api/client";
 import { decryptEntry, encryptEntry } from "../crypto/MindPatternCrypto";
 import { playVoiceAttachment, type PlayingVoice } from "../audio/playback";
 import { createAudioPlayer } from "expo-audio";
-import { forgetEntryVersion, observeEntryVersions } from "../entryVersions";
+import {forgetEntryVersion, observeEntryVersions , isV2Bound, noteV2Bound} from "../entryVersions";
 import { MoodCalendar } from "../components/MoodCalendar";
 import { filterEntries, monthLabel } from "../historyFind";
 import { vault } from "../vault";
@@ -125,6 +125,13 @@ async function decryptRowsWithVersions(
         row.client_entry_id,
         row.blob,
         typeof row.content_version === "number" ? row.content_version : undefined,
+        {
+          // 2026-10-01 audit M1: refuse the legacy fallback for ids that
+          // have EVER authenticated under the v2 binding — a blob that
+          // fails it now is a stale-ciphertext replay, not a legacy row.
+          forbidLegacyAad: await isV2Bound(userId, dataKey, row.client_entry_id),
+          onV2Bound: () => void noteV2Bound(userId, dataKey, row.client_entry_id),
+        },
       );
       decrypted.push({
         clientEntryId: row.client_entry_id,

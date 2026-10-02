@@ -59,7 +59,7 @@ describe("PatternsView funnels", () => {
   it("the remote-rotation funnel surfaces its honest message", async () => {
     const otherKey = new Uint8Array(new ArrayBuffer(32)).fill(13);
     const blob = await encrypt(otherKey, new TextEncoder().encode(JSON.stringify({ v: 2, stats: {} })), buildAad("insights", USER, "patterns"));
-    stubFetch(() => jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(blob), state_seq: 4 }));
+    stubFetch(() => jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(blob), state_seq: 4 }));
     const root = await render(<PatternsView onCrisis={() => undefined} />);
     await settle(40, 4);
     expect(textOf(root)).toContain("session ended");
@@ -67,7 +67,7 @@ describe("PatternsView funnels", () => {
 
   it("a freshness failure says so", async () => {
     const payload = await encrypt(DATA_KEY, new TextEncoder().encode(JSON.stringify({ v: 2, stats: { patterns: [] }, state_seq: 3 })), buildAad("insights", USER, "patterns"));
-    stubFetch(() => jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(payload), state_seq: 9 }));
+    stubFetch(() => jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(payload), state_seq: 9 }));
     const root = await render(<PatternsView onCrisis={() => undefined} />);
     await settle(40, 4);
     expect(textOf(root)).toContain("freshness check");
@@ -83,7 +83,7 @@ describe("PatternsView funnels", () => {
   it("active with zero surfaced patterns renders the honest empty state", async () => {
     const payload = await encrypt(DATA_KEY, new TextEncoder().encode(JSON.stringify({ v: 2, stats: { patterns: [] }, state_seq: 5 })), buildAad("insights", USER, "patterns"));
     stubFetch((url) => {
-      if (url.endsWith("/insights")) return jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(payload), state_seq: 5 });
+      if (url.endsWith("/insights")) return jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(payload), state_seq: 5 });
       if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return jsonResponse([], { headers: { "X-Entries-Revision": "1" } });
       return jsonResponse({}, { status: 404 });
     });
@@ -291,7 +291,7 @@ describe("final function-coverage batch", () => {
       { kind: "temporal", label: "'art' on weekends", occurrences: 5, confidence: 0.7, detail: { pattern_pid: "temporal:art", pattern_state: "confirmed" } },
     ] }, state_seq: 8 })), buildAad("insights", USER, "patterns"));
     stubFetch((url) => {
-      if (url.endsWith("/insights")) return jsonResponse({ phase: "active", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(insightsPayload), state_seq: 8 });
+      if (url.endsWith("/insights")) return jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob: toBase64(insightsPayload), state_seq: 8 });
       if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return jsonResponse([], { headers: { "X-Entries-Revision": "1" } });
       return jsonResponse({}, { status: 404 });
     });

@@ -134,6 +134,27 @@ DIALOG_SAMPLES = [
     "वह मरना चाहती है",  # 76
     "intihar etmek istiyorum diye yazdı",  # 77
     "canını almak istiyorum demiş",  # 78
+    # 2026-10-01 deep audit C2 — one verbatim sample per new pattern.
+    "i wish to die some nights",  # 79 wish (i)? to die
+    "i wish i was gone and nobody noticed",  # 80 wish was gone
+    "i wish i could disappear from everything",  # 81 wish disappear
+    "i cannot take it anymore",  # 82 can't take it anymore
+    "i keep hoping i don't wake up",  # 83 hope i don't wake up
+    "i don't wanna be here anymore",  # 84 don't wanna be here
+    "everyone would be better off without me here",  # 85 better without me
+    "there is no reason to wake up anymore",  # 86 no reason to wake up
+    "goodbye cruel world, this is my last note",  # 87 goodbye cruel world
+    "i would rather die than go back there",  # 88 i would rather die
+    "i would rather die than keep doing this",  # 89 i'd rather die
+    "nobody would even miss me",  # 90 nobody would miss me
+    "you would all miss me when i'm gone",  # 91 miss me when i'm gone
+    "me voy a suicidar esta noche",  # 92 suicid(ar|arse)
+    "pienso matarme y nadie lo sabe",  # 93 pienso/debo/tengo que + matarme
+    "tengo que acabar con todo esto",  # 94 acabar con todo/conmigo
+    "me gustaría morir y que nadie sufriera",  # 95 me gustaría morir
+    "no puedo seguir así ni un día más",  # 96 no puedo seguir asi
+    "estaría mejor muerto que seguir así",  # 97 estaría mejor muerto
+    "hoy me siento sin ganas de vivir",  # 98 sin ganas de vivir
 ]
 
 # One verbatim firing sample per SUPPRESS_EXTRA pattern (order-parity with
@@ -170,6 +191,10 @@ SUPPRESS_SAMPLES = [
     # 2026-09-29 deep-audit CRITICAL: method-family suppress counterparts.
     "someone jumped off a bridge in the news",  # jump(ed|ing) off <place>
     "i take all of my meds before bed every night",  # take all my meds
+    # 2026-10-01 deep audit C2 — the broad ES suppress counterparts.
+    "ya no puedo seguir con esto",  # no puedo seguir (bare form)
+    "me siento mejor muerto que vivo así",  # mejor muerto (bare form)
+    "pienso en cómo acabar con todo",  # acabar con todo (any person)
 ]
 
 # Extra inflections and near-forms of contract patterns: not index-bound,

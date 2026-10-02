@@ -38,6 +38,24 @@ function zeroize(...buffers: Array<Uint8Array | null | undefined>): void {
 const AUTH_INFO = new TextEncoder().encode("mindpattern/auth/v1");
 const PORTAL_WRAP_INFO = new TextEncoder().encode("mindpattern/portal-wrap/v1");
 const PORTAL_NOTES_INFO = new TextEncoder().encode("mindpattern/portal-notes/v1");
+
+/** 2026-10-01 audit C3: notes seal under the therapist's IDENTITY key
+ *  (HKDF over the P-256 private key), not the password. The private key's
+ *  BYTES are unchanged by a password change (only their locker is
+ *  re-wrapped), so notes — and every future revision — stay decryptable
+ *  across password changes. The legacy password-derived label survives
+ *  only for decrypting pre-migration blobs. */
+const PORTAL_NOTES_INFO_V2 = new TextEncoder().encode("mindpattern/portal-notes/v2");
+
+export async function noteKeyV2FromPrivateKey(pkcs8: Bytes): Promise<Bytes> {
+  const key = await subtle().importKey("raw", pkcs8, "HKDF", false, ["deriveBits"]);
+  const bits = await subtle().deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt: ZERO_SALT, info: PORTAL_NOTES_INFO_V2 },
+    key,
+    KEY_SIZE * 8,
+  );
+  return new Uint8Array(bits);
+}
 const WRAP_INFO = new TextEncoder().encode("mindpattern/wrap/v1");
 /** HKDF salt for the master-key subkeys: RFC 5869 default (HashLen zeros),
  * matching backend kdf.hkdf_sha256(salt=None). */
@@ -155,6 +173,17 @@ export async function unlockWrapPrivateKey(
   keyBlobB64: string,
   username: string,
 ): Promise<CryptoKey> {
+  return (await unlockWrapPrivateKeyWithNotesKey(wrapKek, keyBlobB64, username)).privateKey;
+}
+
+/** unlockWrapPrivateKey + the v2 notes key, derived in the same instant the
+ *  raw PKCS#8 exists (2026-10-01 audit C3): the session holds both, and
+ *  the raw bytes still never outlive this call. */
+export async function unlockWrapPrivateKeyWithNotesKey(
+  wrapKek: Bytes,
+  keyBlobB64: string,
+  username: string,
+): Promise<{ privateKey: CryptoKey; noteKeyV2: Bytes }> {
   const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let pkcs8: Bytes | null = null;
@@ -165,15 +194,17 @@ export async function unlockWrapPrivateKey(
       encrypted,
       buildAad(THERAPIST_KEY_CONTEXT, username),
     );
+    const noteKeyV2 = await noteKeyV2FromPrivateKey(pkcs8);
     // `false` makes the resulting CryptoKey non-extractable. Once WebCrypto
     // owns that handle, the raw PKCS#8 copy must not stay in JS memory.
-    return await subtle().importKey(
+    const privateKey = await subtle().importKey(
       "pkcs8",
       pkcs8,
       { name: "ECDH", namedCurve: "P-256" },
       false,
       ["deriveBits"],
     );
+    return { privateKey, noteKeyV2 };
   } finally {
     zeroize(encrypted, pkcs8);
   }
@@ -411,6 +442,25 @@ export async function encryptNote(
   }
 }
 
+/** Decrypt a note blob under EITHER key (2026-10-01 audit C3): new blobs
+ *  seal under the identity-derived v2 key; legacy blobs under the retired
+ *  password-derived label — tried second, so migrated deployments keep
+ *  reading pre-migration rows until their password change rekeys them. */
+export async function decryptNoteAny(
+  noteKeyV2: Bytes,
+  legacyNoteKey: Bytes,
+  therapistId: string,
+  userId: string,
+  clientNoteId: string,
+  blobB64: string,
+): Promise<string> {
+  try {
+    return await decryptNote(noteKeyV2, therapistId, userId, clientNoteId, blobB64);
+  } catch {
+    return await decryptNote(legacyNoteKey, therapistId, userId, clientNoteId, blobB64);
+  }
+}
+
 export async function decryptNote(
   noteKey: Bytes,
   therapistId: string,
@@ -437,6 +487,10 @@ export async function decryptNote(
 }
 
 // --- shared payload decryption ---------------------------------------------------
+
+/** 2026-10-01 audit M1: session-lifetime set of (userId:clientEntryId)
+ *  pairs that authenticated under the version-bound v2 entry AAD. */
+const v2BoundEntries = new Set<string>();
 
 const decodeJson = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes));
 
@@ -521,13 +575,21 @@ export async function decryptEntry(
       buildAad("entry", userId, entry.client_entry_id),
     ];
     let failure: unknown = null;
+    // 2026-10-01 audit M1: within this session, an id that has EVER
+    // authenticated under the v2 binding may no longer use the legacy
+    // fallback — a blob that now fails v2 is a stale-ciphertext replay
+    // (the read-only portal re-fetches per session, so session scope
+    // covers every render this viewer makes).
+    const boundKey = `${userId}:${entry.client_entry_id}`;
     for (const aad of candidates) {
       try {
         plain = await decrypt(dataKey, encrypted, aad);
+        if (aad !== candidates[1]) v2BoundEntries.add(boundKey);
         break;
       } catch (err) {
         failure = err;
         plain = null;
+        if (aad === candidates[0] && v2BoundEntries.has(boundKey)) break; // refuse the replay
       }
     }
     if (plain === null) throw failure ?? new Error("entry could not be decrypted");

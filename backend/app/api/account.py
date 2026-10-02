@@ -969,7 +969,9 @@ async def get_recovery_status(
 ) -> RecoveryStatusResponse:
     """Whether a recovery kit exists (never any secret material)."""
     return RecoveryStatusResponse(
-        enabled=user.recovery_verifier is not None, set_at=user.recovery_set_at
+        enabled=user.recovery_verifier is not None,
+        set_at=user.recovery_set_at,
+        scheme="v2" if (user.recovery_scheme or 1) == 2 else "v1",
     )
 
 
@@ -988,10 +990,15 @@ async def set_recovery_envelope(
 ):
     """Create or replace the recovery envelope (password re-auth required).
 
-    The scrypt verifier is computed server-side from the recovery key
-    (the key is transmitted once, over TLS, exactly like a login verifier)
-    and never stored in the clear. A replacement rotates the previous kit
-    off: the OLD recovery key stops working the moment this returns.
+    The scrypt verifier is computed server-side from the transmitted
+    verifier and never stored in the clear. 2026-10-01 audit C1: with
+    scheme="v2" the verifier is domain-separated HKDF material — unlike a
+    login verifier (which decrypts nothing), the legacy v1 recovery key
+    WAS also the seal KEK input, so a server that observed it could open
+    the sealed data key; v2 kits close that hole (the server can neither
+    open the data-key copy nor derive anything that can). A replacement
+    rotates the previous kit off: the OLD recovery key stops working the
+    moment this returns.
     """
     expected_epoch = user.token_epoch
     await _require_verifier(user, body.password_verifier, request, session)
@@ -1040,6 +1047,10 @@ async def set_recovery_envelope(
         fresh.recovery_verifier = recovery_hash
         fresh.recovery_wrapped_data_key = wrapped_key
         fresh.recovery_set_at = utcnow()
+        # 2026-10-01 audit C1: record the verifier/seal scheme. v2 = the
+        # transmitted verifier is domain-separated HKDF material that can
+        # open nothing; v1 = the legacy raw-key kit (kept verifiable).
+        fresh.recovery_scheme = 2 if body.scheme == "v2" else 1
         await append_access_log(
             session,
             actor_id=fresh.id,
@@ -1092,6 +1103,7 @@ async def clear_recovery_envelope(
         fresh.recovery_verifier = None
         fresh.recovery_wrapped_data_key = None
         fresh.recovery_set_at = None
+        fresh.recovery_scheme = None
         await append_access_log(
             session,
             actor_id=fresh.id,

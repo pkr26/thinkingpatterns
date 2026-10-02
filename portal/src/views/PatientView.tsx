@@ -33,6 +33,7 @@ import {
   decryptEntry,
   decryptInsights,
   decryptNote,
+  decryptNoteAny,
   encryptNote,
   decryptAudio,
   decryptMeasure,
@@ -46,7 +47,12 @@ import { printPage, randomBytes, visitAnchorStore } from "../platform";
 export interface PortalSession {
   username: string;
   userId: string;
+  /** Legacy password-derived notes key — decrypt-only after the 2026-10-01
+   *  C3 migration; kept so pre-migration blobs stay readable. */
   noteKey: Uint8Array<ArrayBuffer>;
+  /** The v2 notes key (identity-derived): every NEW note seals under it and
+   *  survives password changes. */
+  noteKeyV2: Uint8Array<ArrayBuffer>;
   privateKey: CryptoKey;
   publicKeyB64: string;
 }
@@ -826,7 +832,7 @@ export function PatientView(props: {
       const opened: OpenNote[] = [];
       for (const row of noteRows) {
         try {
-          opened.push({ ...row, text: await decryptNote(session.noteKey, session.userId, patient.user_id, row.client_note_id, row.blob) });
+          opened.push({ ...row, text: await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, row.client_note_id, row.blob) });
         } catch {
           opened.push({ ...row, text: "(note could not be decrypted with this account's key)" });
         }
@@ -928,7 +934,7 @@ export function PatientView(props: {
         try {
           for (const rev of revisions) {
             texts.push(
-              await decryptNote(session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob),
+              await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob),
             );
           }
         } catch (err) {
@@ -938,7 +944,7 @@ export function PatientView(props: {
           // never-edited note in a clinical record. Record the failure
           // distinctly (rendered as its own honest line below) and log it
           // instead of swallowing it silently.
-          console.warn("note history failed to decrypt", { noteId: note.id, err });
+          console.warn("note history failed to decrypt", { noteId: note.id });
           setHistoryFailed((prev) => ({ ...prev, [note.id]: true }));
           setHistory((prev) => ({ ...prev, [note.id]: [] }));
           return;
@@ -1114,7 +1120,11 @@ export function PatientView(props: {
       } finally {
         dataKey.fill(0);
       }
-      decrypted.sort((a, b) => b.entry_date.localeCompare(a.entry_date) || a.id.localeCompare(b.id));
+      // 2026-10-01 audit M6: OLDEST first — the sparkline maps array order
+      // left-to-right, and the PHQ/GAD trend chart in this same screen is
+      // explicitly oldest-first; newest-first here made clinicians compare
+      // mirrored slopes.
+      decrypted.sort((a, b) => a.entry_date.localeCompare(b.entry_date) || a.id.localeCompare(b.id));
       if (operation === drilldownGeneration.current) setEntries(decrypted);
     } catch (err) {
       if (operation === drilldownGeneration.current) {
@@ -1144,7 +1154,7 @@ export function PatientView(props: {
     const clientNoteId = pendingNoteId.current[scope];
     try {
       const sealed = await encryptNote(
-        session.noteKey,
+        session.noteKeyV2,
         session.userId,
         patient.user_id,
         clientNoteId,
@@ -1201,7 +1211,7 @@ export function PatientView(props: {
     setError("");
     try {
       const sealed = await encryptNote(
-        session.noteKey,
+        session.noteKeyV2,
         session.userId,
         patient.user_id,
         note.client_note_id,

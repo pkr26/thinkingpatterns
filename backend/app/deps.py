@@ -159,6 +159,20 @@ async def require_user(
     user = await session.get(User, payload["uid"])
     if user is None or not user.is_active:
         raise failure
+    # 2026-10-01 audit L5: the token's purpose claim ("patient"/"therapist")
+    # must match the live DB role when present. Nothing branches on it today
+    # (every route re-checks user.role), but the claim exists "so future
+    # surfaces can skip the DB round-trip" — enforcing it here closes that
+    # future gap and kills forged-purpose tokens immediately. An ABSENT
+    # claim is pre-2026-09-26 legacy (see tokens.verify_token) and stays
+    # accepted; those tokens expire naturally within the 30-day TTL cap.
+    claimed_purpose = payload.get("purpose")
+    if claimed_purpose is not None:
+        expected_purpose = (
+            tokens.PURPOSE_THERAPIST if user.role == ROLE_THERAPIST else tokens.PURPOSE_PATIENT
+        )
+        if claimed_purpose != expected_purpose:
+            raise failure
     # Epoch check: logout bumped the account's epoch, retiring every token
     # issued before it — stateless tokens still get a server-side kill switch.
     if payload.get("ep", 1) != user.token_epoch:

@@ -85,7 +85,10 @@ export function downloadTextFile(filename: string, contents: string, mime: strin
     anchor.download = filename;
     anchor.rel = "noopener";
     anchor.click();
-    setTimeout(() => urlFactory.revokeObjectURL?.(url), 0);
+    // 2026-10-01 audit L-5: revoke on a DELAY — the next-macrotask revoke
+    // could abort an in-progress download of a multi-MB export in some
+    // engines (the download only holds a reference, not the bytes).
+    setTimeout(() => urlFactory.revokeObjectURL?.(url), 60_000);
     return true;
   } catch {
     return false;

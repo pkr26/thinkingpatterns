@@ -7,6 +7,7 @@ import { AppNavigator } from "./src/navigation";
 import { ThemeProvider, useTheme } from "./src/theme";
 import { startNotificationPressRouting } from "./src/nativeFeatures";
 import { applyStoredLanguageChoice } from "./src/languagePref";
+import { ErrorBoundary } from "./src/ErrorBoundary";
 
 /**
  * Privacy shield: while the app is backgrounded, the iOS app-switcher
@@ -16,7 +17,12 @@ import { applyStoredLanguageChoice } from "./src/languagePref";
 export default function App(): React.JSX.Element {
   return (
     <ThemeProvider>
-      <ThemedApp />
+      {/* 2026-10-01 audit L-4: no componentDidCatch existed anywhere — any
+          render throw white-screened the app with no crisis-resources
+          escape hatch. Inside ThemeProvider so the fallback is themed. */}
+      <ErrorBoundary>
+        <ThemedApp />
+      </ErrorBoundary>
     </ThemeProvider>
   );
 }

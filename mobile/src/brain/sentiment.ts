@@ -40,6 +40,9 @@ interface Tables {
   butWords: Set<string>;
   negators: Set<string>;
   negatorsEn: Set<string>;
+  /** 2026-10-01 deep audit (stats M5): frames whose presence in a negator
+   *  window means the negated state IS ongoing — suppress the flip. */
+  perseverativeFrames: Set<string>;
   intensifiers: Record<string, number>;
   irregularForms: Record<string, string>;
   sentimentLexicon: Record<string, number>;
@@ -68,7 +71,12 @@ function T(): Tables {
   if (tables === null) {
     const lex = LEXICON as unknown as Record<string, never> & {
       scalars: Tables["scalars"];
-      word_sets: { but_words: string[]; negators: string[]; negators_en: string[] };
+      word_sets: {
+      but_words: string[];
+      negators: string[];
+      negators_en: string[];
+      perseverative_frames: string[];
+    };
       intensifiers: Record<string, number>;
       irregular_forms: Record<string, string>;
       sentiment_lexicon: Record<string, number>;
@@ -112,6 +120,7 @@ function T(): Tables {
       butWords: new Set(lex.word_sets.but_words),
       negators: new Set(lex.word_sets.negators),
       negatorsEn: new Set(lex.word_sets.negators_en),
+      perseverativeFrames: new Set(lex.word_sets.perseverative_frames),
       intensifiers: nullProto(lex.intensifiers),
       irregularForms: nullProto(lex.irregular_forms),
       sentimentLexicon: nullProto(lex.sentiment_lexicon),
@@ -272,13 +281,15 @@ export function valenceWalk(tokens: string[], language?: string): number[] {
       const window = seg.slice(Math.max(0, i - T().scalars.booster_scope), i);
       let boost = 1.0;
       let negated = false;
+      let perseverative = false;
       for (const prev of window) {
         const intensifier = T().intensifiers[prev];
         if (intensifier !== undefined) boost *= intensifier;
         if (negatorsFor(language).has(prev)) negated = true;
+        if (T().perseverativeFrames.has(prev)) perseverative = true;
       }
       valence *= boost;
-      if (negated) {
+      if (negated && !perseverative) {
         // A negated STRONG negative is the ABSENCE of the state: "i am
         // not suicidal" must never score positive (it measured +0.5).
         if (valence <= -T().scalars.strong_negation_abs) continue;
@@ -367,7 +378,12 @@ export function sentimentComponents(text: string, language?: string): [number, n
 export function detectLanguage(text: string): "en" | "es" | "other" {
   const scored = tokenize(text).filter((t) => t.length >= 3);
   const det = T().languageDetection;
-  if (scored.length === 0) return "en";
+  // 2026-10-01 audit LOW (parity): the server (and the web twin) report
+  // "other" when ANY text exists but nothing scored — only a fully EMPTY
+  // corpus keeps the English default. The old unconditional "en" made the
+  // on-device mood estimate score CJK/emoji-only text against the EN
+  // lexicon from nothing.
+  if (scored.length === 0) return text.length === 0 ? "en" : "other";
   let enHits = 0;
   let esHits = 0;
   for (const t of scored) {

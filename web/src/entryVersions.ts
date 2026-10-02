@@ -26,6 +26,71 @@ const STORAGE_PREFIX = "mindpattern.entryVersions.";
 /** Process-lifetime mirror: user -> (clientEntryId -> max version). */
 const memoryMirror = new Map<string, Map<string, number>>();
 
+// --- 2026-10-01 audit M1: the v2-bound set ---------------------------------
+//
+// The decrypt ladder tries the version-bound v2 AAD first and falls back
+// to the legacy version-free AAD. That fallback must NOT fire for an id
+// whose blob has EVER authenticated under the v2 binding: a malicious
+// server replaying a stored pre-edit v1-bound blob with the truthful
+// current version echo would otherwise render stale text as current (the
+// high-water mark only catches version DECLINES). Same encrypted-at-rest
+// standing as the version marks; absent/corrupt degrades to "no memory".
+const V2_BOUND_PREFIX = "mindpattern.entryV2Bound.";
+const v2BoundMirror = new Map<string, Set<string>>();
+
+function v2BoundKey(userId: string): string {
+  return `${V2_BOUND_PREFIX}${userId}`;
+}
+
+async function loadV2Bound(userId: string, dataKey: Bytes): Promise<Set<string>> {
+  let bound = v2BoundMirror.get(userId);
+  if (!bound) {
+    bound = new Set();
+    v2BoundMirror.set(userId, bound);
+  }
+  const raw = await kv.getItem(v2BoundKey(userId));
+  if (!raw) return bound;
+  let plaintext: Bytes | null = null;
+  try {
+    plaintext = await decrypt(dataKey, fromBase64(raw), buildAad("entry-v2-bound", userId));
+    const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as unknown;
+    if (Array.isArray(parsed)) {
+      for (const id of parsed) if (typeof id === "string") bound.add(id);
+    }
+  } catch {
+    // Corrupt/foreign ciphertext: treat as absent.
+  } finally {
+    zeroize(plaintext);
+  }
+  return bound;
+}
+
+async function persistV2Bound(userId: string, dataKey: Bytes, bound: Set<string>): Promise<void> {
+  const payload = new TextEncoder().encode(JSON.stringify([...bound]));
+  try {
+    const blob = await encrypt(dataKey, payload, buildAad("entry-v2-bound", userId));
+    await kv.setItem(v2BoundKey(userId), toBase64(blob));
+  } finally {
+    zeroize(payload);
+  }
+}
+
+/** Record that this id's blob authenticated under the v2 (version-bound)
+ *  AAD — after this, the legacy fallback is refused for the id. */
+export async function noteV2Bound(userId: string, dataKey: Bytes, clientEntryId: string): Promise<void> {
+  const bound = await loadV2Bound(userId, dataKey);
+  if (bound.has(clientEntryId)) return;
+  bound.add(clientEntryId);
+  await persistV2Bound(userId, dataKey, bound);
+}
+
+/** Whether this id has EVER authenticated under the v2 AAD (absent
+ *  storage means "no memory" — the fallback stays allowed). */
+export async function isV2Bound(userId: string, dataKey: Bytes, clientEntryId: string): Promise<boolean> {
+  const bound = await loadV2Bound(userId, dataKey);
+  return bound.has(clientEntryId);
+}
+
 function storageKey(userId: string): string {
   return `${STORAGE_PREFIX}${userId}`;
 }
@@ -128,6 +193,10 @@ export async function knownEntryVersion(
 export async function forgetEntryVersion(userId: string, dataKey: Bytes, clientEntryId: string): Promise<void> {
   const mirror = await loadStored(userId, dataKey);
   if (mirror.delete(clientEntryId)) await persist(userId, dataKey, mirror);
+  // 2026-10-01 audit M1: the v2-bound mark dies with the row (a recreated
+  // id legitimately starts on the legacy ladder again).
+  const bound = await loadV2Bound(userId, dataKey);
+  if (bound.delete(clientEntryId)) await persistV2Bound(userId, dataKey, bound);
 }
 
 /** Forget everything for a user (sign-out / account deletion; a data-key
@@ -135,6 +204,8 @@ export async function forgetEntryVersion(userId: string, dataKey: Bytes, clientE
 export async function forgetAllEntryVersions(userId: string): Promise<void> {
   memoryMirror.delete(userId);
   await kv.removeItem(storageKey(userId));
+  v2BoundMirror.delete(userId);
+  await kv.removeItem(v2BoundKey(userId));
 }
 
 /** Re-key the persisted map after a data-key rotation: load with the OLD
@@ -150,4 +221,5 @@ export async function rebindEntryVersions(userId: string, oldDataKey: Bytes, new
 /** Test helper: drop every in-memory mirror (storage untouched). */
 export function resetEntryVersionMirrors(): void {
   memoryMirror.clear();
+  v2BoundMirror.clear();
 }

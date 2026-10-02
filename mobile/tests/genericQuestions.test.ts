@@ -66,17 +66,11 @@ describe("genericQuestionForDate rotation", () => {
 });
 
 describe("E-3 (2026-09-21): the Spanish baseline pool", () => {
-  it("embeds shared/generic_questions_es.json exactly (modulo the 2026-09-28 pronoun fix)", () => {
+  it("embeds shared/generic_questions_es.json exactly (2026-10-01: the
+     2026-09-28 pronoun shim is gone — shared/ carries the fixed string
+     and parity is plain equality again)", () => {
     expect(sharedEs.v).toBe(1);
-    // Audit 2026-09-28 (LOW): mobile fixed the usted-register pronoun in
-    // "¿Qué la confortó hoy?" -> "¿Qué le confortó hoy?"; shared/ still
-    // carries the pre-fix string until its owner syncs. The correction is
-    // applied to the loaded copy so parity stays pinned for EVERY other
-    // string — any additional divergence still fails here.
-    const sharedFixed = sharedEs.questions.map((q) =>
-      q === "¿Qué la confortó hoy?" ? "¿Qué le confortó hoy?" : q,
-    );
-    expect([...GENERIC_QUESTIONS_ES]).toEqual(sharedFixed);
+    expect([...GENERIC_QUESTIONS_ES]).toEqual(sharedEs.questions);
   });
 
   it("is position-parity with the English pool (same rotation, same question)", () => {

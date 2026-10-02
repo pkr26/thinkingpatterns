@@ -85,7 +85,7 @@ def _brain_tuning_contract() -> dict[str, object]:
 
 
 # Digests frozen 2026-09-30 from the live engine at campaign start.
-BRAIN_TUNING_DIGEST = "e1cf43c8e8f1f798"
+BRAIN_TUNING_DIGEST = "db54bd23fea9c4f9"
 
 # Snapshots are captured at COLLECTION time (this module's import): some
 # engine modules carry runtime memoization dicts among their module-level
@@ -169,10 +169,10 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.api.therapist": "852d2358d408b105",
     "app.cache": "9cafcda6da25d7e1",
     "app.config": "48fce0698f78bffb",
-    "app.db": "e6fd14fe73a9aa27",
+    "app.db": "4e1b99481ae593d1",
     "app.deps": "eef3badf33769d80",
     "app.locks": "37856db1c6d2e319",
-    "app.main": "a9f558f5b7624858",
+    "app.main": "aab681431909bcc3",
     "app.metrics": "10aefb028623642d",
     "app.middleware": "27babfd5745e9b0b",
     "app.schemas": "20fbb6883918e31c",
@@ -184,11 +184,11 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.security.tokens": "9fd35793a68932a7",
     "app.security.totp": "764e7437fd20e644",
     "app.services.audio_store": "cad5858e779e5566",
-    "app.services.crisis": "89e5b6225db88166",
+    "app.services.crisis": "214490ad774f26f4",
     "app.services.llm": "5051ada0a5d8a7f2",
     "app.services.patterns": "5c1b74f0800b1a40",
     "app.services.phrases": "8e57f838b840229f",
-    "app.services.questions": "e2e993dc36cbe8d2",
+    "app.services.questions": "860046a3cbfadb09",
     "app.services.stt": "09882a71facd2a9c",
     "app.services.threshold": "a320cefdf99c2cb0",
     "app.singleprocess": "18badaef13fb0023",
@@ -288,7 +288,7 @@ PRIVATE_TABLE_DIGESTS = {
     "app.api.insights": "0ab61ee8acc09c3b",
     "app.cache": "85e3c8868decda83",
     "app.schemas": "a11fc3560db59c8f",
-    "app.services.crisis": "5279669bc9a4999e",
+    "app.services.crisis": "075fb9e3c7671d0f",
     "app.services.phrases": "5cad465e4f3299b5",
     "app.services.questions": "07fcf97d72adc879",
     "app.services.stt": "9da07b88205d933e",

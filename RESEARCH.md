@@ -165,7 +165,10 @@ behavior, not intent:
   per-recompute false-alarm probability at φ=0.5 for 21–40-day windows
   (one-off simulation of the exact rule, 40k–100k runs/cell, AR(1)
   mood, chart sigma estimated exactly as the code does). L=3.1 brings
-  the worst cell to 4.7% ≤ 5% while keeping detection power high (a
+  the worst cell to 4.7% ≤ 5% (2026-10-01 audit nuance: under the
+  TRUE-φ calibration; the deployed φ̂-estimated limits sit marginally
+  above at 5.3–5.4% in the worst cells, as brain.py's own comment
+  honestly records) while keeping detection power high (a
   sustained 2σ shift over the last 10 days still fires with p≈0.92 at
   n=60). The reported p-value is a **calibrated alarm probability** — a
   bilinear interpolation over the simulated (φ, n) table times a
@@ -202,9 +205,10 @@ behavior, not intent:
 - **Language verdict by share rule, with an honest "other"**: short
   windows no longer default to English; each language scores the
   window's tokens against its own detection set and the higher share
-  wins only if it clears `LANGUAGE_HIT_FLOOR = 0.10` (with
-  `LANGUAGE_MIN_TOKENS = 50`); anything else is `"other"` and the
-  historical suppressions apply.
+  wins only if it clears `LANGUAGE_HIT_FLOOR = 0.10`; anything else is
+  `"other"` and the historical suppressions apply. (2026-10-01 audit:
+  the retired `LANGUAGE_MIN_TOKENS` gate was still cited here — the
+  constant survives only as a comment in brain.py.)
 - **Spanish person anchoring** (`_ES_PERSON_CANDIDATES`): recurring
   "mi madre"-style proper-person references anchor themes in Spanish
   journals too, under the same gating as the English capitalization

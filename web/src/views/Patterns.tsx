@@ -188,6 +188,14 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
       if (!summary) setError(t("insights.summaryFailedWeb"));
       return;
     }
+    // 2026-10-01 audit M16: fail CLOSED on an unknown phase — mobile's
+    // InsightsScreen rejects anything but baseline|insight; this view used
+    // to render the insight UI (and burn the one-time threshold notice)
+    // for ANY non-baseline value a future or hostile server emitted.
+    if (summary.phase !== "baseline" && summary.phase !== "insight") {
+      setError(t("insights.unknownPhase"));
+      return;
+    }
     setPhase(summary.phase);
     setProgress({ activeDays: summary.active_days, remaining: summary.days_remaining });
     if (summary.blob) {

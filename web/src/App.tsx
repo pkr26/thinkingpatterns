@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { preserveActiveDraft } from "./entryDraft";
+import { preserveSafetyPlan } from "./safetyPlan";
 import { adoptLegacyPlaintextMutes } from "./patternMutes";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from "./sessionLock";
 import { subscribeTabLockdown } from "./tabLockdown";
@@ -138,6 +139,10 @@ export function App(): React.JSX.Element {
     // Fire-and-forget by contract — the key bytes are snapshotted
     // synchronously and a failed seal never blocks the lock.
     void preserveActiveDraft();
+    // 2026-10-01 audit M11: the safety plan rides the same lock path —
+    // half-written Stanley-Brown text must survive the lock, not die with
+    // the unmounted view.
+    void preserveSafetyPlan();
     // Fence any in-flight queue commit; the ciphertext itself stays parked
     // for the account (sign-out keeps it, D-9).
     abortInFlightFlush();
@@ -293,6 +298,11 @@ export function App(): React.JSX.Element {
       signOut();
       return;
     }
+    // 2026-10-01 audit M10/M11: seal the live entry draft AND safety plan
+    // BEFORE the view unmounts — plain navigation used to destroy both
+    // (the draft's own copy promised "until you save or discard it").
+    void preserveActiveDraft().catch(() => undefined);
+    void preserveSafetyPlan().catch(() => undefined);
     setView({ kind: id as View["kind"] });
   }, [signOut]);
   const activeMore = MORE_KINDS.has(view.kind) ? [view.kind as string] : [];
@@ -336,7 +346,7 @@ export function App(): React.JSX.Element {
               a crashed view recovers without a reload. */}
           <ViewBoundary resetKey={view.kind}>
           {view.kind === "today" ? (
-            <EntryView onSaved={onSaved} />
+            <EntryView onSaved={onSaved} onCrisis={() => setCrisisOpen(true)} />
           ) : view.kind === "patterns" ? (
             <PatternsView onCrisis={() => setCrisisOpen(true)} />
           ) : view.kind === "question" ? (

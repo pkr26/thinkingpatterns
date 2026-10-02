@@ -24,7 +24,13 @@ import {
   toBase64,
   unwrapPatientDataKey,
 } from "../crypto";
-import type { Bytes, CaseloadSummary } from "../crypto";
+import {
+  decryptNote as decryptNoteLegacy,
+  encryptNote,
+  noteKeyV2FromPrivateKey,
+  type Bytes,
+  type CaseloadSummary,
+} from "../crypto";
 import { copyToClipboard, currentOrigin, downloadTextFile, randomBytes, sessionStore, visitAnchorStore } from "../platform";
 import { Button, Card, Disclosure, ErrorBanner, Field, Note } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
@@ -254,6 +260,102 @@ export function PatientsView(props: {
     }
   };
 
+  /** 2026-10-01 audit C3: walk every patient's notes; any blob that
+   *  decrypts under the LEGACY password-derived key is re-sealed (with its
+   *  full revision history) under the v2 identity key and swapped through
+   *  the verifier-gated batch endpoint. Chunks of 20 notes per request.
+   *  Already-migrated (v2) blobs fail the legacy decrypt and are skipped. */
+  const rekeyLegacyNotes = async (
+    pkcs8: Bytes,
+    currentKeys: PortalKeySet,
+    username: string,
+    verifierB64: string,
+  ): Promise<void> => {
+    const noteKeyV2 = await noteKeyV2FromPrivateKey(pkcs8);
+    try {
+      const patients = await api.patients();
+      const items: Array<{
+        note_id: string;
+        blob: string;
+        base_version: number;
+        revision_blobs: Array<{ revision_id: string; blob: string }>;
+      }> = [];
+      for (const patient of patients) {
+        let offset = 0;
+        // Bounded walk: notes pages report the next offset (the api.notes
+        // contract); 500 pages is far beyond any real caseload.
+        for (let page = 0; page < 500; page += 1) {
+          const result = await api.notes(patient.user_id, { offset });
+          for (const note of result.notes) {
+            let legacyText: string;
+            try {
+              legacyText = await decryptNoteLegacy(
+                currentKeys.noteKey,
+                username,
+                patient.user_id,
+                note.client_note_id,
+                note.blob,
+              );
+            } catch {
+              continue; // already v2 (or unreadable — not ours to touch)
+            }
+            const sealed = await encryptNote(
+              noteKeyV2,
+              username,
+              patient.user_id,
+              note.client_note_id,
+              legacyText,
+            );
+            const revision_blobs: Array<{ revision_id: string; blob: string }> = [];
+            try {
+              const revisions = await api.noteRevisions(note.id);
+              for (const rev of revisions) {
+                let revText: string;
+                try {
+                  revText = await decryptNoteLegacy(
+                    currentKeys.noteKey,
+                    username,
+                    patient.user_id,
+                    note.client_note_id,
+                    rev.blob,
+                  );
+                } catch {
+                  continue;
+                }
+                const revSealed = await encryptNote(
+                  noteKeyV2,
+                  username,
+                  patient.user_id,
+                  note.client_note_id,
+                  revText,
+                );
+                revision_blobs.push({
+                  revision_id: rev.id,
+                  blob: revSealed.blobB64,
+                });
+              }
+            } catch {
+              /* revision history unavailable: the live note still rekeys */
+            }
+            items.push({
+              note_id: note.id,
+              blob: sealed.blobB64,
+              base_version: note.version ?? 1,
+              revision_blobs,
+            });
+          }
+          if (result.nextOffset === null) break;
+          offset = result.nextOffset;
+        }
+      }
+      for (let i = 0; i < items.length; i += 20) {
+        await api.rekeyNotes(verifierB64, items.slice(i, i + 20));
+      }
+    } finally {
+      noteKeyV2.fill(0);
+    }
+  };
+
   const changePassword = async () => {
     if (secBusy || !props.session) return;
     if (pwNew !== pwConfirm) {
@@ -301,6 +403,12 @@ export function PatientsView(props: {
       if (!pkcs8) {
         throw new Error("the current password did not unlock your stored sharing key — nothing was changed");
       }
+      // 2026-10-01 audit C3: migrate every legacy (password-sealed) note
+      // and its revision history to the v2 identity key BEFORE either
+      // rotation call — while the old password's key is still derivable.
+      // A rekey preserves content (no revision, no version advance); the
+      // server enforces same-length blobs and per-note version fences.
+      await rekeyLegacyNotes(pkcs8, currentKeys, username, verifierB64);
       const resealedBlob = await sealPrivateKeyForUpload(newKeys.wrapKek, pkcs8, username);
       await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob);
       try {
@@ -1156,7 +1264,9 @@ export function PatientsView(props: {
               <Disclosure summary="What happens to existing patient grants">
                 Existing grants stay readable only after each patient re-wraps their data key via the
                 pairing fingerprint path; grants that never re-wrap are intentionally lost. Your notes
-                are unaffected: they are sealed under your password, not this key.
+                are unaffected: they are sealed under your account's sharing key, and any still sealed
+                under your OLD password are re-sealed automatically as part of this change
+                (2026-10-01 — they used to become permanently unreadable).
               </Disclosure>
               <Field label="Current password (to authorize rotation)" value={compCurrent} onChange={setCompCurrent} type="password" autoComplete="current-password" />
               <label className="confirm-label">

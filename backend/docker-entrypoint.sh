@@ -35,6 +35,14 @@ if [ -z "${MINDPATTERN_DB_URL:-}" ] && [ -s /run/secrets/postgres_password ]; th
       *) break ;;
     esac
   done
+  # 2026-10-01 audit LOW: hex-only is a hard contract here (the value is
+  # interpolated verbatim into the URL); a non-hex password used to
+  # produce a corrupt URL that crash-looped the API with an opaque error.
+  case "$db_password" in
+    ''|*[!0-9a-fA-F]*)
+      echo "ERROR: postgres_password must be hex only (openssl rand -hex 16) — URL-reserved characters would corrupt MINDPATTERN_DB_URL" >&2
+      exit 78 ;;
+  esac
   export MINDPATTERN_DB_URL="postgresql+asyncpg://${POSTGRES_USER:-mindpattern}:${db_password}@db:5432/${POSTGRES_DB:-mindpattern}"
 fi
 

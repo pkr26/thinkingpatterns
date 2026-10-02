@@ -307,3 +307,39 @@ not aspirational) in ci.yml and release.yml with this register entry as
 the restoration owner: the remaining gap is concentrated in
 account.py/audio.py error arms (S3-store replace failure, export
 pagination edges). Re-review: next backend wave or before v2.2.
+
+## 2026-10-01 deep audit — tracked item: no data-key rotation under the v2 envelope
+
+The v2 key scheme made password changes O(1) by re-wrapping the SAME
+random data key, and consent revocation nulls only the wrap column —
+there is deliberately no path that changes the data key itself. Consequence:
+any party that once held the data key (a therapist during an active
+grant; anyone via the pre-2026-10-01 recovery-kit exposure, closed by
+the v2 recovery scheme the same day; a processing session capture) can
+decrypt all past AND future ciphertext for the account, independent of
+later password changes or revocations, given any later ciphertext dump.
+
+Why it is tracked rather than shipped with the 2026-10-01 remediation
+wave: a correct rotation is corpus-wide (re-encrypt every entry, measure,
+PHQ-9 row and audio attachment under the new key, re-wrap every active
+consent grant, drain and re-wrap the offline queues on every device,
+re-key the entry-version and v2-bound marks, and survive interruption —
+the v1 O(corpus) rekey machinery in insights.py is the skeleton). Doing
+that hastily is the one change class that can brick a zero-knowledge
+journal permanently; it needs its own plan, its own drills, and its own
+release. Design sketch (agreed direction):
+
+1. `POST /processing/rekey-data-key` (verifier-gated, processing-token
+   possessed): server stages a RekeyJournal batch cursor while the client
+   walks its corpus, uploading re-encrypted rows keyed by (id, expected
+   content_version) with the same optimistic fences as edits.
+2. Grants re-wrap through the existing pairing-fingerprint path (each
+   patient re-wraps to the therapist's unchanged identity key — the note
+   rekey of 2026-10-01 is the template).
+3. Clients drain + re-wrap their offline queues BEFORE the swap commit,
+   and the v2-bound/version marks re-key via rebind (the hooks exist).
+4. A "suspected compromise" UI affordance surfaces it — the same place
+   the processing-token rekey remediation is offered today.
+
+Owner: next crypto wave. Until then the honest copy stands: revoke stops
+FUTURE sharing, it does not evict a key a therapist already unwrapped.

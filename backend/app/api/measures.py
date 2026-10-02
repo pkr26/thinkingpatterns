@@ -462,6 +462,16 @@ async def delete_measure(
             )
             if db_rowcount(result) == 0:
                 raise ApiError(status_code=404, detail="measure not found", code="not_found")
+            # 2026-10-01 audit M13: the create path increments measure_count
+            # (line ~271) but delete never decremented it — permanent upward
+            # drift eventually false-413s a patient who deletes and
+            # re-records measures at the 2,000 lifetime cap. Mirror the
+            # entries.py delete: relative decrement in the SAME transaction.
+            await session.execute(
+                update(User)
+                .where(User.id == fresh_user.id)
+                .values(measure_count=User.measure_count - 1)
+            )
             await append_access_log(
                 session,
                 actor_id=fresh_user.id,

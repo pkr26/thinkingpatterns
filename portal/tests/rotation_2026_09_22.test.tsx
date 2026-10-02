@@ -80,6 +80,13 @@ vi.mock("../src/api", async (importOriginal) => {
 
 vi.mock("../src/crypto", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/crypto")>();
+  const decryptNoteImpl = vi.fn(
+      async (_key: unknown, _t: string, _u: string, _id: string, blob: string) =>
+        blob === "LIVEBLOB" ? "current note text"
+          : blob === "REV1" ? "earlier draft one"
+          : blob === "REV2" ? "earlier draft two"
+          : "existing note text",
+    );
   return {
     ...actual,
     // Tagged derivation: master 1 = the current password, 2 = the
@@ -115,11 +122,10 @@ vi.mock("../src/crypto", async (importOriginal) => {
         wrapKeyBlobB64: "FRESH-SEALED-BLOB",
       };
     }),
-    decryptNote: vi.fn(async (_key: unknown, _t: string, _u: string, _id: string, blob: string) =>
-      blob === "LIVEBLOB" ? "current note text"
-        : blob === "REV1" ? "earlier draft one"
-        : blob === "REV2" ? "earlier draft two"
-        : "existing note text"),
+    decryptNote: decryptNoteImpl,
+    decryptNoteAny: vi.fn(async (...args: unknown[]) =>
+      decryptNoteImpl(...(args.slice(1) as Parameters<typeof decryptNoteImpl>)),
+    ),
   };
 });
 
@@ -136,6 +142,7 @@ const session = {
   username: "drportal",
   userId: "therapist-1",
   noteKey: new Uint8Array(32),
+      noteKeyV2: new Uint8Array(32),
   privateKey: {} as CryptoKey,
   publicKeyB64: "P".repeat(124),
 };

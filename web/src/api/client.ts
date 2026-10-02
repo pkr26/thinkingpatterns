@@ -32,6 +32,12 @@ export const REQUEST_TIMEOUT_MS = 15_000;
  *  REQUEST_TIMEOUT_MS by tests so the regression cannot return quietly. */
 export const VOICE_REQUEST_TIMEOUT_MS = 180_000;
 
+/** Export deadline (2026-10-01 audit L-5): the streamed export walks the
+ *  WHOLE account (up to the 256 MiB blob quota) — the 15 s global cap
+ *  timed out large journals over slow links before the first byte of the
+ *  download. 120 s mirrors the voice-class budget for a bulk read. */
+export const EXPORT_REQUEST_TIMEOUT_MS = 120_000;
+
 function isDevelopmentBuild(): boolean {
   return import.meta.env.DEV === true || import.meta.env.MODE === "test";
 }
@@ -989,16 +995,31 @@ export const api = {
   exportAccountRaw: async (): Promise<Response> => {
     const activeSession = session;
     if (!activeSession) throw new ApiError(0, "not signed in");
-    return fetchWithTimeout(
-      `${activeSession.baseUrl}${API_PREFIX}/account/export`,
-      {
-        method: "GET",
-        headers: { Authorization: `Bearer ${activeSession.token}` },
-        credentials: "omit",
-      },
-      activeSession.baseUrl,
-      activeSession.controller.signal,
-    );
+    // 2026-10-01 audit L-5: the export gets the bulk-read deadline (the
+    // 15 s global cap killed large journals on slow links), and a 401
+    // fires the same one-shot session-expiry latch every gated request
+    // uses — the app used to keep a dead session until the next call.
+    try {
+      return await fetchWithTimeout(
+        `${activeSession.baseUrl}${API_PREFIX}/account/export`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${activeSession.token}` },
+          credentials: "omit",
+        },
+        activeSession.baseUrl,
+        activeSession.controller.signal,
+        EXPORT_REQUEST_TIMEOUT_MS,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401 && !sessionExpiredFired) {
+        // The one-shot expiry latch (same funnel as every gated request):
+        // the app locks down instead of nursing a dead session.
+        sessionExpiredFired = true;
+        sessionExpiredHandler?.(err);
+      }
+      throw err;
+    }
   },
   /** Requires the password-derived verifier: a stolen token cannot erase
    *  data. The verifier travels in the X-Account-Verifier header, never the URL. */

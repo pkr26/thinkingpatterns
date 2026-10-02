@@ -48,6 +48,8 @@ conservative answer for a compliance artifact.
 
 from __future__ import annotations
 
+import anyio
+
 import hashlib
 import hmac
 import json
@@ -197,10 +199,17 @@ async def flush_audit_journal(session: AsyncSession, journal_path: str) -> int:
     lines = []
     for user_id, seq, entry_hash, entry_mac, at in pending:
         lines.append(f"{user_id} {seq} {entry_hash} {entry_mac} {canonical_occurred_at(at)}\n")
-    try:
+
+    def _write() -> None:
         with open(journal_path, "a", encoding="utf-8") as handle:
             handle.writelines(lines)
             handle.flush()
+
+    try:
+        # 2026-10-01 audit M14: the append is blocking file I/O — run it on
+        # a worker thread so the event loop never stalls inside the
+        # per-request dependency teardown (scrypt's off-loop precedent).
+        await anyio.to_thread.run_sync(_write)
     except OSError:
         logger.exception("audit journal append failed (journal falls behind; benign)")
         # The staged entries are consumed either way: retrying on the next

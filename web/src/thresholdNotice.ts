@@ -1,20 +1,26 @@
 /**
  * One-time threshold-crossing notice (ported from mobile's
- * thresholdNotice.ts; the flag is a non-content date stamp — the same
- * standing as the onboarding flag, WEB_PLAN P6.5).
+ * thresholdNotice.ts; the flag is a non-content date stamp).
+ *
+ * 2026-10-01 audit L: the stamp used to live in PLAINTEXT localStorage
+ * keyed by account id — the exact "date paired with the account id is
+ * interaction metadata" class the 2026-09-27 audit removed the crisis
+ * dialog's stamp for. It now rides the kv seam (IndexedDB, not
+ * localStorage) under the same non-content disclosure as the cadence
+ * snooze dates, and sign-out clears it with the other per-account keys.
  */
-import { localStore } from "./platform";
+import { kv } from "./kvstore";
 
-const PREFIX = "mindpattern.thresholdNotice.v1.";
+const KEY = "mindpattern.thresholdNotice.v1";
 
 export async function thresholdNoticeShown(userId: string): Promise<boolean> {
-  return localStore.get(`${PREFIX}${userId}`) !== null;
+  return (await kv.getItem(`${KEY}.${userId}`)) !== null;
 }
 
 export async function recordThresholdNotice(userId: string): Promise<void> {
-  localStore.set(`${PREFIX}${userId}`, new Date().toISOString().slice(0, 10));
+  await kv.setItem(`${KEY}.${userId}`, new Date().toISOString().slice(0, 10));
 }
 
 export async function clearThresholdNotice(userId: string): Promise<void> {
-  localStore.removePrefix(`${PREFIX}${userId}`);
+  await kv.removeItem(`${KEY}.${userId}`);
 }

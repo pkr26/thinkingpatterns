@@ -229,6 +229,15 @@ printf '%s\n' "$rendered_images" | grep -Fx "$BACKUP_IMAGE"
 
 compose pull
 compose up -d --wait
+
+> **Recorded decision required (2026-10-01 audit M19):** the default
+> deployment ships WITHOUT backups and without stale-backup alerting — the
+> `backups` profile and the heartbeat alert group are both opt-in. Before
+> serving real journal traffic, either enable them
+> (`docker compose --profile backups up -d backup`, uncomment the
+> `MindPatternBackupHeartbeat*` alert rules) or write down, here in your
+> deploy notes, that this instance deliberately runs without backups. A
+> silent default is not a decision.
 curl --fail --silent --show-error http://127.0.0.1:8000/readyz
 
 # Optional, profile-gated encrypted backups; this uses the independently
@@ -422,7 +431,7 @@ safe procedure:
        "$(cat /run/secrets/postgres_password)" > "$PGPASSFILE"
      chmod 600 "$PGPASSFILE"
      pg_dump -h db -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
-       | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -out "$tmp"
+       | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass file:/run/secrets/backup_key -out "$tmp"
      mindpattern-backup-mac write "$tmp" "$out.hmac.tmp"
      mv "$out.hmac.tmp" "$out.hmac"; mv "$tmp" "$out"   # sidecar first, ciphertext last
      mindpattern-backup-mac verify "$out"

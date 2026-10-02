@@ -234,7 +234,7 @@ describe("the sensitive-pattern accessible-name contract (audit 2026-09-25)", ()
     stubFetch((url) => {
       if (url.endsWith("/insights") && !url.includes("recompute")) {
         return new Response(
-          JSON.stringify({ phase: "active", active_days: 40, streak: 3, days_remaining: 0, blob: toBase64(blob), state_seq: 3 }),
+          JSON.stringify({ phase: "insight", active_days: 40, streak: 3, days_remaining: 0, blob: toBase64(blob), state_seq: 3 }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }

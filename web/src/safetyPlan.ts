@@ -20,6 +20,7 @@
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv } from "./kvstore";
+import { vault } from "./vault";
 
 /** The six Stanley-Brown-inspired fields, in display order. All free
  *  text; all optional (an empty plan is "nothing written yet"). */
@@ -117,8 +118,52 @@ export async function clearSafetyPlan(userId: string): Promise<void> {
 /** Rotation parity with the B-7 rewrap family: re-seal an existing plan
  *  under the incoming key so it survives a v1 password change. A failure
  *  propagates so the rotation falls back to clearing. */
+/** Rotation parity with the B-7 rewrap family: re-seal an existing plan
+ *  under the incoming key so it survives a v1 password change. A failure
+ *  propagates so the rotation falls back to clearing. */
 export async function rewrapSafetyPlan(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
   const plan = await loadSafetyPlan(oldKey, userId);
   if (plan === null) return;
   await saveSafetyPlan(newKey, userId, plan);
+}
+
+// --- 2026-10-01 audit M11: live-plan custody ----------------------------------
+//
+// The entry draft got a seal-on-lock/crash registry (2026-09-26 MEDIUM);
+// the safety plan shipped without the equivalent: half-written
+// Stanley-Brown text was destroyed by every idle/hidden-tab lock, bfcache
+// restore, or render crash — clinically significant writing, lost in
+// exactly the states the locks fire in. Same shape as entryDraft's
+// registry: the view publishes a getter, App's lockDown seals it FIRST.
+
+/** The live plan, or null when the mounted editor has no unsaved edits
+ *  (a clean editor must never resurrect over itself). */
+let planSource: (() => SafetyPlan | null | undefined) | null = null;
+
+export function registerSafetyPlanSource(
+  source: () => SafetyPlan | null | undefined,
+): () => void {
+  planSource = source;
+  return () => {
+    if (planSource === source) planSource = null;
+  };
+}
+
+/** Seal the live plan for the lock/crash/navigation happening RIGHT NOW —
+ *  the entryDraft.preserveActiveDraft idiom (key snapshotted
+ *  synchronously; async seal on the private copy; best-effort). */
+export function preserveSafetyPlan(): Promise<void> {
+  const plan = planSource?.() ?? null;
+  const owner = vault.ownerUserId();
+  if (!plan || !owner || !vault.isUnlocked()) return Promise.resolve();
+  const current = vault.get();
+  const keyCopy = new Uint8Array(new ArrayBuffer(current.dataKey.length));
+  keyCopy.set(current.dataKey);
+  return (async () => {
+    try {
+      await saveSafetyPlan(keyCopy, owner, plan);
+    } finally {
+      zeroize(keyCopy);
+    }
+  })().catch(() => undefined);
 }
