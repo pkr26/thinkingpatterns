@@ -1063,7 +1063,7 @@ describe("PatientView 2026-09-17 wave", () => {
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     expect(buttonByLabel(root, "Print session summary")).toBe(true);
-    expect(textOf(root)).toContain("MindPattern session summary — patienta");
+    expect(textOf(root)).toContain("Fathom session summary — patienta");
   });
 
   it("note editing round-trips through the PATCH endpoint", async () => {

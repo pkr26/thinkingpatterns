@@ -42,7 +42,7 @@ vi.mock("../src/api", async (importOriginal) => {
       accessLog: vi.fn(async () => []),
       totpSetup: vi.fn(async () => ({
         secret_base32: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
-        otpauth_uri: "otpauth://totp/MindPattern:drportal?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=MindPattern&algorithm=SHA1&digits=6&period=30",
+        otpauth_uri: "otpauth://totp/Fathom:drportal?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Fathom&algorithm=SHA1&digits=6&period=30",
       })),
       totpEnable: vi.fn(async () => ({ backup_codes: ["A2B3C4D5E6", "F7G8H9J2K3", "M4N5P6Q7R8", "S2T3U4V5W6", "X7Y8Z9A2B3", "C4D5E6F7G8", "H9J2K3M4N5", "P6Q7R8S2T3"] })),
       totpDisable: vi.fn(async () => null),
@@ -182,7 +182,7 @@ describe("PatientsView TOTP enrollment (2026-09-22)", () => {
     // default — plaintext (and the otpauth URI, which embeds it) exists in
     // the DOM only behind the explicit reveal toggle.
     expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
-    expect(textOf(root)).not.toContain("otpauth://totp/MindPattern:drportal");
+    expect(textOf(root)).not.toContain("otpauth://totp/Fathom:drportal");
     expect(textOf(root)).toContain("•".repeat(32)); // same-length mask
     expect(buttonByLabel(root, "Show secret")).toBe(true);
     expect(mockedApi.totpSetup).toHaveBeenCalledTimes(1);
@@ -193,12 +193,12 @@ describe("PatientsView TOTP enrollment (2026-09-22)", () => {
     await press(root, "Show secret");
     await flush();
     expect(textOf(root)).toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
-    expect(textOf(root)).toContain("otpauth://totp/MindPattern:drportal");
+    expect(textOf(root)).toContain("otpauth://totp/Fathom:drportal");
     // …and hiding re-masks them while the setup stage stays armed.
     await press(root, "Hide secret");
     await flush();
     expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
-    expect(textOf(root)).not.toContain("otpauth://totp/MindPattern:drportal");
+    expect(textOf(root)).not.toContain("otpauth://totp/Fathom:drportal");
     expect(textOf(root)).toContain("•".repeat(32));
 
     await typeInto(root, "Current password (to authorize setup)", "deep-password-1");

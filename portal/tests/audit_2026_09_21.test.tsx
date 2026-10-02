@@ -186,7 +186,7 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
     // The only printed subtree carries the summary — never the raw entries.
     const printOnly = root.root.findAllByType("div").find((n) => n.props.className === "print-only");
     expect(printOnly).toBeTruthy();
-    expect(deepText(printOnly!)).toContain("MindPattern session summary — patienta");
+    expect(deepText(printOnly!)).toContain("Fathom session summary — patienta");
     expect(deepText(printOnly!)).not.toContain("decrypted e-1");
     // Screen behavior is unchanged: the summary stays hidden outside print
     // (portal.css owns the screen half of the contract).
