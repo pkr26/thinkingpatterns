@@ -96,7 +96,7 @@ describe("UnlockScreen pins", () => {
       .find((n) => flat(n.props.children).includes("Your journal is encrypted with keys only you hold"));
     expect(node).toBeDefined();
     expect(node.props.style).toEqual(
-      [{ textAlign: "center", marginBottom: 24, lineHeight: 20 }, { color: "#8a91a3", fontSize: 14 }],
+      [{ textAlign: "center", marginBottom: 24, lineHeight: 20 }, { color: "#a29a8c", fontSize: 14 }],
     );
   });
 });

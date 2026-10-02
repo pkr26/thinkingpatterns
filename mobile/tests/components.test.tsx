@@ -83,7 +83,7 @@ describe("PrimaryButton", () => {
     const root = await render(<PrimaryButton label="Delete" onPress={() => {}} danger />);
     const btn = root.root.findAllByType(TouchableOpacity)[0];
     const flat = (btn.props.style as unknown[]).flat() as Record<string, unknown>[];
-    expect(flat.some((s) => s.backgroundColor === "#c0392b")).toBe(true);
+    expect(flat.some((s) => s.backgroundColor === "#d98a80")).toBe(true);
   });
 });
 
@@ -109,7 +109,7 @@ describe("CrisisHelpButton", () => {
     expect(textOf(root)).toContain("Need help now? Crisis resources");
     const btn = touchableByLabel(root, "Need help now? Crisis resources");
     const flat = (btn.props.style as unknown[]).flat() as Record<string, unknown>[];
-    expect(flat.some((s) => s.backgroundColor === "#242a38")).toBe(true); // helpBg, not card
+    expect(flat.some((s) => s.backgroundColor === "#1c1915")).toBe(true); // helpBg, not card
     await pressLabel(root, "Need help now? Crisis resources");
     expect(onPress).toHaveBeenCalledTimes(1);
   });
@@ -129,7 +129,7 @@ describe("InlineStatus", () => {
   it("the neutral tone uses muted color", async () => {
     const root = await render(<InlineStatus message="Saved — will sync when online" tone="neutral" />);
     const text = root.root.findAllByType(Text)[0];
-    expect(text.props.style).toMatchObject({ color: "#8a91a3" });
+    expect(text.props.style).toMatchObject({ color: "#a29a8c" });
   });
 });
 
@@ -175,9 +175,9 @@ describe("components under the light theme", () => {
       );
       const { allStyles } = await import("./helpers/rtr");
       const styles = allStyles(root);
-      expect(styles.some((s) => s.backgroundColor === "#2f4bd0")).toBe(true); // light primary
-      expect(styles.some((s) => s.backgroundColor === "#e4e9f5")).toBe(true); // light helpBg
-      expect(styles.some((s) => s.backgroundColor === "#3b5bdb")).toBe(false); // no dark leakage
+      expect(styles.some((s) => s.backgroundColor === "#5a7d5e")).toBe(true); // light primary
+      expect(styles.some((s) => s.backgroundColor === "#f3eee4")).toBe(true); // light helpBg
+      expect(styles.some((s) => s.backgroundColor === "#a9cba4")).toBe(false); // no dark leakage
     } finally {
       vi.mocked(useColorScheme).mockReturnValue("dark");
     }

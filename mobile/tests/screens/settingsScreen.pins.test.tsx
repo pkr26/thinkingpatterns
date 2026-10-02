@@ -181,13 +181,13 @@ describe("SettingsScreen pins: mount-state guards", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     expect(textOf(root)).not.toContain("server 42");
-    expect(textOf(root)).toContain("MindPattern 1.0.0. Everything");
+    expect(textOf(root)).toContain("Fathom 1.0.0. Everything");
   });
 
   it("no serverVersion means the About line has NO suffix at all", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(textOf(root)).toContain("MindPattern 1.0.0. Everything");
+    expect(textOf(root)).toContain("Fathom 1.0.0. Everything");
     expect(textOf(root)).not.toContain("Stryker was here");
   });
 });
@@ -399,7 +399,7 @@ describe("SettingsScreen pins: the password re-auth card", () => {
     });
     await flush();
     expect((touchableByLabel(llmRoot, "Confirm with password").props as { style: unknown[] }).style[1]).toEqual({
-      backgroundColor: "#3b5bdb",
+      backgroundColor: "#a9cba4",
       minHeight: 44,
     });
 
@@ -410,7 +410,7 @@ describe("SettingsScreen pins: the password re-auth card", () => {
     await pressAlertButton("Continue to password");
     await flush();
     expect((touchableByLabel(deleteRoot, "Confirm with password").props as { style: unknown[] }).style[1]).toEqual({
-      backgroundColor: "#c0392b",
+      backgroundColor: "#d98a80",
       minHeight: 44,
     });
   });
@@ -455,7 +455,7 @@ describe("SettingsScreen pins: node-exact style contracts", () => {
     await flush();
     expect(parentViewStyle(root, "couldn't sync")).toEqual([
       { padding: 16, gap: 8 },
-      { backgroundColor: "#1a1e26", borderRadius: 12 },
+      { backgroundColor: "#2a2620", borderRadius: 12 },
     ]);
     // The recovery action stays left-aligned (center={false}).
     expect((touchableByLabel(root, "Try syncing them again").props as { style: unknown[] }).style).toEqual([
@@ -474,11 +474,11 @@ describe("SettingsScreen pins: node-exact style contracts", () => {
     await flush();
     expect(parentViewStyle(root, "Enter your password to delete everything")).toEqual([
       { padding: 16, gap: 12 },
-      { backgroundColor: "#141821", borderRadius: 12 },
+      { backgroundColor: "#232019", borderRadius: 12 },
     ]);
     expect(styleArrayOfText(root, "Enter your password to delete everything")).toEqual([
       { fontSize: 15, fontWeight: "600", lineHeight: 20 },
-      { color: "#e8eaf0" },
+      { color: "#ede8df" },
     ]);
   });
 

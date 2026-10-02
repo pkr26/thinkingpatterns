@@ -156,7 +156,7 @@ describe("EntryScreen progress display", () => {
     const scroll = root.root.findByType(reactNative.ScrollView);
     expect(scroll.props.contentContainerStyle).toEqual({ padding: 20, gap: 16 });
     // Themed container: [base, colors] pair (design-system pass).
-    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#211e1a" }]);
     // Keyboard hygiene: drag-to-dismiss on the scroll container.
     expect(scroll.props.keyboardDismissMode).toBe("on-drag");
   });
@@ -244,32 +244,32 @@ describe("EntryScreen progress display", () => {
 
   it("pins the visual language of the screen (styles are a product contract)", async () => {
     // Design-system pass: styles now compose theme tokens (dark palette),
-    // and the audit's failing colors moved: button fill #4f7cff → #3b5bdb
+    // and the audit's failing colors moved: button fill #b7d5b2 → #a9cba4
     // (white label 3.71:1 → 5.67:1), input minHeight 220 → autogrow 140.
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
     expectStyle(root, { flex: 1 }); // container base
-    expectStyle(root, { backgroundColor: "#0f1115" }); // themed container
+    expectStyle(root, { backgroundColor: "#211e1a" }); // themed container
     expectStyle(root, { gap: 6 }); // progressRow
-    expectStyle(root, { color: "#8a91a3", fontSize: 13 }); // progressLabel
+    expectStyle(root, { color: "#a29a8c", fontSize: 13 }); // progressLabel
     expectStyle(root, { height: 6, overflow: "hidden" }); // progressTrack base
-    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 3 }); // progressTrack themed
+    expectStyle(root, { backgroundColor: "#2a2620", borderRadius: 3 }); // progressTrack themed
     expectStyle(root, { height: 6 }); // progressFill base
-    expectStyle(root, { backgroundColor: "#4f7cff", borderRadius: 3, width: "0%" }); // progressFill themed
+    expectStyle(root, { backgroundColor: "#b7d5b2", borderRadius: 3, width: "0%" }); // progressFill themed
     expectStyle(root, { minHeight: 140, textAlignVertical: "top" }); // input base (autogrow)
     expectStyle(root, {
-      backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 12, padding: 16, fontSize: 16,
+      backgroundColor: "#2a2620", color: "#ede8df", borderRadius: 12, padding: 16, fontSize: 16,
     }); // input themed
     expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton base
-    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // PrimaryButton themed (AA fix)
+    expectStyle(root, { backgroundColor: "#a9cba4", minHeight: 44 }); // PrimaryButton themed (AA fix)
     expectStyle(root, { fontWeight: "600" }); // buttonText base
-    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // buttonText themed
+    expectStyle(root, { color: "#1e1c17", fontSize: 16 }); // buttonText (dark onPrimary)
     // 2026-09-17: navigation is the PERSISTENT bottom bar (MainShell), no
     // longer an in-scroll NavRow. Its styles are pinned in
     // components.bottomNav.test.tsx; this screen keeps the chips row.
     // Fix 23 (2026-09-21): chips carry t.minTouch — they measured ~33pt.
-    expectStyle(root, { backgroundColor: "#141821", borderRadius: 10, minHeight: 44, justifyContent: "center" }); // prompt chip themed
+    expectStyle(root, { backgroundColor: "#232019", borderRadius: 10, minHeight: 44, justifyContent: "center" }); // prompt chip themed
     expectStyle(root, { paddingHorizontal: 12, paddingVertical: 8 }); // prompt chip base
   });
 

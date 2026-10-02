@@ -38,11 +38,11 @@ describe("PrivacyScreen pins: the full per-node style contract", () => {
     await flush();
 
     const scroll = root.root.findAllByType(ScrollView)[0];
-    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#211e1a" }]);
     expect(scroll.props.contentContainerStyle).toEqual({ padding: 20, gap: 14 });
 
     expect(textNode(root, "Privacy, in plain language").props.style).toEqual(
-      [{ fontSize: 22, fontWeight: "700", lineHeight: 29 }, { color: "#e8eaf0" }],
+      [{ fontSize: 22, fontWeight: "700", lineHeight: 29 }, { color: "#ede8df" }],
     );
 
     // Exactly five section stacks, each with its gap-only container style.
@@ -59,7 +59,7 @@ describe("PrivacyScreen pins: the full per-node style contract", () => {
     ];
     for (const title of titles) {
       expect(textNode(root, title).props.style).toEqual(
-        [{ fontSize: 12, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase" }, { color: "#7f9bff" }],
+        [{ fontSize: 12, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase" }, { color: "#b6a9e3" }],
       );
     }
     const bodies = [
@@ -71,12 +71,12 @@ describe("PrivacyScreen pins: the full per-node style contract", () => {
     ];
     for (const body of bodies) {
       expect(textNode(root, (s) => s.startsWith(body)).props.style).toEqual(
-        [{ fontSize: 15, lineHeight: 22 }, { color: "#b6bdc9" }],
+        [{ fontSize: 15, lineHeight: 22 }, { color: "#cfc7ba" }],
       );
     }
 
     expect(textNode(root, (s) => s.startsWith("This policy lives inside the app")).props.style).toEqual(
-      { color: "#8a91a3", fontSize: 12, lineHeight: 17 },
+      { color: "#a29a8c", fontSize: 12, lineHeight: 17 },
     );
   });
 });

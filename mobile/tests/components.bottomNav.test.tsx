@@ -42,7 +42,7 @@ describe("BottomNav", () => {
   it("the help action keeps its distinct surface and weight", async () => {
     const { allStyles } = await import("./helpers/rtr");
     const root = await render(<BottomNav current="none" navigation={{ navigate }} />);
-    expect(allStyles(root).some((s) => s.backgroundColor === "#242a38")).toBe(true); // helpBg
+    expect(allStyles(root).some((s) => s.backgroundColor === "#1c1915")).toBe(true); // helpBg
   });
 
   it("current='none' selects nothing", async () => {

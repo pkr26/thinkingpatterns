@@ -295,21 +295,21 @@ describe("UnlockScreen", () => {
 
   it("pins the visual language of the screen", async () => {
     // Design-system pass: theme-composed styles; primary fill is the
-    // AA-passing #3b5bdb; the crisis affordance keeps its own surface.
+    // AA-passing #a9cba4; the crisis affordance keeps its own surface.
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<UnlockScreen />);
     await flush();
     expectStyle(root, { flex: 1, justifyContent: "center" }); // container base
-    expectStyle(root, { backgroundColor: "#0f1115", padding: 32, gap: 12 }); // container themed
+    expectStyle(root, { backgroundColor: "#211e1a", padding: 32, gap: 12 }); // container themed
     expectStyle(root, { fontSize: 34, fontWeight: "700", textAlign: "center" }); // title base
-    expectStyle(root, { color: "#e8eaf0" }); // title themed
+    expectStyle(root, { color: "#ede8df" }); // title themed
     expectStyle(root, { textAlign: "center", marginBottom: 24, lineHeight: 20 }); // subtitle base
-    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // subtitle themed
-    expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 16 });
+    expectStyle(root, { color: "#a29a8c", fontSize: 14 }); // subtitle themed
+    expectStyle(root, { backgroundColor: "#2a2620", color: "#ede8df", borderRadius: 10, padding: 14, fontSize: 16 });
     expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
-    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
-    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // button text
-    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 }); // help surface
+    expectStyle(root, { backgroundColor: "#a9cba4", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { color: "#1e1c17", fontSize: 16 }); // button text (dark onPrimary)
+    expectStyle(root, { backgroundColor: "#1c1915", borderRadius: 10, minHeight: 44 }); // help surface
   });
 
   it("supports submitting from the keyboard", async () => {
@@ -437,7 +437,7 @@ describe("UnlockScreen", () => {
     const keyboard = root.root.findByType(reactNative.KeyboardAvoidingView);
     expect(keyboard.props.behavior).toBe("padding");
     expect(keyboard.props.style).toEqual(
-      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#0f1115", padding: 32, gap: 12 }],
+      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#211e1a", padding: 32, gap: 12 }],
     );
 
     const original = reactNative.Platform.OS;

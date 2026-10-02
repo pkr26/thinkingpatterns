@@ -24,7 +24,7 @@ describe("PrimaryButton pins: the exact style-array contract", () => {
     const btn = touchableByLabel(root, "Save entry");
     expect(btn.props.style).toEqual([
       { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" },
-      { backgroundColor: "#3b5bdb", minHeight: 44 },
+      { backgroundColor: "#a9cba4", minHeight: 44 },
       false,
     ]);
   });
@@ -34,7 +34,7 @@ describe("PrimaryButton pins: the exact style-array contract", () => {
     const btn = root.root.findAllByType(TouchableOpacity)[0];
     expect(btn.props.style).toEqual([
       { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" },
-      { backgroundColor: "#3b5bdb", minHeight: 44 },
+      { backgroundColor: "#a9cba4", minHeight: 44 },
       { opacity: 0.6 },
     ]);
     expect(root.root.findAllByType(ActivityIndicator)).toHaveLength(1);
@@ -77,10 +77,10 @@ describe("CrisisHelpButton pins", () => {
     const btn = touchableByLabel(root, "Need help now? Crisis resources");
     expect(btn.props.style).toEqual([
       { padding: 16, alignItems: "center", justifyContent: "center" },
-      { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 },
+      { backgroundColor: "#1c1915", borderRadius: 10, minHeight: 44 },
     ]);
     const label = root.root.findAllByType(Text)[0];
-    expect(label.props.style).toEqual([{ fontWeight: "700" }, { color: "#e8eaf0", fontSize: 14 }]);
+    expect(label.props.style).toEqual([{ fontWeight: "700" }, { color: "#ede8df", fontSize: 14 }]);
   });
 });
 
@@ -98,16 +98,16 @@ describe("InlineStatus pins", () => {
     expect(view).toBeDefined();
     expect(view.props.style).toEqual([
       { paddingVertical: 10, paddingHorizontal: 14, alignItems: "center" },
-      { backgroundColor: "#141821", borderRadius: 10 },
+      { backgroundColor: "#232019", borderRadius: 10 },
     ]);
     // tone defaults to "ok" → success color (a "" default or a false tone
     // condition would render the neutral muted color instead).
-    expect(root.root.findAllByType(Text)[0].props.style).toEqual({ color: "#59c98a", fontSize: 13 });
+    expect(root.root.findAllByType(Text)[0].props.style).toEqual({ color: "#93c7a6", fontSize: 13 });
   });
 
   it("the neutral tone renders the muted color exactly", async () => {
     const root = await render(<InlineStatus message="Saved — will sync when online" tone="neutral" />);
-    expect(root.root.findAllByType(Text)[0].props.style).toEqual({ color: "#8a91a3", fontSize: 13 });
+    expect(root.root.findAllByType(Text)[0].props.style).toEqual({ color: "#a29a8c", fontSize: 13 });
   });
 });
 
@@ -118,8 +118,8 @@ describe("NoticeChip pins", () => {
     expect(view).toBeDefined();
     expect(view.props.style).toEqual([
       { alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: 12 },
-      { backgroundColor: "#1a1e26", borderRadius: 12 },
+      { backgroundColor: "#2a2620", borderRadius: 12 },
     ]);
-    expect(root.root.findAllByType(Text)[0].props.style).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(root.root.findAllByType(Text)[0].props.style).toEqual({ color: "#a29a8c", fontSize: 12 });
   });
 });

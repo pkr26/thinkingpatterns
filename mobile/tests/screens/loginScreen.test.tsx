@@ -75,7 +75,7 @@ describe("LoginScreen chrome", () => {
   it("renders the sign-in form and the register toggle", async () => {
     const root = await render(<LoginScreen />);
     await flush();
-    expect(textOf(root)).toContain("MindPattern");
+    expect(textOf(root)).toContain("Fathom");
     expect(textOf(root)).toContain("Sign in");
     expect(textOf(root)).toContain("New here? Create an account");
     // Editors start empty and idle (no busy spinner, fields blank).
@@ -86,24 +86,24 @@ describe("LoginScreen chrome", () => {
 
   it("pins the visual language of the screen", async () => {
     // Design-system pass: theme-composed styles; the button fill moved to
-    // the AA-passing #3b5bdb and the switch link is a themed GhostButton.
+    // the AA-passing #a9cba4 and the switch link is a themed GhostButton.
     const { expectStyle } = await import("../helpers/rtr");
     const root = await render(<LoginScreen />);
     await flush();
     expectStyle(root, { flex: 1, justifyContent: "center" }); // container base
-    expectStyle(root, { backgroundColor: "#0f1115", padding: 32, gap: 12 }); // container themed
+    expectStyle(root, { backgroundColor: "#211e1a", padding: 32, gap: 12 }); // container themed
     expectStyle(root, { fontSize: 34, fontWeight: "700", textAlign: "center" }); // title base
-    expectStyle(root, { color: "#e8eaf0" }); // title themed
+    expectStyle(root, { color: "#ede8df" }); // title themed
     expectStyle(root, { textAlign: "center", marginBottom: 24 }); // subtitle base
-    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // subtitle themed
-    expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 16 });
+    expectStyle(root, { color: "#a29a8c", fontSize: 14 }); // subtitle themed
+    expectStyle(root, { backgroundColor: "#2a2620", color: "#ede8df", borderRadius: 10, padding: 14, fontSize: 16 });
     expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
-    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
-    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // button text
+    expectStyle(root, { backgroundColor: "#a9cba4", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { color: "#1e1c17", fontSize: 16 }); // button text (dark onPrimary)
     expectStyle(root, { padding: 12 }); // GhostButton base
-    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // ghost text
+    expectStyle(root, { color: "#a29a8c", fontSize: 14 }); // ghost text
     // The crisis affordance keeps its distinct surface.
-    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 });
+    expectStyle(root, { backgroundColor: "#1c1915", borderRadius: 10, minHeight: 44 });
   });
 
   it("switches to register mode and back", async () => {
@@ -476,7 +476,7 @@ describe("login", () => {
     const keyboard = root.root.findByType(reactNative.KeyboardAvoidingView);
     expect(keyboard.props.behavior).toBe("padding");
     expect(keyboard.props.style).toEqual(
-      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#0f1115", padding: 32, gap: 12 }],
+      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#211e1a", padding: 32, gap: 12 }],
     );
 
     const original = reactNative.Platform.OS;

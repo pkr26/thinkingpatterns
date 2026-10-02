@@ -93,18 +93,18 @@ describe("navigation pins: BootSplash themed styles are pinned to their nodes", 
       .find((n) => styleArray(n).some((s) => JSON.stringify(s) === JSON.stringify(splashBase)));
     expect(splash).toBeDefined();
     // The themed overlay must be an entry of THE SAME style array (CrisisScreen
-    // renders #0f1115 elsewhere in the tree, so a whole-tree assert is blind).
-    expect(styleArray(splash)).toContainEqual({ backgroundColor: "#0f1115" });
+    // renders #211e1a elsewhere in the tree, so a whole-tree assert is blind).
+    expect(styleArray(splash)).toContainEqual({ backgroundColor: "#211e1a" });
   });
 
   it("the brand Text node carries the themed text color in its own style array", async () => {
     sessionState = { authStatus: "loading", unlocked: false };
     const root = await render(<AppNavigator />);
     await flush();
-    const brand = root.root.findAllByType(Text).find((n) => flat(n.props.children) === "MindPattern");
+    const brand = root.root.findAllByType(Text).find((n) => flat(n.props.children) === "Fathom");
     expect(brand).toBeDefined();
     expect(styleArray(brand)).toContainEqual({ fontSize: 28, fontWeight: "700" });
-    expect(styleArray(brand)).toContainEqual({ color: "#e8eaf0" });
+    expect(styleArray(brand)).toContainEqual({ color: "#ede8df" });
   });
 
   it("the tagline Text node carries exactly the muted 13px style object", async () => {
@@ -115,7 +115,7 @@ describe("navigation pins: BootSplash themed styles are pinned to their nodes", 
       .findAllByType(Text)
       .find((n) => flat(n.props.children) === "Your patterns, from your words. Encrypted on this device.");
     expect(tagline).toBeDefined();
-    expect(tagline.props.style).toEqual({ color: "#8a91a3", fontSize: 13 });
+    expect(tagline.props.style).toEqual({ color: "#a29a8c", fontSize: 13 });
   });
 });
 
@@ -167,10 +167,10 @@ describe("theme pins: exact scale and palette values", () => {
   it("theme flags and the otherwise-unpinned palette hexes are exact", () => {
     expect(darkTheme.dark).toBe(true);
     expect(lightTheme.dark).toBe(false);
-    expect(darkTheme.colors.border).toBe("#222733");
-    expect(lightTheme.colors.border).toBe("#d5dae4");
-    expect(lightTheme.colors.primaryBright).toBe("#3b5bdb");
-    expect(lightTheme.colors.sparkDown).toBe("#c64650");
+    expect(darkTheme.colors.border).toBe("#3a352c");
+    expect(lightTheme.colors.border).toBe("#e7e0d4");
+    expect(lightTheme.colors.primaryBright).toBe("#44604a");
+    expect(lightTheme.colors.sparkDown).toBe("#a0483f");
   });
 });
 

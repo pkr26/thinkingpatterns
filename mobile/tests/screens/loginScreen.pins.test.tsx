@@ -216,7 +216,7 @@ describe("LoginScreen pins: node-exact style overlays", () => {
     await flush();
     const node = textNode(root, (s) => s.includes("Your patterns, from your words."));
     expect(node.props.style).toEqual(
-      [{ textAlign: "center", marginBottom: 24 }, { color: "#8a91a3", fontSize: 14 }],
+      [{ textAlign: "center", marginBottom: 24 }, { color: "#a29a8c", fontSize: 14 }],
     );
   });
 
@@ -225,7 +225,7 @@ describe("LoginScreen pins: node-exact style overlays", () => {
     await pressLabel(root, "New here? Create an account");
     await typeInto(root, "password", "abc");
     const weakNode = textNode(root, (s) => s.startsWith("Password strength:"));
-    expect(weakNode.props.style).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(weakNode.props.style).toEqual({ color: "#a29a8c", fontSize: 12 });
     // Strong band: hint is "" — the node text must end at the period.
     await typeInto(root, "password", "a Quite long sentence, with 5 things!");
     expect(allText(root)).toContain("Password strength: strong.");
@@ -237,14 +237,14 @@ describe("LoginScreen pins: node-exact style overlays", () => {
     await typeInto(root, "password", "correct horse");
     await typeInto(root, "confirm password", "correct HORSE");
     const node = textNode(root, "Passwords don't match.");
-    expect(node.props.style).toEqual({ color: "#ff6b6b", fontSize: 12 });
+    expect(node.props.style).toEqual({ color: "#eba49b", fontSize: 12 });
   });
 
   it("the no-reset warning carries the body overlay on its own node", async () => {
     const root = await render(<LoginScreen />);
     await pressLabel(root, "New here? Create an account");
     const node = textNode(root, (s) => s.includes("There is no password reset."));
-    expect(node.props.style).toEqual({ color: "#b6bdc9", fontSize: 13, lineHeight: 19 });
+    expect(node.props.style).toEqual({ color: "#cfc7ba", fontSize: 13, lineHeight: 19 });
   });
 });
 

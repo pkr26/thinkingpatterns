@@ -130,14 +130,14 @@ describe("OnboardingScreen pins: the per-node style contract", () => {
     const container = root.root.findAllByType(View).find((n) => n.props.onTouchStart === touchActivity);
     expect(container).toBeDefined();
     expect(container.props.style).toEqual(
-      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#0f1115", padding: 24, gap: 18 }],
+      [{ flex: 1, justifyContent: "center" }, { backgroundColor: "#211e1a", padding: 24, gap: 18 }],
     );
-    expect(textNode(root, "1 of 3").props.style).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(textNode(root, "1 of 3").props.style).toEqual({ color: "#a29a8c", fontSize: 12 });
     expect(textNode(root, "Write each day").props.style).toEqual(
-      [{ fontSize: 26, fontWeight: "700", lineHeight: 33 }, { color: "#e8eaf0" }],
+      [{ fontSize: 26, fontWeight: "700", lineHeight: 33 }, { color: "#ede8df" }],
     );
     expect(textNode(root, (s) => s.startsWith("After 30 days of writing")).props.style).toEqual(
-      [{ fontSize: 16, lineHeight: 24 }, { color: "#b6bdc9" }],
+      [{ fontSize: 16, lineHeight: 24 }, { color: "#cfc7ba" }],
     );
   });
 
@@ -148,7 +148,7 @@ describe("OnboardingScreen pins: the per-node style contract", () => {
     await flush();
     await pressLabel(root, "Continue");
     await pressLabel(root, "Continue");
-    const age = textNode(root, (s) => s.includes("MindPattern is for people 18 and older"));
-    expect(age.props.style).toEqual({ color: "#b6bdc9", fontSize: 13, lineHeight: 19 });
+    const age = textNode(root, (s) => s.includes("Fathom is for people 18 and older"));
+    expect(age.props.style).toEqual({ color: "#cfc7ba", fontSize: 13, lineHeight: 19 });
   });
 });

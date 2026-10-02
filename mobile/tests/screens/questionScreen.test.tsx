@@ -119,16 +119,16 @@ describe("QuestionScreen", () => {
     const root = await render(<QuestionScreen />);
     await flush();
     expectStyle(root, { flex: 1, justifyContent: "center" }); // container base
-    expectStyle(root, { backgroundColor: "#0f1115", padding: 24, gap: 18 }); // container themed
+    expectStyle(root, { backgroundColor: "#211e1a", padding: 24, gap: 18 }); // container themed
     expectStyle(root, { padding: 22, gap: 12 }); // card base
-    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 14 }); // card themed
+    expectStyle(root, { backgroundColor: "#2a2620", borderRadius: 14 }); // card themed
     expectStyle(root, { fontSize: 12, fontWeight: "700", letterSpacing: 1.5 }); // cardTitle base
     expectStyle(root, { fontSize: 22, fontWeight: "600", lineHeight: 30 }); // question base
-    expectStyle(root, { color: "#e8eaf0" }); // question themed
-    expectStyle(root, { color: "#8a91a3", fontSize: 12 }); // footnote (contrast fix)
+    expectStyle(root, { color: "#ede8df" }); // question themed
+    expectStyle(root, { color: "#a29a8c", fontSize: 12 }); // footnote (contrast fix)
     expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
-    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
-    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // button text
+    expectStyle(root, { backgroundColor: "#a9cba4", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { color: "#1e1c17", fontSize: 16 }); // button text (dark onPrimary)
   });
 
   it("renders the error style on failures", async () => {
@@ -138,7 +138,7 @@ describe("QuestionScreen", () => {
     await flush();
     expect(textOf(root)).toContain("offline");
     expectStyle(root, { fontSize: 13, textAlign: "center" }); // error base
-    expectStyle(root, { color: "#ff6b6b" }); // error themed
+    expectStyle(root, { color: "#eba49b" }); // error themed
   });
 
   it("below the threshold shows TODAY'S question from the on-device pool — neutral, no key, no consent", async () => {
@@ -154,7 +154,7 @@ describe("QuestionScreen", () => {
     // Neutral: no alert role, no error color anywhere in the tree.
     expect(root.root.findAll((n) => n.props.accessibilityRole === "alert")).toHaveLength(0);
     const { allStyles } = await import("../helpers/rtr");
-    expect(allStyles(root).some((s) => s.color === "#ff6b6b")).toBe(false);
+    expect(allStyles(root).some((s) => s.color === "#eba49b")).toBe(false);
     // …nothing leaves the device for it: no key-bearing call, no stored-
     // question fetch, and — the whole point — NO consent explainer.
     expect(api.openProcessingSession).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe("QuestionScreen", () => {
     // No error surface at all: no alert role, no error color, no dialog.
     expect(root.root.findAll((n) => n.props.accessibilityRole === "alert")).toHaveLength(0);
     const { allStyles } = await import("../helpers/rtr");
-    expect(allStyles(root).some((s) => s.color === "#ff6b6b")).toBe(false);
+    expect(allStyles(root).some((s) => s.color === "#eba49b")).toBe(false);
     expect(Alert.alert).not.toHaveBeenCalled();
     // …and nothing key-bearing or network-bound ran past the failed check.
     expect(api.openProcessingSession).not.toHaveBeenCalled();

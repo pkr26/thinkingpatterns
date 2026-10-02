@@ -47,10 +47,11 @@ describe("theme scales", () => {
     expect(darkTheme.type).toEqual(lightTheme.type);
     expect(darkTheme.minTouch).toBe(44);
     expect(darkTheme.spacing).toEqual({ xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32 });
-    // The two palettes differ in every color except onPrimary (white labels
-    // sit on fills that were each darkened until white passed AA).
+    // The two palettes differ in EVERY color, onPrimary included: the
+    // 2026-10-02 wave inverts the dark theme (light sage/coral fills
+    // carry a near-black label) while the light theme keeps white on
+    // its dark fills.
     for (const key of Object.keys(darkTheme.colors) as (keyof typeof darkTheme.colors)[]) {
-      if (key === "onPrimary") continue;
       expect(lightTheme.colors[key]).not.toBe(darkTheme.colors[key]);
     }
   });

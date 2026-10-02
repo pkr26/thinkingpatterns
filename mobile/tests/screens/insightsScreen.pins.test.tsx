@@ -285,11 +285,11 @@ describe("InsightsScreen pins: sparkline geometry and gating", () => {
 
     // Exactly one bar per day, sign-colored, with exact heights:
     // 0 → max(3, 0·20) = 3 up; 0.5 → 10 up; −0.5 → 10 down.
-    const bars = allStyles(root).filter((s) => s.backgroundColor === "#59c98a" || s.backgroundColor === "#e06c75");
+    const bars = allStyles(root).filter((s) => s.backgroundColor === "#93c7a6" || s.backgroundColor === "#d98a80");
     expect(bars).toHaveLength(3);
-    expect(bars).toContainEqual({ backgroundColor: "#59c98a", height: 3 });
-    expect(bars).toContainEqual({ backgroundColor: "#59c98a", height: 10 });
-    expect(bars).toContainEqual({ backgroundColor: "#e06c75", height: 10 });
+    expect(bars).toContainEqual({ backgroundColor: "#93c7a6", height: 3 });
+    expect(bars).toContainEqual({ backgroundColor: "#93c7a6", height: 10 });
+    expect(bars).toContainEqual({ backgroundColor: "#d98a80", height: 10 });
 
     // Half-cell containers pin the up/down split geometry.
     expectStyle(root, { height: 22, justifyContent: "flex-end" });
@@ -388,8 +388,8 @@ describe("InsightsScreen pins: card chrome, chips and styles", () => {
     ]) as never);
     const root = await render(<InsightsScreen />);
     await flush();
-    expectStyle(root, { color: "#59c98a", fontSize: 11, fontWeight: "700" }); // stateStrong
-    expectStyle(root, { color: "#8a91a3", fontSize: 11, fontWeight: "600" }); // stateEarly
+    expectStyle(root, { color: "#93c7a6", fontSize: 11, fontWeight: "700" }); // stateStrong
+    expectStyle(root, { color: "#a29a8c", fontSize: 11, fontWeight: "600" }); // stateEarly
     // The two chips pair with their own state text.
     const texts = allText(root);
     expect(texts).toContain("seen consistently");
@@ -420,23 +420,23 @@ describe("InsightsScreen pins: card chrome, chips and styles", () => {
       )?.color;
     const chips = root.root.findAllByType(Text).filter((n) => String(n.props.children) === "THEME");
     expect(chips).toHaveLength(2);
-    expect(colorOf(chips[0])).toBe("#8a91a3"); // presence → muted chip
-    expect(colorOf(chips[1])).toBe("#7f9bff"); // normal → accent chip
+    expect(colorOf(chips[0])).toBe("#a29a8c"); // presence → muted chip
+    expect(colorOf(chips[1])).toBe("#b6a9e3"); // normal → accent chip
   });
 
   it("the expanded evidence panel carries its full style contract", async () => {
     const root = await renderExpanded([pattern({ detail: { sample_days: 63, p_value: 0.001, negativity: 0.7 } })]);
     // Panel base + themed overlay.
     expectStyle(root, { padding: 12, gap: 8, marginTop: 2 });
-    expectStyle(root, { backgroundColor: "#141821", borderRadius: 10 });
+    expectStyle(root, { backgroundColor: "#232019", borderRadius: 10 });
     // Row key/value pairs.
     expectStyle(root, { fontSize: 12, width: 128, flexShrink: 0 });
-    expectStyle(root, { color: "#8a91a3" });
+    expectStyle(root, { color: "#a29a8c" });
     expectStyle(root, { fontSize: 12, flex: 1, lineHeight: 16 });
-    expectStyle(root, { color: "#b6bdc9" });
+    expectStyle(root, { color: "#cfc7ba" });
     // Toggle text, tech text, footnotes.
     expectStyle(root, { fontSize: 13, fontWeight: "600" });
-    expectStyle(root, { color: "#7f9bff" });
+    expectStyle(root, { color: "#b6a9e3" });
     expectStyle(root, { fontSize: 12, fontWeight: "600" });
     expectStyle(root, { fontSize: 11, marginTop: 2, lineHeight: 15 });
     // Card header row and the toggle hit area.
@@ -464,14 +464,14 @@ describe("InsightsScreen pins: card chrome, chips and styles", () => {
       const style = (node.props as { style: unknown }).style;
       return Array.isArray(style) ? style : [style];
     };
-    expect(styleOfText("Evidence window")).toContainEqual({ color: "#8a91a3" });
-    expect(styleOfText("Based on")).toContainEqual({ color: "#8a91a3" });
-    expect(styleOfText("63 entries in your analysis window")).toContainEqual({ color: "#b6bdc9" });
-    expect(styleOfText("Hide technical details")).toContainEqual({ color: "#8a91a3" });
-    expect(styleOfText("Significance")).toContainEqual({ color: "#8a91a3" });
-    expect(styleOfText("p = 1.0e-3")).toContainEqual({ color: "#b6bdc9" });
-    expect(styleOfText("Patterns like this can occasionally appear by chance")).toContainEqual({ color: "#8a91a3" });
-    expect(styleOfText("An observation about your own data")).toContainEqual({ color: "#8a91a3" });
+    expect(styleOfText("Evidence window")).toContainEqual({ color: "#a29a8c" });
+    expect(styleOfText("Based on")).toContainEqual({ color: "#a29a8c" });
+    expect(styleOfText("63 entries in your analysis window")).toContainEqual({ color: "#cfc7ba" });
+    expect(styleOfText("Hide technical details")).toContainEqual({ color: "#a29a8c" });
+    expect(styleOfText("Significance")).toContainEqual({ color: "#a29a8c" });
+    expect(styleOfText("p = 1.0e-3")).toContainEqual({ color: "#cfc7ba" });
+    expect(styleOfText("Patterns like this can occasionally appear by chance")).toContainEqual({ color: "#a29a8c" });
+    expect(styleOfText("An observation about your own data")).toContainEqual({ color: "#a29a8c" });
   });
 
   it("the lifecycle chip's strong style pairs with its own state text", async () => {
@@ -491,8 +491,8 @@ describe("InsightsScreen pins: card chrome, chips and styles", () => {
       if (!node) throw new Error(`no chip ${state}`);
       return (node.props as { style: unknown }).style;
     };
-    expect(chipStyle("seen consistently")).toEqual({ color: "#59c98a", fontSize: 11, fontWeight: "700" });
-    expect(chipStyle("early evidence")).toEqual({ color: "#8a91a3", fontSize: 11, fontWeight: "600" });
+    expect(chipStyle("seen consistently")).toEqual({ color: "#93c7a6", fontSize: 11, fontWeight: "700" });
+    expect(chipStyle("early evidence")).toEqual({ color: "#a29a8c", fontSize: 11, fontWeight: "600" });
   });
 
   it("both expanders expose their exact accessibility labels and state", async () => {

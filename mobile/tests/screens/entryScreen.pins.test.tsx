@@ -241,7 +241,7 @@ describe("EntryScreen pins: status tone colors", () => {
     await writeEntry(root, "good day");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(styleOfText(root, "Saved ✓")).toEqual({ color: "#59c98a", fontSize: 13 });
+    expect(styleOfText(root, "Saved ✓")).toEqual({ color: "#93c7a6", fontSize: 13 });
   });
 
   it("an offline (queued) save reads as neutral: muted, never success-colored", async () => {
@@ -250,7 +250,7 @@ describe("EntryScreen pins: status tone colors", () => {
     await writeEntry(root, "offline thought");
     await pressLabel(root, "Save entry");
     await flush();
-    expect(styleOfText(root, "Saved — will sync when online")).toEqual({ color: "#8a91a3", fontSize: 13 });
+    expect(styleOfText(root, "Saved — will sync when online")).toEqual({ color: "#a29a8c", fontSize: 13 });
   });
 });
 
@@ -297,10 +297,10 @@ describe("EntryScreen pins: node-exact style contracts", () => {
     vi.mocked(localStreak).mockResolvedValue(4);
     const root = await render(<EntryScreen navigation={nav} />);
     await flush();
-    expect(styleOfText(root, "days to your patterns")).toEqual({ color: "#8a91a3", fontSize: 13 });
-    expect(styleOfText(root, "Writing streak: 4 days")).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(styleOfText(root, "days to your patterns")).toEqual({ color: "#a29a8c", fontSize: 13 });
+    expect(styleOfText(root, "Writing streak: 4 days")).toEqual({ color: "#a29a8c", fontSize: 12 });
     await writeEntry(root, "x".repeat(95_000));
-    expect(styleOfText(root, "95,000 / 100,000")).toEqual({ color: "#8a91a3", fontSize: 12, textAlign: "right" });
+    expect(styleOfText(root, "95,000 / 100,000")).toEqual({ color: "#a29a8c", fontSize: 12, textAlign: "right" });
   });
 
   it("the mood check-in block: container gap, label, row, option and option text", async () => {
@@ -309,15 +309,15 @@ describe("EntryScreen pins: node-exact style contracts", () => {
     await flush();
     await openDetails(root);
     expectStyle(root, { gap: 8 }); // the check-in block container (sm spacing)
-    expect(styleOfText(root, "How does today feel?")).toEqual({ color: "#8a91a3", fontSize: 13 });
+    expect(styleOfText(root, "How does today feel?")).toEqual({ color: "#a29a8c", fontSize: 13 });
     const moodRow = root.root.findAllByType(View).find((n) => n.props.accessibilityLabel === "Mood check-in");
     expect(moodRow?.props.style).toEqual({ flexDirection: "row", gap: 8 });
     const okay = root.root.findAll((n) => n.props.accessibilityLabel === "Mood: Okay")[0];
     expect(okay.props.style).toEqual([
       { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
-      { backgroundColor: "#1a1e26", borderRadius: 10, minHeight: 44 },
+      { backgroundColor: "#2a2620", borderRadius: 10, minHeight: 44 },
     ]);
-    expect(styleOfText(root, "Okay")).toEqual({ color: "#b6bdc9", fontSize: 13 });
+    expect(styleOfText(root, "Okay")).toEqual({ color: "#cfc7ba", fontSize: 13 });
   });
 
   it("the keyboard-avoiding wrapper is exactly {flex: 1}", async () => {
@@ -375,7 +375,7 @@ describe("EntryScreen pins: 44pt touch contract on every chip (audit fix 23, 202
     expect(sleep).toBeTruthy();
     expect(sleep.props.style).toEqual([
       { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
-      { backgroundColor: "#1a1e26", borderRadius: 10, minHeight: 44 },
+      { backgroundColor: "#2a2620", borderRadius: 10, minHeight: 44 },
     ]);
   });
 

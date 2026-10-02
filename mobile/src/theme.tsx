@@ -1,22 +1,35 @@
 /**
- * The MindPattern design system: one palette (dark is the default, light
+ * The Fathom design system: one palette (dark is the default, light
  * follows the OS), plus the spacing / typography / radius scales every
  * screen is built from. No screen may hardcode a hex literal — if a color
  * is needed, it belongs here with its contrast checked.
  *
- * Contrast commitments (WCAG AA, 4.5:1 for normal text; computed with the
- * sRGB relative-luminance formula and pinned by tests/theme.test.ts):
+ * 2026-10-02 palette wave: both variants are the patient web app's tokens
+ * ported verbatim (web/public/app.css) — warm charcoal + sage dark, warm
+ * paper + sage light — so the phone, the web client, and the therapist
+ * portal speak one visual language.
  *
- *  dark.muted   #8a91a3 — 6.0:1 on bg #0f1115, 5.3:1 on card #1a1e26
- *               (replaces #5c6370, which measured 3.13:1 — the failing
- *               gray that carried the crisis-screen fine print)
- *  dark.onPrimary on primary #3b5bdb — 5.7:1 (replaces #4f7cff, 3.71:1)
- *  dark.accent  #7f9bff — 7.2:1 on bg, 5.5:1 on helpBg #242a38
- *  dark.body    #b6bdc9 — 10.0:1 on bg, 8.8:1 on card
- *  dark.error   #ff6b6b — 6.8:1 on bg
- *  light.muted  #5a6272 — 6.1:1 on card, 5.7:1 on bg #f5f6fa
- *  light.onPrimary on primary #2f4bd0 — 6.9:1
- *  light.accent #2f4bd0 — 6.9:1 on card
+ * Contrast commitments (WCAG AA, 4.5:1 for normal text; computed with the
+ * sRGB relative-luminance formula and pinned by tests/theme.test.tsx —
+ * every ratio below was recomputed for this palette):
+ *
+ *  dark.muted   #a29a8c — 5.96:1 on bg #211e1a, 5.40:1 on card #2a2620,
+ *               5.83:1 on cardDeep #232019
+ *  dark.onPrimary #1e1c17 on primary #a9cba4 — 9.54:1; on danger
+ *               #d98a80 — 6.40:1 (the dark theme INVERTS: light sage and
+ *               coral fills carry a near-black label, the web dark
+ *               pattern; the light theme keeps white on dark fills)
+ *  dark.accent  #b6a9e3 — 7.72:1 on bg, 7.00:1 on card, 7.56:1 on helpBg
+ *               #1c1915 (the web app's lavender quiet-cue family)
+ *  dark.body    #cfc7ba — 9.90:1 on bg, 8.97:1 on card
+ *  dark.error   #eba49b — 8.15:1 on bg
+ *  light.muted  #6f675c — 5.52:1 on card, 5.12:1 on bg #f8f5ef
+ *  light.onPrimary #ffffff on primary #5a7d5e — 4.64:1; on danger
+ *               #b3554e — 4.85:1
+ *  light.accent #5d4f9e — 6.77:1 on card, 6.27:1 on bg, 6.00:1 on
+ *               helpBg #f3eee4 (the web light theme's accent-STRONG —
+ *               the text-grade form; the base #7465b7 misses AA on the
+ *               help surface at 4.31:1)
  *
  * Tone: the palette stays flat and calm on purpose — no gradients, no
  * celebration colors; the one loud accent is reserved for crisis help.
@@ -58,12 +71,15 @@ export interface ThemeColors {
   placeholder: string;
   /** Links, kind labels, inline affordances. */
   accent: string;
-  /** Primary button fill — white labels sit on this. */
+  /** Primary button fill — the onPrimary label sits on this (near-black
+   *  in the dark theme's light-fill inversion, white in the light
+   *  theme). */
   primary: string;
   /** Non-text fills only (progress bar, switch track): decorative, never
    *  used behind text. */
   primaryBright: string;
-  /** Text on primary/danger fills. */
+  /** Text on primary/danger fills — see primary for the per-theme
+   *  inversion. */
   onPrimary: string;
   /** Destructive button fill. */
   danger: string;
@@ -123,23 +139,23 @@ const scales = {
 export const darkTheme: Theme = {
   dark: true,
   colors: {
-    bg: "#0f1115",
-    card: "#1a1e26",
-    cardDeep: "#141821",
-    border: "#222733",
-    text: "#e8eaf0",
-    body: "#b6bdc9",
-    muted: "#8a91a3",
-    placeholder: "#8a91a3",
-    accent: "#7f9bff",
-    primary: "#3b5bdb",
-    primaryBright: "#4f7cff",
-    onPrimary: "#ffffff",
-    danger: "#c0392b",
-    error: "#ff6b6b",
-    success: "#59c98a",
-    sparkDown: "#e06c75",
-    helpBg: "#242a38",
+    bg: "#211e1a",
+    card: "#2a2620",
+    cardDeep: "#232019",
+    border: "#3a352c",
+    text: "#ede8df",
+    body: "#cfc7ba",
+    muted: "#a29a8c",
+    placeholder: "#a29a8c",
+    accent: "#b6a9e3",
+    primary: "#a9cba4",
+    primaryBright: "#b7d5b2",
+    onPrimary: "#1e1c17",
+    danger: "#d98a80",
+    error: "#eba49b",
+    success: "#93c7a6",
+    sparkDown: "#d98a80",
+    helpBg: "#1c1915",
   },
   ...scales,
 };
@@ -147,23 +163,23 @@ export const darkTheme: Theme = {
 export const lightTheme: Theme = {
   dark: false,
   colors: {
-    bg: "#f5f6fa",
-    card: "#ffffff",
-    cardDeep: "#eef0f6",
-    border: "#d5dae4",
-    text: "#161a22",
-    body: "#3d4453",
-    muted: "#5a6272",
-    placeholder: "#5a6272",
-    accent: "#2f4bd0",
-    primary: "#2f4bd0",
-    primaryBright: "#3b5bdb",
+    bg: "#f8f5ef",
+    card: "#fffefb",
+    cardDeep: "#f4f0e7",
+    border: "#e7e0d4",
+    text: "#2a2520",
+    body: "#4d463d",
+    muted: "#6f675c",
+    placeholder: "#6f675c",
+    accent: "#5d4f9e",
+    primary: "#5a7d5e",
+    primaryBright: "#44604a",
     onPrimary: "#ffffff",
-    danger: "#b03525",
-    error: "#c92f22",
-    success: "#187a41",
-    sparkDown: "#c64650",
-    helpBg: "#e4e9f5",
+    danger: "#b3554e",
+    error: "#9c443d",
+    success: "#35704f",
+    sparkDown: "#a0483f",
+    helpBg: "#f3eee4",
   },
   ...scales,
 };

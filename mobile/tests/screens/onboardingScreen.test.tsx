@@ -55,7 +55,7 @@ describe("OnboardingScreen", () => {
     expect(textOf(root)).toContain("3 of 3");
     expect(textOf(root)).toContain("Keep your password safe");
     expect(textOf(root)).toContain("There is no password reset");
-    expect(textOf(root)).toContain("MindPattern is for people 18 and older");
+    expect(textOf(root)).toContain("Fathom is for people 18 and older");
 
     await pressLabel(root, "I understand — start writing");
     await flush();

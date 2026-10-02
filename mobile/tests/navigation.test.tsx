@@ -67,13 +67,13 @@ describe("AppNavigator", () => {
     // The tagline is honest copy (audit fix): "Your patterns. Your keys.
     // Nobody else's." overstated it — the key visits server memory once
     // during a consented analysis.
-    expect(textOf(root)).toContain("MindPattern");
+    expect(textOf(root)).toContain("Fathom");
     expect(textOf(root)).toContain("Your patterns, from your words. Encrypted on this device.");
     const { expectStyle } = await import("./helpers/rtr");
     expectStyle(root, { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 });
-    expectStyle(root, { backgroundColor: "#0f1115" });
+    expectStyle(root, { backgroundColor: "#211e1a" });
     expectStyle(root, { fontSize: 28, fontWeight: "700" }); // brand
-    expectStyle(root, { color: "#e8eaf0" }); // brand themed
+    expectStyle(root, { color: "#ede8df" }); // brand themed
   });
 
   it("logged out: the login screen plus crisis access — nothing else", async () => {
@@ -81,7 +81,7 @@ describe("AppNavigator", () => {
     const root = await render(<AppNavigator />);
     await flush();
     expect(screenNames(root)).toEqual(["Login", "Recovery", "Crisis"]);
-    expect(textOf(root)).toContain("MindPattern");
+    expect(textOf(root)).toContain("Fathom");
     expect(screenOptions(root, "Login")).toEqual({ headerShown: false });
     // Crisis is a first-class screen even before sign-in (M7).
     expect(screenOptions(root, "Crisis")).toEqual({ title: "Get help" });

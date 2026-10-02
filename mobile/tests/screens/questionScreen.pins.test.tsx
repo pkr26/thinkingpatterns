@@ -230,9 +230,9 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
     await flush();
     expect(parentViewStyle(root, "No recurring pattern")).toEqual([
       { padding: 22, gap: 12 },
-      { backgroundColor: "#1a1e26", borderRadius: 14 },
+      { backgroundColor: "#2a2620", borderRadius: 14 },
     ]);
-    expect(styleOfText(root, "No recurring pattern")).toEqual({ color: "#b6bdc9", fontSize: 15, lineHeight: 22 });
+    expect(styleOfText(root, "No recurring pattern")).toEqual({ color: "#cfc7ba", fontSize: 15, lineHeight: 22 });
   });
 
   it("the baseline card: view, title, question, fine print, day counter, ghost button", async () => {
@@ -241,18 +241,18 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
     await flush();
     expect(parentViewStyle(root, "For now, one question a day")).toEqual([
       { padding: 22, gap: 12 },
-      { backgroundColor: "#1a1e26", borderRadius: 14 },
+      { backgroundColor: "#2a2620", borderRadius: 14 },
     ]);
     expect(styleArrayOfText(root, "Today")).toEqual([
       { fontSize: 12, fontWeight: "700", letterSpacing: 1.5 },
-      { color: "#7f9bff" },
+      { color: "#b6a9e3" },
     ]);
     expect(styleArrayOfText(root, GENERIC)).toEqual([
       { fontSize: 22, fontWeight: "600", lineHeight: 30 },
-      { color: "#e8eaf0" },
+      { color: "#ede8df" },
     ]);
-    expect(styleOfText(root, "For now, one question a day")).toEqual({ color: "#8a91a3", fontSize: 12, lineHeight: 17 });
-    expect(styleOfText(root, "Day 4 of 30")).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(styleOfText(root, "For now, one question a day")).toEqual({ color: "#a29a8c", fontSize: 12, lineHeight: 17 });
+    expect(styleOfText(root, "Day 4 of 30")).toEqual({ color: "#a29a8c", fontSize: 12 });
     expect((touchableByLabel(root, "Write about this").props as { style: unknown[] }).style).toEqual([
       { padding: 12 },
       false,
@@ -267,17 +267,17 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
     await flush();
     expect(parentViewStyle(root, "What repeats?")).toEqual([
       { padding: 22, gap: 12 },
-      { backgroundColor: "#1a1e26", borderRadius: 14 },
+      { backgroundColor: "#2a2620", borderRadius: 14 },
     ]);
     expect(styleArrayOfText(root, "Today")).toEqual([
       { fontSize: 12, fontWeight: "700", letterSpacing: 1.5 },
-      { color: "#7f9bff" },
+      { color: "#b6a9e3" },
     ]);
     expect(styleArrayOfText(root, "What repeats?")).toEqual([
       { fontSize: 22, fontWeight: "600", lineHeight: 30 },
-      { color: "#e8eaf0" },
+      { color: "#ede8df" },
     ]);
-    expect(styleOfText(root, "One question a day. No advice")).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(styleOfText(root, "One question a day. No advice")).toEqual({ color: "#a29a8c", fontSize: 12 });
     expect((touchableByLabel(root, "Write about this").props as { style: unknown[] }).style).toEqual([
       { padding: 12 },
       false,
@@ -292,7 +292,7 @@ describe("QuestionScreen pins: node-exact style contracts", () => {
     await flush();
     expect(styleArrayOfText(root, "nothing leaves this device for it")).toEqual([
       { textAlign: "center", marginTop: 8, lineHeight: 16 },
-      { color: "#8a91a3", fontSize: 12 },
+      { color: "#a29a8c", fontSize: 12 },
     ]);
   });
 });

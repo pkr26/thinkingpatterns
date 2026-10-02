@@ -275,9 +275,9 @@ describe("HistoryScreen pins: badge chrome", () => {
     expect(badgeView).toHaveLength(1);
     expect(badgeView[0].props.style).toEqual([
       { paddingVertical: 4, paddingHorizontal: 10 },
-      { backgroundColor: "#141821", borderRadius: 10 },
+      { backgroundColor: "#232019", borderRadius: 10 },
     ]);
-    expect(styleOfText(root, "Light")).toEqual({ color: "#7f9bff", fontSize: 12 });
+    expect(styleOfText(root, "Light")).toEqual({ color: "#b6a9e3", fontSize: 12 });
   });
 });
 
@@ -292,25 +292,25 @@ describe("HistoryScreen pins: list chrome and row contract", () => {
     // E-9 (2026-09-21): the list scroller is a windowed FlatList.
     const scroll = root.root.findAllByType(FlatList);
     expect(scroll).toHaveLength(1);
-    expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#211e1a" }]);
     expect(scroll[0].props.contentContainerStyle).toEqual({ padding: 20, gap: 12, flexGrow: 1 });
 
     const rc = scroll[0].props.refreshControl as React.ReactElement<{ tintColor?: string; colors?: string[] }>;
-    expect(rc.props.tintColor).toBe("#4f7cff");
-    expect(rc.props.colors).toEqual(["#4f7cff"]);
+    expect(rc.props.tintColor).toBe("#b7d5b2");
+    expect(rc.props.colors).toEqual(["#b7d5b2"]);
 
     const rows = entryRows(root);
     expect(rows).toHaveLength(1);
     expect(rows[0].props.style).toEqual([
       { padding: 16, gap: 10 },
-      { backgroundColor: "#1a1e26", borderRadius: 12, minHeight: 44 },
+      { backgroundColor: "#2a2620", borderRadius: 12, minHeight: 44 },
     ]);
 
     // Audit 2026-09-28 (INFO): the card date renders through
     // formatEntryDate (the raw ISO string read as machine output) — the
     // style pin targets the FORMATTED date text now.
     const dateText = root.root.findAllByType(Text).find((n: any) => flat(n.props.children) === "Thursday, September 3, 2026");
-    expect(dateText!.props.style).toEqual({ color: "#8a91a3", fontSize: 12 });
+    expect(dateText!.props.style).toEqual({ color: "#a29a8c", fontSize: 12 });
     expect(dateText!.parent.props.style).toEqual({
       flexDirection: "row",
       alignItems: "center",
@@ -318,7 +318,7 @@ describe("HistoryScreen pins: list chrome and row contract", () => {
       gap: 10,
     });
 
-    expect(styleOfText(root, "an ordinary entry")).toEqual({ color: "#b6bdc9", fontSize: 15, lineHeight: 21 });
+    expect(styleOfText(root, "an ordinary entry")).toEqual({ color: "#cfc7ba", fontSize: 15, lineHeight: 21 });
   });
 });
 
@@ -329,10 +329,10 @@ describe("HistoryScreen pins: state cards and presence guards", () => {
     await flush();
     const alertText = root.root.findAll((n: any) => n.props.accessibilityRole === "alert");
     expect(alertText).toHaveLength(1);
-    expect(alertText[0].props.style).toEqual({ color: "#ff6b6b", fontSize: 13 });
+    expect(alertText[0].props.style).toEqual({ color: "#eba49b", fontSize: 13 });
     expect(alertText[0].parent.props.style).toEqual([
       { padding: 16, gap: 10 },
-      { backgroundColor: "#1a1e26", borderRadius: 12 },
+      { backgroundColor: "#2a2620", borderRadius: 12 },
     ]);
     expect(textOf(root)).not.toContain("No entries yet.");
     expect(textOf(root)).not.toContain("Your journal history loads when you're online");
@@ -346,10 +346,10 @@ describe("HistoryScreen pins: state cards and presence guards", () => {
       flat(n.props.children).includes("Your journal history loads when you're online"),
     );
     expect(node).toBeDefined();
-    expect(node.props.style).toEqual({ color: "#b6bdc9", fontSize: 15, lineHeight: 22 });
+    expect(node.props.style).toEqual({ color: "#cfc7ba", fontSize: 15, lineHeight: 22 });
     expect(node.parent.props.style).toEqual([
       { padding: 16, gap: 10 },
-      { backgroundColor: "#1a1e26", borderRadius: 12 },
+      { backgroundColor: "#2a2620", borderRadius: 12 },
     ]);
   });
 
@@ -358,10 +358,10 @@ describe("HistoryScreen pins: state cards and presence guards", () => {
     await flush();
     const node = root.root.findAllByType(Text).find((n: any) => flat(n.props.children).includes("No entries yet."));
     expect(node).toBeDefined();
-    expect(node.props.style).toEqual({ color: "#b6bdc9", fontSize: 15, lineHeight: 22 });
+    expect(node.props.style).toEqual({ color: "#cfc7ba", fontSize: 15, lineHeight: 22 });
     expect(node.parent.props.style).toEqual([
       { padding: 16, gap: 10 },
-      { backgroundColor: "#1a1e26", borderRadius: 12 },
+      { backgroundColor: "#2a2620", borderRadius: 12 },
     ]);
   });
 
@@ -393,7 +393,7 @@ describe("HistoryScreen pins: state cards and presence guards", () => {
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
     expect(textOf(root)).toContain("2 entries couldn't be read on this device.");
-    expect(styleOfText(root, "couldn't be read")).toEqual({ color: "#8a91a3", fontSize: 12, textAlign: "center" });
+    expect(styleOfText(root, "couldn't be read")).toEqual({ color: "#a29a8c", fontSize: 12, textAlign: "center" });
   });
 });
 
@@ -593,15 +593,15 @@ describe("HistoryScreen pins: editor chrome", () => {
 
     const scroll = root.root.findAllByType(ScrollView);
     expect(scroll).toHaveLength(1);
-    expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#211e1a" }]);
     expect(scroll[0].props.contentContainerStyle).toEqual({ padding: 20, gap: 16 });
 
-    expect(styleOfText(root, "Thursday, September 3, 2026")).toEqual({ color: "#8a91a3", fontSize: 13 });
+    expect(styleOfText(root, "Thursday, September 3, 2026")).toEqual({ color: "#a29a8c", fontSize: 13 });
 
     const editor = theEditor(root);
     expect(editor.props.style).toEqual([
       { minHeight: 140, textAlignVertical: "top" },
-      { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 12, padding: 16, fontSize: 16 },
+      { backgroundColor: "#2a2620", color: "#ede8df", borderRadius: 12, padding: 16, fontSize: 16 },
     ]);
     expect(editor.props.editable).toBe(true);
     expect(editor.props.autoCorrect).toBe(false);
@@ -624,7 +624,7 @@ describe("HistoryScreen pins: editor chrome", () => {
     expect(textOf(root)).not.toContain("/ 100,000");
     await typeIntoEditor(root, `x`.repeat(90_001));
     expect(textOf(root)).toContain("90,001 / 100,000");
-    expect(styleOfText(root, "90,001")).toEqual({ color: "#8a91a3", fontSize: 12, textAlign: "right" });
+    expect(styleOfText(root, "90,001")).toEqual({ color: "#a29a8c", fontSize: 12, textAlign: "right" });
   });
 });
 
@@ -639,15 +639,15 @@ describe("HistoryScreen pins: detail chrome and cancel", () => {
 
     const scroll = root.root.findAllByType(ScrollView);
     expect(scroll).toHaveLength(1);
-    expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    expect(scroll[0].props.style).toEqual([{ flex: 1 }, { backgroundColor: "#211e1a" }]);
     expect(scroll[0].props.contentContainerStyle).toEqual({ padding: 20, gap: 16 });
 
     const dateText = root.root.findAllByType(Text).find((n: any) => flat(n.props.children) === "Thursday, September 3, 2026");
-    expect(dateText.props.style).toEqual({ color: "#8a91a3", fontSize: 13 });
+    expect(dateText.props.style).toEqual({ color: "#a29a8c", fontSize: 13 });
     expect(dateText.parent.props.style).toEqual({ flexDirection: "row", alignItems: "center", gap: 10 });
 
     expect(styleOfText(root, "the whole entry, every word of it")).toEqual({
-      color: "#e8eaf0",
+      color: "#ede8df",
       fontSize: 16,
       lineHeight: 24,
     });
@@ -737,7 +737,7 @@ describe("HistoryScreen pins: edit semantics", () => {
     await typeIntoEditor(root, "revised words");
     await pressLabel(root, "Save changes");
     await flush();
-    expect(styleOfText(root, "Updated ✓")).toEqual({ color: "#59c98a", fontSize: 13 });
+    expect(styleOfText(root, "Updated ✓")).toEqual({ color: "#93c7a6", fontSize: 13 });
     await act(async () => {
       root.unmount();
     });

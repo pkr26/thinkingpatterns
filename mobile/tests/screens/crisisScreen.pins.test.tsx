@@ -47,13 +47,13 @@ const { render, flush, textOf, allText, allStyles, expectStyle, touchableByLabel
 
 /** The dark theme's exact literals (theme.test pins the palette itself). */
 const T = {
-  bg: "#0f1115",
-  card: "#1a1e26",
-  border: "#222733",
-  text: "#e8eaf0",
-  body: "#b6bdc9",
-  muted: "#8a91a3",
-  accent: "#7f9bff",
+  bg: "#211e1a",
+  card: "#2a2620",
+  border: "#3a352c",
+  text: "#ede8df",
+  body: "#cfc7ba",
+  muted: "#a29a8c",
+  accent: "#b6a9e3",
   radiusLg: 12,
   minTouch: 44,
   xl: 20,
@@ -206,7 +206,7 @@ describe("CrisisScreen pins: themed text overlays pinned to their own nodes", ()
     expect(styleArrayOfText(root, "Please reach out right now")).toEqual([styles.body, { color: T.body }]);
     expect(styleArrayOfText(root, "What to expect when you call or text")).toEqual([styles.body, { color: T.body }]);
     expect(styleArrayOfText(root, "These are US services")).toEqual([styles.body, { color: T.body }]);
-    expect(styleArrayOfText(root, "MindPattern is a journal")).toEqual([styles.note, { color: T.muted }]);
+    expect(styleArrayOfText(root, "Fathom is a journal")).toEqual([styles.note, { color: T.muted }]);
     expect(styleArrayOfText(root, "Open findahelpline.com")).toEqual([styles.linkText, { color: T.accent }]);
   });
 

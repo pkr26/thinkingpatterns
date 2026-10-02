@@ -241,7 +241,7 @@ describe("SettingsScreen chrome", () => {
       .find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis");
     expect(sw).toBeDefined();
     expect(sw.props.value).toBe(true);
-    expect(sw.props.trackColor).toEqual({ true: "#4f7cff", false: "#141821" });
+    expect(sw.props.trackColor).toEqual({ true: "#b7d5b2", false: "#232019" });
   });
 
   it("renders an empty, idle form before the stored URL resolves", async () => {
@@ -263,26 +263,26 @@ describe("SettingsScreen chrome", () => {
 
   it("pins the visual language of the screen", async () => {
     // Design-system pass: theme-composed styles; the footnote moved off the
-    // failing #5c6370 onto muted #8a91a3; the button fill is AA-passing.
+    // failing #5c6370 onto muted #a29a8c; the button fill is AA-passing.
     const { expectStyle } = await import("../helpers/rtr");
     vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     expectStyle(root, { flex: 1 }); // container base
-    expectStyle(root, { backgroundColor: "#0f1115", padding: 24, gap: 14 }); // container themed
-    expectStyle(root, { color: "#8a91a3", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginTop: 8 }); // label
-    expectStyle(root, { backgroundColor: "#1a1e26", color: "#e8eaf0", borderRadius: 10, padding: 14, fontSize: 15 }); // input
+    expectStyle(root, { backgroundColor: "#211e1a", padding: 24, gap: 14 }); // container themed
+    expectStyle(root, { color: "#a29a8c", fontSize: 12, fontWeight: "700", letterSpacing: 1, marginTop: 8 }); // label
+    expectStyle(root, { backgroundColor: "#2a2620", color: "#ede8df", borderRadius: 10, padding: 14, fontSize: 15 }); // input
     expectStyle(root, { borderRadius: 10, padding: 16, alignItems: "center", justifyContent: "center" }); // PrimaryButton
-    expectStyle(root, { backgroundColor: "#3b5bdb", minHeight: 44 }); // primary fill (AA fix)
-    expectStyle(root, { backgroundColor: "#c0392b", minHeight: 44 }); // danger fill
+    expectStyle(root, { backgroundColor: "#a9cba4", minHeight: 44 }); // primary fill (AA fix)
+    expectStyle(root, { backgroundColor: "#d98a80", minHeight: 44 }); // danger fill
     expectStyle(root, { padding: 12 }); // GhostButton base
-    expectStyle(root, { color: "#8a91a3", fontSize: 14 }); // ghostText
-    expectStyle(root, { color: "#ffffff", fontSize: 16 }); // buttonText
+    expectStyle(root, { color: "#a29a8c", fontSize: 14 }); // ghostText
+    expectStyle(root, { color: "#1e1c17", fontSize: 16 }); // buttonText (dark onPrimary)
     expectStyle(root, { flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }); // row base
-    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 10 }); // row themed
-    expectStyle(root, { color: "#b6bdc9", fontSize: 13, flex: 1, lineHeight: 18 }); // rowText
-    expectStyle(root, { color: "#8a91a3", fontSize: 12, lineHeight: 18 }); // footnote (contrast fix)
-    expectStyle(root, { backgroundColor: "#242a38", borderRadius: 10, minHeight: 44 }); // help surface
+    expectStyle(root, { backgroundColor: "#2a2620", borderRadius: 10 }); // row themed
+    expectStyle(root, { color: "#cfc7ba", fontSize: 13, flex: 1, lineHeight: 18 }); // rowText
+    expectStyle(root, { color: "#a29a8c", fontSize: 12, lineHeight: 18 }); // footnote (contrast fix)
+    expectStyle(root, { backgroundColor: "#1c1915", borderRadius: 10, minHeight: 44 }); // help surface
   });
 
   it("hands cleartext URLs directly to the fail-closed client without a consent dialog", async () => {
@@ -934,7 +934,7 @@ describe("About and Advanced sections", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     expect(textOf(root)).toContain("About");
-    expect(textOf(root)).toContain("MindPattern 1.0.0 · server 0.9.1");
+    expect(textOf(root)).toContain("Fathom 1.0.0 · server 0.9.1");
     expect(textOf(root)).toContain("encrypted on this device before it leaves");
     expect(textOf(root)).toContain("single-use session");
   });
@@ -983,7 +983,7 @@ describe("About and Advanced sections", () => {
   it("renders the version without the server part when meta has none", async () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(textOf(root)).toContain("MindPattern 1.0.0");
+    expect(textOf(root)).toContain("Fathom 1.0.0");
     expect(textOf(root)).not.toContain("server undefined");
   });
 
@@ -1108,9 +1108,9 @@ describe("Health mirror section (module absent — this build)", () => {
     expect(sw.props.disabled).toBe(true);
     expect(sw.props.accessibilityState).toEqual({ checked: false, disabled: true });
     // The disclosure states all three facts: what is written, that
-    // MindPattern never READS from Health, and what off means.
+    // Fathom never READS from Health, and what off means.
     expect(textOf(root)).toContain("written to the Health app on this device");
-    expect(textOf(root)).toContain("MindPattern never reads anything from Health");
+    expect(textOf(root)).toContain("Fathom never reads anything from Health");
     expect(textOf(root)).toContain("Turning this off stops future writes; what the Health app already holds stays there.");
     expect(textOf(root)).toContain("health module not linked in this build");
   });

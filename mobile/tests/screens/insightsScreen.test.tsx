@@ -82,7 +82,7 @@ describe("InsightsScreen phases", () => {
 
   it("pins the visual language of the screen (patterns + error states)", async () => {
     // Design-system pass: fine print moved off the failing #5c6370 (3.13:1)
-    // onto the theme's muted #8a91a3 (≥4.5:1 on every surface).
+    // onto the theme's muted #a29a8c (≥4.5:1 on every surface).
     vi.mocked(api.insights).mockResolvedValue({
       phase: "insight",
       active_days: 31,
@@ -93,13 +93,13 @@ describe("InsightsScreen phases", () => {
     const root = await render(<InsightsScreen />);
     await flush();
     expectStyle(root, { flex: 1 }); // container base
-    expectStyle(root, { backgroundColor: "#0f1115" }); // themed container
-    expectStyle(root, { backgroundColor: "#1a1e26", borderRadius: 12, padding: 16, gap: 6 }); // card
-    expectStyle(root, { color: "#b6bdc9", fontSize: 15, lineHeight: 21 }); // cardBody
-    expectStyle(root, { color: "#7f9bff", fontSize: 11, fontWeight: "700", letterSpacing: 1 }); // kind
-    expectStyle(root, { color: "#8a91a3", fontSize: 12 }); // meta (contrast fix)
+    expectStyle(root, { backgroundColor: "#211e1a" }); // themed container
+    expectStyle(root, { backgroundColor: "#2a2620", borderRadius: 12, padding: 16, gap: 6 }); // card
+    expectStyle(root, { color: "#cfc7ba", fontSize: 15, lineHeight: 21 }); // cardBody
+    expectStyle(root, { color: "#b6a9e3", fontSize: 11, fontWeight: "700", letterSpacing: 1 }); // kind
+    expectStyle(root, { color: "#a29a8c", fontSize: 12 }); // meta (contrast fix)
     expectStyle(root, { fontSize: 12, textAlign: "center", marginTop: 8 }); // footnote base
-    expectStyle(root, { color: "#8a91a3" }); // footnote themed color (contrast fix)
+    expectStyle(root, { color: "#a29a8c" }); // footnote themed color (contrast fix)
 
     // Empty state renders the card title style.
     vi.mocked(api.insights).mockResolvedValue({
@@ -113,7 +113,7 @@ describe("InsightsScreen phases", () => {
     await act(async () => {
       await onRefresh();
     });
-    expectStyle(root, { color: "#e8eaf0", fontSize: 17, fontWeight: "700" }); // cardTitle
+    expectStyle(root, { color: "#ede8df", fontSize: 17, fontWeight: "700" }); // cardTitle
 
     // Error state on a failed refresh after a successful load.
     vi.mocked(api.insights).mockRejectedValue(new Error("offline"));
@@ -123,7 +123,7 @@ describe("InsightsScreen phases", () => {
       await onRefresh2();
     });
     expect(textOf(root)).toContain("offline");
-    expectStyle(root, { color: "#ff6b6b", fontSize: 13 }); // error
+    expectStyle(root, { color: "#eba49b", fontSize: 13 }); // error
     // Errors now carry a Retry affordance, not just pull-to-refresh.
     expect(textOf(root)).toContain("Try again");
   });
@@ -176,7 +176,7 @@ describe("InsightsScreen phases", () => {
     // Layout container contract.
     const scroll = root.root.findByType(ScrollView);
     expect(scroll.props.contentContainerStyle).toEqual({ padding: 20, gap: 14 });
-    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#0f1115" }]);
+    expect(scroll.props.style).toEqual([{ flex: 1 }, { backgroundColor: "#211e1a" }]);
   });
 
   it("renders no pattern cards on the very first paint", async () => {
@@ -623,8 +623,8 @@ describe("InsightsScreen evidence view", () => {
     // The sparkline renders an up bar (positive day) and a down bar, with a
     // textual summary for screen readers (the bars are invisible to them).
     const styles = (await import("../helpers/rtr")).allStyles(root);
-    expect(styles.some((s) => s.backgroundColor === "#59c98a")).toBe(true); // up bar
-    expect(styles.some((s) => s.backgroundColor === "#e06c75")).toBe(true); // down bar
+    expect(styles.some((s) => s.backgroundColor === "#93c7a6")).toBe(true); // up bar
+    expect(styles.some((s) => s.backgroundColor === "#d98a80")).toBe(true); // down bar
     const summary = root.root.findAll(
       (n) => n.props.accessibilityRole === "image" && typeof n.props.accessibilityLabel === "string",
     );
@@ -994,8 +994,8 @@ describe("InsightsScreen presence-flagged topics", () => {
       ((node as { props: { style: unknown } }).props.style as Record<string, unknown>[]).flat().findLast(
         (s) => s && typeof s === "object" && "color" in s,
       )?.color;
-    expect(colorOf(guitar)).toBe("#8a91a3"); // muted — down-ranked
-    expect(colorOf(work)).toBe("#b6bdc9"); // body
+    expect(colorOf(guitar)).toBe("#a29a8c"); // muted — down-ranked
+    expect(colorOf(work)).toBe("#cfc7ba"); // body
   });
 });
 
@@ -1047,8 +1047,8 @@ describe("InsightsScreen path to help + accessibility", () => {
     const root = await render(<InsightsScreen />);
     await flush();
     const scroll = root.root.findByType(ScrollView);
-    expect(scroll.props.refreshControl.props.tintColor).toBe("#4f7cff");
-    expect(scroll.props.refreshControl.props.colors).toEqual(["#4f7cff"]);
+    expect(scroll.props.refreshControl.props.tintColor).toBe("#b7d5b2");
+    expect(scroll.props.refreshControl.props.colors).toEqual(["#b7d5b2"]);
   });
 });
 
